@@ -1,6 +1,6 @@
 ---
 name: signals-e2e
-description: Bring the local Signals DPG stack up if it is not already running (by invoking the run-signals-dpg skill), or reuse a live one, then run the black-box Playwright suite end to end, and produce a five-section signoff a human can read. The local oracles (email/SMS sink, search stub, item_search indexer) are built and unit-tested but not yet wired into any spec today; that wiring is the follow-on coverage plan, not something this run currently exercises. Use when asked to end-to-end test Signals, run a full e2e, test the U18/guardian flow, sign off on Signals before a release, or "run /signals-e2e".
+description: Bring the local Signals DPG stack up if it is not already running (self-contained recipe, no other skill required), or reuse a live one, then run the black-box Playwright suite end to end, and produce a five-section signoff a human can read. The local oracles (email/SMS sink, search stub, item_search indexer) are built and unit-tested but not yet wired into any spec today; that wiring is the follow-on coverage plan, not something this run currently exercises. Use when asked to end-to-end test Signals, run a full e2e, test the U18/guardian flow, sign off on Signals before a release, or "run /signals-e2e".
 ---
 
 # signals-e2e — one command to test Signals and sign off on it
@@ -10,7 +10,8 @@ description: Bring the local Signals DPG stack up if it is not already running (
 **You own this step; the scripts do not.** `lib/stack-up.sh` deliberately only
 *verifies* a live target and fails after ~40s if nothing answers — starting a
 stack means writing `.env` files and launching processes, which is
-`run-signals-dpg`'s job and must not be duplicated here.
+a separate concern from asserting behaviour, so it lives in
+`references/bringing-the-stack-up.md` rather than in `lib/`.
 
 So, at the top of every invocation:
 
@@ -20,21 +21,15 @@ curl -sf "http://localhost:2742/api/v1/network/schemas?network=<network-id>" >/d
 ```
 
 - **LIVE, right dot** → reuse it. Say so, and continue to §5's phases.
-- **DEAD, or serving a different dot** → **invoke the `run-signals-dpg` skill
-  now** with the requested dot, wait for it to report the stack healthy, then
-  continue. Do not ask the caller to do this themselves — the whole point of
-  this skill is that one invocation tests Signals end to end.
+- **DEAD, or serving a different dot** → bring one up yourself now, following
+  `references/bringing-the-stack-up.md`. It is self-contained: env (including
+  the e2e-only `CREATE_TEST_OTP` and the three `NOTIFICATION_SERVICE_*` vars
+  the mail oracle needs), infra, schema, cache clears, the direct API launch,
+  and a verification step that refuses to continue on an empty schema count.
+  Do not ask the caller to do this themselves — the whole point of this skill
+  is that one invocation tests Signals end to end.
 - Note the network **id** is not always the directory name (`yellow_dot` →
   `onest_yellow_dot`); §2's matrix has both.
-
-- **If the `run-signals-dpg` skill is not available** (it is a personal skill on
-  the author's machine, not committed to this repo — see the note below), do not
-  guess at bringing the stack up. Tell the caller exactly what is needed:
-  Postgres + Redis via `docker compose up -d db redis`, the API on `:2742`, the
-  UI on `:3000` or `:5173`, and root `.env` carrying `CREATE_TEST_OTP=true` plus
-  the three `NOTIFICATION_SERVICE_*` vars. `SETUP.md` is the repo's own
-  walkthrough. Then stop and let them do it — a half-configured stack produces
-  failures that look like product bugs.
 
 Only once a stack answers do you run `lib/run.sh`.
 
@@ -52,7 +47,7 @@ the place to add a new case.
 ## 1. Ground rules (spec §10 — carried from the aggregator skill because they're right)
 
 - **Never edit a tracked file to make a run work.** `.env` and `apps/ui/.env`
-  are gitignored and are `/run-signals-dpg`'s business; e2e-only vars go in as
+  are gitignored and are the stack recipe's business (§0); e2e-only vars go in as
   inline `E2E_*` env, never into `e2e/config/local.json`. A run leaves the
   working tree clean — verify with `git status --porcelain` after every
   invocation.
@@ -114,7 +109,7 @@ seams between suites.
 | Phase | What | Owner |
 |---|---|---|
 | −1 (once) | Fix the drift audit's static defects, run green against a live stack, *before* trusting any result from this suite | done — Task 3 |
-| −0.5 (every invocation) | **Reuse a live stack, or bring one up by invoking the `run-signals-dpg` skill** — see §0 | you, the agent running this skill |
+| −0.5 (every invocation) | **Reuse a live stack, or bring one up** — §0 + `references/bringing-the-stack-up.md` | you, the agent running this skill |
 | 0 | Preflight: docker, node ≥24, ports, the notification-env triple-check | `lib/run.sh` |
 | 1 | Verify the (now-live) stack, start the 3 stubs, snapshot the DB. `lib/stack-up.sh` only *verifies* — §0 is what guarantees something is there to verify. | `lib/run.sh` |
 | 2 | API tier — deterministic, no browser | `npm run e2e:api` via `lib/run.sh` |
@@ -146,7 +141,7 @@ of Playwright.
 
 **Before any of this**: the stack must already be live. `run.sh`
 (`stack-up.sh`) verifies and waits — it does not bring anything up — so run
-`/run-signals-dpg [dot]` first, once, for whichever dot you're about to test.
+§0's recipe first, once, for whichever dot you're about to test.
 Also confirm the target's `.env` has `NOTIFICATION_SERVICE_ENDPOINT` pointed
 at the notify-sink (`http://localhost:4545`) and, if you need the search
 stub's envelope recorder to see traffic, `SIGNALS_SEARCH_URL` pointed at it
