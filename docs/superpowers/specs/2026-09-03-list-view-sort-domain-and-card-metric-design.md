@@ -203,7 +203,7 @@ and visibly.
 | D14 | With an anchor present, the card label is **"matches your profile"** — even when text is also typed | After D13 the score is still 100% profile↔item cosine; text only narrows membership. Labelling it "matches your search" would be false. The typed text is surfaced as its own removable chip instead. |
 | D15 | `VITE_FREETEXT_MATCH_SCORE_ENABLED` is **kept** | Reversing #646's C3. It is a legitimate per-deployment product choice — "does this instance show a score for free-text matches, or only for profile matches?" — not a workaround for an ambiguous badge. Labelling (D14) fixes the ambiguity; the flag keeps its real meaning. |
 | D16 | Offset paging is retained; **keyset paging is a follow-up** | See §3.5. Accepted, measured risk. |
-| D17 | `item_id` is appended as the final `ORDER BY` key on the **`newest` and `nearest`** paths in both repos — **not** on `relevance` | Fixes P1 in signals-search and the identical latent bug in the native fallback. Amended 2026-09-03 after measurement: on the cosine path the tiebreaker destroys the HNSW index (115× slower, O(corpus)) and buys little, because ANN returns different candidate *sets* per page regardless of tie ordering. See §3.4. |
+| D17 | `item_id` is appended as the final `ORDER BY` key on the **`newest` and `nearest`** paths in both repos — **not** on `relevance` | Fixes P1 in signals-search and the identical latent bug in the native fallback. Amended 2026-09-03 after measurement: on the cosine path the tiebreaker destroys the HNSW index (115× slower, O(corpus)) and buys little, because a cosine tie needs byte-identical embeddings and the traversal is deterministic anyway. See §3.4. |
 | D18 | The card's primary metric **is** the ranking basis | So metric and order can never disagree. See §5. |
 | D19 | With no `?domain=`, the list defaults to the viewer's **first interacting counterpart domain**, else the first visible domain | The All tab was the previous no-domain default; something must replace it. Invisible for a viewer with one visible domain. |
 | D20 | The explanation panel ("why this result, in this position") is **in scope** | Requested. Subject to the honesty constraint in §5.4. |
@@ -426,20 +426,63 @@ the `JOIN items` changes nothing. pgvector's HNSW scan supplies a pathkey only
 for the exact single-expression ordering, and being *approximate* it cannot
 promise complete tie groups, so an incremental sort over it is not legal.
 
-**The tiebreaker would buy little there in any case.** HNSW is approximate, so
-page 1 (`LIMIT 20`) and page 2 (`LIMIT 20 OFFSET 20`) run different bounds and
-the traversal can return different candidate **sets** — not merely a different
-order within a tie group. Making the window's order deterministic does not
-stabilise which rows are in the window.
+**The tiebreaker also buys almost nothing there.** A cosine tie requires
+byte-identical embeddings, which requires identical vectorized content. The one
+real tie group is rows with `embedding IS NULL` (legitimate — no vectorizable
+content), which cluster at the tail. And the HNSW traversal is *deterministic*
+for a fixed query vector, `ef_search` and index state, so even tied rows come
+back in a stable order.
 
 **Resolution:** the tiebreaker applies to `newest` and `nearest` (where it is
 free — those paths already performed a sort) and **not** to `relevance`.
 
-**So P1's guarantee is scoped, and this must not be overstated elsewhere:**
-no-duplicates / no-omissions is **firm for `newest` and `nearest`** and
-**best-effort for `relevance`**. Since the list defaults to `relevance`
-whenever an anchor is present, the default view is the best-effort one. The UI
-must not promise stable deep paging there.
+**Relevance paging IS deterministic and does partition cleanly** — measured, at
+`ef_search = 500`: five pages at offsets 0/20/40/100/200 returned 100 rows,
+100 distinct ids, zero overlap between any pair; and offset 100 returned a
+byte-identical set twice in one session and once on a fresh connection. So P1's
+guarantee is scoped only in the narrow sense that `relevance` relies on the
+traversal's determinism rather than on a unique sort key.
+
+### 3.4.1 A separate, higher-severity defect found while measuring this
+
+`hnsw.ef_search` defaults to **40** and `hnsw.iterative_scan` defaults to
+**off**. In that configuration the HNSW scan **silently truncates**. Measured,
+`limit 20`, 20 500 live rows:
+
+| offset | rows returned |
+| --- | --- |
+| 0 | 20 |
+| 20 | 20 |
+| 40 | 20 |
+| 100 | **0** |
+| 200 | **0** |
+
+60 of 100 expected rows. `EXPLAIN` confirms the planner still chooses
+`Index Scan using item_search_embedding_hnsw` at every offset, so nothing falls
+back to a complete plan — the truncation is silent, and `meta.total` still
+reports 20 500.
+
+**This is live today on the default path**, and it is the same failure shape as
+P2: an empty page under a full `meta.total`. It also defeats this document's
+headline requirement, because `getNextPageParam`
+(`use-infinite-browse-items.ts:249`) stops paging on any short page — so under
+`relevance` the list would silently cap at roughly 60 items while displaying a
+count in the thousands. Replacing a 30 km cap with a 60-item cap is not the fix
+#644 asked for.
+
+**The fix is configuration only.** pgvector 0.8.5 supports iterative scan:
+
+```sql
+SET hnsw.iterative_scan = strict_order;
+```
+
+With `ef_search` left at its 40 default, that returns full 20-row pages at
+offsets 0, 40, 100, 200 **and 1000**, with the HNSW index still used. Offset
+200 goes 135 ms → 206 ms — and the 135 ms was fast only because it was
+returning nothing. Offset 0, the common case, shows no regression.
+
+So this is a **fixable defect, not an inherent limitation.** See §3.5 for how
+it changes the scope decision.
 
 ### 3.5 Paging depth: accepted risk (D16)
 
@@ -466,11 +509,20 @@ and it **requires** the D17 tiebreaker to be expressible at all — without
 skips the rest of the tie group. So D17 is both the correctness fix and the
 prerequisite for the performance fix.
 
-**But only for `newest` and `nearest`.** Keyset paging cannot fix `relevance`:
-you cannot cursor-seek into an approximate ANN graph. Deep relevance paging is
-inherently approximate (§3.4), which is a property of ANN search rather than a
-deferred defect — do not file it as one. If exhaustive enumeration matters more
-than ranking for a given use, the answer is to sort by `newest`.
+**Open scope decision — `hnsw.iterative_scan` (§3.4.1).** Without it, the
+default `relevance` list silently caps at roughly 60 items, so #644's headline
+requirement is not met on the path most users land on. Three options:
+
+1. **Land the config fix in this epic** (recommended). It is a session-level
+   `SET hnsw.iterative_scan = strict_order` on signals-search's search
+   connection, plus a test that pages past `ef_search` and asserts a non-empty
+   page. Small, and it is the difference between #644 working and not working
+   by default.
+2. **Default the list to `newest`** instead of `relevance`, which pages
+   completely today, with `relevance` opt-in.
+3. **Ship knowing the default view caps at ~60 items.**
+
+Not decided here. Recorded so it is chosen rather than discovered.
 
 ### 3.6 Rerank paging guard (P2)
 

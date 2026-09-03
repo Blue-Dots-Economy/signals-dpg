@@ -195,22 +195,34 @@ single-expression ordering. A second sort key invalidates that pathkey, and
 because the scan is *approximate* it cannot promise it emits complete tie
 groups — so Postgres cannot legally build an incremental sort over it.
 
-**And the tiebreaker would buy almost nothing there anyway.** HNSW is
-approximate: page 1 (`LIMIT 20`) and page 2 (`LIMIT 20 OFFSET 20`) run
-different bounds, so the traversal can return different candidate **sets**, not
-merely a different order within a tie group. Ordering the window
-deterministically does not stabilise which rows are in the window. Genuine
-cosine ties additionally require byte-identical embeddings; the one real tie
-group is rows with `embedding IS NULL`, which cluster at the tail.
+**And the tiebreaker buys almost nothing there anyway.** A cosine tie requires
+byte-identical embeddings; the one real tie group is rows with
+`embedding IS NULL`, which cluster at the tail. The traversal is also
+**deterministic** for a fixed query vector, `ef_search` and index state, so
+even tied rows come back in a stable order.
 
-**Consequence, and it must not be understated:** the no-duplicates /
-no-omissions guarantee is **firm for `newest` and `nearest`** and
-**best-effort for `relevance`**. Keyset pagination would not fix `relevance`
-either — you cannot cursor-seek into an approximate graph. This is a property
-of ANN search, not a deferred bug.
+Measured: at `ef_search = 500`, five pages at offsets 0/20/40/100/200 returned
+100 rows, 100 distinct ids, zero overlap between any pair — a clean partition;
+and offset 100 returned a byte-identical set twice in one session and once on a
+fresh connection. **Relevance paging is deterministic**; do not describe it as
+inherently approximate.
 
-Since Signals-DPG defaults to `relevance` whenever an anchor is present, that
-is the default list view. The UI must not promise stable deep paging there.
+### 3.2 Separate live defect: HNSW truncates silently at the default ef_search
+
+Found while measuring the above. `hnsw.ef_search` defaults to 40 and
+`hnsw.iterative_scan` to off; in that configuration the scan returns **0 rows**
+past roughly `offset 60` (measured at `limit 20` over 20 500 rows: 20/20/20/0/0
+at offsets 0/20/40/100/200) while `meta.total` still reports the full count.
+`EXPLAIN` shows the HNSW index chosen at every offset, so nothing falls back —
+the truncation is silent. Same failure shape as P2.
+
+Fix is configuration only (pgvector 0.8.5):
+`SET hnsw.iterative_scan = strict_order` returns full pages to offset 1000 with
+`ef_search` left at 40.
+
+**Not part of this contract** — no wire change — but it gates whether #644's
+"page through all items" actually holds on the default `relevance` path. Scope
+decision recorded in spec §3.5.
 
 ---
 
@@ -362,5 +374,6 @@ Expect   - NO ST_DWithin predicate in the SQL (nearest must not filter)
 | --- | --- |
 | 2026-09-03 | Frozen. Initial version. |
 | 2026-09-03 | Clarifications only, no shape change: §2.1 (the inferred path reports `'newest'` while ordering by `indexed_at`) and §2.2 (`orderingCenter` reaches the SQL layer only under `sort: 'nearest'`, or every anchor search starts emitting `distanceMeters`). Both surfaced while implementing; neither alters a field or a rule. |
-| 2026-09-03 | **AMENDMENT (§3, §9): the `relevance` ORDER BY drops the `s.item_id` tiebreaker.** Measured: it destroys the HNSW index (2.8 ms → 316 ms, full seq scan, O(corpus)) because pgvector supplies a pathkey only for the exact single-expression ordering, and being approximate it cannot support an incremental sort. It also buys almost nothing, since ANN can return different candidate *sets* per page regardless of tie ordering. `newest`/`nearest` keep the tiebreaker at zero cost. P1's guarantee is therefore firm for those two and best-effort for `relevance`. |
+| 2026-09-03 | **AMENDMENT (§3, §9): the `relevance` ORDER BY drops the `s.item_id` tiebreaker.** Measured: it destroys the HNSW index (2.8 ms → 316 ms, full seq scan, O(corpus)) because pgvector supplies a pathkey only for the exact single-expression ordering, and an approximate scan cannot support an incremental sort. It also buys almost nothing: a cosine tie needs byte-identical embeddings, and the traversal is deterministic anyway. `newest`/`nearest` keep the tiebreaker at zero cost. |
+| 2026-09-03 | Correction to the above: an earlier draft claimed relevance paging was inherently approximate (differing candidate sets per page). Measurement disproved it — paging is deterministic and partitions cleanly. §3.1 corrected; §3.2 added for the real defect (silent HNSW truncation at the default `ef_search`). |
 | 2026-09-03 | Note on §5: the radius Signals-DPG SENDS is `distance_meters ?? env` and is legitimately **absent** when neither is set — signals-search then applies `SEARCH_DEFAULT_DISTANCE_METERS`. `meta.distance_meters` folds in DPG's mirror of that default for **reporting only**; it is never put on the wire. |
