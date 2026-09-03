@@ -16,7 +16,7 @@ import {
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { createItemInternal, ItemServiceError, resolveGoLiveGates } from '@/services/item_service';
-import { tagUserForDomain } from '@/services/aggregator/default_aggregator';
+import { tagUserWithDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { getWardAge } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
@@ -340,7 +340,7 @@ export const create_item_handler = async (
       // Bootstrap the single role on the user's first create so `user.domains`
       // stays the source of truth for the lock. Sets only when unset; never
       // grows to a second domain, so the role stays single.
-      const roleBootstrapped = await tx
+      await tx
         .update(user)
         .set({ domains: [body.item_domain], updatedAt: new Date() })
         .where(
@@ -348,17 +348,28 @@ export const create_item_handler = async (
             eq(user.id, userId),
             sql`(${user.domains} IS NULL OR cardinality(${user.domains}) = 0)`,
           ),
-        )
-        .returning({ id: user.id });
+        );
 
-      // SS-3 (#640): the user's domain was just decided here, so this is the
-      // user-level moment a default aggregator can own them. Guarded on the
-      // bootstrap having fired, so it runs once per user rather than on every
-      // profile write — ownership is a property of the account, and re-running
-      // it on later writes would resolve a default whose result is discarded.
-      if (roleBootstrapped.length > 0) {
-        await tagUserForDomain(tx, userId, body.item_domain);
-      }
+      // SS-3 (#640): make sure the owner has an owning aggregator.
+      //
+      // NOT guarded on the role bootstrap above having fired. It only fires
+      // when `user.domains` was empty, and `applySignupExtras` already
+      // populates it at signup — so gating on it stranded the exact population
+      // this feature exists for: someone who signed up BEFORE a default was
+      // nominated has domains set and no owner, and their later profile create
+      // would never tag them. With `owner_required` configured that profile
+      // then sits in `draft` forever, invisible in discover and on the map,
+      // with no runtime path to recover it.
+      //
+      // Cheap enough to run on every create: the write is one statement whose
+      // `IS NULL` guard short-circuits the org lookup for an already-owned
+      // user, so it matches no rows and scans nothing.
+      //
+      // Uses the request's concrete network, not a lookup from the bare
+      // domain — that lookup returns null when two served networks declare the
+      // same domain, which would leave the user untagged while the gate (which
+      // does know the network) still demanded an owner.
+      await tagUserWithDefaultAggregator(tx, userId, body.item_network, body.item_domain);
 
       return c;
     });

@@ -15,8 +15,7 @@ const dbState = {
   /** Rows the user lookup returns. */
   userRows: [] as Array<{ onboardedByOrgId: string | null }>,
   /** Rows the tagging UPDATE ... RETURNING reports as written. */
-  updateReturns: [] as Array<{ id: string }>,
-  updates: [] as Array<Record<string, unknown>>,
+  taggedRows: [] as Array<{ id: string }>,
   /** Every SQL object handed to `execute`, so we can assert on the query. */
   executed: [] as unknown[],
 };
@@ -24,7 +23,11 @@ const dbState = {
 vi.mock('@api/db/postgres/drizzle_config', () => {
   const execute = vi.fn((query: unknown) => {
     dbState.executed.push(query);
-    return Promise.resolve({ rows: dbState.orgRows });
+    const sqlText = JSON.stringify(query);
+    // The tag write is an UPDATE ... RETURNING; the resolution is a SELECT.
+    return Promise.resolve({
+      rows: sqlText.includes('UPDATE') ? dbState.taggedRows : dbState.orgRows,
+    });
   });
   const select = vi.fn(() => ({
     from: vi.fn(() => ({
@@ -33,17 +36,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
       })),
     })),
   }));
-  const update = vi.fn(() => ({
-    set: vi.fn((values: Record<string, unknown>) => ({
-      where: vi.fn(() => ({
-        returning: vi.fn(() => {
-          dbState.updates.push(values);
-          return Promise.resolve(dbState.updateReturns);
-        }),
-      })),
-    })),
-  }));
-  return { db: { select, update, execute } };
+  return { db: { select, execute } };
 });
 
 const { db } = await import('@api/db/postgres/drizzle_config');
@@ -58,8 +51,7 @@ const {
 beforeEach(() => {
   dbState.orgRows = [];
   dbState.userRows = [];
-  dbState.updateReturns = [];
-  dbState.updates = [];
+  dbState.taggedRows = [];
   dbState.executed = [];
   vi.clearAllMocks();
 });
@@ -93,62 +85,47 @@ describe('resolveDefaultAggregator', () => {
 });
 
 describe('tagUserWithDefaultAggregator', () => {
-  it('writes the tag and the server-only default marker', async () => {
-    dbState.orgRows = [{ id: 'org_agg_1' }];
-    dbState.updateReturns = [{ id: 'user_1' }];
-
-    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
-    expect(result.tagged).toBe(true);
-    expect(result.resolution).toEqual({ org_id: 'org_agg_1' });
-
-    expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0]).toMatchObject({
-      onboardedByOrgId: 'org_agg_1',
-      onboardedByDefault: true,
-    });
+  it('reports tagged when the guarded UPDATE wrote a row', async () => {
+    dbState.taggedRows = [{ id: 'user_1' }];
+    await expect(
+      tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker'),
+    ).resolves.toEqual({ tagged: true });
   });
 
-  // A participant onboarded months ago already carries a real onboarded_at.
-  // Overwriting it would make a dormant user resurface as brand new in
-  // item_metrics.age_days / profile_status.
-  // The tagging basis (#640's last AC). Portal self-signup has no other
-  // writer for this column, so without it the basis is only half recorded.
-  it("records the basis as 'self', without clobbering an existing via", async () => {
-    dbState.orgRows = [{ id: 'org_agg_1' }];
-    dbState.updateReturns = [{ id: 'user_1' }];
+  it('reports not tagged when it matched no rows', async () => {
+    dbState.taggedRows = [];
+    await expect(
+      tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker'),
+    ).resolves.toEqual({ tagged: false });
+  });
+
+  // One statement, so an already-owned user costs a single PK-guarded UPDATE
+  // that matches nothing — the org lookup never runs for them.
+  it('is a single statement, not resolve-then-write', async () => {
+    dbState.taggedRows = [{ id: 'user_1' }];
     await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
-    // A coalesce expression, not the literal 'self' — a cold-voice user tagged
-    // later must keep via='voice'.
-    expect(dbState.updates[0].onboardedVia).not.toBe('self');
-    expect(dbState.updates[0].onboardedVia).toHaveProperty('queryChunks');
+    expect(dbState.executed).toHaveLength(1);
   });
 
-  it('preserves an existing onboarded_at instead of stamping now()', async () => {
-    dbState.orgRows = [{ id: 'org_agg_1' }];
-    dbState.updateReturns = [{ id: 'user_1' }];
+  it('guards on IS NULL so the tag is write-once, and scopes to the binding', async () => {
+    dbState.taggedRows = [{ id: 'user_1' }];
     await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
-    // A plain Date here would overwrite the genuine join date; it must be a SQL
-    // expression (coalesce) so an earlier value survives.
-    expect(dbState.updates[0].onboardedAt).not.toBeInstanceOf(Date);
-    expect(dbState.updates[0].onboardedAt).toHaveProperty('queryChunks');
+    const stmt = JSON.stringify(dbState.executed[0]);
+    expect(stmt).toContain('onboarded_by_org_id IS NULL');
+    expect(stmt).toContain('blue_dot/seeker');
+    // EXISTS stops it writing NULL over NULL when no default is nominated.
+    expect(stmt).toContain('EXISTS');
   });
 
-  it('writes nothing when no default is nominated', async () => {
-    dbState.orgRows = [];
-    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
-    expect(result).toEqual({ resolution: { org_id: null }, tagged: false });
-    expect(dbState.updates).toHaveLength(0);
-  });
-
-
-  // The IS NULL predicate lives in the WHERE, so an already-tagged user matches
-  // no rows: moving someone between aggregators stays explicit and audited.
-  it('reports tagged=false when the guarded UPDATE matched no rows', async () => {
-    dbState.orgRows = [{ id: 'org_agg_1' }];
-    dbState.updateReturns = [];
-    const result = await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
-    expect(result.tagged).toBe(false);
-    expect(result.resolution.org_id).toBe('org_agg_1');
+  // A participant onboarded months ago already carries a real onboarded_at, and
+  // item_metrics.age_days / profile_status derive from it — overwriting would
+  // resurface a dormant user as brand new.
+  it('coalesces onboarded_at and onboarded_via rather than overwriting', async () => {
+    dbState.taggedRows = [{ id: 'user_1' }];
+    await tagUserWithDefaultAggregator(db, 'user_1', 'blue_dot', 'seeker');
+    const stmt = JSON.stringify(dbState.executed[0]);
+    expect(stmt).toContain("coalesce(onboarded_via, 'self')");
+    expect(stmt).toContain('coalesce(onboarded_at, now())');
   });
 });
 
@@ -190,12 +167,11 @@ describe('resolveOwnerGateContext', () => {
     });
   });
 
-  // The tag write already resolved the default; reusing it keeps a gated
-  // profile write at one `organization` read instead of two.
-  it('reuses a known resolution instead of re-querying', async () => {
+  it('resolves the default for the given binding', async () => {
     dbState.userRows = [{ onboardedByOrgId: 'org_agg_1' }];
-    const ctx = await resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker', { org_id: 'org_agg_1' });
+    dbState.orgRows = [{ id: 'org_agg_1' }];
+    const ctx = await resolveOwnerGateContext(db, 'user_1', 'blue_dot', 'seeker');
     expect(ctx).toEqual({ has_owner: true, default_configured: true });
-    expect(dbState.executed).toHaveLength(0);
+    expect(JSON.stringify(dbState.executed[0])).toContain('blue_dot/seeker');
   });
 });

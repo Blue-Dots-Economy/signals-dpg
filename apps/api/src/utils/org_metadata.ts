@@ -7,16 +7,14 @@ import { organization } from '@api/db/postgres/schema/auth';
  *
  * `metadata` is a JSON *string* column (a better-auth convention), and
  * `POST /api/v1/admin/aggregator/upsert` writes `{ external_id, domains, ... }`
- * into it so a new field needs no migration on the org table. Three call sites
- * had grown their own copy of the same defensive parse — the aggregator
- * dashboard, the aggregator export, and the default-aggregator endpoint — so it
- * lives here once.
+ * into it so a new field needs no migration on the org table. The aggregator
+ * dashboard and the aggregator export had each grown their own copy of the
+ * same defensive parse, so it lives here once.
  *
  * Always defensive: a null column, malformed JSON, a missing `domains` key or
  * non-string entries all degrade to `[]` rather than throwing. Callers decide
- * what an empty list means (the dashboard and export return 400
- * `NO_DOMAINS_CONFIGURED`; the default endpoint treats it as "legacy mirror,
- * skip the check").
+ * what an empty list means — both current callers return 400
+ * `NO_DOMAINS_CONFIGURED`.
  */
 
 /** Parse the declared domains out of a raw `organization.metadata` value. */

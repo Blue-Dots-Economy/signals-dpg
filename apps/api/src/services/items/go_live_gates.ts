@@ -22,7 +22,8 @@ export interface GoLiveContext {
   hasOwner: boolean;
   /**
    * `owner_required`: whether a default aggregator is nominated at all. Binary
-   * because `organization_single_default_idx` guarantees at most one exists —
+   * because `organization_default_binding_exclusive` guarantees at most one
+   * org holds any given binding —
    * there is no "two defaults" case to distinguish. See guard 1 below.
    */
   defaultConfigured: boolean;
@@ -60,10 +61,12 @@ export const GO_LIVE_GATE_CHECKS: Record<GoLiveGate, (ctx: GoLiveContext) => boo
    *   from launch until that happens, so Q1 and Q4 would contradict each other.
    *
    *   This is only safe to express as a boolean because the database enforces
-   *   at most one default (`organization_single_default_idx`). If two orgs
-   *   could be defaults, "not configured" and "cannot tell" would be different
-   *   states needing OPPOSITE answers here, and treating them alike would make
-   *   the gate fail open on a misconfiguration.
+   *   that at most one org holds a given binding
+   *   (`organization_default_binding_exclusive`, migration 0014). Defaults are
+   *   PER BINDING — a seeker aggregator and a provider aggregator coexist by
+   *   design — but a single binding can never be contested. If it could,
+   *   "not configured" and "cannot tell" would need OPPOSITE answers here, and
+   *   treating them alike would make the gate fail open on a misconfiguration.
    *
    * Guard 2 — blocks `draft → live` only; never demotes a profile that is
    *   already live. `classify_item` re-derives draft↔live on EVERY write, not

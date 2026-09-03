@@ -1,10 +1,21 @@
 import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
 
 /**
- * Append-only audit of default-aggregator changes via
- * POST /api/v1/admin/aggregator/default (#640, SS-3). One row per binding
- * actually changed. No updates, no deletes wired up — same shape as
+ * Append-only audit of default-aggregator changes (#640, SS-3). Written by the
+ * `organization_default_aggregator_audit` trigger (migration 0014), one row per
+ * binding gained or lost. No updates, no deletes wired up — same shape as
  * `pii_reveal_audit`.
+ *
+ * A trigger rather than application code because the default is nominated by a
+ * hand-written UPDATE (a support request), which no route would ever see.
+ *
+ * Known limit: a hand-over lands as TWO rows, because exclusivity forces
+ * clearing org A before setting org B — a revoke (`to_org_id` null) and a grant
+ * (`from_org_id` null). The grant row of a hand-over is therefore shaped
+ * exactly like a first-ever nomination. Run the two UPDATEs in ONE transaction
+ * so the pair shares a `changed_at`, which is what lets an operator correlate
+ * them; a transaction id column would make it explicit and is the obvious
+ * follow-up if this trail is ever read programmatically.
  *
  * Why this table exists at all: `organization` has no `updated_at`, and the
  * default is stored as a plain column, so without this there would be **no
@@ -13,8 +24,13 @@ import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
  * re-assignment job needs to know when the hand-over happened; it cannot be
  * reconstructed after the fact.
  *
- * No FK on `changed_by`: the acting service user may be removed later and the
- * audit row must survive it. `from_org_id` / `to_org_id` are likewise
+ * `changed_by` is the Postgres role that ran the statement. If support connects
+ * through one shared role, every change reads identically — the row says WHEN
+ * and WHAT, not which human. Add a session-level audit context if per-operator
+ * attribution is needed.
+ *
+ * No FK on `changed_by`: the role may be dropped later and the audit row must
+ * survive it. `from_org_id` / `to_org_id` are likewise
  * unconstrained so an org row can be deleted without erasing history.
  */
 export const aggregator_default_audit = pgTable(
@@ -33,7 +49,7 @@ export const aggregator_default_audit = pgTable(
      * unaudited.
      */
     toOrgId: text('to_org_id'),
-    /** The acting network-service user that made the change. */
+    /** The Postgres role that ran the statement. */
     changedBy: text('changed_by').notNull(),
     changedAt: timestamp('changed_at').notNull().defaultNow(),
   },

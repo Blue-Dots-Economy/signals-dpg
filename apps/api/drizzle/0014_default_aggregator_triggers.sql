@@ -57,6 +57,36 @@ BEGIN
       USING ERRCODE = 'unique_violation';
   END IF;
 
+  -- The org must actually report on the domain it is being made default for.
+  --
+  -- Dropping the old admin endpoint took two validations with it that the
+  -- database had not replaced: this one, and "is the binding served by this
+  -- instance" (which the DB cannot know — SERVED_DOMAINS is env config). This
+  -- restores the one that is checkable, and it doubles as a typo guard: a
+  -- fat-fingered 'blue_dot/seekers' matches no declared domain and is
+  -- rejected, where before it would have been accepted silently, tagged
+  -- nobody, and still produced an audit row reading like a success.
+  --
+  -- Skipped when the org declares nothing (legacy mirrors predate
+  -- metadata.domains), so this cannot lock out an existing deployment.
+  IF coalesce(jsonb_array_length((NEW.metadata::jsonb) -> 'domains'), 0) > 0 THEN
+    SELECT b
+      INTO clash_bind
+      FROM unnest(NEW.default_for_bindings) AS b
+     WHERE split_part(b, '/', 2) NOT IN (
+             SELECT jsonb_array_elements_text((NEW.metadata::jsonb) -> 'domains'))
+     LIMIT 1;
+
+    IF clash_bind IS NOT NULL THEN
+      RAISE EXCEPTION
+        'org % does not declare the domain in binding % (declares: %)',
+        NEW.id, clash_bind,
+        (SELECT string_agg(d, ',')
+           FROM jsonb_array_elements_text((NEW.metadata::jsonb) -> 'domains') AS d)
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -74,7 +104,12 @@ EXECUTE FUNCTION assert_default_binding_exclusive();
 -- 2. Audit: one row per binding gained or lost.
 --
 --   to_org_id   NULL => the binding was REVOKED (nothing took over)
---   from_org_id NULL => first assignment for that binding
+--   from_org_id NULL => nothing held it immediately before this row
+--
+-- A hand-over is two rows (a revoke of A, then a grant to B) because
+-- exclusivity forces clearing A first, so the grant row looks exactly like a
+-- first-ever nomination. Run both UPDATEs in ONE transaction and the pair
+-- shares a changed_at, which is how an operator correlates them.
 --
 -- `changed_by` is the Postgres role that ran the statement, the only identity
 -- available for a hand-written UPDATE. `organization` has no `updated_at`, and

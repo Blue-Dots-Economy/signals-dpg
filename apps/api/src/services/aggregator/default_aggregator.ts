@@ -13,10 +13,17 @@ import { resolveServedNetworkForDomain } from '@/utils/served_domain_guard';
  * is responsible for verifying that person and nobody can decrypt them.
  *
  * The default aggregator is a real, already-approved aggregator org that the
- * network admin nominates through `POST /api/v1/admin/aggregator/default`. It
- * is deliberately never system-generated: an org minted by the system has no
+ * network admin nominates by a direct backend/support request — a hand-written
+ * UPDATE of `organization.default_for_bindings` (#640's answer; there is no API
+ * for it, and the database enforces the rules: a CHECK for `type='aggregator'`,
+ * the `organization_default_binding_exclusive` trigger for one org per binding,
+ * and an audit trigger so the change is traceable).
+ *
+ * It is deliberately never system-generated: an org minted by the system has no
  * enabled Keycloak user, so the "unverified queue" it owns would be a queue
- * nobody can open.
+ * nobody can open. Note the database can only prove `type = 'aggregator'` —
+ * `organization` has no approval/status column, so "already-approved" is a
+ * process guarantee the runbook has to carry, not an enforced one.
  *
  * ## Defaults are per binding
  *
@@ -99,42 +106,43 @@ export async function resolveDefaultAggregator(
  * tagging time — `item_metrics.age_days` and `profile_status` are derived from
  * it, and a dormant participant must not resurface as brand new.
  *
- * @returns the resolution, plus whether this call actually wrote the tag and
- *   whether the user ends up owned. Callers use this to build the go-live gate
- *   context without a second round trip.
+ * @returns whether this call actually wrote the tag.
  */
 export async function tagUserWithDefaultAggregator(
   exec: DbOrTx,
   userId: string,
   network: string,
   domain: string,
-): Promise<{ resolution: DefaultAggregatorResolution; tagged: boolean }> {
-  const resolution = await resolveDefaultAggregator(exec, network, domain);
-  if (!resolution.org_id) return { resolution, tagged: false };
+): Promise<{ tagged: boolean }> {
+  const binding = bindingKey(network, domain);
 
-  const updated = await exec
-    .update(user)
-    .set({
-      onboardedByOrgId: resolution.org_id,
-      onboardedByDefault: true,
-      // The tagging basis the last AC on #640 asks for. `onboarded_via` has
-      // exactly one other writer — `participant.ts`, from the request's
-      // `channel` — which the portal self-signup path never reaches, so
-      // without this those users carry NULL and show up as an unattributed
-      // bucket in the aggregator dashboard's GROUP BY onboarded_via.
-      //
-      // `coalesce`, not an overwrite: an untagged user may already have a via.
-      // A cold-voice onboard made before any default was nominated has
-      // via='voice' with a null org; when a default is nominated later and
-      // this fires, relabelling them 'self' would make the basis a lie.
-      onboardedVia: sql`coalesce(${user.onboardedVia}, 'self')`,
-      onboardedAt: sql`coalesce(${user.onboardedAt}, now())`,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(user.id, userId), isNull(user.onboardedByOrgId)))
-    .returning({ id: user.id });
+  // One statement, and the guard short-circuits the lookup. For a user who
+  // already has an owner the WHERE fails, so the subqueries never execute —
+  // no `organization` scan. That is what makes this cheap enough to run on
+  // every profile create rather than only on a user's first one.
+  //
+  // The EXISTS matters: without it, a create on an instance with no default
+  // nominated would write NULL over NULL and burn a row version.
+  const updated = (await exec.execute(sql`
+    UPDATE "user"
+       SET onboarded_by_org_id = (
+             SELECT id FROM organization
+              WHERE default_for_bindings && ARRAY[${binding}]::text[]
+                AND type = 'aggregator'
+              LIMIT 1),
+           onboarded_by_default = true,
+           onboarded_via = coalesce(onboarded_via, 'self'),
+           onboarded_at  = coalesce(onboarded_at, now()),
+           updated_at    = now()
+     WHERE id = ${userId}
+       AND onboarded_by_org_id IS NULL
+       AND EXISTS (
+             SELECT 1 FROM organization
+              WHERE default_for_bindings && ARRAY[${binding}]::text[]
+                AND type = 'aggregator')
+    RETURNING id`)) as unknown as { rows?: Array<{ id: string }> };
 
-  return { resolution, tagged: updated.length > 0 };
+  return { tagged: (updated.rows ?? []).length > 0 };
 }
 
 export interface OwnerGateContext {
@@ -145,17 +153,14 @@ export interface OwnerGateContext {
 
 /**
  * The two signals the `owner_required` go-live gate needs: whether the profile
- * owner has an owning aggregator, and what state the instance's default is in.
- *
- * Pass `known` when the caller has already resolved the default (every path
- * that tags does), so a gated write costs one `organization` read, not two.
+ * owner has an owning aggregator, and whether a default is nominated for this
+ * binding at all.
  */
 export async function resolveOwnerGateContext(
   exec: DbOrTx,
   ownerUserId: string,
   network: string,
   domain: string,
-  known?: DefaultAggregatorResolution,
 ): Promise<OwnerGateContext> {
   const [owner] = await exec
     .select({ onboardedByOrgId: user.onboardedByOrgId })
@@ -163,7 +168,7 @@ export async function resolveOwnerGateContext(
     .where(eq(user.id, ownerUserId))
     .limit(1);
 
-  const resolution = known ?? (await resolveDefaultAggregator(exec, network, domain));
+  const resolution = await resolveDefaultAggregator(exec, network, domain);
 
   return {
     // A missing user row counts as "no owner" — fail closed. It should not
@@ -193,21 +198,16 @@ export async function resolveOwnerGateContext(
  * stores a bare domain. A domain that is unserved or ambiguous leaves the user
  * untagged (see `resolveServedNetworkForDomain`).
  *
- * @returns the org id written, or null when nothing was written.
+ * @returns whether the tag was written.
  */
 export async function tagUserForDomain(
   exec: DbOrTx,
   userId: string,
   domain: string,
-): Promise<string | null> {
+): Promise<boolean> {
   const network = resolveServedNetworkForDomain(domain);
-  if (!network) return null;
+  if (!network) return false;
 
-  const { resolution, tagged } = await tagUserWithDefaultAggregator(
-    exec,
-    userId,
-    network,
-    domain,
-  );
-  return tagged ? resolution.org_id : null;
+  const { tagged } = await tagUserWithDefaultAggregator(exec, userId, network, domain);
+  return tagged;
 }

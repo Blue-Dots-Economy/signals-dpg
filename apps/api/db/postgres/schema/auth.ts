@@ -115,10 +115,9 @@ export const organization = pgTable('organization', {
   //
   // An array because one aggregator may be the default for several domains
   // (seeker AND provider is the expected launch shape). Postgres cannot
-  // unique-index an array element, so "one default per binding" is enforced by
-  // POST /api/v1/admin/aggregator/default clearing the binding off every other
-  // org in the same transaction; the read path additionally fails closed if it
-  // ever sees two claimants.
+  // unique-index an array element, so "one org per binding" is enforced by the
+  // `organization_default_binding_exclusive` trigger (migration 0014), which
+  // rejects a nomination for a binding another org already holds.
   //
   // Deliberately NOT indexed for lookup: `organization` holds tens to hundreds
   // of rows, where a sequential scan beats GIN and GIN would tax every upsert.

@@ -85,6 +85,8 @@ function nextRows() {
   return Promise.resolve(rowQueue.shift() ?? []);
 }
 
+const txExecuted: unknown[] = [];
+
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
     select: () => ({
@@ -110,13 +112,16 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         update: () => ({
           set: (v: Record<string, unknown>) => {
             txUpdateSet(v);
-            // The single-role bootstrap now reads `.returning()` so it can tell
-            // whether it fired — that is the user-level moment the SS-3 default
-            // aggregator tags the owner (#640). Empty array = the user already
-            // had a domain, so no tagging.
-            return { where: () => ({ returning: async () => [] }) };
+            return { where: async () => undefined };
           },
         }),
+        // SS-3 (#640): the default-aggregator tag is one raw UPDATE whose
+        // IS NULL guard short-circuits the org lookup. No rows = nothing to
+        // tag, which is what these tests exercise.
+        execute: async (q: unknown) => {
+          txExecuted.push(q);
+          return { rows: [] };
+        },
       };
       return cb(tx);
     },
@@ -431,6 +436,37 @@ describe('create_item_handler guards', () => {
     expect(txUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({ domains: ['employer'] })
     );
+  });
+
+  // REGRESSION (#640): the tag must NOT be gated on the role bootstrap firing.
+  //
+  // The bootstrap only fires when `user.domains` is empty, but
+  // `applySignupExtras` already populates it at signup — so gating on it
+  // stranded the exact population this feature exists for: someone who signed
+  // up BEFORE a default was nominated has domains set and no owner, and their
+  // later profile create would never tag them. With `owner_required`
+  // configured that profile then sits in `draft` forever.
+  it('attempts the default-aggregator tag even when the role is already set', async () => {
+    txExecuted.length = 0;
+    rowQueue.push([{ domains: ['employer'] }]);
+
+    const reply = await call({
+      user: { id: 'u1' },
+      body: baseBody({
+        item_domain: 'employer',
+        consent: { category: 'profile_creation', version: 1 },
+      }),
+    });
+
+    expect(reply.statusCode).toBe(201);
+    // The user already had a domain, so the bootstrap's WHERE matches nothing —
+    // yet the tag write still ran, scoped to the request's concrete binding.
+    const tagStmt = txExecuted
+      .map((q) => JSON.stringify(q))
+      .find((t) => t.includes('onboarded_by_org_id'));
+    expect(tagStmt).toBeDefined();
+    expect(tagStmt).toContain('onboarded_by_org_id IS NULL');
+    expect(tagStmt).toContain('blue_dot/employer');
   });
 
   it('an admin api-key caller bypasses the domain lock entirely', async () => {
