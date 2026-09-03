@@ -287,6 +287,31 @@ export const create_item_handler = async (
     // rolls the item back too (fail-closed — never a PII item without a consent
     // row). The item event/cache-invalidation happen only after commit.
     const created = await db.transaction(async (tx) => {
+      // SS-3 (#640): give the owner an owning aggregator BEFORE the item is
+      // classified.
+      //
+      // This is the seam between the two levels: the tag is per USER, the
+      // draft/live decision is per ITEM. `createItemInternal` runs
+      // `classify_item`, which reads the tag through `owner_required` — so the
+      // write has to happen first or a brand-new signup's first profile is
+      // classified unowned and lands in `draft`, only going live on some later
+      // write. Same transaction, so it is atomic with the item.
+      //
+      // Not guarded on the role bootstrap below: that only fires when
+      // `user.domains` was empty, and `applySignupExtras` already populates it
+      // at signup — gating on it stranded the population this feature exists
+      // for (signed up before a default was nominated, so never tagged).
+      //
+      // Cheap on every create: one statement whose `IS NULL` guard
+      // short-circuits the org lookup for an already-owned user, matching no
+      // rows and scanning nothing.
+      //
+      // Uses the request's concrete network rather than deriving it from the
+      // bare domain — that derivation returns null when two served networks
+      // declare the same domain, which would leave the user untagged while the
+      // gate (which does know the network) still demanded an owner.
+      await tagUserWithDefaultAggregator(tx, userId, body.item_network, body.item_domain);
+
       const c = await createItemInternal(tx, {
         item_network: body.item_network,
         item_domain: body.item_domain,
@@ -349,27 +374,6 @@ export const create_item_handler = async (
             sql`(${user.domains} IS NULL OR cardinality(${user.domains}) = 0)`,
           ),
         );
-
-      // SS-3 (#640): make sure the owner has an owning aggregator.
-      //
-      // NOT guarded on the role bootstrap above having fired. It only fires
-      // when `user.domains` was empty, and `applySignupExtras` already
-      // populates it at signup — so gating on it stranded the exact population
-      // this feature exists for: someone who signed up BEFORE a default was
-      // nominated has domains set and no owner, and their later profile create
-      // would never tag them. With `owner_required` configured that profile
-      // then sits in `draft` forever, invisible in discover and on the map,
-      // with no runtime path to recover it.
-      //
-      // Cheap enough to run on every create: the write is one statement whose
-      // `IS NULL` guard short-circuits the org lookup for an already-owned
-      // user, so it matches no rows and scans nothing.
-      //
-      // Uses the request's concrete network, not a lookup from the bare
-      // domain — that lookup returns null when two served networks declare the
-      // same domain, which would leave the user untagged while the gate (which
-      // does know the network) still demanded an owner.
-      await tagUserWithDefaultAggregator(tx, userId, body.item_network, body.item_domain);
 
       return c;
     });
