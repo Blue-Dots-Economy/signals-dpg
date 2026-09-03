@@ -676,5 +676,6 @@
   "public_profile.complete_profile_hint": "Complete your active profile to apply or connect.",
   "public_profile.action_sent": "{{action}} request sent",
   "public_profile.your_profile": "Your Profile",
-  "a11y.skip_to_content": "Skip to content"
+  "a11y.skip_to_content": "Skip to content",
+  "browse.domain_group": "Domain"
 }
