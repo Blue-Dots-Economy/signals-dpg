@@ -564,7 +564,69 @@ describe('fetchLocalItems', () => {
 
     const order = render(queries[1]?.orderBy).replace(/\s+/g, ' ').trim();
     expect(order).toBe(
-      "(items.lifecycle_status = 'live') DESC, items.created_at DESC"
+      "(items.lifecycle_status = 'live') DESC, items.created_at DESC, items.item_id ASC"
+    );
+  });
+
+  // #644 P3 on the native path. The order used to be INFERRED from whether a
+  // lat/lng happened to be present, so an AREA filter — which sends
+  // coordinates to narrow by radius — also silently reordered the page by
+  // distance. Measured before the fix: seeker within 50 km inverted created_at
+  // at index 42 (2026-07-14 followed by 2026-08-03) while the first rows still
+  // looked correctly dated, which is why it went unnoticed.
+  it('keeps created_at order with a centre present when order_by says so', async () => {
+    await fetchLocalItems({
+      ...base,
+      ...page,
+      item_latitude: 12.9,
+      item_longitude: 77.6,
+      radius_meters: 50000,
+      order_by: 'created_at',
+    });
+
+    const order = render(queries[1]?.orderBy).replace(/\s+/g, ' ').trim();
+    expect(order).toBe(
+      "(items.lifecycle_status = 'live') DESC, items.created_at DESC, items.item_id ASC"
+    );
+    expect(order).not.toContain('earth_distance');
+  });
+
+  it('still filters by radius while ordering by created_at', async () => {
+    // The area must narrow the SET even though it no longer picks the order —
+    // otherwise this "fix" would just have deleted the filter.
+    await fetchLocalItems({
+      ...base,
+      ...page,
+      item_latitude: 12.9,
+      item_longitude: 77.6,
+      radius_meters: 50000,
+      order_by: 'created_at',
+    });
+
+    expect(whereText(1)).toContain('earth_distance');
+  });
+
+  it('orders by distance when order_by asks for it', async () => {
+    await fetchLocalItems({
+      ...base,
+      ...page,
+      item_latitude: 12.9,
+      item_longitude: 77.6,
+      order_by: 'distance',
+    });
+
+    const order = render(queries[1]?.orderBy).replace(/\s+/g, ' ').trim();
+    expect(order).toContain('SELECT MIN( earth_distance( ll_to_earth(12.9, 77.6)');
+    expect(order).toContain('ASC NULLS LAST');
+  });
+
+  it('degrades to created_at when distance is asked for without a centre', async () => {
+    // A caller bug, but emitting SQL that cannot run is worse than recency.
+    await fetchLocalItems({ ...base, ...page, order_by: 'distance' });
+
+    const order = render(queries[1]?.orderBy).replace(/\s+/g, ' ').trim();
+    expect(order).toBe(
+      "(items.lifecycle_status = 'live') DESC, items.created_at DESC, items.item_id ASC"
     );
   });
 
@@ -581,6 +643,8 @@ describe('fetchLocalItems', () => {
     expect(order).toContain('SELECT MIN( earth_distance( ll_to_earth(12.9, 77.6)');
     expect(order).toContain('ASC NULLS LAST');
     expect(order).toContain('items.created_at DESC');
+    // Omitting `order_by` keeps the historical inference — `/network/item/fetch`
+    // and the markers path depend on "coordinates mean nearest-first".
   });
 
   it('uses the same WHERE clause for the count and the page query', async () => {
@@ -615,7 +679,11 @@ describe('fetchLocalMarkers', () => {
     await fetchLocalMarkers({ ...base, ...page });
 
     const order = render(queries[1]?.orderBy).replace(/\s+/g, ' ').trim();
-    expect(order).toBe('items.created_at DESC');
+    // `item_id` is the final tiebreaker on every native ORDER BY (#644 P1):
+    // LIMIT/OFFSET over rows tied on the leading key duplicates and skips
+    // items across pages, and a bulk index produces many identical
+    // `created_at` values.
+    expect(order).toBe('items.created_at DESC, items.item_id ASC');
   });
 
   it('shares the filter builder with the list feed (partition keys + facets)', async () => {

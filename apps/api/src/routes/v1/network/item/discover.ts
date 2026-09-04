@@ -1,4 +1,8 @@
-import z, { DiscoverItemsBodySchema, DiscoverResponseSchema } from '@dpg/schemas';
+import z, {
+  DiscoverItemsBodySchema,
+  DiscoverResponseSchema,
+  type DiscoverSort,
+} from '@dpg/schemas';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import {
@@ -83,6 +87,124 @@ type DiscoverItemsRequest = FastifyRequest<{
  * when the request carried a location — a non-geo search has no radius to
  * report.
  */
+/**
+ * Default and validate the requested order (#644, wire contract §5.2).
+ *
+ * Exported and pure so the decision table is testable without a route. Mirrors
+ * `resolveSort` in signals-search rather than sharing a package with it: the
+ * two services deploy independently, and the two layers legitimately know
+ * different things (this one knows about `anchor_item_id`, the other about a
+ * resolved query vector).
+ *
+ * Never errors. An order the request cannot have degrades to `newest`, and the
+ * response reports what was actually applied — so the UI can label from what
+ * happened rather than from what it asked for.
+ */
+export function resolveDiscoverSort(input: {
+  requested?: DiscoverSort;
+  hasAnchor: boolean;
+  hasQ: boolean;
+  hasOrderingCenter: boolean;
+}): DiscoverSort {
+  if (input.requested === 'relevance') {
+    // Cosine needs a query vector, which comes from the anchor or the text.
+    return input.hasAnchor || input.hasQ ? 'relevance' : 'newest';
+  }
+  if (input.requested === 'nearest') {
+    return input.hasOrderingCenter ? 'nearest' : 'newest';
+  }
+  if (input.requested === 'newest') return 'newest';
+
+  // Unspecified: relevance is the useful default when we have an anchor to
+  // rank against, else there is nothing to rank by.
+  return input.hasAnchor ? 'relevance' : 'newest';
+}
+
+/**
+ * The geo params the NATIVE fallback should receive (#644, contract §7).
+ *
+ * `buildDistanceOrderBy` keys off lat/lng ONLY, while `buildWhereClause` adds
+ * a radius clause only when lat, lng AND radius_meters are all present. So
+ * `nearest` sends coordinates with NO radius — distance-ordered and unbounded
+ * — while every other sort sends them only when an area filter was actually
+ * requested. Pure and separate from the handler so those three cases are
+ * readable on their own.
+ */
+function resolveNativeGeoFilters(input: {
+  sortApplied: DiscoverSort;
+  hasAreaFilter: boolean;
+  effectiveDistanceMeters: number | undefined;
+  body: Pick<
+    z.infer<typeof DiscoverItemsBodySchema>,
+    | 'item_latitude'
+    | 'item_longitude'
+    | 'ordering_latitude'
+    | 'ordering_longitude'
+    | 'min_lat'
+    | 'min_lng'
+    | 'max_lat'
+    | 'max_lng'
+  >;
+}): {
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
+  order_by?: 'distance' | 'created_at';
+} {
+  const { sortApplied, hasAreaFilter, effectiveDistanceMeters, body } = input;
+
+  // VIEWPORT: the native path has supported a bbox all along
+  // (`buildWhereClause`'s min_lat/min_lng/max_lat/max_lng), so this mode works
+  // even with signals-search down — which is every local run. The bbox
+  // filters; the order still comes from `sort`, and `nearest` inside a
+  // viewport uses the ordering centre the UI sends alongside it.
+  if (body.min_lat !== undefined) {
+    const nearestCentreGiven =
+      sortApplied === 'nearest' &&
+      body.ordering_latitude !== undefined &&
+      body.ordering_longitude !== undefined;
+    return {
+      min_lat: body.min_lat,
+      min_lng: body.min_lng,
+      max_lat: body.max_lat,
+      max_lng: body.max_lng,
+      ...(nearestCentreGiven
+        ? {
+            item_latitude: body.ordering_latitude,
+            item_longitude: body.ordering_longitude,
+            order_by: 'distance' as const,
+          }
+        : { order_by: 'created_at' as const }),
+    };
+  }
+
+  if (sortApplied === 'nearest') {
+    return {
+      item_latitude: body.ordering_latitude ?? body.item_latitude,
+      item_longitude: body.ordering_longitude ?? body.item_longitude,
+      radius_meters: effectiveDistanceMeters,
+      order_by: 'distance',
+    };
+  }
+  if (hasAreaFilter) {
+    return {
+      item_latitude: body.item_latitude,
+      item_longitude: body.item_longitude,
+      radius_meters: effectiveDistanceMeters,
+      // The area narrows the SET; it must not also choose the order. Leaving
+      // this to inference made `sort: 'newest'` + an area return
+      // distance-ordered rows, because the native ORDER BY keyed off the mere
+      // presence of coordinates (#644 P3, on the native path).
+      order_by: 'created_at',
+    };
+  }
+  return { order_by: 'created_at' };
+}
+
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
     item_id: item.item_id,
@@ -180,32 +302,90 @@ const discover_items_handler = async (
       body.filters ?? []
     );
 
+    // AREA FILTER, opt-in (#644). Present only when the client explicitly
+    // asked for `radius` mode. In the default `anywhere` mode all three area
+    // fields are absent, so no spatial clause is built and — critically — the
+    // SIGNALS_SEARCH_DISTANCE_METERS env fallback does NOT apply.
+    //
+    // This gate IS the #644 fix. Previously the UI forwarded the resolved
+    // viewer location on every list request and signals-search treats a
+    // spatial clause as a hard `s_dwithin` predicate, so every signed-in
+    // viewer silently saw only items within ~30 km with no way to widen it.
+    // Either area mode counts as "the caller asked to be bounded". `radius`
+    // sends a centre + distance; `viewport` sends a rectangle (contract §1.5).
+    const hasBbox = body.min_lat !== undefined;
+    const hasAreaFilter =
+      (body.item_latitude !== undefined && body.item_longitude !== undefined) || hasBbox;
+
+    // Effective reported radius (#394): only meaningful when an AREA FILTER
+    // exists. Precedence: the request's own override, then the configured env,
+    // then the documented constant that mirrors signals-search's own default —
+    // so the UI's "within X km" note is accurate whether or not
+    // SIGNALS_SEARCH_DISTANCE_METERS is set.
+    const effectiveDistanceMeters = hasAreaFilter
+      ? (body.distance_meters ??
+        signalsSearchConfig.distanceMeters ??
+        DEFAULT_SEARCH_DISTANCE_METERS)
+      : undefined;
+
+    // ORDERING centre (#644): orders without filtering. Never contributes a
+    // spatial clause and never sets `meta.distance_meters`.
+    const hasOrderingCenter =
+      body.ordering_latitude !== undefined && body.ordering_longitude !== undefined;
+
+    // `nearest` needs a centre from somewhere. A RADIUS area's centre serves
+    // as one (signals-search reuses it, contract §1.3 rule 2) — a VIEWPORT
+    // does NOT: a bbox has no centre on the wire, and deriving one from the
+    // rectangle's midpoint would let "search this area" silently change the
+    // sort the user chose. So nearest-within-a-viewport requires the UI to
+    // send `ordering_latitude`/`ordering_longitude` alongside the bbox.
+    const hasRadiusCenter =
+      body.item_latitude !== undefined && body.item_longitude !== undefined;
+    const sortApplied = resolveDiscoverSort({
+      requested: body.sort,
+      hasAnchor: body.anchor_item_id !== undefined,
+      hasQ: body.q !== undefined,
+      hasOrderingCenter: hasOrderingCenter || hasRadiusCenter,
+    });
+
     const searchInput: SearchSignalsInput = {
       network: body.item_network,
       domain: body.item_domain,
       itemType: body.item_type,
       q: body.q,
       filters: allowedFilters,
-      lat: body.item_latitude,
-      lng: body.item_longitude,
-      distanceMeters: body.distance_meters ?? signalsSearchConfig.distanceMeters,
+      ...(hasBbox
+        ? {
+            minLat: body.min_lat,
+            minLng: body.min_lng,
+            maxLat: body.max_lat,
+            maxLng: body.max_lng,
+          }
+        : {}),
+      ...(hasRadiusCenter
+        ? {
+            lat: body.item_latitude,
+            lng: body.item_longitude,
+            // Sent radius, NOT `effectiveDistanceMeters`: when neither the
+            // request nor the env sets one we send nothing and let
+            // signals-search apply its own default, exactly as before.
+            // `effectiveDistanceMeters` folds in DEFAULT_SEARCH_DISTANCE_METERS
+            // for *reporting* only — sending it would hardcode our mirror of
+            // their default onto the wire and silently pin it if theirs moved.
+            distanceMeters: body.distance_meters ?? signalsSearchConfig.distanceMeters,
+          }
+        : {}),
+      ...(hasOrderingCenter
+        ? {
+            orderingLat: body.ordering_latitude,
+            orderingLng: body.ordering_longitude,
+          }
+        : {}),
+      sort: sortApplied,
       limit: body.limit,
       offset: body.offset,
       anchorItemId: body.anchor_item_id,
     };
-
-    // Effective reported radius (#394): only meaningful when a location was
-    // actually sent (no spatial clause is built otherwise, on either the
-    // signals-search or native-fallback path). Precedence: the request's own
-    // override, then the configured env, then the documented constant that
-    // mirrors signals-search's own default — so the UI's "within X km" note
-    // is accurate whether or not SIGNALS_SEARCH_DISTANCE_METERS is set.
-    const effectiveDistanceMeters =
-      body.item_latitude !== undefined && body.item_longitude !== undefined
-        ? (body.distance_meters ??
-          signalsSearchConfig.distanceMeters ??
-          DEFAULT_SEARCH_DISTANCE_METERS)
-        : undefined;
 
     // Native fallback (#394, revising Task 3): thrown for a request timeout, a
     // non-2xx/invalid response, OR signals-search being unconfigured (the
@@ -232,6 +412,13 @@ const discover_items_handler = async (
     // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
     // a text query filters only this instance's rows; peers contribute live,
     // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
+    const nativeGeoFilters = resolveNativeGeoFilters({
+      sortApplied,
+      hasAreaFilter,
+      effectiveDistanceMeters,
+      body,
+    });
+
     const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
         { err: logErr, body },
@@ -244,9 +431,13 @@ const discover_items_handler = async (
           item_network: body.item_network,
           item_domain: body.item_domain,
           item_type: body.item_type,
-          item_latitude: body.item_latitude,
-          item_longitude: body.item_longitude,
-          radius_meters: effectiveDistanceMeters,
+          // Native ordering (#644, contract §7). `buildDistanceOrderBy` keys
+          // off lat/lng ONLY, while `buildWhereClause` adds a radius clause
+          // only when lat, lng AND radius_meters are all present
+          // (item_fetch_runtime.ts:328-332). So `nearest` sends coordinates
+          // with NO radius — distance-ordered and unbounded — and `newest`
+          // sends none at all, falling through to created_at DESC.
+          ...nativeGeoFilters,
           limit: body.limit,
           offset: body.offset,
           lifecycle_filter: 'live_only',
@@ -280,6 +471,10 @@ const discover_items_handler = async (
           source: 'native_fallback' as const,
           degraded: true,
           distance_meters: effectiveDistanceMeters,
+          // The native path does no ranking, so a relevance request genuinely
+          // got recency. Report that rather than claiming an order we did not
+          // deliver.
+          sort_applied: sortApplied === 'relevance' ? ('newest' as const) : sortApplied,
         },
         items,
       });
@@ -300,6 +495,10 @@ const discover_items_handler = async (
           source: 'signals_search' as const,
           degraded: false,
           distance_meters: effectiveDistanceMeters,
+          // signals-search is the authority on what it actually did. Absent
+          // when talking to a version without #644's sort support, in which
+          // case our own resolved value is the best available answer.
+          sort_applied: searchResult.meta.sort_applied ?? sortApplied,
         },
         items,
       });
@@ -339,6 +538,19 @@ const discover_items_handler = async (
               source: 'signals_search' as const,
               degraded: false,
               distance_meters: effectiveDistanceMeters,
+              // Anchor-less retry: `sortApplied` was resolved WITH the
+              // anchor, so it may say `relevance` when the retry has no
+              // query vector left to rank by. Re-resolve without the anchor
+              // for the fallback, so an older signals-search that sends no
+              // sort_applied doesn't make us claim an order we didn't get.
+              sort_applied:
+                retryResult.meta.sort_applied ??
+                resolveDiscoverSort({
+                  requested: body.sort,
+                  hasAnchor: false,
+                  hasQ: body.q !== undefined,
+                  hasOrderingCenter: hasOrderingCenter || hasAreaFilter,
+                }),
             },
             items,
           });

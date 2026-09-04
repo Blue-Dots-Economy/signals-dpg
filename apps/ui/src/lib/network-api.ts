@@ -145,7 +145,7 @@ export interface FetchNetworkMarkersQuery {
   /**
    * Facet filter, one entry per `item_state.<field>`. A value is either a
    * scalar (equality/containment match) or a `string[]` — the #203 Task 7
-   * multi-select case (`MapFiltersPanel`'s `selectedFields`) — serialized
+   * multi-select case (`BrowseFiltersPanel`'s `selectedFields`) — serialized
    * below as repeated params so the server parses it back into `string[]`
    * (see the comment at the serialization site).
    */
@@ -193,7 +193,7 @@ export async function fetchNetworkMarkers(
   // filter (unchanged, pre-#203 behavior).
   //
   // An ARRAY value (#203 Task 7 — the map's multi-select facet filters, e.g.
-  // `MapFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
+  // `BrowseFiltersPanel`'s `selectedFields`) is the critical case: it MUST reach
   // the server as a real array, not `String(value)` (which produced a single
   // comma-joined `"a,b"` string — inert against buildWhereClause's
   // `item_state ->> field = ANY(...)` facet filter, Task 3). The fix is to
@@ -249,6 +249,13 @@ export interface FetchDiscoverQuery {
   item_latitude?: number;
   item_longitude?: number;
   distance_meters?: number;
+  // #644 VIEWPORT area mode: the exact rectangle the map is showing (contract
+  // §1.5). Mutually exclusive with the radius trio above — the BFF rejects
+  // both together. All four travel or none do; a partial box is a 400.
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   limit?: number;
   offset?: number;
   // The active profile's item id (#394 Task 2, threading Task 1's backend
@@ -257,9 +264,19 @@ export interface FetchDiscoverQuery {
   // relevance-to-profile ranking. Omitted entirely when unset (Task 3 is what
   // wires an actual profile id in from the page).
   anchor_item_id?: string;
+  // #644: explicit ordering. Optional — the BFF defaults it and reports what
+  // it actually applied via `meta.sort_applied`.
+  sort?: DiscoverSortMode;
+  // #644: the ORDERING centre for `sort: 'nearest'`. Distinct from
+  // `item_latitude`/`item_longitude` above, which are the AREA FILTER: these
+  // two order the whole network nearest-first without bounding it.
+  ordering_latitude?: number;
+  ordering_longitude?: number;
 }
 
 export type DiscoverSource = 'signals_search' | 'native_fallback';
+
+export type DiscoverSortMode = 'relevance' | 'newest' | 'nearest';
 
 export interface DiscoverResponse {
   items: Item[];
@@ -274,6 +291,10 @@ export interface DiscoverResponse {
     // `DiscoverResponseSchema` in `@dpg/schemas`). The list note above the
     // results (`resolveListNote`) uses this to show "within X km".
     distance_meters?: number;
+    // #644: the order the server ACTUALLY applied, after its own defaulting
+    // and fallbacks. Always present. The UI labels from this rather than from
+    // what it requested, so it can never claim an order it did not get.
+    sort_applied: DiscoverSortMode;
   };
 }
 
@@ -299,9 +320,21 @@ export async function fetchDiscover(
   if (query.item_latitude !== undefined) body.item_latitude = query.item_latitude;
   if (query.item_longitude !== undefined) body.item_longitude = query.item_longitude;
   if (query.distance_meters !== undefined) body.distance_meters = query.distance_meters;
+  // NOTE: this builder is an explicit ALLOWLIST — a field absent from it is
+  // silently dropped, however correctly the caller supplied it. That is how
+  // the viewport bbox first shipped inert: the hook and the BFF both handled
+  // it, this function did not, and nothing failed loudly.
+  if (query.min_lat !== undefined) body.min_lat = query.min_lat;
+  if (query.min_lng !== undefined) body.min_lng = query.min_lng;
+  if (query.max_lat !== undefined) body.max_lat = query.max_lat;
+  if (query.max_lng !== undefined) body.max_lng = query.max_lng;
   if (query.limit !== undefined) body.limit = query.limit;
   if (query.offset !== undefined) body.offset = query.offset;
   if (query.anchor_item_id) body.anchor_item_id = query.anchor_item_id;
+  if (query.sort !== undefined) body.sort = query.sort;
+  if (query.ordering_latitude !== undefined) body.ordering_latitude = query.ordering_latitude;
+  if (query.ordering_longitude !== undefined)
+    body.ordering_longitude = query.ordering_longitude;
 
   const response = await networkApiClient.post<DiscoverResponse>(
     '/api/v1/network/item/discover',

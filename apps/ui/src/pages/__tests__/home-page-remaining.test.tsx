@@ -58,6 +58,11 @@ const providerSchema: RJSFSchema = {
   properties: {
     company: { type: 'string', title: 'Company' },
     gender: { type: 'string', title: 'Gender', enum: ['female', 'male'] },
+    // Declared so the facet-replacement test below filters on a field this
+    // domain actually honours. An undeclared facet is now pruned before it
+    // reaches the URL or the feed, mirroring the server's silent drop
+    // (`resolveAllowedFacetFields`) — see `resolveFacetFieldLabels`.
+    city: { type: 'string', title: 'City', enum: ['Mysuru', 'Bengaluru'] },
   },
 };
 
@@ -588,8 +593,8 @@ function FiltersStub({ filterFieldDomains, selectedFields, onFieldsChange }: Fil
   );
 }
 
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: (props: FiltersStubProps) => <FiltersStub {...props} />,
 }));
 
 // RJSF doesn't submit under happy-dom (and ActionModal has its own suite), so
@@ -1063,11 +1068,12 @@ describe('HomePage — browse scope and view defaults', () => {
     // browseable tab for them — the stale param must be discarded.
     renderHome('/?view=list&domain=seeker');
 
-    expect(await screen.findByRole('heading', { name: 'Browse All' })).toBeInTheDocument();
-    await waitFor(() => expect(route()).not.toContain('domain=seeker'));
-    // …and the "All" feed is what actually renders.
+    // #644 (spec D8/D19): the stale param is REPAIRED to a valid default
+    // rather than dropped back to an all-domains view — there is no longer an
+    // "All" tab to fall back to.
+    await waitFor(() => expect(route()).toContain('domain=provider'));
+    expect(route()).not.toContain('domain=seeker');
     expect(await findCard('Acme Welding')).toBeInTheDocument();
-    expect(cardFor('Rita Mentor')).not.toBeNull();
     // Sanity: a legitimate tab still survives.
     await user.click(screen.getByRole('button', { name: 'Mentor' }));
     await waitFor(() => expect(route()).toContain('domain=mentor'));

@@ -168,8 +168,8 @@ vi.mock('@/tourist/tourist-map', () => ({
 }));
 // Radix popover filters are unreliable under happy-dom; expose one button that
 // drives the panel's onFieldsChange contract instead.
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: ({ onFieldsChange }: { onFieldsChange: (f: Record<string, string[]>) => void }) => (
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: ({ onFieldsChange }: { onFieldsChange: (f: Record<string, string[]>) => void }) => (
     <button type="button" onClick={() => onFieldsChange({ category: ['Stay'] })}>
       filter-stay
     </button>

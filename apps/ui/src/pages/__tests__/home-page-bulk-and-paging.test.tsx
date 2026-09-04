@@ -530,8 +530,8 @@ vi.mock('@/components/map/map-container', () => ({
   MapView: () => <div data-testid="map-view" />,
 }));
 
-vi.mock('@/components/map/map-filters-panel', () => ({
-  MapFiltersPanel: () => <div data-testid="filters-panel" />,
+vi.mock('@/components/filters/browse-filters-panel', () => ({
+  BrowseFiltersPanel: () => <div data-testid="filters-panel" />,
 }));
 
 // The real ActionModal submits through RJSF, which doesn't fire under happy-dom
@@ -1156,13 +1156,13 @@ describe('HomePage — infinite-scroll paging', () => {
     renderHome('/?view=list&domain=provider');
 
     await findCard('Acme Welding');
-    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
     expect(cardFor('Initech Casting')).toBeNull();
 
     await scrollSentinelIntoView();
 
     expect(await findCard('Initech Casting')).toBeInTheDocument();
-    expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(3);
   });
 
   it('stops paging once the last page is loaded', async () => {
@@ -1173,16 +1173,18 @@ describe('HomePage — infinite-scroll paging', () => {
 
     await scrollSentinelIntoView();
     expect(await findCard('Globex Foundry')).toBeInTheDocument();
-    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
 
     // Sentinel is now disabled — firing it again must not fetch past the end.
     await scrollSentinelIntoView();
 
-    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
     expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
   });
 
-  it('advances every visible domain from the "All" tab sentinel', async () => {
+  // #644 (spec D8): the sentinel drives ONE feed. It used to fan a single
+  // scroll out across every visible domain's independent pager, then merge and
+  // re-sort the union — which is what discarded the server's ranking (P6).
+  it('advances the selected domain’s feed from the list sentinel', async () => {
     signedInSeeker();
     state.browse = {
       provider: { pages: [[provider1], [provider2]], total: 2 },
@@ -1191,15 +1193,16 @@ describe('HomePage — infinite-scroll paging', () => {
     renderHome('/?view=list');
 
     await findCard('Acme Welding');
-    expect(screen.getByText('Showing 2 of 4')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(1);
     expect(cardFor('Globex Foundry')).toBeNull();
+    // A different domain's feed is not paged in alongside it.
     expect(cardFor('Sam Mentor')).toBeNull();
 
     await scrollSentinelIntoView();
 
     expect(await findCard('Globex Foundry')).toBeInTheDocument();
-    expect(cardFor('Sam Mentor')).not.toBeNull();
-    expect(screen.getByText('Showing 4 of 4')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
+    expect(cardFor('Sam Mentor')).toBeNull();
   });
 });
 
@@ -1212,7 +1215,12 @@ describe('HomePage — network selector and served scope', () => {
       provider: { pages: [[provider1]], total: 1 },
       artisan: { pages: [[mkItem('a1', 'artisan', 'artisan_1.0', { craft: 'Blue Pottery' })]], total: 1 },
     };
-    renderHome('/?view=list');
+    // #644: pin blue_dot's domain explicitly. This viewer has no profile, so
+    // the default would be blue_dot's first VISIBLE domain (`seeker`) rather
+    // than `provider` — irrelevant before, when the "All" tab browsed every
+    // domain at once. Switching network clears `?domain=`, so purple_dot still
+    // resolves its own default (`artisan`, its only to_domain).
+    renderHome('/?view=list&domain=provider');
 
     expect(await screen.findByText('Networks')).toBeInTheDocument();
     await findCard('Acme Welding');
@@ -1247,7 +1255,10 @@ describe('HomePage — network selector and served scope', () => {
     // Acting as a provider, the portal browses that domain's counterparts only.
     expect(await findCard('Asha Seeker')).toBeInTheDocument();
     expect(cardFor('Acme Welding')).toBeNull();
-    expect(await screen.findByRole('heading', { name: 'Seeker' })).toBeInTheDocument();
+    // The page-header domain title is gone (#645) — a duplicate of the
+    // toolbar's control. With one selectable domain that control collapses to
+    // a plural "Showing Seekers" label instead of a dead one-button toggle.
+    expect(await screen.findByTestId('domain-single-label')).toHaveTextContent('Seekers');
     // The scope pins the network, so no selector is offered even with two configured.
     expect(screen.queryByText('Networks')).not.toBeInTheDocument();
     expect(screen.queryByText('Purple Dot')).not.toBeInTheDocument();

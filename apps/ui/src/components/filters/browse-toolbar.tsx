@@ -1,0 +1,160 @@
+import { useTranslation } from 'react-i18next';
+import { AppliedFilterChips } from './applied-filter-chips';
+import { SortSelect } from './sort-select';
+import { AreaSelect } from './area-select';
+import type { AppliedChip } from './applied-filter-chips';
+import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
+import type { ViewMode } from '@/engine/types';
+
+export interface BrowseToolbarProps {
+  viewMode: ViewMode;
+  /** Server-reported total for the active feed; omitted while loading. */
+  count?: number;
+  /**
+   * Map view only: how many matching items the map cannot plot at ANY zoom —
+   * no coordinate, or not yet in the geo read-model. Explains the part of the
+   * gap between this count (all matches) and the map's viewport pill that
+   * zooming out will never close. Omitted when zero.
+   */
+  notMappable?: number;
+  sort: BrowseSort;
+  /** `meta.sort_applied` — what the server actually did. */
+  sortApplied?: BrowseSort;
+  nearestAvailable: boolean;
+  /**
+   * False when the server cannot rank by relevance for this request (no anchor
+   * and no typed text, or the discover BFF degraded to its native path). The
+   * option is then omitted from the sort menu — see `SortSelect`.
+   */
+  relevanceAvailable?: boolean;
+  relevanceBasis: 'profile' | 'search' | null;
+  onSortChange: (next: BrowseSort) => void;
+  area: BrowseArea;
+  /**
+   * The map's last reported bounds, enabling the "area shown on the map"
+   * option. Null before any map has been shown, in which case that option is
+   * hidden rather than offered dead.
+   */
+  viewportBounds?: { minLat: number; minLng: number; maxLat: number; maxLng: number } | null;
+  /** Centre offered when the user picks a radius; null when none resolves. */
+  defaultCenter: { lat: number; lng: number } | null;
+  onAreaChange: (next: BrowseArea) => void;
+  /**
+   * Chips for constraints whose EDITOR is elsewhere — search text and facets.
+   * `sort` and `area` are deliberately absent: their controls sit in this same
+   * row already showing their value, so a chip repeating it renders as a
+   * visible duplicate ("Area Within 25 km | Within 25 km ×").
+   */
+  chips: AppliedChip[];
+  onRemoveChip: (chip: AppliedChip) => void;
+  onClearAll: () => void;
+  /**
+   * Whether anything at all is non-default. Distinct from `chips.length > 0`,
+   * because sort and area can be non-default while producing no chip — and
+   * clear-all still has to be reachable then.
+   */
+  canClearAll: boolean;
+}
+
+/**
+ * The browse state bar (#644/#645, spec §7.2).
+ *
+ * Division of labour (spec §7.1): the APP BAR owns the EDITORS — the search
+ * box and the facet-panel trigger, neither of which moves here. This bar owns
+ * the STATE read-out, plus the two controls that had no previous home, `sort`
+ * and `area`. Nothing here becomes a second editor for something the app bar
+ * already edits.
+ *
+ * Row 1: the domain control and the result count.
+ * Row 2: sort (list only), area, the applied chips, clear-all.
+ *
+ * Row 2 always renders — showing "no filters applied" when empty — so the bar
+ * keeps a stable height and the list below does not shift under the user's
+ * thumb as chips come and go.
+ *
+ * It is NOT `sticky`: `PageShell` renders this as a sibling of the scrolling
+ * `<main>`, so it is structurally pinned. See `toolbarSlot` there for why that
+ * beats a sticky child with a hardcoded offset.
+ */
+export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
+  const { t } = useTranslation();
+  const isMap = props.viewMode === 'map';
+
+  return (
+    // ONE row. The domain control used to sit in a row of its own above this
+    // one; it now renders beside "Search near" over the content (see
+    // `PageShell`/`ContentHeader`), which frees this bar to be purely "what is
+    // filtering this list, and what does it total".
+    <div data-testid="browse-toolbar" className="px-4 py-2 sm:px-6">
+      <div
+        data-testid="toolbar-row-2"
+        className="flex flex-wrap items-center gap-2"
+      >
+        {/* Sort is ABSENT on the map (spec D26), not disabled: ordering is
+            meaningless for a marker layer, and a disabled control invites the
+            question rather than answering it. */}
+        {!isMap && (
+          <SortSelect
+            value={props.sort}
+            applied={props.sortApplied}
+            nearestAvailable={props.nearestAvailable}
+            relevanceAvailable={props.relevanceAvailable}
+            basis={props.relevanceBasis}
+            onChange={props.onSortChange}
+          />
+        )}
+        {/* Area is ABSENT on the map, for the same reason as Sort (spec D26).
+            Two independent reasons:
+
+            1. It was INERT. `useMapMarkers` is called with the viewport, not
+               with `area` — the map's radius comes from the bounds it is
+               showing — so the control changed nothing on the map at all.
+            2. It would be redundant and contradictory if wired up. On the map
+               the VIEWPORT *is* the spatial filter; layering a radius on top
+               of a bbox lets "Within 5 km" sit over a 200 km-wide viewport and
+               render an empty map with pins just off-screen.
+
+            Area exists to give the LIST a location constraint, because the
+            list is the escape hatch from a map too dense to show every pin
+            (#644, "Why the list still needs an optional area filter"). */}
+        {!isMap && (
+          <AreaSelect
+            value={props.area}
+            defaultCenter={props.defaultCenter}
+            viewportBounds={props.viewportBounds}
+            onChange={props.onAreaChange}
+          />
+        )}
+        {props.chips.length > 0 && (
+          <AppliedFilterChips chips={props.chips} onRemove={props.onRemoveChip} />
+        )}
+        {props.canClearAll ? (
+          <button
+            type="button"
+            onClick={props.onClearAll}
+            className="inline-flex items-center text-xs font-bold text-destructive hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
+          >
+            {t('browse.clear_all')}
+          </button>
+        ) : (
+          <span className="text-xs italic text-muted-foreground">
+            {t('browse.no_filters')}
+          </span>
+        )}
+        <span className="flex-1" />
+        {props.count !== undefined && (
+          <span className="flex flex-wrap items-baseline justify-end gap-x-1.5 text-xs">
+            <span className="font-semibold text-muted-foreground">
+              {t('browse.count_listings', { count: props.count })}
+            </span>
+            {props.notMappable !== undefined && props.notMappable > 0 && (
+              <span data-testid="not-mappable-note" className="text-muted-foreground/80">
+                {t('browse.count_not_mappable', { count: props.notMappable })}
+              </span>
+            )}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
