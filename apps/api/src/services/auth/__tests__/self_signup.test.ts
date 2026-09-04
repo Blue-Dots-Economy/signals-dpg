@@ -26,7 +26,13 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
   },
 }));
 
-const redisState = { counts: new Map<string, number>(), error: null as unknown };
+// `expires` records (key, ttl) so tests can assert the configured window reaches
+// Redis, and that no per-IP key is ever written.
+const redisState = {
+  counts: new Map<string, number>(),
+  expires: [] as Array<{ key: string; ttl: number }>,
+  error: null as unknown,
+};
 vi.mock('@api/db/secondary/redis', () => ({
   redis: {
     incr: async (key: string) => {
@@ -35,7 +41,10 @@ vi.mock('@api/db/secondary/redis', () => ({
       redisState.counts.set(key, next);
       return next;
     },
-    expire: async () => 1,
+    expire: async (key: string, ttl: number) => {
+      redisState.expires.push({ key, ttl });
+      return 1;
+    },
   },
 }));
 
@@ -43,6 +52,11 @@ const mockAuthConfig = {
   keycloak_enabled: true,
   allow_self_signup: true,
   login_channels: ['phone', 'email'] as Array<'phone' | 'email'>,
+  // Mirrors the SIGNUP_* env defaults; the throttle reads these per request.
+  signup_rate_limit: {
+    window_seconds: 3600,
+    max_per_identifier: 3,
+  },
 };
 const mockKeycloakConfig = {
   internal_base_url: 'http://keycloak:8080',
@@ -93,10 +107,16 @@ beforeEach(() => {
   dbState.selectError = null;
   inserted.length = 0;
   redisState.counts.clear();
+  redisState.expires.length = 0;
   redisState.error = null;
   mockAuthConfig.keycloak_enabled = true;
   mockAuthConfig.allow_self_signup = true;
   mockAuthConfig.login_channels = ['phone', 'email'];
+  // Mutated in place by the tunability tests below, so it must be reset here.
+  mockAuthConfig.signup_rate_limit = {
+    window_seconds: 3600,
+    max_per_identifier: 3,
+  };
   mockKeycloakConfig.api_client_secret = 'shh';
   mockApiConfig.served_domains = [{ domain: 'student' }, { domain: 'employer' }];
   findByEmail.mockReset().mockResolvedValue([]);
@@ -324,19 +344,32 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
+  // Rotating the identifier defeats the per-identifier counter (each address is a
+  // fresh key at count 1), so this is the case the per-IP ceiling exists for.
   it('blocks bulk signup from one IP across different identifiers', async () => {
     for (let i = 0; i < 10; i += 1) {
-      await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
+      const res = await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
+      expect(res.ok).toBe(true);
     }
 
-    const result = await selfSignup(
-      { ...INPUT, email: 'user-eleven@example.org' },
-      makeLog()
-    );
+    const result = await selfSignup({ ...INPUT, email: 'eleventh@example.org' }, makeLog());
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
+  });
+
+  // Separate windows on purpose: retuning the identifier window to release
+  // someone must not also loosen the abuse ceiling.
+  it('keeps the per-IP ceiling on its own window, not the tunable one', async () => {
+    mockAuthConfig.signup_rate_limit.window_seconds = 60;
+
+    await selfSignup(INPUT, makeLog());
+
+    expect(redisState.expires).toEqual([
+      { key: `signup:id:${INPUT.email}`, ttl: 60 },
+      { key: `signup:ip:${INPUT.clientIp}`, ttl: 3600 },
+    ]);
   });
 
   it('fails OPEN when Redis is down — an outage must not block signup', async () => {
@@ -347,6 +380,32 @@ describe('rate limiting', () => {
 
     expect(result.ok).toBe(true);
     expect(log.error).toHaveBeenCalled();
+  });
+
+  // The tests above pass against the old hardcoded values too, so they don't
+  // exercise tunability. These do.
+  it('honours an operator-raised per-identifier limit', async () => {
+    mockAuthConfig.signup_rate_limit.max_per_identifier = 5;
+
+    for (let i = 0; i < 5; i += 1) {
+      expect((await selfSignup(INPUT, makeLog())).ok).toBe(true);
+    }
+    const result = await selfSignup(INPUT, makeLog());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('SIGNUP_RATE_LIMITED');
+  });
+
+  it('stamps the configured window as the Redis TTL', async () => {
+    mockAuthConfig.signup_rate_limit.window_seconds = 300;
+
+    await selfSignup(INPUT, makeLog());
+
+    expect(redisState.expires).toEqual([
+      { key: `signup:id:${INPUT.email}`, ttl: 300 },
+      { key: `signup:ip:${INPUT.clientIp}`, ttl: 3600 },
+    ]);
   });
 });
 

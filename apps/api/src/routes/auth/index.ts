@@ -6,7 +6,11 @@ const AuthRoutes: FastifyPluginAsyncZod = async (fastify) => {
     method: ['GET', 'POST', 'OPTIONS'],
     schema: { hide: true },
     url: '/api/auth/*',
-    config: { rateLimit: { max: 10, timeWindow: '10 seconds' } },
+    // No `config.rateLimit`: @fastify/rate-limit is not installed or registered,
+    // so Fastify would silently ignore it — a previous one here read as
+    // protection while enforcing nothing. This path is limited at the ingress
+    // (`/api/auth` is an apiRateLimit group, and unified-otp/request carries a
+    // tighter otpRateLimit). Don't add one without registering the plugin.
 
     handler: async (request, reply) => {
       if (request.method === 'OPTIONS') {

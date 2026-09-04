@@ -114,6 +114,45 @@ describe('AuthSecretsSchema', () => {
       AuthSecretsSchema.parse({ ...base, LOGIN_CHANNELS: 'email' }).LOGIN_CHANNELS
     ).toBe('email');
   });
+
+  // The defaults ARE the previously hardcoded behaviour, so pin them: a changed
+  // default is a silent change to the public signup abuse ceiling.
+  it('defaults the signup rate limit to the previously hardcoded constants', () => {
+    const parsed = AuthSecretsSchema.parse(base);
+    expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(3);
+    expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(3600);
+  });
+
+  it('coerces the signup rate limit overrides from strings', () => {
+    const parsed = AuthSecretsSchema.parse({
+      ...base,
+      SIGNUP_MAX_PER_IDENTIFIER: '50',
+      SIGNUP_RATE_LIMIT_WINDOW_SECONDS: '300',
+    });
+    expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(50);
+    expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(300);
+  });
+
+  // Per-IP is Kong's apiRateLimit at the ingress (#669), never an app env var.
+  // Fails if the key is re-added to the schema.
+  it('exposes no SIGNUP_MAX_PER_IP — per-IP limiting is Kong\'s job', () => {
+    const parsed = AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IP: '10' });
+    expect('SIGNUP_MAX_PER_IP' in parsed).toBe(false);
+  });
+
+  // Reachable in practice: the chart's generic `config:` passthrough turns a
+  // blank value in a cluster values file into "", and loadEnv() parses bare.
+  it.each([['0'], ['']])('rejects %j for a signup rate limit', (value) => {
+    expect(() =>
+      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IDENTIFIER: value })
+    ).toThrow();
+  });
+
+  it('rejects a non-integer signup rate limit', () => {
+    expect(() =>
+      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IDENTIFIER: '2.5' })
+    ).toThrow();
+  });
 });
 
 describe('NotificationSecretsSchema', () => {

@@ -45,7 +45,7 @@ export interface SelfSignupInput {
   domain?: string | null;
   /** Age in years (0..120), derived from the birth year on the client (#331). Parked for provisioning to apply at first login. */
   age?: number | null;
-  /** Caller IP, for rate limiting. */
+  /** Caller IP, for the per-IP counter below. */
   clientIp?: string;
 }
 
@@ -74,11 +74,6 @@ export type SelfSignupResult =
     }
   | { ok: false; code: SelfSignupErrorCode; message: string };
 
-/** Signup attempts allowed per identifier and per IP, and over what window. */
-const RATE_LIMIT_WINDOW_SECONDS = 3600;
-const MAX_PER_IDENTIFIER = 3;
-const MAX_PER_IP = 10;
-
 function normalizeEmail(value: string | null | undefined): string | null {
   const trimmed = value?.trim().toLowerCase();
   return trimmed || null;
@@ -90,14 +85,43 @@ function normalizePhone(value: string | null | undefined): string | null {
 }
 
 /**
+ * Per-IP ceiling, deliberately NOT operator-tunable and deliberately not shared
+ * with the identifier window above.
+ *
+ * Rotating the submitted identifier defeats the per-identifier counter — each
+ * `user{n}@x.org` is a fresh key at count 1 — and every attempt costs a Keycloak
+ * Admin REST lookup plus a create, so this is the only thing bounding how many
+ * unverified identities one caller can mint. It stays in the app because
+ * `/api/v1/auth` has no dedicated Kong route: it falls through to the shared
+ * `/api` catch-all, which is orders of magnitude looser than 10/hour and is
+ * `fault_tolerant: true` (fail-open) besides. Same reasoning, and the same
+ * hardcoded-constant shape, as the per-IP counters on the sibling public routes
+ * (`routes/v1/auth/u18_precheck.ts`, `routes/v1/consent/u18_signup_guardian.ts`).
+ *
+ * Kept on its own window so raising SIGNUP_RATE_LIMIT_WINDOW_SECONDS to release
+ * a locked-out user cannot also loosen the abuse ceiling.
+ */
+const MAX_PER_IP = 10;
+const IP_WINDOW_SECONDS = 3600;
+
+/**
  * Fixed-window counter in Redis. Coarse on purpose: this endpoint is public and
  * creates Keycloak entries, so the point is to make bulk abuse impractical, not
  * to be precise. Fails OPEN — a Redis outage must not block legitimate signup.
+ *
+ * The TTL is stamped only on the first increment, so raising `max` takes effect
+ * next request but SHORTENING `windowSeconds` does not shorten keys already
+ * counting — an operator releasing someone must wait out or DEL the key.
  */
-async function overLimit(key: string, max: number, log: FastifyBaseLogger): Promise<boolean> {
+async function overLimit(
+  key: string,
+  max: number,
+  windowSeconds: number,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
   try {
     const count = await redis.incr(key);
-    if (count === 1) await redis.expire(key, RATE_LIMIT_WINDOW_SECONDS);
+    if (count === 1) await redis.expire(key, windowSeconds);
     return count > max;
   } catch (err) {
     log.error({ err, key }, 'self-signup: rate-limit check failed; allowing the request');
@@ -196,9 +220,13 @@ async function prepareSignup(
   }
 
   const identifier = email ?? phoneNumber;
+  // Read at request time, not module scope: evaluating authConfig at import time
+  // breaks self_signup.test.ts, which mocks @/config.
+  const { window_seconds, max_per_identifier } = authConfig.signup_rate_limit;
   if (
-    (await overLimit(`signup:id:${identifier}`, MAX_PER_IDENTIFIER, log)) ||
-    (input.clientIp && (await overLimit(`signup:ip:${input.clientIp}`, MAX_PER_IP, log)))
+    (await overLimit(`signup:id:${identifier}`, max_per_identifier, window_seconds, log)) ||
+    (input.clientIp &&
+      (await overLimit(`signup:ip:${input.clientIp}`, MAX_PER_IP, IP_WINDOW_SECONDS, log)))
   ) {
     return {
       ok: false,

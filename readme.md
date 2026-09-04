@@ -151,6 +151,12 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
+# Self-signup abuse ceiling, per identifier (email/phone), counted in Redis.
+# Only bites when SELF_SIGNUP_MODE=allowed. Positive integers only — 0 or empty
+# fails boot. A fixed per-IP ceiling applies too and is not tunable.
+SIGNUP_MAX_PER_IDENTIFIER="3"
+SIGNUP_RATE_LIMIT_WINDOW_SECONDS="3600"
+
 # DLT-approved provider template id for OTP SMS (login + guardian OTP);
 # defaults to "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
 # CREATE_TEST_OTP is off. (Distinct from the per-event lifecycle SMS templates,

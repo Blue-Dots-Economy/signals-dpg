@@ -47,7 +47,9 @@ const STATUS: Record<string, ErrorStatus> = {
  * Keycloak's own registration form is password-based).
  *
  * Unauthenticated by necessity — the caller has no account yet. `SELF_SIGNUP_MODE`
- * is the gate, and the service rate-limits per identifier and per IP.
+ * is the gate. The service rate-limits per identifier (operator-tunable via
+ * SIGNUP_MAX_PER_IDENTIFIER) and per IP (a fixed in-app ceiling — see
+ * services/auth/self_signup.ts for why that one is not tunable).
  */
 export const auth_signup: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({

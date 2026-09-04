@@ -42,6 +42,19 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
+  // Self-signup abuse ceiling, per IDENTIFIER (fixed window, counted in Redis by
+  // services/auth/self_signup.ts). Defaults reproduce the previously hardcoded
+  // constants, so behaviour is unchanged unless an operator opts in. There is no
+  // SIGNUP_MAX_PER_IP — per-IP limiting is Kong's apiRateLimit at the ingress
+  // (#669).
+  //
+  // `.positive()` rejects both 0 and the empty string, and loadEnv() parses this
+  // schema bare, so either crash-loops the api on a raw Zod error. That is
+  // reachable: these are set through the chart's generic `config:` passthrough,
+  // where a blank value renders an empty env var. To disable the ceiling set it
+  // high; 0 does not mean unlimited.
+  SIGNUP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
+  SIGNUP_MAX_PER_IDENTIFIER: z.coerce.number().int().positive().default(3),
   // Identity provider. Single rollback lever:
   //   'betterauth' — better-auth only; every Keycloak path stays dormant.
   //   'keycloak'   — Keycloak only; better-auth is not involved in any step.
