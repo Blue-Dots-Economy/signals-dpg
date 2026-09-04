@@ -60,8 +60,19 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: async () => {},
 }));
 
+// Chainable stub: any property access or call returns another stub, so it
+// tolerates the full zod fluent API (`.email().optional().meta()`, `.coerce`,
+// etc.) without enumerating every method — needed because getPiiKey's import
+// chain (@dpg/auth -> unified_otp.ts) now also resolves through this mock.
+function zodChainStub(): unknown {
+  const fn = (..._args: unknown[]) => zodChainStub();
+  return new Proxy(fn, {
+    get: () => zodChainStub(),
+  });
+}
+
 vi.mock('@dpg/schemas', () => ({
-  default: { object: () => ({}), string: () => ({ min: () => ({}) }) },
+  default: zodChainStub(),
   ConsentStatusQuerySchema: {},
   ConsentStatusResponseSchema: {},
   ProfileConsentStatusResponseSchema: {},
@@ -99,7 +110,7 @@ function makeReply(): FakeReply {
   };
 }
 
-const log = { error: vi.fn() };
+const log = { error: vi.fn(), info: vi.fn() };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function call(handler: any, req: Record<string, unknown>) {
