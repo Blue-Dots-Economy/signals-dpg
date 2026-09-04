@@ -8,12 +8,21 @@ import { and, eq, inArray, or, type SQL } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { user } from '@api/db/postgres/schema/auth';
+import { incrWithinWindow } from '@/utils/rate_window';
 
 type Req = FastifyRequest<{
   Querystring: { network: string; phone?: string; email?: string };
 }>;
 
 const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as number[] } };
+
+// This endpoint is unauthenticated by design (pre-login consent check), so an
+// existing-vs-unknown user is distinguishable from the response. A per-IP fixed
+// window blunts the bulk-enumeration oracle the audit flagged (previously only
+// Kong's 10k/min global cap applied). Fail-open on a Redis blip: a rate-limit
+// backend outage must not break the login/consent flow for legitimate users.
+const CONSENT_RL_WINDOW_SEC = 60;
+const CONSENT_RL_MAX_PER_WINDOW = 30;
 
 export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
@@ -35,6 +44,24 @@ export const get_consent_status_by_identifier_handler = async (
   reply: FastifyReply,
 ) => {
   const { network, phone, email } = request.query;
+
+  try {
+    const rlCount = await incrWithinWindow(
+      `consent:status:rl:${request.ip}`,
+      CONSENT_RL_WINDOW_SEC,
+    );
+    if (rlCount > CONSENT_RL_MAX_PER_WINDOW) {
+      return reply.code(429).send({
+        error: 'CONSENT_RATE_LIMITED',
+        message: 'Too many requests; please try again later.',
+      });
+    }
+  } catch (err) {
+    request.log.warn(
+      { err },
+      'consent status-by-identifier rate-limit check unavailable; allowing request',
+    );
+  }
 
   try {
     // Resolve the user from the identifier — no auth required (pre-login).

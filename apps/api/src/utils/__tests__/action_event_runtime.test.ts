@@ -27,6 +27,22 @@ vi.mock('../item_decrypt', () => ({
     decryptItemPrivate(row),
 }));
 
+// The mirror SSRF guard resolves the allowed instance origins from the source
+// item's network config. Mock both so the unit test controls the allowlist:
+// only https://peer.example.com is a registered instance for network "n".
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(async () => ({
+    id: 'n',
+    instances: [{ domain_id: 'd', instance_url: 'https://peer.example.com' }],
+  })),
+}));
+
+vi.mock('@dpg/config', () => ({
+  getAllowedInstanceOriginsFromNetworkConfig: (config: {
+    instances?: { instance_url: string }[];
+  }) => (config.instances ?? []).map((i) => new URL(i.instance_url).origin),
+}));
+
 import { apiConfig } from '@/config';
 import {
   buildActionEventPayload,
@@ -696,5 +712,25 @@ describe('mirrorActionEventToSourceInstance', () => {
       action_id: event.action_id,
       source_instance_url: 'https://peer.example.com',
     });
+  });
+
+  it('refuses to mirror (no fetch) when the source instance URL is not registered for its network — SSRF guard', async () => {
+    const fetchMock = vi.fn(async (_url: URL | string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const log = makeLog();
+    const event = makeEvent({
+      source_item: { ...remoteRef, item_instance_url: 'http://169.254.169.254' },
+      target_item: localRef,
+    });
+
+    await mirrorActionEventToSourceInstance(event, asLog(log));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0][1]).toMatch(/possible SSRF/i);
   });
 });

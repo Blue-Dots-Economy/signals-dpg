@@ -73,6 +73,13 @@ vi.mock('@/services/minor_guardian_repo', () => ({
 
 vi.mock('@/services/minor', () => ({ isMinor: (age: number) => age < 18 }));
 
+// Per-IP rate limit on the by-identifier enumeration endpoint. Default under
+// the cap; a test overrides `rlState.count` to exercise the 429.
+const { rlState } = vi.hoisted(() => ({ rlState: { count: 1 } }));
+vi.mock('@/utils/rate_window', () => ({
+  incrWithinWindow: vi.fn(async () => rlState.count),
+}));
+
 import { get_consent_status_handler } from '../get_consent_status';
 import { get_profile_consent_status_handler } from '../get_profile_consent_status';
 import { get_consent_status_by_identifier_handler } from '../get_consent_status_by_identifier';
@@ -110,6 +117,7 @@ function call(handler: any, req: Record<string, unknown>) {
 beforeEach(() => {
   rowQueue.length = 0;
   dbState.failWith = null;
+  rlState.count = 1;
   vi.clearAllMocks();
 });
 
@@ -344,5 +352,17 @@ describe('get_consent_status_by_identifier_handler', () => {
 
     expect(reply.statusCode).toBe(500);
     expect((reply.body as { error: string }).error).toBe('CONSENT_READ_FAILED');
+  });
+
+  it('429 CONSENT_RATE_LIMITED once the per-IP window cap is exceeded', async () => {
+    rlState.count = 31; // over CONSENT_RL_MAX_PER_WINDOW (30)
+
+    const reply = await call(get_consent_status_by_identifier_handler, {
+      query: { network: 'blue_dot', email: 'a@b.com' },
+      ip: '203.0.113.9',
+    });
+
+    expect(reply.statusCode).toBe(429);
+    expect((reply.body as { error: string }).error).toBe('CONSENT_RATE_LIMITED');
   });
 });

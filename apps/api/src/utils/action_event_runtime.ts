@@ -8,7 +8,9 @@ import z, {
 } from '@dpg/schemas';
 import { action_events, items } from '@dpg/database';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { getAllowedInstanceOriginsFromNetworkConfig } from '@dpg/config';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
+import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from './item_decrypt';
 
 type ActionItemRef = z.infer<typeof PerformNetworkActionBodySchema>['source_item'];
@@ -290,6 +292,37 @@ function isPlainObject(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
 }
 
+/**
+ * SSRF guard for the outbound event mirror. The mirror POSTs a full action-event
+ * blob (containing PII) to `source_item.item_instance_url`, and that URL is
+ * ultimately caller-asserted (via the unauthenticated /network/action/perform
+ * body, then persisted and replayed from the DB on status updates). Without this
+ * check any attacker can point it at an internal address (e.g. cloud IMDS) or an
+ * exfiltration endpoint. We only mirror to an instance the source item's network
+ * config actually registers for a reachable domain — the same allowlist CORS is
+ * built from (getAllowedInstanceOriginsFromNetworkConfig). Compared by origin.
+ */
+async function isRegisteredSourceInstance(
+  event: StoredActionEvent
+): Promise<boolean> {
+  let sourceOrigin: string;
+  try {
+    sourceOrigin = new URL(event.source_item.item_instance_url).origin;
+  } catch {
+    return false;
+  }
+
+  const networkConfig = await getNetworkConfigById(
+    event.source_item.item_network
+  );
+  const allowedOrigins = getAllowedInstanceOriginsFromNetworkConfig(
+    networkConfig,
+    apiConfig.served_domains
+  );
+
+  return allowedOrigins.includes(sourceOrigin);
+}
+
 export async function mirrorActionEventToSourceInstance(
   event: StoredActionEvent,
   log: FastifyBaseLogger
@@ -298,6 +331,30 @@ export async function mirrorActionEventToSourceInstance(
     normalizeInstanceUrl(event.source_item.item_instance_url) ===
     normalizeInstanceUrl(getCurrentApiBaseUrl())
   ) {
+    return;
+  }
+
+  try {
+    if (!(await isRegisteredSourceInstance(event))) {
+      log.error(
+        {
+          action_id: event.action_id,
+          source_instance_url: event.source_item.item_instance_url,
+          source_item_network: event.source_item.item_network,
+        },
+        'Refusing to mirror action event: source instance URL is not a registered instance for its network (possible SSRF)'
+      );
+      return;
+    }
+  } catch (err) {
+    log.error(
+      {
+        err,
+        action_id: event.action_id,
+        source_instance_url: event.source_item.item_instance_url,
+      },
+      'Failed to validate source instance URL before mirroring; refusing to mirror'
+    );
     return;
   }
 
