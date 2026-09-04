@@ -1561,26 +1561,25 @@ export function HomePage() {
     setSort,
   });
 
-  // Spec D7: list EVERY domain in the network and explain the ones the viewer
-  // cannot browse. `computeVisibleDomains` is unchanged — the interaction
-  // matrix still governs what is fetchable; we only stop making whole domains
-  // silently vanish.
-  const domainOptions = React.useMemo<DomainOption[]>(() => {
-    const visibleIds = new Set(visibleDomains.map((d) => d.id));
-    return (network?.domains ?? []).map((d) => {
-      const label = formatDomainLabel(d.id, [d]) || d.id;
-      return {
+  // Only the domains this viewer can actually browse.
+  //
+  // REVERSES spec D7, which listed every domain in the network and marked the
+  // non-interacting ones disabled-with-a-reason. That produced a permanently
+  // dead `Seeker` button in the middle of the primary browse control for any
+  // signed-in seeker, which reads as a broken toggle rather than as an
+  // explanation. `computeVisibleDomains` (and so the interaction matrix) is
+  // unchanged and still governs what is fetchable — the difference is only
+  // that a domain the viewer cannot browse is no longer rendered.
+  const domainOptions = React.useMemo<DomainOption[]>(
+    () =>
+      visibleDomains.map((d) => ({
         id: d.id,
-        label,
+        label: formatDomainLabel(d.id, [d]) || d.id,
         // The collapsed one-domain label names a set, not an item.
-        pluralLabel: pluralizeDomainLabel(d.id, [d]) || label,
-        available: visibleIds.has(d.id),
-        unavailableReason: visibleIds.has(d.id)
-          ? undefined
-          : t('browse.domain_unavailable', { domain: label }),
-      };
-    });
-  }, [network, visibleDomains, t]);
+        pluralLabel: pluralizeDomainLabel(d.id, [d]) || formatDomainLabel(d.id, [d]) || d.id,
+      })),
+    [visibleDomains],
+  );
 
   const handleDomainSelect = (domainId: string) => {
     setSelectedDomain(domainId);

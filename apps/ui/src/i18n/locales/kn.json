@@ -681,7 +681,6 @@
   "browse.no_filters": "ಯಾವುದೇ ಫಿಲ್ಟರ್ ಅನ್ವಯಿಸಿಲ್ಲ",
   "browse.count_listings": "{{count}} ಪಟ್ಟಿಗಳು",
   "browse.count_not_mappable": "· {{count}} ನಕ್ಷೆಯಲ್ಲಿ ಇಲ್ಲ",
-  "browse.domain_unavailable": "ನೀವು {{domain}} ಜೊತೆ ಸಂಪರ್ಕಿಸಲಾಗುವುದಿಲ್ಲ",
   "card.metric_km": "{{km}} ಕಿಮೀ",
   "card.metric_m": "{{m}} ಮೀ",
   "card.metric_today": "ಇಂದು",

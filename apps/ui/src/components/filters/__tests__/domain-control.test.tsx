@@ -12,15 +12,13 @@ import { DomainControl } from '../domain-control';
  * `item_domain`); multi-select on the map (one `/markers` call per domain).
  */
 
+// All three are BROWSABLE. Callers filter non-browsable domains out before
+// they reach this component (reversing spec D7), so there is no such thing as
+// an unavailable option here any more.
 const opts = [
-  { id: 'provider', label: 'Provider', available: true },
-  { id: 'trainer', label: 'Trainer', available: true },
-  {
-    id: 'seeker',
-    label: 'Seeker',
-    available: false,
-    unavailableReason: "You can't connect with other seekers",
-  },
+  { id: 'provider', label: 'Provider' },
+  { id: 'trainer', label: 'Trainer' },
+  { id: 'seeker', label: 'Seeker' },
 ];
 
 describe('DomainControl — single mode (list)', () => {
@@ -89,36 +87,6 @@ describe('DomainControl — multi mode (map)', () => {
   });
 });
 
-describe('DomainControl — unavailable domains (spec D7 / #645)', () => {
-  it('LISTS an unavailable domain with its reason instead of hiding it', () => {
-    // computeVisibleDomains silently removed entire domains for signed-in
-    // viewers, which users experienced as those domains not existing. The
-    // interaction matrix is unchanged — only made visible.
-    render(<DomainControl options={opts} mode="single" selected={['provider']} onChange={vi.fn()} />);
-    const seeker = screen.getByRole('button', { name: /Seeker/ });
-    expect(seeker).toBeDisabled();
-    expect(seeker).toHaveAccessibleDescription(/can't connect with other seekers/i);
-  });
-
-  it('cannot be selected', async () => {
-    const onChange = vi.fn();
-    render(
-      <DomainControl options={opts} mode="single" selected={['provider']} onChange={onChange} />,
-    );
-    await userEvent.click(screen.getByRole('button', { name: /Seeker/ }));
-    expect(onChange).not.toHaveBeenCalled();
-  });
-
-  it('cannot be selected in multi mode either', async () => {
-    const onChange = vi.fn();
-    render(
-      <DomainControl options={opts} mode="multi" selected={['provider']} onChange={onChange} />,
-    );
-    await userEvent.click(screen.getByRole('button', { name: /Seeker/ }));
-    expect(onChange).not.toHaveBeenCalled();
-  });
-});
-
 describe('DomainControl — accessibility', () => {
   it('is a labelled group', () => {
     render(<DomainControl options={opts} mode="single" selected={['provider']} onChange={vi.fn()} />);
@@ -135,23 +103,19 @@ describe('DomainControl — accessibility', () => {
 
 describe('DomainControl — single selectable domain', () => {
   it('states the domain instead of rendering a control (Q1)', () => {
-    // A seeker in a network with no seeker->seeker edge had exactly one
-    // selectable domain and still got a permanently disabled `Seeker` button
-    // beside it, which reads as a broken control rather than "this is the
-    // only thing you can browse".
+    // A seeker in a network with no seeker->seeker edge can browse exactly one
+    // domain. The caller filters the non-browsable ones out (reversing spec
+    // D7), so a single option arrives and there is no choice to render.
     render(
       <DomainControl
-        options={[
-          { id: 'provider', label: 'Provider', available: true },
-          { id: 'seeker', label: 'Seeker', available: false, unavailableReason: "You can't connect with other seekers" },
-        ]}
+        options={[{ id: 'provider', label: 'Provider', pluralLabel: 'Providers' }]}
         mode="single"
         selected={['provider']}
         onChange={() => {}}
       />,
     );
 
-    expect(screen.getByTestId('domain-single-label')).toHaveTextContent('Provider');
+    expect(screen.getByTestId('domain-single-label')).toHaveTextContent('Providers');
     // A real heading, not small muted text: with the page-header title removed
     // (#645) this is the browse page's only statement of what is on screen, so
     // it carries the document's heading rank too.
@@ -160,15 +124,14 @@ describe('DomainControl — single selectable domain', () => {
       'domain-single-label',
     );
     expect(screen.queryByRole('group')).toBeNull();
-    expect(screen.queryByRole('button', { name: /Seeker/ })).toBeNull();
   });
 
-  it('still renders the control when two domains are selectable', () => {
+  it('renders the control when two domains are browsable', () => {
     render(
       <DomainControl
         options={[
-          { id: 'provider', label: 'Provider', available: true },
-          { id: 'seeker', label: 'Seeker', available: true },
+          { id: 'provider', label: 'Provider' },
+          { id: 'seeker', label: 'Seeker' },
         ]}
         mode="single"
         selected={['provider']}
@@ -180,16 +143,31 @@ describe('DomainControl — single selectable domain', () => {
     expect(screen.getByRole('group')).toBeInTheDocument();
   });
 
-  it('renders nothing when no domain is selectable at all', () => {
+  it('renders nothing when there is no browsable domain', () => {
     const { container } = render(
+      <DomainControl options={[]} mode="single" selected={[]} onChange={() => {}} />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('never renders a disabled tab — a non-browsable domain is simply absent', () => {
+    // Reverses spec D7. Listing the domain and disabling it put a permanently
+    // dead button in the middle of the primary browse control, which reads as
+    // a broken toggle rather than as an explanation of the interaction matrix.
+    render(
       <DomainControl
-        options={[{ id: 'seeker', label: 'Seeker', available: false }]}
-        mode="single"
-        selected={[]}
+        options={[
+          { id: 'provider', label: 'Provider' },
+          { id: 'service_provider', label: 'Service Provider' },
+        ]}
+        mode="multi"
+        selected={['provider']}
         onChange={() => {}}
       />,
     );
 
-    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByRole('button', { name: /Seeker/ })).toBeNull();
+    for (const b of screen.getAllByRole('button')) expect(b).not.toBeDisabled();
   });
 });

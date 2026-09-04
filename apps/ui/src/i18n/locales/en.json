@@ -691,7 +691,6 @@
   "browse.no_filters": "No filters applied",
   "browse.count_listings": "{{count}} listings",
   "browse.count_not_mappable": "· {{count}} not on the map",
-  "browse.domain_unavailable": "You can't connect with {{domain}}",
   "card.metric_km": "{{km}} km",
   "card.metric_m": "{{m}} m",
   "card.metric_today": "Today",
