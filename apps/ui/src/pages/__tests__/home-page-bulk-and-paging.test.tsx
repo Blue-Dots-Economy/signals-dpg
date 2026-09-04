@@ -1255,7 +1255,10 @@ describe('HomePage — network selector and served scope', () => {
     // Acting as a provider, the portal browses that domain's counterparts only.
     expect(await findCard('Asha Seeker')).toBeInTheDocument();
     expect(cardFor('Acme Welding')).toBeNull();
-    expect(await screen.findByRole('heading', { name: 'Seeker' })).toBeInTheDocument();
+    // The page-header domain title is gone (#645) — a duplicate of the
+    // toolbar's control. With one selectable domain that control collapses to
+    // a plural "Showing Seekers" label instead of a dead one-button toggle.
+    expect(await screen.findByTestId('domain-single-label')).toHaveTextContent('Seekers');
     // The scope pins the network, so no selector is offered even with two configured.
     expect(screen.queryByText('Networks')).not.toBeInTheDocument();
     expect(screen.queryByText('Purple Dot')).not.toBeInTheDocument();

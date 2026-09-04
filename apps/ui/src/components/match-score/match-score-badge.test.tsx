@@ -16,17 +16,17 @@ import { MatchScoreBadge } from './match-score-badge';
 describe('MatchScoreBadge — metric kinds', () => {
   it('renders a relevance percentage', () => {
     render(<MatchScoreBadge metric={{ kind: 'relevance', percent: 62 }} basis="profile" />);
-    expect(screen.getByRole('button')).toHaveTextContent('62%');
+    expect(screen.getByTestId('card-metric-pill')).toHaveTextContent('62%');
   });
 
   it('renders a distance in km at or above 1000 m', () => {
     render(<MatchScoreBadge metric={{ kind: 'distance', meters: 4200 }} basis={null} />);
-    expect(screen.getByRole('button')).toHaveTextContent('4.2');
+    expect(screen.getByTestId('card-metric-pill')).toHaveTextContent('4.2');
   });
 
   it('renders a distance in metres below 1000', () => {
     render(<MatchScoreBadge metric={{ kind: 'distance', meters: 850 }} basis={null} />);
-    expect(screen.getByRole('button')).toHaveTextContent('850');
+    expect(screen.getByTestId('card-metric-pill')).toHaveTextContent('850');
   });
 
   it('renders a relative age', () => {
@@ -38,7 +38,7 @@ describe('MatchScoreBadge — metric kinds', () => {
         basis={null}
       />,
     );
-    expect(screen.getByRole('button')).toHaveTextContent('5');
+    expect(screen.getByTestId('card-metric-pill')).toHaveTextContent('5');
     vi.useRealTimers();
   });
 
@@ -53,29 +53,29 @@ describe('MatchScoreBadge — icon-only, basis in the label', () => {
     // It would not survive translation in the footer slot it shares with
     // Connect, and the sticky toolbar already says it once.
     render(<MatchScoreBadge metric={{ kind: 'relevance', percent: 62 }} basis="profile" />);
-    const pill = screen.getByRole('button');
+    const pill = screen.getByTestId('card-metric-pill');
     expect(pill).toHaveTextContent('62%');
     expect(pill.textContent).not.toMatch(/profile/i);
   });
 
   it('carries the basis in its accessible name', () => {
     render(<MatchScoreBadge metric={{ kind: 'relevance', percent: 62 }} basis="profile" />);
-    expect(screen.getByRole('button').getAttribute('aria-label')).toMatch(/62%/);
+    expect(screen.getByTestId('card-metric-pill').getAttribute('aria-label')).toMatch(/62%/);
   });
 
   it('distinguishes the search basis from the profile basis', () => {
     const { rerender } = render(
       <MatchScoreBadge metric={{ kind: 'relevance', percent: 62 }} basis="profile" />,
     );
-    const profileLabel = screen.getByRole('button').getAttribute('aria-label');
+    const profileLabel = screen.getByTestId('card-metric-pill').getAttribute('aria-label');
 
     rerender(<MatchScoreBadge metric={{ kind: 'relevance', percent: 62 }} basis="search" />);
-    expect(screen.getByRole('button').getAttribute('aria-label')).not.toBe(profileLabel);
+    expect(screen.getByTestId('card-metric-pill').getAttribute('aria-label')).not.toBe(profileLabel);
   });
 
   it('shows no band words at all', () => {
     render(<MatchScoreBadge metric={{ kind: 'relevance', percent: 95 }} basis="profile" />);
-    expect(screen.getByRole('button').textContent).not.toMatch(
+    expect(screen.getByTestId('card-metric-pill').textContent).not.toMatch(
       /excellent|good|moderate|low/i,
     );
   });
@@ -91,7 +91,38 @@ describe('MatchScoreBadge — interaction', () => {
         onClick={onClick}
       />,
     );
-    await userEvent.click(screen.getByRole('button'));
+    await userEvent.click(screen.getByTestId('card-metric-pill'));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MatchScoreBadge — only relevance is interactive', () => {
+  it('renders a plain span, not a button, when there is nothing to open', () => {
+    // A date or a distance pill used to render as a <button> advertising
+    // "Tap for details", and clicking it opened "Match Score Details" — a
+    // panel that explains a cosine score, so with no score computed it showed
+    // an empty "No match score available" dialog.
+    render(
+      <MatchScoreBadge
+        metric={{ kind: 'age', createdAt: new Date('2026-08-29T00:00:00Z') }}
+        basis={null}
+      />,
+    );
+
+    const pill = screen.getByTestId('card-metric-pill');
+    expect(pill.tagName).toBe('SPAN');
+    expect(screen.queryByRole('button')).toBeNull();
+  });
+
+  it('renders a button when a details handler is supplied', () => {
+    render(
+      <MatchScoreBadge
+        metric={{ kind: 'relevance', percent: 62 }}
+        basis="profile"
+        onClick={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('card-metric-pill').tagName).toBe('BUTTON');
   });
 });

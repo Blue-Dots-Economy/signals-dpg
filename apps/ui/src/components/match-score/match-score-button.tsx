@@ -60,11 +60,18 @@ export function MatchScoreButton({
   }
 
   if (effectiveMetric && !error) {
+    // Only a RELEVANCE pill opens the score modal. Under `newest`/`nearest`
+    // the pill is an age or a distance, and that modal explains a cosine
+    // score — so clicking a "Today" pill opened "Match Score Details" and,
+    // with no score computed, an empty "No match score available" dialog.
+    // Passing no handler also makes the badge render as plain text, so it
+    // stops advertising "Tap for details" for a metric that has none.
+    const opensDetails = effectiveMetric.kind === 'relevance';
     return (
       <MatchScoreBadge
         metric={effectiveMetric}
         basis={basis ?? 'profile'}
-        onClick={onViewDetails}
+        onClick={opensDetails ? onViewDetails : undefined}
       />
     );
   }

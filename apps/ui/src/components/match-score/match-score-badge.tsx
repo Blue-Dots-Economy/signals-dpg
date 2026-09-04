@@ -78,23 +78,45 @@ export function MatchScoreBadge({
   };
   const iconSizes = { sm: 'h-3 w-3', md: 'h-3.5 w-3.5', lg: 'h-4 w-4' };
 
-  const badge = (
+  const content = (
+    <>
+      <Icon className={cn('shrink-0', iconSizes[size])} />
+      <span className="truncate">{value}</span>
+    </>
+  );
+  const shared = cn(
+    'inline-flex items-center rounded-full font-medium text-white transition-colors',
+    styles.bg,
+    sizeClasses[size],
+    className,
+  );
+
+  // A <span> when there is nothing to open. Rendering a <button> regardless
+  // made every pill focusable and hoverable as though it were actionable —
+  // and only a relevance pill has details to show (an age or a distance has
+  // no explanation panel behind it).
+  const badge = onClick ? (
     <button
       type="button"
+      data-testid="card-metric-pill"
       onClick={onClick}
       aria-label={description ? `${value} — ${description}` : (value ?? undefined)}
       className={cn(
-        'inline-flex items-center rounded-full font-medium text-white transition-colors',
+        shared,
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        styles.bg,
-        onClick && styles.hover,
-        sizeClasses[size],
-        className,
+        styles.hover,
       )}
     >
-      <Icon className={cn('shrink-0', iconSizes[size])} />
-      <span className="truncate">{value}</span>
+      {content}
     </button>
+  ) : (
+    <span
+      data-testid="card-metric-pill"
+      aria-label={description ? `${value} — ${description}` : (value ?? undefined)}
+      className={shared}
+    >
+      {content}
+    </span>
   );
 
   return (

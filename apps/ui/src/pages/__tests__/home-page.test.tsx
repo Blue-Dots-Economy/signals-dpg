@@ -135,6 +135,12 @@ interface BrowseEntry {
   partial: boolean;
   degraded: boolean;
   distanceMeters?: number;
+  /**
+   * `meta.sort_applied`. The card's metric pill renders from this (#646 C1),
+   * so a fixture that omits it produces no pill at all — which is why the
+   * pill went untested here until the QA round.
+   */
+  sortApplied?: 'relevance' | 'newest' | 'nearest';
 }
 
 interface BrowseOpts {
@@ -308,6 +314,7 @@ vi.mock('@/hooks/use-infinite-browse-items', () => ({
       partial: entry.partial,
       degraded: entry.degraded,
       distanceMeters: entry.distanceMeters,
+      sortApplied: entry.sortApplied,
     };
   },
 }));
@@ -655,7 +662,7 @@ describe('HomePage — signed-in default domain (#644)', () => {
 });
 
 describe('HomePage — domain tab switching', () => {
-  it('switches the feed, retitles the header and records the domain in the URL', async () => {
+  it('switches the feed and records the domain in the URL', async () => {
     // #644: `provider` is already the resolved default for a seeker, so
     // switching has to target a DIFFERENT domain — re-picking the current one
     // is deliberately a no-op (the list always needs exactly one domain, so
@@ -666,8 +673,15 @@ describe('HomePage — domain tab switching', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Mentor' }));
 
-    expect(await screen.findByRole('heading', { name: 'Mentor' })).toBeInTheDocument();
+    // No heading to check: the page-header domain title was removed (#645).
+    // It duplicated the toolbar's domain control and was WRONG on the map,
+    // naming one domain while several could be selected. The toolbar's own
+    // pressed state is the assertion that matters.
     await waitFor(() => expect(url()).toContain('domain=mentor'));
+    expect(screen.getByRole('button', { name: 'Mentor' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     expect(browseOptsFor('mentor')?.enabled).toBe(true);
     expectNoCard('Acme Welding');
   });
@@ -872,6 +886,56 @@ describe('HomePage — search', () => {
     await userEvent.type(screen.getByRole('searchbox'), 'welder');
 
     await waitFor(() => expect(lastMarkerCall().search).toBe('welder'));
+  });
+});
+
+describe('HomePage — card metric follows the sort (#646 C1)', () => {
+  it('shows a DISTANCE pill under `nearest`, computing it when the server omits one', async () => {
+    // The discover item schema carries a per-item `distanceMeters`, but only
+    // the signals-search path populates it — the native fallback orders by
+    // distance yet projects no distance column. Without a client-side
+    // backfill the pill vanished whenever signals-search was down, which is
+    // every local run and any production outage (QA Q11/P5).
+    signedInSeeker();
+    state.location = { lat: 12.97, lng: 77.59 };
+    state.locationSource = 'profile';
+    state.browse = {
+      // `providerItem1` sits at 12.91/77.61 — ~7 km from the viewer above.
+      // No `distanceMeters` on the entry: this is the native-fallback shape.
+      provider: { ...emptyBrowse(), items: [providerItem1], total: 1, sortApplied: 'nearest' },
+    };
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    const pill = await screen.findByTestId('card-metric-pill');
+    expect(pill).toHaveTextContent(/km/i);
+    // A distance is not a score, so it must not be clickable (QA P1).
+    expect(pill.tagName).toBe('SPAN');
+  });
+
+  it('shows an AGE pill under `newest`, not a score', async () => {
+    signedInSeeker();
+    state.browse = {
+      provider: { ...emptyBrowse(), items: [providerItem1], total: 1, sortApplied: 'newest' },
+    };
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    const pill = await screen.findByTestId('card-metric-pill');
+    expect(pill).not.toHaveTextContent(/%/);
+    expect(pill.tagName).toBe('SPAN');
+  });
+
+  it('leaves the pill absent under `nearest` with no viewer location to measure from', async () => {
+    signedInSeeker();
+    state.location = null;
+    state.browse = {
+      provider: { ...emptyBrowse(), items: [providerItem1], total: 1, sortApplied: 'nearest' },
+    };
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    expect(screen.queryByTestId('card-metric-pill')).toBeNull();
   });
 });
 

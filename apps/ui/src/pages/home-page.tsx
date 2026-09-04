@@ -41,7 +41,7 @@ import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
 import { CheckSquare } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
-import { formatDomainLabel } from '@/lib/domain-icons';
+import { formatDomainLabel, pluralizeDomainLabel } from '@/lib/domain-icons';
 import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { EmptyState } from '@/components/empty-state';
@@ -79,6 +79,7 @@ import { useGeolocationPermission } from '@/hooks/use-geolocation-permission';
 import { LocationSourceToggle } from '@/components/location/location-source-toggle';
 import { EnableLocationBanner } from '@/components/location/enable-location-banner';
 import type { LatLng } from '@/lib/geo/types';
+import { nearestDistanceMeters } from '@/lib/geo/distance';
 import {
   getU18Status,
   type U18StatusResponse,
@@ -476,19 +477,6 @@ function resolveDomainActions(
 ): DotActionSchema[] {
   if (selectedDomain) return getActionsForDomain(selectedDomain);
   return activeAction ? [activeAction] : [];
-}
-
-/** The header's display domain: the selected domain, else the sole visible domain, else null (the "All" header). */
-function resolveHeaderDomain(selectedDomain: string | null, visibleDomains: DotNetworkDomain[]): string | null {
-  return selectedDomain ?? (visibleDomains.length === 1 ? visibleDomains[0].id : null);
-}
-
-/** The header description for the display domain (undefined on the "All" header). */
-function resolveHeaderDescription(
-  headerDomain: string | null,
-  visibleDomains: DotNetworkDomain[],
-): string | undefined {
-  return headerDomain ? visibleDomains.find((d) => d.id === headerDomain)?.description : undefined;
 }
 
 /** Normalise a guardian-flow action type to the OTP-purpose kind ('connect' or 'apply'). */
@@ -1173,10 +1161,31 @@ export function HomePage() {
   // Own-item filtering is a view concern — apply it to the paged feed so a
   // viewer never sees their own profile in their own browse list. Runs UPSTREAM
   // of the discover bypass so it applies in both modes.
-  const singleDomainItems = React.useMemo(
-    () => excludeOwnItems(singleDomainList.items, localProfileItemIds),
-    [singleDomainList.items, localProfileItemIds],
-  );
+  const singleDomainItems = React.useMemo(() => {
+    const own = excludeOwnItems(singleDomainList.items, localProfileItemIds);
+
+    // #646 C1: under `nearest` the card's pill IS the distance, so it has to
+    // resolve on both discover paths. signals-search returns a per-item
+    // `distanceMeters`; the NATIVE fallback does not (it orders by distance
+    // but projects no distance column, and adding one would have to be
+    // threaded through the peer-instance fetch too). Without this the pill
+    // simply vanished whenever signals-search was down — which is every local
+    // run, and any production outage.
+    //
+    // Computed from the same stored coordinates the server orders by, so the
+    // two agree to haversine-vs-spheroid error, far below the precision of a
+    // "4.2 km" label. Those coordinates carry PII jitter in both cases
+    // (`.claude/rules/database-conventions.md`), so this exposes nothing the
+    // ordering did not already.
+    if (singleDomainList.sortApplied !== 'nearest' || !browseCoords) return own;
+
+    return own.map((item) => {
+      if (item.distanceMeters != null) return item;
+      const meters = nearestDistanceMeters(browseCoords, item.item_locations);
+      if (!Number.isFinite(meters)) return item;
+      return { ...item, distanceMeters: meters };
+    });
+  }, [singleDomainList.items, singleDomainList.sortApplied, localProfileItemIds, browseCoords]);
 
   // Single-domain: bottom sentinel advances the paged fetch. Server already
   // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
@@ -1548,6 +1557,8 @@ export function HomePage() {
       return {
         id: d.id,
         label,
+        // The collapsed one-domain label names a set, not an item.
+        pluralLabel: pluralizeDomainLabel(d.id, [d]) || label,
         available: visibleIds.has(d.id),
         unavailableReason: visibleIds.has(d.id)
           ? undefined
@@ -1828,11 +1839,6 @@ export function HomePage() {
     );
   }
 
-  // With a single browseable domain there's no "All" — the header names that
-  // one domain (derived from visibleDomains, so it's generic, not per-network).
-  const headerDomain = resolveHeaderDomain(selectedDomain, visibleDomains);
-  const contentTitle = formatDomainLabel(headerDomain, visibleDomains) || t('home.browse_all');
-  const contentDescription = resolveHeaderDescription(headerDomain, visibleDomains);
   // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
   // `selectedDomain` (which paged feed is actually driving the list), not
   // `headerDomain` (a display-only label that can be non-null even on the
@@ -1965,11 +1971,14 @@ export function HomePage() {
       <GuestHero />
     ) : (
       <ContentHeader
-        title={contentTitle}
-        description={contentDescription}
-        // #644: the count lives in the browse toolbar now. Rendering it here
-        // as well put two identical counts within ~40px of each other, and
-        // the toolbar's copy survives scrolling while this header does not.
+        // No title/description/count here any more (#645). All three were
+        // duplicates of the browse toolbar directly above — and the title was
+        // actively WRONG on the map: it named a single domain (the sole visible
+        // one, or the list's selection) while the map's multi-select could have several
+        // selected, so choosing Seeker + Provider still read "Seeker". The
+        // toolbar's domain control is the one statement of what is on screen.
+        // This header now carries only the location toggle, Select, and the
+        // no-profile prompt.
         count={undefined}
         noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
         actions={headerActions}

@@ -5,7 +5,13 @@ import { cn } from '@/lib/utils';
 
 export interface DomainOption {
   id: string;
+  /** Singular, for the toggle buttons — each names one domain. */
   label: string;
+  /**
+   * Plural, for the collapsed single-domain label, which names the SET on
+   * screen ("Showing Providers"). Falls back to `label`.
+   */
+  pluralLabel?: string;
   /** False for a domain the viewer's own domain cannot initiate toward. */
   available: boolean;
   /** Shown when `available` is false — one short human sentence, already localized. */
@@ -78,7 +84,7 @@ export function DomainControl({
         data-testid="domain-single-label"
         className="text-xs font-semibold text-muted-foreground"
       >
-        {t('browse.domain_only', { domain: only.label })}
+        {t('browse.domain_only', { domain: only.pluralLabel ?? only.label })}
       </p>
     );
   }
