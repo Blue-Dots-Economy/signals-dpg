@@ -10,6 +10,13 @@ export interface BrowseToolbarProps {
   viewMode: ViewMode;
   /** Server-reported total for the active feed; omitted while loading. */
   count?: number;
+  /**
+   * Map view only: how many matching items have no coordinate and therefore
+   * cannot appear as a pin. Explains the gap between this count (all matches)
+   * and the map's own viewport pill. Omitted when zero — a "0 without a
+   * location" note is noise.
+   */
+  withoutLocation?: number;
   sort: BrowseSort;
   /** `meta.sort_applied` — what the server actually did. */
   sortApplied?: BrowseSort;
@@ -129,8 +136,15 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
         )}
         <span className="flex-1" />
         {props.count !== undefined && (
-          <span className="text-xs font-semibold text-muted-foreground">
-            {t('browse.count_listings', { count: props.count })}
+          <span className="flex flex-wrap items-baseline justify-end gap-x-1.5 text-xs">
+            <span className="font-semibold text-muted-foreground">
+              {t('browse.count_listings', { count: props.count })}
+            </span>
+            {props.withoutLocation !== undefined && props.withoutLocation > 0 && (
+              <span data-testid="without-location-note" className="text-muted-foreground/80">
+                {t('browse.count_without_location', { count: props.withoutLocation })}
+              </span>
+            )}
           </span>
         )}
       </div>

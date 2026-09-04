@@ -69,6 +69,7 @@ import {
 } from '@/lib/browse-discover';
 import { BrowseToolbar } from '@/components/filters/browse-toolbar';
 import { useAppliedFilterChips } from '@/hooks/use-applied-filter-chips';
+import { useBrowseTotals } from '@/hooks/use-browse-totals';
 import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 import { DomainControl } from '@/components/filters/domain-control';
 import type { DomainOption } from '@/components/filters/domain-control';
@@ -1043,6 +1044,18 @@ export function HomePage() {
   // matching the control's own semantics.
   const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
+  // Filter-scoped totals for the MAP's filter bar (N5). The list already has
+  // this number from the feed it renders, so the extra count requests are
+  // enabled on the map only.
+  const browseTotals = useBrowseTotals(
+    network,
+    mapDomains,
+    activeFieldFilters,
+    search,
+    viewMode === 'map',
+  );
+
+
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
   // show (client-side membership check — every `Marker` carries `item_domain`).
   // On a single-domain tab the fetch above is already scoped to that domain, so
@@ -1883,9 +1896,13 @@ export function HomePage() {
   // "Newest" (Q2).
   const relevanceAvailable = relevanceBasis !== null && !listDegraded;
 
-  const contentCount = viewMode === 'map' ? mapMarkers.total : singleDomainList.total;
+  // The bar states "how many match these filters" in BOTH views, so switching
+  // list<->map no longer changes the number for an unexplained reason. The
+  // VIEWPORT count keeps its own home: the pill on the map, whose whole job is
+  // "how many are in this area".
+  const contentCount = viewMode === 'map' ? browseTotals.total : singleDomainList.total;
   const contentLoading =
-    viewMode === 'map' ? mapMarkers.isLoading : singleDomainList.isLoading;
+    viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading;
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -1979,8 +1996,14 @@ export function HomePage() {
     const browseContextRow = (
       <div
         data-testid="browse-context-row"
-        className="mb-4 flex flex-wrap items-center justify-between gap-3"
+        // `items-center` keeps the location/select controls exactly where they
+        // were; the domain side takes `self-end` so the heading drops to the
+        // bottom of the row, sitting just above the content instead of
+        // floating in the middle of a row whose height those taller buttons
+        // set. `mb-2` rather than `mb-4` closes the rest of the gap.
+        className="mb-2 flex flex-wrap items-center justify-between gap-3"
       >
+        <div className="self-end">
         <DomainControl
           options={domainOptions}
           // The map is multi-domain and takes its own selection; the list is
@@ -1996,6 +2019,7 @@ export function HomePage() {
             if (next[0]) handleDomainSelect(next[0]);
           }}
         />
+        </div>
         {headerActions}
       </div>
     );
@@ -2073,6 +2097,9 @@ export function HomePage() {
           <BrowseToolbar
             viewMode={viewMode}
             count={contentLoading ? undefined : contentCount}
+            // Map only: names the items that can never be pins, so the gap
+            // between this count and the map's viewport pill is stated.
+            withoutLocation={viewMode === 'map' ? browseTotals.withoutLocation : undefined}
             sort={sort}
             sortApplied={listSortApplied}
             // `nearest` needs a centre to order around.

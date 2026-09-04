@@ -680,6 +680,7 @@
   "browse.area_radius_unavailable": "ಪ್ರದೇಶ ಸೀಮಿತಗೊಳಿಸಲು ನಿಮ್ಮ ಸ್ಥಳ ಬೇಕು",
   "browse.no_filters": "ಯಾವುದೇ ಫಿಲ್ಟರ್ ಅನ್ವಯಿಸಿಲ್ಲ",
   "browse.count_listings": "{{count}} ಪಟ್ಟಿಗಳು",
+  "browse.count_without_location": "· {{count}} ಸ್ಥಳವಿಲ್ಲ, ಹಾಗಾಗಿ ನಕ್ಷೆಯಲ್ಲಿ ಇಲ್ಲ",
   "browse.domain_unavailable": "ನೀವು {{domain}} ಜೊತೆ ಸಂಪರ್ಕಿಸಲಾಗುವುದಿಲ್ಲ",
   "card.metric_km": "{{km}} ಕಿಮೀ",
   "card.metric_m": "{{m}} ಮೀ",

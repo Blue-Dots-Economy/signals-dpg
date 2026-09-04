@@ -13,6 +13,20 @@ import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 // client-side, mirrored by `cache_ttl_seconds` sent to the server so the
 // client's freshness intent lines up with the server's own cache knob.
 const MAP_STALE_TIME_MS = 90 * 1000;
+
+/** True when any of an item's locations falls inside `bbox`. */
+function markerInBbox(
+  m: Marker,
+  bbox: { minLat: number; minLng: number; maxLat: number; maxLng: number },
+): boolean {
+  return (m.item_locations ?? []).some(
+    (l) =>
+      l.lat >= bbox.minLat &&
+      l.lat <= bbox.maxLat &&
+      l.lng >= bbox.minLng &&
+      l.lng <= bbox.maxLng,
+  );
+}
 const MAP_CACHE_TTL_SECONDS = 90;
 
 // Viewport bucketing (spec §8 flag-back: "rounded viewport bucket"). Only the
@@ -377,6 +391,24 @@ export function useMapMarkers(
   // over-dense "N+ in this area — zoom in" indicator this hook's caller
   // renders, so neither trusts a set that's only representative for some
   // domains.
+  // The bbox the user is LOOKING at, which is not always the one last fetched
+  // — see the count derivation below.
+  const shownBbox =
+    viewport?.minLat !== undefined &&
+    viewport.minLng !== undefined &&
+    viewport.maxLat !== undefined &&
+    viewport.maxLng !== undefined
+      ? {
+          minLat: viewport.minLat,
+          minLng: viewport.minLng,
+          maxLat: viewport.maxLat,
+          maxLng: viewport.maxLng,
+        }
+      : null;
+  const shownBboxSignature = shownBbox
+    ? `${shownBbox.minLat},${shownBbox.minLng},${shownBbox.maxLat},${shownBbox.maxLng}`
+    : null;
+
   const aggregated = React.useMemo(() => {
     const markers: Marker[] = [];
     let total = 0;
@@ -385,14 +417,36 @@ export function useMapMarkers(
     for (const result of results) {
       if (result.data) {
         markers.push(...result.data.markers);
-        total += result.data.meta.total;
+        const serverTotal = result.data.meta.total;
+        const domainTruncated = serverTotal > cap;
         partial = partial || result.data.meta.partial;
-        truncated = truncated || result.data.meta.total > cap;
+        truncated = truncated || domainTruncated;
+
+        // COUNT WHAT IS ON SCREEN, not what was last requested.
+        //
+        // `shouldRefetch` deliberately reuses a cached result whenever the new
+        // bbox is CONTAINED in the previous padded one (zooming in, or
+        // returning to the map at a tighter viewport). The markers stay
+        // correct — they are a superset, and the out-of-view ones simply are
+        // not on screen — but `meta.total` still describes the LARGER fetched
+        // area. That is why zooming out to 72 and coming back to a city
+        // viewport kept reading "72 listings" while showing a city's worth of
+        // pins.
+        //
+        // When a domain is not truncated its `markers` array IS the complete
+        // set for the fetched area, so filtering to the shown bbox gives the
+        // exact on-screen count. When it IS truncated we do not hold the full
+        // set, and the caller renders an "N+ in this area" pill from
+        // `truncated` anyway, so the server total remains the right input.
+        total +=
+          shownBbox && !domainTruncated
+            ? result.data.markers.filter((m) => markerInBbox(m, shownBbox)).length
+            : serverTotal;
       }
     }
     return { markers, total, partial, truncated };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap is a cheap derived primitive listed explicitly
-  }, [dataSignature, cap]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap and shownBboxSignature are cheap derived primitives listed explicitly
+  }, [dataSignature, cap, shownBboxSignature]);
 
   // Update the held refetch state (Task 5) once every active domain's query
   // for `effectiveBbox` has settled — in an effect, not during render, so
