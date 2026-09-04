@@ -25,9 +25,21 @@ export interface BrowseToolbarProps {
   /** Centre offered when the user picks a radius; null when none resolves. */
   defaultCenter: { lat: number; lng: number } | null;
   onAreaChange: (next: BrowseArea) => void;
+  /**
+   * Chips for constraints whose EDITOR is elsewhere — search text and facets.
+   * `sort` and `area` are deliberately absent: their controls sit in this same
+   * row already showing their value, so a chip repeating it renders as a
+   * visible duplicate ("Area Within 25 km | Within 25 km ×").
+   */
   chips: AppliedChip[];
   onRemoveChip: (chip: AppliedChip) => void;
   onClearAll: () => void;
+  /**
+   * Whether anything at all is non-default. Distinct from `chips.length > 0`,
+   * because sort and area can be non-default while producing no chip — and
+   * clear-all still has to be reachable then.
+   */
+  canClearAll: boolean;
 }
 
 /**
@@ -92,12 +104,17 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
           defaultCenter={props.defaultCenter}
           onChange={props.onAreaChange}
         />
-        {props.chips.length > 0 ? (
-          <AppliedFilterChips
-            chips={props.chips}
-            onRemove={props.onRemoveChip}
-            onClearAll={props.onClearAll}
-          />
+        {props.chips.length > 0 && (
+          <AppliedFilterChips chips={props.chips} onRemove={props.onRemoveChip} />
+        )}
+        {props.canClearAll ? (
+          <button
+            type="button"
+            onClick={props.onClearAll}
+            className="inline-flex items-center text-xs font-bold text-destructive hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
+          >
+            {t('browse.clear_all')}
+          </button>
         ) : (
           <span className="text-xs italic text-muted-foreground">
             {t('browse.no_filters')}

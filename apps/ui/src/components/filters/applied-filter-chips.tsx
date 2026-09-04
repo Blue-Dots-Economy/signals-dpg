@@ -21,7 +21,6 @@ export interface AppliedChip {
 export interface AppliedFilterChipsProps {
   chips: AppliedChip[];
   onRemove: (chip: AppliedChip) => void;
-  onClearAll: () => void;
 }
 
 const KIND_STYLES: Record<ChipKind, string> = {
@@ -45,11 +44,17 @@ const KIND_STYLES: Record<ChipKind, string> = {
  * Chips are the READ-OUT; the facet panel and the app-bar search box remain
  * the EDITORS (spec §7.1). So this component formats nothing, owns no filter
  * state, and reports removals back to the caller rather than acting on them.
+ *
+ * It carries chips ONLY for constraints whose editor is elsewhere — search
+ * text and facets. `sort` and `area` have their own controls sitting inches
+ * away in the same row, and a chip repeating their value read as a duplicate
+ * on screen ("Area Within 25 km | Within 25 km ×"). Clear-all lives in the
+ * toolbar rather than here, because it must be reachable when sort or area is
+ * non-default even though neither produces a chip.
  */
 export function AppliedFilterChips({
   chips,
   onRemove,
-  onClearAll,
 }: Readonly<AppliedFilterChipsProps>) {
   const { t } = useTranslation();
   const groupRef = React.useRef<HTMLDivElement>(null);
@@ -104,13 +109,6 @@ export function AppliedFilterChips({
           )}
         </span>
       ))}
-      <button
-        type="button"
-        onClick={onClearAll}
-        className="inline-flex items-center text-xs font-bold text-destructive hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring pointer-coarse:min-h-11"
-      >
-        {t('browse.clear_all')}
-      </button>
     </div>
   );
 }

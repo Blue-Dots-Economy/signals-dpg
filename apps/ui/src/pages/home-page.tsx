@@ -1468,20 +1468,17 @@ export function HomePage() {
         removable: true,
       });
     }
-    if (area.mode === 'radius') {
-      out.push({
-        kind: 'area',
-        id: 'area',
-        label: t('browse.area_radius', { km: Math.round(area.meters / 1000) }),
-        removable: true,
-      });
-    }
-    // Sort only appears when non-default, so the common case stays uncluttered.
-    if (sort !== 'relevance') {
-      out.push({ kind: 'sort', id: 'sort', label: t(`browse.sort_${sort}`), removable: true });
-    }
+    // NOT chipped: `sort` and `area`. Their own controls sit in the same row
+    // already showing their value, so a chip repeating it renders as a visible
+    // duplicate — "Area Within 25 km | Within 25 km ×". Clear-all still resets
+    // them; see `canClearAll` below.
     return out;
-  }, [search, activeFieldFilters, area, sort, t]);
+  }, [search, activeFieldFilters, t]);
+
+  // Anything non-default at all, including the two constraints that produce no
+  // chip — otherwise changing only the area would leave no way to reset.
+  const canClearAll =
+    appliedChips.length > 0 || sort !== 'relevance' || area.mode !== 'anywhere';
 
   const handleRemoveChip = React.useCallback((chip: AppliedChip) => {
     switch (chip.kind) {
@@ -1839,8 +1836,14 @@ export function HomePage() {
   // P3-deferred header-count-vs-list-total mismatch: the header now reports
   // the same server-side total the "Showing X of Y" list indicator uses,
   // instead of a client-filtered card count.
-  const contentCount = singleDomainList.total;
-  const contentLoading = singleDomainList.isLoading;
+  // #644: the toolbar count must follow the VIEW, not always the list feed.
+  // Found in browser QA: on the map the bar read "22 listings" (the list's
+  // single-domain total) while the map showed 66 markers across two domains,
+  // because the map is multi-domain and the list is not. Each view reports its
+  // own total.
+  const contentCount = viewMode === 'map' ? mapMarkers.total : singleDomainList.total;
+  const contentLoading =
+    viewMode === 'map' ? mapMarkers.isLoading : singleDomainList.isLoading;
 
   function buildEmptyState(domainLabel: string) {
     if (search) return <EmptyState message={t('home.no_search_results', { search })} />;
@@ -2036,6 +2039,7 @@ export function HomePage() {
             chips={appliedChips}
             onRemoveChip={handleRemoveChip}
             onClearAll={handleClearAll}
+            canClearAll={canClearAll}
           />
         ) : undefined
       }
@@ -2193,9 +2197,9 @@ export function HomePage() {
                   </p>
                 )}
                 {/* #644: one domain is always selected — the "All" tab and its
-                    client-merged, client-re-sorted union are gone (spec D8). */}
-              // Single domain tab: paged infinite scroll (§5.1). Server already
-              // orders nearest-first when coords are known, so no client sort here.
+                    client-merged, client-re-sorted union are gone (spec D8).
+                    Paged infinite scroll (§5.1), rendered in the SERVER's order
+                    for whichever sort was applied; no client-side re-sort. */}
               <>
                 {singleDomainList.total > 0 && (
                   <p className="mb-2 text-xs text-muted-foreground">

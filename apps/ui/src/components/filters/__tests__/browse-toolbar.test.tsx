@@ -23,6 +23,7 @@ const base: BrowseToolbarProps = {
   chips: [],
   onRemoveChip: vi.fn(),
   onClearAll: vi.fn(),
+  canClearAll: false,
 };
 
 describe('BrowseToolbar', () => {
@@ -66,6 +67,21 @@ describe('BrowseToolbar', () => {
     );
   });
 
+  it('offers clear-all when only sort or area is non-default, though neither chips', () => {
+    // Found in browser QA: sort and area produce no chip (their own controls
+    // already show their value), so gating clear-all on chips.length would
+    // leave a user who only changed the area with no way to reset.
+    render(<BrowseToolbar {...base} chips={[]} canClearAll />);
+    expect(screen.getByRole('button', { name: /clear all/i })).toBeInTheDocument();
+    expect(screen.queryByText(/no filters applied/i)).toBeNull();
+  });
+
+  it('shows no clear-all when nothing is non-default', () => {
+    render(<BrowseToolbar {...base} chips={[]} canClearAll={false} />);
+    expect(screen.queryByRole('button', { name: /clear all/i })).toBeNull();
+    expect(screen.getByText(/no filters applied/i)).toBeInTheDocument();
+  });
+
   it('keeps row 2 present in both chip states, so the list below does not shift', () => {
     // A bar that changed height as chips came and went would move the list
     // under the user's thumb mid-scroll (spec §7.2).
@@ -76,6 +92,7 @@ describe('BrowseToolbar', () => {
     rerender(
       <BrowseToolbar
         {...base}
+        canClearAll
         chips={[{ kind: 'facet', id: 'facet:sector', label: 'Sector: Energy', removable: true }]}
       />,
     );
