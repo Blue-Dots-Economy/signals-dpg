@@ -1156,13 +1156,13 @@ describe('HomePage — infinite-scroll paging', () => {
     renderHome('/?view=list&domain=provider');
 
     await findCard('Acme Welding');
-    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
     expect(cardFor('Initech Casting')).toBeNull();
 
     await scrollSentinelIntoView();
 
     expect(await findCard('Initech Casting')).toBeInTheDocument();
-    expect(screen.getByText('Showing 3 of 3')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(3);
   });
 
   it('stops paging once the last page is loaded', async () => {
@@ -1173,12 +1173,11 @@ describe('HomePage — infinite-scroll paging', () => {
 
     await scrollSentinelIntoView();
     expect(await findCard('Globex Foundry')).toBeInTheDocument();
-    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
 
     // Sentinel is now disabled — firing it again must not fetch past the end.
     await scrollSentinelIntoView();
 
-    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
     expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
   });
 
@@ -1194,7 +1193,7 @@ describe('HomePage — infinite-scroll paging', () => {
     renderHome('/?view=list');
 
     await findCard('Acme Welding');
-    expect(screen.getByText('Showing 1 of 2')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(1);
     expect(cardFor('Globex Foundry')).toBeNull();
     // A different domain's feed is not paged in alongside it.
     expect(cardFor('Sam Mentor')).toBeNull();
@@ -1202,7 +1201,7 @@ describe('HomePage — infinite-scroll paging', () => {
     await scrollSentinelIntoView();
 
     expect(await findCard('Globex Foundry')).toBeInTheDocument();
-    expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument();
+    expect(document.querySelectorAll('[data-item-card]')).toHaveLength(2);
     expect(cardFor('Sam Mentor')).toBeNull();
   });
 });

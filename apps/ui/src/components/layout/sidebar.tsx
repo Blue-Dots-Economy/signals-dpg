@@ -1,3 +1,4 @@
+import type * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -112,6 +113,7 @@ export function AppSidebar({
   }, {});
 
   const domainKeys = Object.keys(profilesByDomain);
+  const hasNoProfiles = domainKeys.length === 0;
 
   // "My items" group label is domain-aware: a network can override the generic
   // "My Profile(s)" heading per domain via `my_items_label` in network.json
@@ -227,7 +229,26 @@ export function AppSidebar({
             <SidebarSeparator />
           </>
         )}
-        <SidebarGroup>
+        {/* With NO profiles yet, this group is stretched to the exact height of
+            the browse toolbar (`--dpg-toolbar-h`, measured and published by
+            PageShell) and owns the divider itself, so the sidebar's rule and
+            the toolbar's bottom border form one continuous line across the
+            viewport — the same way the sidebar header's border meets the top
+            bar's above it.
+
+            Only in the empty state. Once profiles exist the group is taller
+            than the toolbar and no alignment is possible or expected, so it
+            falls back to its natural height and the shared `<SidebarSeparator />`
+            below. `hasNoProfiles` therefore also suppresses that separator, or
+            the empty state would draw two rules. */}
+        <SidebarGroup
+          className={hasNoProfiles ? 'border-b border-sidebar-border' : undefined}
+          style={
+            hasNoProfiles
+              ? ({ minHeight: 'var(--dpg-toolbar-h, auto)' } as React.CSSProperties)
+              : undefined
+          }
+        >
           <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
           <SidebarGroupContent>
             {domainKeys.length === 0 ? (
@@ -365,7 +386,9 @@ export function AppSidebar({
             )}
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarSeparator />
+        {/* Suppressed in the empty state — the group above draws its own
+            bottom border there so it can line up with the browse toolbar. */}
+        {!hasNoProfiles && <SidebarSeparator />}
         <SidebarGroup>
           <SidebarGroupLabel>{t('nav.actions_group')}</SidebarGroupLabel>
           <SidebarGroupContent>

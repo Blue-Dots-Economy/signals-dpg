@@ -1,3 +1,4 @@
+import * as React from 'react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslation } from 'react-i18next';
 import { SidebarProvider } from '@/components/ui/sidebar';
@@ -94,6 +95,31 @@ export function PageShell({
   footerSlot,
 }: Readonly<PageShellProps>) {
   const { t } = useTranslation();
+
+  // Publish the browse-toolbar band's height as `--dpg-toolbar-h` so the
+  // sidebar can align its first divider to this band's bottom border.
+  //
+  // Measured rather than hardcoded on purpose. Both columns start at the same
+  // y (the sidebar header and the top bar are the same height), so aligning
+  // the two rules means matching this band's height exactly — and a literal
+  // would silently drift the next time a toolbar row's padding changes.
+  const toolbarRef = React.useRef<HTMLDivElement | null>(null);
+  const [toolbarHeight, setToolbarHeight] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) {
+      setToolbarHeight(null);
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      setToolbarHeight(el.getBoundingClientRect().height);
+    });
+    observer.observe(el);
+    setToolbarHeight(el.getBoundingClientRect().height);
+    return () => observer.disconnect();
+  }, [toolbarSlot]);
+
   return (
     <TooltipProvider>
       <a
@@ -102,7 +128,13 @@ export function PageShell({
       >
         {t('a11y.skip_to_content')}
       </a>
-      <SidebarProvider>
+      <SidebarProvider
+        style={
+          toolbarHeight != null
+            ? ({ '--dpg-toolbar-h': `${toolbarHeight}px` } as React.CSSProperties)
+            : undefined
+        }
+      >
         <AppSidebar
           networks={networks}
           selectedNetwork={selectedNetwork}
@@ -134,7 +166,9 @@ export function PageShell({
           {toolbarSlot && (
             // `flex-none` so it keeps its natural height instead of being
             // squeezed by the flex column, matching `footerSlot` below.
-            <div className="flex-none border-b bg-background">{toolbarSlot}</div>
+            <div ref={toolbarRef} className="flex-none border-b bg-background">
+              {toolbarSlot}
+            </div>
           )}
           <main
             id="main-content"

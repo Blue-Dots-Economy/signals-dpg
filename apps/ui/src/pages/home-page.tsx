@@ -2220,14 +2220,11 @@ export function HomePage() {
                     Paged infinite scroll (§5.1), rendered in the SERVER's order
                     for whichever sort was applied; no client-side re-sort. */}
               <>
-                {singleDomainList.total > 0 && (
-                  <p className="mb-2 text-xs text-muted-foreground">
-                    {t('home.showing_x_of_y', {
-                      shown: singleDomainList.items.length,
-                      total: singleDomainList.total,
-                    })}
-                  </p>
-                )}
+                {/* No "Showing N of M" here. The toolbar above already states
+                    the total for the active filters, and the list is infinite
+                    scroll — so "shown" is just "however far you happen to have
+                    scrolled", which tells the reader nothing and duplicated a
+                    count sitting ~40px away. */}
                 <CardGrid
                   schema={activeSchema!}
                   schemaName={selectedDomain ?? undefined}

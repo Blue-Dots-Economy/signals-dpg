@@ -40,10 +40,18 @@ describe('BrowseToolbar', () => {
     expect(screen.queryByText(/248/)).toBeNull();
   });
 
-  it('OMITS the sort control on the map — absent, not disabled (spec D26)', () => {
+  it('OMITS both sort and area on the map — absent, not disabled (spec D26)', () => {
+    // Area was rendered here originally, which was wrong twice over: the map
+    // fetch never received `area` (it scopes by viewport), so the control was
+    // inert; and a radius layered on a bbox is a contradictory second spatial
+    // filter. On the map the viewport IS the area.
     render(<BrowseToolbar {...base} viewMode="map" />);
     expect(screen.queryByRole('button', { name: /sort/i })).toBeNull();
-    // Area still applies to the map.
+    expect(screen.queryByRole('button', { name: /area/i })).toBeNull();
+  });
+
+  it('offers area on the list, where it is the dense-map escape hatch', () => {
+    render(<BrowseToolbar {...base} viewMode="list" />);
     expect(screen.getByRole('button', { name: /area/i })).toBeInTheDocument();
   });
 

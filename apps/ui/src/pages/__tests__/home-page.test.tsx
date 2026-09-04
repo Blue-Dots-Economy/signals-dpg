@@ -607,18 +607,19 @@ describe('HomePage — signed-out browsing', () => {
 });
 
 describe('HomePage — signed-in default domain (#644)', () => {
-  it('reports the selected domain’s own total in the header and the X-of-Y indicator', async () => {
-    // Previously these were sums across every visible domain, because the
-    // "All" tab merged N feeds. One feed now drives both numbers, so they
-    // can no longer disagree with each other or with the server.
+  it('reports the selected domain’s own total, once, in the toolbar', async () => {
+    // Previously this was a sum across every visible domain, because the
+    // "All" tab merged N feeds. One feed drives it now, so it cannot disagree
+    // with the server.
     signedInSeeker();
     renderHome('/?view=list');
 
     await findCard('Acme Welding');
-    // One count, in the toolbar — it used to also render in the page header,
-    // 40px away, which is a duplicate the moment both are on screen.
+    // ONE count. It used to also render in the page header 40px away, and
+    // again as "Showing 2 of 3" above the grid — three renderings of the same
+    // fact, one of which ("shown") only reported how far you had scrolled.
     expect(screen.getByText('3 listings')).toBeInTheDocument();
-    expect(screen.getByText('Showing 2 of 3')).toBeInTheDocument();
+    expect(screen.queryByText(/^Showing \d+ of \d+$/)).toBeNull();
   });
 
   it('lands on an interacting counterpart domain and never browses a non-interacting one', async () => {

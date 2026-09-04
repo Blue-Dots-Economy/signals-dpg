@@ -106,11 +106,27 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             onChange={props.onSortChange}
           />
         )}
-        <AreaSelect
-          value={props.area}
-          defaultCenter={props.defaultCenter}
-          onChange={props.onAreaChange}
-        />
+        {/* Area is ABSENT on the map, for the same reason as Sort (spec D26).
+            Two independent reasons:
+
+            1. It was INERT. `useMapMarkers` is called with the viewport, not
+               with `area` — the map's radius comes from the bounds it is
+               showing — so the control changed nothing on the map at all.
+            2. It would be redundant and contradictory if wired up. On the map
+               the VIEWPORT *is* the spatial filter; layering a radius on top
+               of a bbox lets "Within 5 km" sit over a 200 km-wide viewport and
+               render an empty map with pins just off-screen.
+
+            Area exists to give the LIST a location constraint, because the
+            list is the escape hatch from a map too dense to show every pin
+            (#644, "Why the list still needs an optional area filter"). */}
+        {!isMap && (
+          <AreaSelect
+            value={props.area}
+            defaultCenter={props.defaultCenter}
+            onChange={props.onAreaChange}
+          />
+        )}
         {props.chips.length > 0 && (
           <AppliedFilterChips chips={props.chips} onRemove={props.onRemoveChip} />
         )}
