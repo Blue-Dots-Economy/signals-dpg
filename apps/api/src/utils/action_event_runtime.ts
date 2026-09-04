@@ -10,6 +10,9 @@ import { action_events, items } from '@dpg/database';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { decryptItemPrivate } from './item_decrypt';
+import { isSsrfSafeUrl } from './ssrf_guard';
+
+const MIRROR_FETCH_TIMEOUT_MS = 5_000;
 
 type ActionItemRef = z.infer<typeof PerformNetworkActionBodySchema>['source_item'];
 type PerformActionTargetItemRef = z.infer<
@@ -301,36 +304,50 @@ export async function mirrorActionEventToSourceInstance(
     return;
   }
 
+  const targetUrl = event.source_item.item_instance_url;
+  // Residual mitigation for issue #7 (identity forgery): these identity
+  // claims aren't cryptographically verified until the peer-auth follow-up
+  // (docs/security/network-action-perform-peer-auth-followup.md) lands, so
+  // log them on every mirror attempt for post-hoc detection.
+  const identityContext = {
+    action_id: event.action_id,
+    source_instance_url: targetUrl,
+    source_item_owner: event.source_item_owner ?? null,
+    target_item_owner: event.target_item_owner ?? null,
+  };
+
+  if (!(await isSsrfSafeUrl(targetUrl))) {
+    log.error(identityContext, 'Blocked SSRF-unsafe mirror target');
+    return;
+  }
+
   try {
-    const response = await fetch(
-      new URL('/api/v1/event/store', event.source_item.item_instance_url),
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(event),
-      }
-    );
+    const response = await fetch(new URL('/api/v1/event/store', targetUrl), {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(event),
+      redirect: 'error',
+      signal: AbortSignal.timeout(MIRROR_FETCH_TIMEOUT_MS),
+    });
 
     if (!response.ok) {
       log.error(
         {
-          action_id: event.action_id,
-          source_instance_url: event.source_item.item_instance_url,
+          ...identityContext,
           status_code: response.status,
           status_text: response.statusText,
         },
         'Failed to mirror action event to source instance'
       );
+      return;
     }
+
+    log.info(identityContext, 'Mirrored action event to source instance');
   } catch (err) {
     log.error(
-      {
-        err,
-        action_id: event.action_id,
-        source_instance_url: event.source_item.item_instance_url,
-      },
+      { ...identityContext, err },
       'Failed to mirror action event to source instance'
     );
   }
