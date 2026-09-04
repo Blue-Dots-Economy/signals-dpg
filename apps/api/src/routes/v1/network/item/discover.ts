@@ -138,7 +138,12 @@ function resolveNativeGeoFilters(input: {
     z.infer<typeof DiscoverItemsBodySchema>,
     'item_latitude' | 'item_longitude' | 'ordering_latitude' | 'ordering_longitude'
   >;
-}): { item_latitude?: number; item_longitude?: number; radius_meters?: number } {
+}): {
+  item_latitude?: number;
+  item_longitude?: number;
+  radius_meters?: number;
+  order_by?: 'distance' | 'created_at';
+} {
   const { sortApplied, hasAreaFilter, effectiveDistanceMeters, body } = input;
 
   if (sortApplied === 'nearest') {
@@ -146,6 +151,7 @@ function resolveNativeGeoFilters(input: {
       item_latitude: body.ordering_latitude ?? body.item_latitude,
       item_longitude: body.ordering_longitude ?? body.item_longitude,
       radius_meters: effectiveDistanceMeters,
+      order_by: 'distance',
     };
   }
   if (hasAreaFilter) {
@@ -153,9 +159,14 @@ function resolveNativeGeoFilters(input: {
       item_latitude: body.item_latitude,
       item_longitude: body.item_longitude,
       radius_meters: effectiveDistanceMeters,
+      // The area narrows the SET; it must not also choose the order. Leaving
+      // this to inference made `sort: 'newest'` + an area return
+      // distance-ordered rows, because the native ORDER BY keyed off the mere
+      // presence of coordinates (#644 P3, on the native path).
+      order_by: 'created_at',
     };
   }
-  return {};
+  return { order_by: 'created_at' };
 }
 
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
