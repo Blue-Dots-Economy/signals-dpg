@@ -149,15 +149,20 @@ Open **http://localhost:5173** in your browser.
 - `LOGIN_CHANNELS` (default `email,phone`) — restrict login identifiers. e.g.
   `LOGIN_CHANNELS=phone` shows only the phone input and rejects email OTP.
 - Admin-domain emails (`ADMIN_DOMAINS`) are exempt from the self-signup gate.
-- `SIGNUP_MAX_PER_IDENTIFIER` (default `3`), `SIGNUP_MAX_PER_IP` (default `10`),
+- `SIGNUP_MAX_PER_IDENTIFIER` (default `3`) and
   `SIGNUP_RATE_LIMIT_WINDOW_SECONDS` (default `3600`) — the self-signup abuse
-  ceiling, counted in Redis. Relevant when `SELF_SIGNUP_MODE=allowed`: a field
-  worker re-attempting the same identifier hits `SIGNUP_RATE_LIMITED`, and
-  raising `SIGNUP_MAX_PER_IDENTIFIER` releases them on the next request. All
-  three must be positive integers — `0` and an empty value are rejected at boot,
-  so to effectively remove a ceiling set it high rather than to zero. Note that
-  *shortening* the window does not shorten counters already running; only the
-  `MAX` values take effect immediately.
+  ceiling, counted in Redis **per identifier** (email/phone). Relevant when
+  `SELF_SIGNUP_MODE=allowed`: a field worker re-attempting the same identifier
+  hits `SIGNUP_RATE_LIMITED`, and raising `SIGNUP_MAX_PER_IDENTIFIER` releases
+  them on the next request. Both must be positive integers — `0` and an empty
+  value are rejected at boot, so to effectively remove the ceiling set it high
+  rather than to zero. Note that *shortening* the window does not shorten
+  counters already running; only the max takes effect immediately.
+- There is deliberately **no per-IP signup limit in the API**. Per-IP rate
+  limiting is the ingress's job (Kong `apiRateLimit` in the signals api chart),
+  keyed on the PROXY-protocol address a client cannot forge and counted across
+  proxy replicas. Only the per-identifier limit lives here, because Kong cannot
+  key on a request-body field.
 
 ---
 

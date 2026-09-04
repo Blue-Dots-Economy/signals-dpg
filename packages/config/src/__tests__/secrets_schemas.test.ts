@@ -121,7 +121,6 @@ describe('AuthSecretsSchema', () => {
   it('defaults the signup rate limit to the previously hardcoded constants', () => {
     const parsed = AuthSecretsSchema.parse(base);
     expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(3);
-    expect(parsed.SIGNUP_MAX_PER_IP).toBe(10);
     expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(3600);
   });
 
@@ -129,12 +128,19 @@ describe('AuthSecretsSchema', () => {
     const parsed = AuthSecretsSchema.parse({
       ...base,
       SIGNUP_MAX_PER_IDENTIFIER: '50',
-      SIGNUP_MAX_PER_IP: '200',
       SIGNUP_RATE_LIMIT_WINDOW_SECONDS: '300',
     });
     expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(50);
-    expect(parsed.SIGNUP_MAX_PER_IP).toBe(200);
     expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(300);
+  });
+
+  // Per-IP is Kong's apiRateLimit at the ingress (#669), never an app env var.
+  // Guards a well-meaning re-add: the schema is strict about nothing, so an
+  // unknown key would be silently dropped rather than rejected — this asserts
+  // the parsed config exposes no per-IP knob to read.
+  it('exposes no SIGNUP_MAX_PER_IP — per-IP limiting is Kong\'s job', () => {
+    const parsed = AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IP: '10' });
+    expect('SIGNUP_MAX_PER_IP' in parsed).toBe(false);
   });
 
   // Both of these reach the schema in practice: the chart renders env from a
@@ -143,7 +149,7 @@ describe('AuthSecretsSchema', () => {
   // asserted here so the sharp edge is at least documented by a test.
   it.each([['0'], ['']])('rejects %j for a signup rate limit', (value) => {
     expect(() =>
-      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IP: value })
+      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IDENTIFIER: value })
     ).toThrow();
   });
 

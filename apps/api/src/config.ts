@@ -74,7 +74,6 @@ export const authConfig = {
   signup_rate_limit: {
     window_seconds: auth.SIGNUP_RATE_LIMIT_WINDOW_SECONDS,
     max_per_identifier: auth.SIGNUP_MAX_PER_IDENTIFIER,
-    max_per_ip: auth.SIGNUP_MAX_PER_IP,
   },
   // Identity provider. Read this — never re-parse process.env.
   provider: auth.AUTH_PROVIDER,

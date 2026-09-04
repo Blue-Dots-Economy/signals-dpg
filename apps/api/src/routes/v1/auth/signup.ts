@@ -65,10 +65,9 @@ export const auth_signup: FastifyPluginAsyncZod = async function (fastify) {
       },
     },
     handler: async (request, reply) => {
-      const result = await selfSignup(
-        { ...request.body, clientIp: request.ip },
-        request.log
-      );
+      // No clientIp: per-IP rate limiting is Kong's apiRateLimit at the
+      // ingress, not this service's job (#669).
+      const result = await selfSignup(request.body, request.log);
 
       if (!result.ok) {
         const status: ErrorStatus = STATUS[result.code] ?? 400;

@@ -45,8 +45,6 @@ export interface SelfSignupInput {
   domain?: string | null;
   /** Age in years (0..120), derived from the birth year on the client (#331). Parked for provisioning to apply at first login. */
   age?: number | null;
-  /** Caller IP, for rate limiting. */
-  clientIp?: string;
 }
 
 export type SelfSignupErrorCode =
@@ -95,14 +93,20 @@ function normalizePhone(value: string | null | undefined): string | null {
  * chart's `apiRateLimit.groups`, and CodeQL's `js/missing-rate-limiting` on the
  * other routes is answered by that, not by adding limiters here.
  *
- * The exception is the per-IDENTIFIER limit below. Kong's rate-limiting plugin
- * keys on ip / credential / consumer / service / header / path — it cannot key
- * on a field in the request body, and the signup identifier is the email/phone
- * in the POST body. So "N attempts per identifier" is not expressible at the
- * ingress at any setting, and this is the only place it can live. The per-IP
- * counter alongside it is a deliberately tighter second belt over the ingress
- * ceiling, kept because self-signup mints Keycloak identities and is the one
- * public endpoint where bulk abuse is cheap.
+ * The one exception is the per-IDENTIFIER limit below. Kong's rate-limiting
+ * plugin keys on ip / credential / consumer / service / header / path — it
+ * cannot key on a field in the request body, and the signup identifier is the
+ * email/phone in the POST body. So "N attempts per identifier" is not
+ * expressible at the ingress at any setting, and this is the only place it can
+ * live.
+ *
+ * There is deliberately NO per-IP counter here any more. Per-IP is precisely
+ * what Kong's `apiRateLimit` does, keyed on the PROXY-protocol address the L4
+ * ELB prepends — which a client cannot forge, unlike the X-Forwarded-For that
+ * Fastify's `request.ip` ultimately trusts — and counted in shared Redis so the
+ * ceiling holds across proxy replicas. An in-process per-IP counter was a
+ * weaker duplicate of a control that already exists one layer up, so it was
+ * removed rather than made operator-tunable.
  *
  * The TTL is stamped only on the first increment of a window, which matters now
  * that `windowSeconds` is operator-tunable: RAISING a max takes effect on the
@@ -221,15 +225,10 @@ async function prepareSignup(
 
   const identifier = email ?? phoneNumber;
   // Read at request time, not module scope: the limits are operator-tunable
-  // (SIGNUP_MAX_PER_IDENTIFIER / SIGNUP_MAX_PER_IP /
-  // SIGNUP_RATE_LIMIT_WINDOW_SECONDS) and reading them here keeps this file free
-  // of import-time config evaluation.
-  const { window_seconds, max_per_identifier, max_per_ip } = authConfig.signup_rate_limit;
-  if (
-    (await overLimit(`signup:id:${identifier}`, max_per_identifier, window_seconds, log)) ||
-    (input.clientIp &&
-      (await overLimit(`signup:ip:${input.clientIp}`, max_per_ip, window_seconds, log)))
-  ) {
+  // (SIGNUP_MAX_PER_IDENTIFIER / SIGNUP_RATE_LIMIT_WINDOW_SECONDS) and reading
+  // them here keeps this file free of import-time config evaluation.
+  const { window_seconds, max_per_identifier } = authConfig.signup_rate_limit;
+  if (await overLimit(`signup:id:${identifier}`, max_per_identifier, window_seconds, log)) {
     return {
       ok: false,
       code: 'SIGNUP_RATE_LIMITED',

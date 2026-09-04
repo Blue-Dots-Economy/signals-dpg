@@ -50,19 +50,25 @@ export const AuthSecretsSchema = z.object({
   // Defaults reproduce the previous constants exactly, so behaviour is unchanged
   // unless an operator opts in.
   //
-  // All three are `.positive()`, so 0 and the EMPTY STRING are both rejected —
-  // and loadEnv() parses this schema bare, so a bad value crash-loops the api on
-  // a raw Zod error rather than degrading. That matters because these are set
-  // through the chart's generic `config:` passthrough, where a key left as
-  // `SIGNUP_MAX_PER_IP: ""` renders an empty env var. There is no "0 means
-  // unlimited" escape hatch: to effectively disable a ceiling, set it high.
+  // Per-IDENTIFIER only. There is no SIGNUP_MAX_PER_IP: per-IP rate limiting is
+  // Kong's `apiRateLimit` at the ingress (#669), keyed on the unforgeable
+  // PROXY-protocol address and counted across proxy replicas. The identifier is
+  // a request-BODY field, which Kong's limit_by cannot key on — that asymmetry
+  // is the whole reason this one lives in application config.
   //
-  // Raising a `MAX` takes effect on the next request. SHORTENING the window does
+  // Both are `.positive()`, so 0 and the EMPTY STRING are rejected — and
+  // loadEnv() parses this schema bare, so a bad value crash-loops the api on a
+  // raw Zod error rather than degrading. That matters because these are set
+  // through the chart's generic `config:` passthrough, where a key left as
+  // `SIGNUP_MAX_PER_IDENTIFIER: ""` renders an empty env var. There is no "0
+  // means unlimited" escape hatch: to effectively disable the ceiling, set it
+  // high.
+  //
+  // Raising the max takes effect on the next request. SHORTENING the window does
   // NOT retroactively shorten keys already counting — see the TTL note in
   // services/auth/self_signup.ts.
   SIGNUP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   SIGNUP_MAX_PER_IDENTIFIER: z.coerce.number().int().positive().default(3),
-  SIGNUP_MAX_PER_IP: z.coerce.number().int().positive().default(10),
   // Identity provider. Single rollback lever:
   //   'betterauth' — better-auth only; every Keycloak path stays dormant.
   //   'keycloak'   — Keycloak only; better-auth is not involved in any step.

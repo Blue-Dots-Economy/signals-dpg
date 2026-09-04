@@ -57,7 +57,6 @@ const mockAuthConfig = {
   signup_rate_limit: {
     window_seconds: 3600,
     max_per_identifier: 3,
-    max_per_ip: 10,
   },
 };
 const mockKeycloakConfig = {
@@ -101,7 +100,7 @@ const { selfSignup, resetSelfSignupState } = await import('../self_signup.js');
 const makeLog = () =>
   ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }) as unknown as FastifyBaseLogger;
 
-const INPUT = { name: 'Asha Rao', email: 'asha@example.org', clientIp: '10.0.0.1' };
+const INPUT = { name: 'Asha Rao', email: 'asha@example.org' };
 
 beforeEach(() => {
   resetSelfSignupState();
@@ -119,7 +118,6 @@ beforeEach(() => {
   mockAuthConfig.signup_rate_limit = {
     window_seconds: 3600,
     max_per_identifier: 3,
-    max_per_ip: 10,
   };
   mockKeycloakConfig.api_client_secret = 'shh';
   mockApiConfig.served_domains = [{ domain: 'student' }, { domain: 'employer' }];
@@ -309,7 +307,7 @@ describe('phone attributes must actually persist', () => {
     const log = makeLog();
 
     const result = await selfSignup(
-      { name: 'Asha', phoneNumber: '+919876500001', clientIp: '10.0.0.1' },
+      { name: 'Asha', phoneNumber: '+919876500001' },
       log
     );
 
@@ -348,19 +346,21 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
-  it('blocks bulk signup from one IP across different identifiers', async () => {
-    for (let i = 0; i < 10; i += 1) {
-      await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
+  // Inverted deliberately (#669). This used to assert an 11th signup from one
+  // IP across different identifiers was blocked, by an in-process per-IP
+  // counter. That counter is gone: per-IP is Kong's apiRateLimit at the
+  // ingress, keyed on the unforgeable PROXY-protocol address rather than the
+  // X-Forwarded-For that request.ip trusts. So the service itself must NOT
+  // limit by IP — asserted here so a re-add is a failing test, not a silent
+  // duplicate of the ingress control.
+  it('does not limit by IP — that is the ingress layer\'s job', async () => {
+    for (let i = 0; i < 15; i += 1) {
+      const res = await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
+      expect(res.ok).toBe(true);
     }
 
-    const result = await selfSignup(
-      { ...INPUT, email: 'user-eleven@example.org' },
-      makeLog()
-    );
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.code).toBe('SIGNUP_RATE_LIMITED');
+    expect(redisState.expires.every((e) => e.key.startsWith('signup:id:'))).toBe(true);
+    expect(redisState.expires.some((e) => e.key.startsWith('signup:ip:'))).toBe(false);
   });
 
   it('fails OPEN when Redis is down — an outage must not block signup', async () => {
@@ -388,28 +388,13 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
-  it('honours an operator-lowered per-IP limit', async () => {
-    mockAuthConfig.signup_rate_limit.max_per_ip = 2;
-
-    for (let i = 0; i < 2; i += 1) {
-      await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
-    }
-    const result = await selfSignup({ ...INPUT, email: 'third@example.org' }, makeLog());
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.code).toBe('SIGNUP_RATE_LIMITED');
-  });
 
   it('stamps the configured window as the Redis TTL', async () => {
     mockAuthConfig.signup_rate_limit.window_seconds = 300;
 
     await selfSignup(INPUT, makeLog());
 
-    expect(redisState.expires).toEqual([
-      { key: `signup:id:${INPUT.email}`, ttl: 300 },
-      { key: `signup:ip:${INPUT.clientIp}`, ttl: 300 },
-    ]);
+    expect(redisState.expires).toEqual([{ key: `signup:id:${INPUT.email}`, ttl: 300 }]);
   });
 });
 
