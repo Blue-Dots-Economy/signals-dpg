@@ -206,13 +206,27 @@ async function registerAuthRoutes(): Promise<{
 // --- routes/auth/index.ts -------------------------------------------------
 
 describe('routes/auth/index.ts (better-auth catch-all proxy)', () => {
-  it('registers a hidden, rate-limited GET/POST/OPTIONS catch-all on /api/auth/*', async () => {
+  it('registers a hidden GET/POST/OPTIONS catch-all on /api/auth/*', async () => {
     const { route } = await registerAuthRoutes();
 
     expect(route.url).toBe('/api/auth/*');
     expect(route.method).toEqual(['GET', 'POST', 'OPTIONS']);
     expect(route.schema.hide).toBe(true);
-    expect(route.config.rateLimit).toEqual({ max: 10, timeWindow: '10 seconds' });
+  });
+
+  // This assertion is inverted on purpose (signals-dpg#669). It used to read
+  // `expect(route.config.rateLimit).toEqual({ max: 10, timeWindow: '10 seconds' })`
+  // and the test name claimed the route was "rate-limited" — but
+  // @fastify/rate-limit is not a dependency and is registered nowhere, so
+  // Fastify ignored that key entirely and the route was unlimited. The test
+  // asserted the shape of a config object that nothing ever read, which is how
+  // the illusion survived. Rate limiting for this path is Kong's job
+  // (apiRateLimit group + the tighter otpRateLimit on unified-otp/request), so
+  // the correct state is NO app-level config, and this guards a re-add.
+  it('declares no app-level rateLimit config — the plugin is not installed', async () => {
+    const { route } = await registerAuthRoutes();
+
+    expect(route.config?.rateLimit).toBeUndefined();
   });
 
   it('short-circuits OPTIONS preflight with 204 and never calls better-auth', async () => {

@@ -89,6 +89,21 @@ function normalizePhone(value: string | null | undefined): string | null {
  * creates Keycloak entries, so the point is to make bulk abuse impractical, not
  * to be precise. Fails OPEN — a Redis outage must not block legitimate signup.
  *
+ * WHY THIS EXISTS IN THE APP AT ALL, given Kong rate-limits at the ingress
+ * (signals-dpg#669). Rate limiting is otherwise deployment config, not
+ * application code — the per-route per-IP ceilings live in the signals api
+ * chart's `apiRateLimit.groups`, and CodeQL's `js/missing-rate-limiting` on the
+ * other routes is answered by that, not by adding limiters here.
+ *
+ * The exception is the per-IDENTIFIER limit below. Kong's rate-limiting plugin
+ * keys on ip / credential / consumer / service / header / path — it cannot key
+ * on a field in the request body, and the signup identifier is the email/phone
+ * in the POST body. So "N attempts per identifier" is not expressible at the
+ * ingress at any setting, and this is the only place it can live. The per-IP
+ * counter alongside it is a deliberately tighter second belt over the ingress
+ * ceiling, kept because self-signup mints Keycloak identities and is the one
+ * public endpoint where bulk abuse is cheap.
+ *
  * The TTL is stamped only on the first increment of a window, which matters now
  * that `windowSeconds` is operator-tunable: RAISING a max takes effect on the
  * next request, but SHORTENING the window does not retroactively shorten keys
