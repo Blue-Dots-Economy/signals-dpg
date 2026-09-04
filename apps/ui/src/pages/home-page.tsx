@@ -2404,22 +2404,16 @@ export function HomePage() {
                   }}
                 />
                 </MapErrorBoundary>
-                {/* Map count pill (#203 §7, revised; extended by Task 6):
-                    logged-out map view has no header count badge (that's a
-                    logged-in ContentHeader), so this small non-blocking pill
-                    surfaces the result count for the current view at all
-                    zooms. Task 6 adds an over-dense "N+ in this area — zoom
-                    in" variant that shows for BOTH anon and signed-in
-                    visitors whenever the true total exceeds the active
-                    zoom-band marker cap (`mapMarkers.truncated`) — see
-                    `MapCountPill` for the two-variant logic. `fixed` + high
-                    z-index so it stays above the map's own maximize overlay
-                    (z-[2000]). */}
+                {/* The VIEWPORT count, for every visitor. The toolbar above
+                    states the filter total instead (N5), so this is the only
+                    place the "how many are in this area" number appears —
+                    which is why it is no longer gated on being signed out.
+                    `fixed` + high z-index so it stays above the map's own
+                    maximize overlay (z-[2000]). */}
                 <MapCountPill
                   total={mapMarkers.total}
                   shown={mapItems.length}
                   truncated={mapMarkers.truncated}
-                  signedIn={!!user}
                 />
                 {/* Federation-degradation indicator (#203 §6): some peer instances
                     didn't answer in time, so the viewport marker set is known-partial.
