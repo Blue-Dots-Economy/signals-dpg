@@ -120,6 +120,44 @@ export function resolveDiscoverSort(input: {
   return input.hasAnchor ? 'relevance' : 'newest';
 }
 
+/**
+ * The geo params the NATIVE fallback should receive (#644, contract §7).
+ *
+ * `buildDistanceOrderBy` keys off lat/lng ONLY, while `buildWhereClause` adds
+ * a radius clause only when lat, lng AND radius_meters are all present. So
+ * `nearest` sends coordinates with NO radius — distance-ordered and unbounded
+ * — while every other sort sends them only when an area filter was actually
+ * requested. Pure and separate from the handler so those three cases are
+ * readable on their own.
+ */
+function resolveNativeGeoFilters(input: {
+  sortApplied: DiscoverSort;
+  hasAreaFilter: boolean;
+  effectiveDistanceMeters: number | undefined;
+  body: Pick<
+    z.infer<typeof DiscoverItemsBodySchema>,
+    'item_latitude' | 'item_longitude' | 'ordering_latitude' | 'ordering_longitude'
+  >;
+}): { item_latitude?: number; item_longitude?: number; radius_meters?: number } {
+  const { sortApplied, hasAreaFilter, effectiveDistanceMeters, body } = input;
+
+  if (sortApplied === 'nearest') {
+    return {
+      item_latitude: body.ordering_latitude ?? body.item_latitude,
+      item_longitude: body.ordering_longitude ?? body.item_longitude,
+      radius_meters: effectiveDistanceMeters,
+    };
+  }
+  if (hasAreaFilter) {
+    return {
+      item_latitude: body.item_latitude,
+      item_longitude: body.item_longitude,
+      radius_meters: effectiveDistanceMeters,
+    };
+  }
+  return {};
+}
+
 function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
   return {
     item_id: item.item_id,
@@ -311,32 +349,12 @@ const discover_items_handler = async (
     // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
     // a text query filters only this instance's rows; peers contribute live,
     // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
-    // Native ordering geo params (#644, contract §7), hoisted out of the call
-    // so the three cases read as statements rather than a nested ternary.
-    //
-    // `buildDistanceOrderBy` keys off lat/lng ONLY, while `buildWhereClause`
-    // adds a radius clause only when lat, lng AND radius_meters are all
-    // present. So `nearest` sends coordinates with NO radius — distance
-    // ordered and unbounded — while everything else sends them only when an
-    // area filter was actually requested.
-    let nativeGeoFilters: {
-      item_latitude?: number;
-      item_longitude?: number;
-      radius_meters?: number;
-    } = {};
-    if (sortApplied === 'nearest') {
-      nativeGeoFilters = {
-        item_latitude: body.ordering_latitude ?? body.item_latitude,
-        item_longitude: body.ordering_longitude ?? body.item_longitude,
-        radius_meters: effectiveDistanceMeters,
-      };
-    } else if (hasAreaFilter) {
-      nativeGeoFilters = {
-        item_latitude: body.item_latitude,
-        item_longitude: body.item_longitude,
-        radius_meters: effectiveDistanceMeters,
-      };
-    }
+    const nativeGeoFilters = resolveNativeGeoFilters({
+      sortApplied,
+      hasAreaFilter,
+      effectiveDistanceMeters,
+      body,
+    });
 
     const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
