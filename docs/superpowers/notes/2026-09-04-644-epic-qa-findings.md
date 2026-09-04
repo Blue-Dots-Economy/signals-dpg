@@ -130,3 +130,41 @@ rather than inferred. Needs one extra count request (`/discover` with
 "has a location").
 
 **N6 — "Showing N of M" removed from the list. FIXED.**
+
+---
+
+# Third QA round (P-series)
+
+**P1 — a date/distance pill opened "Match Score Details". FIXED.**
+`MatchScoreButton` passed `onViewDetails` for every metric kind. The handler
+is now relevance-only, and `MatchScoreBadge` renders a `<span>` instead of a
+`<button>` when it has nothing to open — so a non-relevance pill is neither
+focusable nor labelled "Tap for details".
+
+**P2 — "Showing Provider" → "Showing Providers". FIXED.** New
+`pluralizeDomainLabel` prefers a `plural_label` on the domain (English rules
+are not safe for a schema-driven label) and falls back to -s/-ies, no-op for
+an already-plural label.
+
+**P3 — the page-header domain title. REMOVED.** Duplicated the toolbar, and
+was wrong on the map: it named one domain while several could be selected
+(Seeker + Provider read "Seeker"). `ContentHeader.title` is optional now;
+`resolveHeaderDomain` / `resolveHeaderDescription` deleted.
+
+**P4 — dead-code audit. DONE.** `tsc --noUnusedLocals` is the tool here (no
+eslint in this repo) and is clean; it is what surfaced the orphaned header
+vars. Five i18n keys orphaned by this epic removed from all three locales
+(`match.confidence`, `match.factors_heading`, `match.ai_reasoning_heading`,
+`filters.domain_group`, `home.browse_all`) — verified against the merge-base
+that each had exactly one caller before this epic. `home.map_count_first` was
+already orphaned at the base, so left alone. Remaining unused exports are all
+component prop-type interfaces, which is this codebase's convention (several
+are consumed by tests or re-exported from `index.ts`) — left as-is rather than
+churned.
+
+**P5 — no distance pill under `nearest`. FIXED.** Per-item `distanceMeters`
+exists in the discover item schema but only the signals-search path fills it;
+the native fallback orders by distance while projecting no distance column.
+Backfilled client-side from `item_locations` + the ordering centre. Also
+exposed that the home-page browse mock never returned `sortApplied`, so the
+metric pill had no test coverage at all — now threaded through.
