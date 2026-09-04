@@ -77,9 +77,11 @@ function mapCreateItemError(
   if (err instanceof ItemServiceError) {
     // `details` carries the extra fields a published error shape promises —
     // DOMAIN_LOCKED's `locked_domain` / `requested_domain`, which the UI reads.
+    // Spread straight from `details`: object spread of `undefined` contributes
+    // nothing, so a `?? {}` fallback would only add an empty object literal.
     return {
       status: err.statusCode,
-      body: { error: err.errorCode, message: err.message, ...(err.details ?? {}) },
+      body: { error: err.errorCode, message: err.message, ...err.details },
     };
   }
   if (err instanceof DrizzleQueryError && err.cause instanceof DatabaseError) {
