@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchDiscover, fetchNetworkItems, PROFILE_PAGE_SIZE } from '@/lib/network-api';
-import type { DiscoverFacetFilter, DiscoverSource } from '@/lib/network-api';
+import type { DiscoverFacetFilter, DiscoverSource, FetchDiscoverQuery } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import type { DotNetworkSchema, DotNetworkDomain } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
@@ -129,22 +129,50 @@ export function useInfiniteBrowseItems(
   // set is the whole network.
   // Left `undefined` rather than `{}` when inactive: spreading `undefined` into
   // an object literal is a no-op, so no fallback is needed (Sonar S7744).
-  const areaFilter =
-    area.mode === 'radius'
-      ? {
-          item_latitude: area.center.lat,
-          item_longitude: area.center.lng,
-          distance_meters: area.meters,
-        }
-      : undefined;
+  // Typed as the exact request fields rather than `Record<string, number>`:
+  // the loose form is assignable to anything and let the bbox spread into
+  // `fetchDiscover` unnoticed while that function's allowlist dropped it.
+  let areaFilter:
+    | Pick<FetchDiscoverQuery, 'item_latitude' | 'item_longitude' | 'distance_meters'>
+    | Pick<FetchDiscoverQuery, 'min_lat' | 'min_lng' | 'max_lat' | 'max_lng'>
+    | undefined;
+  if (area.mode === 'radius') {
+    areaFilter = {
+      item_latitude: area.center.lat,
+      item_longitude: area.center.lng,
+      distance_meters: area.meters,
+    };
+  } else if (area.mode === 'viewport') {
+    // The exact rectangle (contract §1.5). All four bounds travel together —
+    // a partial box is rejected by the BFF rather than defaulted.
+    areaFilter = {
+      min_lat: area.bounds.minLat,
+      min_lng: area.bounds.minLng,
+      max_lat: area.bounds.maxLat,
+      max_lng: area.bounds.maxLng,
+    };
+  }
 
-  // The ORDERING centre — only for `nearest`, and only when the area filter
-  // has not already supplied one (signals-search reuses the filter's centre).
-  // This separation is what keeps "location may sort" distinct from "location
-  // filters": the viewer's coordinates order the feed without bounding it.
+  // The ORDERING centre — only for `nearest`.
+  //
+  // A RADIUS area already supplies a centre and signals-search reuses it
+  // (contract §1.3 rule 2), so sending one too would be redundant. A VIEWPORT
+  // does NOT: a bbox has no centre on the wire, and the BFF deliberately will
+  // not derive one from the rectangle's midpoint, because that would let
+  // "search this area" silently change the sort. So nearest-inside-a-viewport
+  // has to send the centre explicitly, and the viewport's own midpoint is the
+  // right one — it is the area the user is asking about.
+  const needsExplicitCenter = area.mode !== 'radius';
+  const nearestCenter =
+    area.mode === 'viewport'
+      ? {
+          lat: (area.bounds.minLat + area.bounds.maxLat) / 2,
+          lng: (area.bounds.minLng + area.bounds.maxLng) / 2,
+        }
+      : userLocation;
   const orderingCenter =
-    sort === 'nearest' && !areaFilter && userLocation
-      ? { ordering_latitude: userLocation.lat, ordering_longitude: userLocation.lng }
+    sort === 'nearest' && needsExplicitCenter && nearestCenter
+      ? { ordering_latitude: nearestCenter.lat, ordering_longitude: nearestCenter.lng }
       : undefined;
 
   // Location + q/filters/mode are all part of the key so any change resets

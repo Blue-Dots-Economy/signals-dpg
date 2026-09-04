@@ -249,6 +249,13 @@ export interface FetchDiscoverQuery {
   item_latitude?: number;
   item_longitude?: number;
   distance_meters?: number;
+  // #644 VIEWPORT area mode: the exact rectangle the map is showing (contract
+  // §1.5). Mutually exclusive with the radius trio above — the BFF rejects
+  // both together. All four travel or none do; a partial box is a 400.
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   limit?: number;
   offset?: number;
   // The active profile's item id (#394 Task 2, threading Task 1's backend
@@ -313,6 +320,14 @@ export async function fetchDiscover(
   if (query.item_latitude !== undefined) body.item_latitude = query.item_latitude;
   if (query.item_longitude !== undefined) body.item_longitude = query.item_longitude;
   if (query.distance_meters !== undefined) body.distance_meters = query.distance_meters;
+  // NOTE: this builder is an explicit ALLOWLIST — a field absent from it is
+  // silently dropped, however correctly the caller supplied it. That is how
+  // the viewport bbox first shipped inert: the hook and the BFF both handled
+  // it, this function did not, and nothing failed loudly.
+  if (query.min_lat !== undefined) body.min_lat = query.min_lat;
+  if (query.min_lng !== undefined) body.min_lng = query.min_lng;
+  if (query.max_lat !== undefined) body.max_lat = query.max_lat;
+  if (query.max_lng !== undefined) body.max_lng = query.max_lng;
   if (query.limit !== undefined) body.limit = query.limit;
   if (query.offset !== undefined) body.offset = query.offset;
   if (query.anchor_item_id) body.anchor_item_id = query.anchor_item_id;

@@ -542,3 +542,81 @@ describe('useInfiniteBrowseItems — area and sort (#644)', () => {
     expect(vi.mocked(fetchNetworkItems).mock.calls[0][0].item_latitude).toBe(12.97);
   });
 });
+
+describe('useInfiniteBrowseItems — viewport area mode', () => {
+  // This block asserts on the FIRST call, so the mock must start clean —
+  // otherwise `calls[0]` is whatever an earlier test happened to leave.
+  beforeEach(() => vi.mocked(fetchDiscover).mockClear());
+
+  const BOUNDS = { minLat: 12.8, minLng: 77.4, maxLat: 13.1, maxLng: 77.8 };
+
+  it('sends all four bounds and no radius', async () => {
+    // Regression guard for a silent drop: `fetchDiscover` builds its body from
+    // an explicit ALLOWLIST, so a field it does not name is discarded however
+    // correctly the caller supplied it. The bbox first shipped inert exactly
+    // that way — the hook and the BFF both handled it, this body builder did
+    // not, and nothing failed loudly. Measured symptom: the list showed 79 of
+    // 79 with a viewport applied, where the API returns 71 for that box.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverPage('newest'));
+    renderHook(
+      () =>
+        useInfiniteBrowseItems(network, domain, null, {
+          relevance: true,
+          area: { mode: 'viewport', bounds: BOUNDS },
+          sort: 'newest',
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(fetchDiscover).toHaveBeenCalled());
+
+    const body = vi.mocked(fetchDiscover).mock.calls[0][0];
+    expect(body.min_lat).toBe(12.8);
+    expect(body.min_lng).toBe(77.4);
+    expect(body.max_lat).toBe(13.1);
+    expect(body.max_lng).toBe(77.8);
+    // Alternative modes — the BFF rejects both together.
+    expect(body.item_latitude).toBeUndefined();
+    expect(body.distance_meters).toBeUndefined();
+  });
+
+  it('sends the viewport MIDPOINT as the ordering centre under nearest', async () => {
+    // A bbox has no centre on the wire, and the BFF deliberately will not
+    // derive one from the rectangle (contract §1.3 rule 2 is s_dwithin-only),
+    // because that would let "search this area" silently change the sort. So
+    // nearest-inside-a-viewport has to send the centre explicitly.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverPage('nearest'));
+    renderHook(
+      () =>
+        useInfiniteBrowseItems(network, domain, { lat: 1, lng: 2 }, {
+          relevance: true,
+          area: { mode: 'viewport', bounds: BOUNDS },
+          sort: 'nearest',
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(fetchDiscover).toHaveBeenCalled());
+
+    const body = vi.mocked(fetchDiscover).mock.calls[0][0];
+    // The viewport's own midpoint, NOT the viewer's location — the area the
+    // user asked about is the thing to measure from.
+    expect(body.ordering_latitude).toBeCloseTo(12.95);
+    expect(body.ordering_longitude).toBeCloseTo(77.6);
+    expect(body.min_lat).toBe(12.8);
+  });
+
+  it('sends no ordering centre for a viewport under newest', async () => {
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverPage('newest'));
+    renderHook(
+      () =>
+        useInfiniteBrowseItems(network, domain, { lat: 1, lng: 2 }, {
+          relevance: true,
+          area: { mode: 'viewport', bounds: BOUNDS },
+          sort: 'newest',
+        }),
+      { wrapper },
+    );
+    await waitFor(() => expect(fetchDiscover).toHaveBeenCalled());
+
+    expect(vi.mocked(fetchDiscover).mock.calls[0][0].ordering_latitude).toBeUndefined();
+  });
+});

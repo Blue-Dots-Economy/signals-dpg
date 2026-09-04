@@ -40,7 +40,7 @@ import { useCardSelection } from '@/hooks/use-card-selection';
 import { useNetworkConfigs, useResolvedNetwork, useNetworkConfig } from '@/hooks/use-network-config';
 import { BulkActionBar } from '@/components/selection/bulk-action-bar';
 import { ActionModal } from '@/components/actions/action-modal';
-import { CheckSquare } from 'lucide-react';
+import { CheckSquare, List } from 'lucide-react';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { formatDomainLabel, pluralizeDomainLabel } from '@/lib/domain-icons';
 import { ACTION_CONSENT_SENTINEL, guardianOtpErrorOf, type PerformActionPayload } from '@/lib/action-api';
@@ -2109,6 +2109,20 @@ export function HomePage() {
             onSortChange={setSort}
             area={area}
             defaultCenter={browseCoords}
+            // Only once the map has actually reported bounds — see AreaSelect.
+            viewportBounds={
+              mapViewport?.minLat !== undefined &&
+              mapViewport.minLng !== undefined &&
+              mapViewport.maxLat !== undefined &&
+              mapViewport.maxLng !== undefined
+                ? {
+                    minLat: mapViewport.minLat,
+                    minLng: mapViewport.minLng,
+                    maxLat: mapViewport.maxLat,
+                    maxLng: mapViewport.maxLng,
+                  }
+                : null
+            }
             onAreaChange={setArea}
             chips={appliedChips}
             onRemoveChip={handleRemoveChip}
@@ -2404,6 +2418,45 @@ export function HomePage() {
                   }}
                 />
                 </MapErrorBoundary>
+                {/* "Search this area" — the dense-map escape hatch #644
+                    describes, placed where you need it.
+                    
+                    The Area control lives in the LIST view, so without this
+                    the only way to apply a viewport was to leave the map,
+                    open a dropdown, and pick "the area shown on the map"
+                    about a map no longer on screen. The realistic sequence is
+                    the opposite: the pill says "1500+ in this area — zoom
+                    in", you are already at max zoom, and you want the full
+                    list FOR THAT AREA.
+                    
+                    Sends the bounds and switches view in one action. */}
+                {mapViewport?.minLat !== undefined &&
+                  mapViewport.minLng !== undefined &&
+                  mapViewport.maxLat !== undefined &&
+                  mapViewport.maxLng !== undefined && (
+                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4">
+                      <button
+                        type="button"
+                        data-testid="search-this-area"
+                        onClick={() => {
+                          setArea({
+                            mode: 'viewport',
+                            bounds: {
+                              minLat: mapViewport.minLat!,
+                              minLng: mapViewport.minLng!,
+                              maxLat: mapViewport.maxLat!,
+                              maxLng: mapViewport.maxLng!,
+                            },
+                          });
+                          handleViewModeChange('list');
+                        }}
+                        className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-xs font-semibold shadow-lg pointer-coarse:min-h-11 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <List className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        {t('home.search_this_area')}
+                      </button>
+                    </div>
+                  )}
                 {/* The VIEWPORT count, for every visitor. The toolbar above
                     states the filter total instead (N5), so this is the only
                     place the "how many are in this area" number appears —

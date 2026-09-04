@@ -35,7 +35,19 @@ export type BrowseSort = 'relevance' | 'newest' | 'nearest';
 
 export type BrowseArea =
   | { mode: 'anywhere' }
-  | { mode: 'radius'; center: { lat: number; lng: number }; meters: number };
+  | { mode: 'radius'; center: { lat: number; lng: number }; meters: number }
+  /**
+   * The exact rectangle the map is showing (#644 scope, restored). Spec D6
+   * had dropped this mode because signals-search offered only a Point +
+   * radius, so a viewport had to be approximated by its circumscribed circle
+   * — always larger than the rectangle, so the list would have included items
+   * that were off the edges of the map. signals-search now has a `bbox` op,
+   * so this is exact and the "approximate" label #644 asked for is gone.
+   */
+  | {
+      mode: 'viewport';
+      bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number };
+    };
 
 /** Shared so the page, the hook and their tests agree on the default. */
 export const DEFAULT_BROWSE_AREA: BrowseArea = { mode: 'anywhere' };

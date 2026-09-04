@@ -30,6 +30,12 @@ export interface BrowseToolbarProps {
   relevanceBasis: 'profile' | 'search' | null;
   onSortChange: (next: BrowseSort) => void;
   area: BrowseArea;
+  /**
+   * The map's last reported bounds, enabling the "area shown on the map"
+   * option. Null before any map has been shown, in which case that option is
+   * hidden rather than offered dead.
+   */
+  viewportBounds?: { minLat: number; minLng: number; maxLat: number; maxLng: number } | null;
   /** Centre offered when the user picks a radius; null when none resolves. */
   defaultCenter: { lat: number; lng: number } | null;
   onAreaChange: (next: BrowseArea) => void;
@@ -115,6 +121,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
           <AreaSelect
             value={props.area}
             defaultCenter={props.defaultCenter}
+            viewportBounds={props.viewportBounds}
             onChange={props.onAreaChange}
           />
         )}
