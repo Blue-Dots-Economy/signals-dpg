@@ -51,16 +51,23 @@ export function RelevanceExplanation({
 }: Readonly<RelevanceExplanationProps>) {
   const { t } = useTranslation();
 
-  const sortLabel =
-    metric?.kind === 'relevance'
-      ? basis === 'search'
-        ? t('browse.sort_relevance_search')
-        : t('browse.sort_relevance_profile')
-      : metric?.kind === 'distance'
-        ? t('browse.sort_nearest')
-        : metric?.kind === 'age'
-          ? t('browse.sort_newest')
-          : null;
+  // One label per metric kind. Written as a switch rather than a ternary chain
+  // because the relevance arm itself branches on the basis, and nesting that
+  // made the whole thing unreadable (Sonar S3358).
+  const sortLabel = ((): string | null => {
+    switch (metric?.kind) {
+      case 'relevance':
+        return basis === 'search'
+          ? t('browse.sort_relevance_search')
+          : t('browse.sort_relevance_profile');
+      case 'distance':
+        return t('browse.sort_nearest');
+      case 'age':
+        return t('browse.sort_newest');
+      default:
+        return null;
+    }
+  })();
 
   // The vectorized-field table explains a COSINE score. Under `nearest` or
   // `newest` nothing about those fields determined the position, so showing

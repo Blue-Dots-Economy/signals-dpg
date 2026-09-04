@@ -65,7 +65,7 @@ interface ChipProps {
   ariaLabel?: string;
 }
 
-function Chip({ label, selected, onToggle, title, ariaLabel }: ChipProps) {
+function Chip({ label, selected, onToggle, title, ariaLabel }: Readonly<ChipProps>) {
   return (
     <button
       type="button"
@@ -94,7 +94,7 @@ interface FilterGroupProps {
   children: React.ReactNode;
 }
 
-function FilterGroup({ title, children }: FilterGroupProps) {
+function FilterGroup({ title, children }: Readonly<FilterGroupProps>) {
   return (
     <div className="space-y-2">
       <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
@@ -129,7 +129,7 @@ export function BrowseFiltersPanel({
   onFieldsChange,
   showDomainToggle = true,
   viewMode = 'map',
-}: BrowseFiltersPanelProps) {
+}: Readonly<BrowseFiltersPanelProps>) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);

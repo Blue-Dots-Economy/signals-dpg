@@ -48,12 +48,16 @@ export function SortSelect({
       ? t('browse.sort_relevance_search')
       : t('browse.sort_relevance_profile');
 
-  const labelFor = (sort: BrowseSort): string =>
-    sort === 'relevance'
-      ? relevanceLabel
-      : sort === 'nearest'
-        ? t('browse.sort_nearest')
-        : t('browse.sort_newest');
+  const labelFor = (sort: BrowseSort): string => {
+    switch (sort) {
+      case 'relevance':
+        return relevanceLabel;
+      case 'nearest':
+        return t('browse.sort_nearest');
+      default:
+        return t('browse.sort_newest');
+    }
+  };
 
   // Label from what happened, falling back to the request only before the
   // first response has arrived.

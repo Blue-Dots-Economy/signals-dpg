@@ -61,12 +61,14 @@ import {
   resolveListNote,
   excludeOwnItems,
   buildFilteredCardsForDomain,
+  DEFAULT_BROWSE_AREA,
+  type DerivedBrowseParams,
+  type BrowseArea,
+  type BrowseSort,
 } from '@/lib/browse-discover';
-import type { DerivedBrowseParams, BrowseArea, BrowseSort } from '@/lib/browse-discover';
-import { DEFAULT_BROWSE_AREA } from '@/lib/browse-discover';
 import { BrowseToolbar } from '@/components/filters/browse-toolbar';
+import { useAppliedFilterChips } from '@/hooks/use-applied-filter-chips';
 import type { DomainOption } from '@/components/filters/domain-control';
-import type { AppliedChip } from '@/components/filters/applied-filter-chips';
 import { resolveDefaultDomain } from '@/lib/browse-domain';
 import { getServedScope } from '@/lib/served-binding';
 import { computeVisibleDomains } from '@/lib/visible-domains';
@@ -1449,71 +1451,24 @@ export function HomePage() {
     [selectedDomain, singleDomainItems, search, activeFieldFilters, enumFilterFields, listDiscover],
   );
 
-  // "All" tab: same filter applied per-domain to the accumulated paged union.
-  // #644/#645: one source of truth for the chip read-out. Every active
-  // constraint appears exactly once. Adding a constraint means adding it here
-  // AND in `handleRemoveChip` below — and nowhere else.
-  const appliedChips = React.useMemo<AppliedChip[]>(() => {
-    const out: AppliedChip[] = [];
-    const q = search.trim();
-    if (q) {
-      out.push({ kind: 'search', id: 'q', label: `"${q}"`, removable: true });
-    }
-    for (const [field, values] of Object.entries(activeFieldFilters)) {
-      if (values.length === 0) continue;
-      out.push({
-        kind: 'facet',
-        id: `facet:${field}`,
-        label: `${field}: ${values.join(', ')}`,
-        removable: true,
-      });
-    }
-    // NOT chipped: `sort` and `area`. Their own controls sit in the same row
-    // already showing their value, so a chip repeating it renders as a visible
-    // duplicate — "Area Within 25 km | Within 25 km ×". Clear-all still resets
-    // them; see `canClearAll` below.
-    return out;
-  }, [search, activeFieldFilters, t]);
-
-  // Anything non-default at all, including the two constraints that produce no
-  // chip — otherwise changing only the area would leave no way to reset.
-  const canClearAll =
-    appliedChips.length > 0 || sort !== 'relevance' || area.mode !== 'anywhere';
-
-  const handleRemoveChip = React.useCallback((chip: AppliedChip) => {
-    switch (chip.kind) {
-      // Spec D25: this chip's editor is the app-bar box. Dropping the query
-      // but leaving the typed text sitting in that box would be a lie.
-      case 'search':
-        setSearch('');
-        break;
-      case 'facet': {
-        const field = chip.id.slice('facet:'.length);
-        setMapSelectedFields((prev) => {
-          const next = { ...prev };
-          delete next[field];
-          return next;
-        });
-        break;
-      }
-      case 'area':
-        setArea(DEFAULT_BROWSE_AREA);
-        break;
-      case 'sort':
-        setSort('relevance');
-        break;
-      case 'domain':
-        // Not removable: the list always needs exactly one domain.
-        break;
-    }
-  }, []);
-
-  const handleClearAll = React.useCallback(() => {
-    setSearch('');
-    setMapSelectedFields({});
-    setArea(DEFAULT_BROWSE_AREA);
-    setSort('relevance');
-  }, []);
+  // #645 §4.1: the applied-filter state (chips, per-chip removal, reset, and
+  // "is anything applied") lives in one hook so the four always agree and a
+  // page component this size doesn't also carry a loop and a switch.
+  const {
+    chips: appliedChips,
+    onRemove: handleRemoveChip,
+    onClearAll: handleClearAll,
+    canClearAll,
+  } = useAppliedFilterChips({
+    search,
+    setSearch,
+    activeFieldFilters,
+    setFieldFilters: setMapSelectedFields,
+    area,
+    setArea,
+    sort,
+    setSort,
+  });
 
   // Spec D7: list EVERY domain in the network and explain the ones the viewer
   // cannot browse. `computeVisibleDomains` is unchanged — the interaction
@@ -1841,6 +1796,29 @@ export function HomePage() {
   // single-domain total) while the map showed 66 markers across two domains,
   // because the map is multi-domain and the list is not. Each view reports its
   // own total.
+  // Which domains the control shows as selected. The map is multi-domain and
+  // takes its own selection (empty meaning "all visible"); the list is
+  // single-select on the one domain driving its feed (spec D11). Hoisted out
+  // of the JSX because nesting the two conditions inline was unreadable.
+  // Deliberately NOT memoized: this sits AFTER the `if (!network) return`
+  // guard above, so a hook here would run on some renders and not others —
+  // "rendered more hooks than during the previous render". It is a two-branch
+  // array build; memoizing it would buy nothing and cost correctness.
+  const toolbarSelectedDomains = ((): string[] => {
+    if (viewMode === 'map') {
+      return mapSelectedDomains.length > 0
+        ? mapSelectedDomains
+        : visibleDomains.map((d) => d.id);
+    }
+    return selectedDomain ? [selectedDomain] : [];
+  })();
+
+  // Which quantity `relevance` means for this viewer: their profile when an
+  // anchor is sent, else their typed text, else neither.
+  let relevanceBasis: 'profile' | 'search' | null = null;
+  if (hasProfileAnchor) relevanceBasis = 'profile';
+  else if (search.trim()) relevanceBasis = 'search';
+
   const contentCount = viewMode === 'map' ? mapMarkers.total : singleDomainList.total;
   const contentLoading =
     viewMode === 'map' ? mapMarkers.isLoading : singleDomainList.isLoading;
@@ -2009,15 +1987,7 @@ export function HomePage() {
             domainOptions={domainOptions}
             // The map is multi-domain and takes its own selection; the list is
             // single-select on the one domain driving its feed (spec D11).
-            selectedDomains={
-              viewMode === 'map'
-                ? mapSelectedDomains.length > 0
-                  ? mapSelectedDomains
-                  : visibleDomains.map((d) => d.id)
-                : selectedDomain
-                  ? [selectedDomain]
-                  : []
-            }
+            selectedDomains={toolbarSelectedDomains}
             onDomainsChange={(next) => {
               if (viewMode === 'map') {
                 handleMapDomainsChange(next);
@@ -2031,7 +2001,7 @@ export function HomePage() {
             sortApplied={listSortApplied}
             // `nearest` needs a centre to order around.
             nearestAvailable={browseCoords !== null}
-            relevanceBasis={hasProfileAnchor ? 'profile' : search.trim() ? 'search' : null}
+            relevanceBasis={relevanceBasis}
             onSortChange={setSort}
             area={area}
             defaultCenter={browseCoords}
@@ -2234,7 +2204,7 @@ export function HomePage() {
                   // #646 C1: each card's pill shows whatever drove its
                   // position, keyed off what the SERVER actually applied.
                   sortApplied={listSortApplied}
-                  relevanceBasis={hasProfileAnchor ? 'profile' : search.trim() ? 'search' : null}
+                  relevanceBasis={relevanceBasis}
                 />
                 <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
               </>

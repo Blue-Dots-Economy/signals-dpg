@@ -127,6 +127,8 @@ export function useInfiniteBrowseItems(
   // The AREA FILTER's centre — only in radius mode. #644: `anywhere` sends
   // nothing, so signals-search builds no s_dwithin clause and the candidate
   // set is the whole network.
+  // Left `undefined` rather than `{}` when inactive: spreading `undefined` into
+  // an object literal is a no-op, so no fallback is needed (Sonar S7744).
   const areaFilter =
     area.mode === 'radius'
       ? {
@@ -192,8 +194,8 @@ export function useInfiniteBrowseItems(
             offset: pageParam,
             ...(q ? { q } : {}),
             ...(filters.length > 0 ? { filters } : {}),
-            ...(areaFilter ?? {}),
-            ...(orderingCenter ?? {}),
+            ...areaFilter,
+            ...orderingCenter,
             sort,
             ...(anchorItemId ? { anchor_item_id: anchorItemId } : {}),
           },

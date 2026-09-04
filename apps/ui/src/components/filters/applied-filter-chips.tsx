@@ -57,7 +57,7 @@ export function AppliedFilterChips({
   onRemove,
 }: Readonly<AppliedFilterChipsProps>) {
   const { t } = useTranslation();
-  const groupRef = React.useRef<HTMLDivElement>(null);
+  const groupRef = React.useRef<HTMLFieldSetElement>(null);
   const pendingFocus = React.useRef(false);
 
   // Focus returns to the group after a removal (spec §4.6). The button the
@@ -76,12 +76,13 @@ export function AppliedFilterChips({
   if (chips.length === 0) return null;
 
   return (
-    <div
+    // <fieldset> rather than <div role="group"> — implicit group role, native
+    // element, identical to assistive tech (Sonar S6819). UA chrome reset.
+    <fieldset
       ref={groupRef}
-      role="group"
       tabIndex={-1}
       aria-label={t('browse.applied_filters')}
-      className="flex flex-wrap items-center gap-2 outline-none"
+      className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0 outline-none"
     >
       {chips.map((chip) => (
         <span
@@ -109,6 +110,6 @@ export function AppliedFilterChips({
           )}
         </span>
       ))}
-    </div>
+    </fieldset>
   );
 }

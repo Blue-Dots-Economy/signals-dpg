@@ -65,13 +65,16 @@ export function DomainControl({
   };
 
   return (
-    <div
-      role="group"
+    // <fieldset> rather than <div role="group">: it carries an IMPLICIT group
+    // role, so assistive tech and `getByRole('group')` behave identically while
+    // using the native element (Sonar S6819). `min-w-0 p-0 m-0 border-0` resets
+    // the UA's default fieldset chrome so the border below is ours.
+    <fieldset
       aria-label={t('browse.domain_group')}
       // Horizontal scroll rather than wrap: wrapping a 4+ domain network would
       // eat a phone screen, and this bar is sticky (spec §7.5). No live network
       // exceeds three domains today.
-      className="inline-flex max-w-full overflow-x-auto rounded-lg border border-border bg-background"
+      className="m-0 inline-flex min-w-0 max-w-full overflow-x-auto rounded-lg border border-border bg-background p-0"
     >
       {options.map((o) => {
         const on = selected.includes(o.id);
@@ -107,6 +110,6 @@ export function DomainControl({
           </React.Fragment>
         );
       })}
-    </div>
+    </fieldset>
   );
 }

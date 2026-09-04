@@ -51,12 +51,13 @@ export function MatchScoreButton({
   // #646 C1: the pill shows the RANKING BASIS, resolved by the caller from
   // the sort the server applied — so under `nearest`/`newest` it is a distance
   // or an age rather than a score badged onto a differently-ordered list.
-  const effectiveMetric: CardMetric =
-    metric !== undefined
-      ? metric
-      : score?.score != null
-        ? { kind: 'relevance', percent: score.score }
-        : null;
+  // `undefined` means the caller had no sort context (a share preview, a
+  // public profile), so fall back to the profile relevance score. An explicit
+  // `null` means the caller HAS a sort and it produced no metric — respect it.
+  let effectiveMetric: CardMetric = metric ?? null;
+  if (metric === undefined && score?.score != null) {
+    effectiveMetric = { kind: 'relevance', percent: score.score };
+  }
 
   if (effectiveMetric && !error) {
     return (

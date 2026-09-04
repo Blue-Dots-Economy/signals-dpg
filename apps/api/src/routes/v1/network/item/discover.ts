@@ -311,6 +311,33 @@ const discover_items_handler = async (
     // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
     // a text query filters only this instance's rows; peers contribute live,
     // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
+    // Native ordering geo params (#644, contract §7), hoisted out of the call
+    // so the three cases read as statements rather than a nested ternary.
+    //
+    // `buildDistanceOrderBy` keys off lat/lng ONLY, while `buildWhereClause`
+    // adds a radius clause only when lat, lng AND radius_meters are all
+    // present. So `nearest` sends coordinates with NO radius — distance
+    // ordered and unbounded — while everything else sends them only when an
+    // area filter was actually requested.
+    let nativeGeoFilters: {
+      item_latitude?: number;
+      item_longitude?: number;
+      radius_meters?: number;
+    } = {};
+    if (sortApplied === 'nearest') {
+      nativeGeoFilters = {
+        item_latitude: body.ordering_latitude ?? body.item_latitude,
+        item_longitude: body.ordering_longitude ?? body.item_longitude,
+        radius_meters: effectiveDistanceMeters,
+      };
+    } else if (hasAreaFilter) {
+      nativeGeoFilters = {
+        item_latitude: body.item_latitude,
+        item_longitude: body.item_longitude,
+        radius_meters: effectiveDistanceMeters,
+      };
+    }
+
     const fallBackToNative = async (logErr: unknown) => {
       request.log.warn(
         { err: logErr, body },
@@ -329,19 +356,7 @@ const discover_items_handler = async (
           // (item_fetch_runtime.ts:328-332). So `nearest` sends coordinates
           // with NO radius — distance-ordered and unbounded — and `newest`
           // sends none at all, falling through to created_at DESC.
-          ...(sortApplied === 'nearest'
-            ? {
-                item_latitude: body.ordering_latitude ?? body.item_latitude,
-                item_longitude: body.ordering_longitude ?? body.item_longitude,
-                radius_meters: effectiveDistanceMeters,
-              }
-            : hasAreaFilter
-              ? {
-                  item_latitude: body.item_latitude,
-                  item_longitude: body.item_longitude,
-                  radius_meters: effectiveDistanceMeters,
-                }
-              : {}),
+          ...nativeGeoFilters,
           limit: body.limit,
           offset: body.offset,
           lifecycle_filter: 'live_only',
