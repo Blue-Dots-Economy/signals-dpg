@@ -158,8 +158,8 @@ Open **http://localhost:5173** in your browser.
   value are rejected at boot, so to effectively remove the ceiling set it high
   rather than to zero. Note that *shortening* the window does not shorten
   counters already running; only the max takes effect immediately.
-  Per-IP limiting is not done here — that is the ingress's job (Kong
-  `apiRateLimit`).
+  A separate, non-tunable per-IP ceiling (10/hour) also applies, on its own
+  window, so retuning the values above cannot loosen it.
 
 ---
 

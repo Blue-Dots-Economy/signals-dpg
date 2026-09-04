@@ -47,7 +47,9 @@ const STATUS: Record<string, ErrorStatus> = {
  * Keycloak's own registration form is password-based).
  *
  * Unauthenticated by necessity — the caller has no account yet. `SELF_SIGNUP_MODE`
- * is the gate, and the service rate-limits per identifier and per IP.
+ * is the gate. The service rate-limits per identifier (operator-tunable via
+ * SIGNUP_MAX_PER_IDENTIFIER) and per IP (a fixed in-app ceiling — see
+ * services/auth/self_signup.ts for why that one is not tunable).
  */
 export const auth_signup: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -65,9 +67,10 @@ export const auth_signup: FastifyPluginAsyncZod = async function (fastify) {
       },
     },
     handler: async (request, reply) => {
-      // No clientIp: per-IP rate limiting is Kong's apiRateLimit at the
-      // ingress, not this service's job (#669).
-      const result = await selfSignup(request.body, request.log);
+      const result = await selfSignup(
+        { ...request.body, clientIp: request.ip },
+        request.log
+      );
 
       if (!result.ok) {
         const status: ErrorStatus = STATUS[result.code] ?? 400;

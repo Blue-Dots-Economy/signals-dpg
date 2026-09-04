@@ -99,7 +99,7 @@ const { selfSignup, resetSelfSignupState } = await import('../self_signup.js');
 const makeLog = () =>
   ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }) as unknown as FastifyBaseLogger;
 
-const INPUT = { name: 'Asha Rao', email: 'asha@example.org' };
+const INPUT = { name: 'Asha Rao', email: 'asha@example.org', clientIp: '10.0.0.1' };
 
 beforeEach(() => {
   resetSelfSignupState();
@@ -305,7 +305,7 @@ describe('phone attributes must actually persist', () => {
     const log = makeLog();
 
     const result = await selfSignup(
-      { name: 'Asha', phoneNumber: '+919876500001' },
+      { name: 'Asha', phoneNumber: '+919876500001', clientIp: '10.0.0.1' },
       log
     );
 
@@ -344,17 +344,32 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
-  // Inverted deliberately (#669): this used to assert an 11th signup from one IP
-  // was blocked. That counter is gone — per-IP is Kong's job — so the assertion
-  // is now that the service writes no IP key at all, making a re-add fail here.
-  it('does not limit by IP — that is the ingress layer\'s job', async () => {
-    for (let i = 0; i < 15; i += 1) {
+  // Rotating the identifier defeats the per-identifier counter (each address is a
+  // fresh key at count 1), so this is the case the per-IP ceiling exists for.
+  it('blocks bulk signup from one IP across different identifiers', async () => {
+    for (let i = 0; i < 10; i += 1) {
       const res = await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
       expect(res.ok).toBe(true);
     }
 
-    expect(redisState.expires.every((e) => e.key.startsWith('signup:id:'))).toBe(true);
-    expect(redisState.expires.some((e) => e.key.startsWith('signup:ip:'))).toBe(false);
+    const result = await selfSignup({ ...INPUT, email: 'eleventh@example.org' }, makeLog());
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('SIGNUP_RATE_LIMITED');
+  });
+
+  // Separate windows on purpose: retuning the identifier window to release
+  // someone must not also loosen the abuse ceiling.
+  it('keeps the per-IP ceiling on its own window, not the tunable one', async () => {
+    mockAuthConfig.signup_rate_limit.window_seconds = 60;
+
+    await selfSignup(INPUT, makeLog());
+
+    expect(redisState.expires).toEqual([
+      { key: `signup:id:${INPUT.email}`, ttl: 60 },
+      { key: `signup:ip:${INPUT.clientIp}`, ttl: 3600 },
+    ]);
   });
 
   it('fails OPEN when Redis is down — an outage must not block signup', async () => {
@@ -382,13 +397,15 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
-
   it('stamps the configured window as the Redis TTL', async () => {
     mockAuthConfig.signup_rate_limit.window_seconds = 300;
 
     await selfSignup(INPUT, makeLog());
 
-    expect(redisState.expires).toEqual([{ key: `signup:id:${INPUT.email}`, ttl: 300 }]);
+    expect(redisState.expires).toEqual([
+      { key: `signup:id:${INPUT.email}`, ttl: 300 },
+      { key: `signup:ip:${INPUT.clientIp}`, ttl: 3600 },
+    ]);
   });
 });
 

@@ -76,6 +76,8 @@ const MUTATED_ENV_KEYS = [
   'AUTH_MIDDLEWARE_ENABLED',
   'CREATE_TEST_OTP',
   'SELF_SIGNUP_MODE',
+  'SIGNUP_MAX_PER_IDENTIFIER',
+  'SIGNUP_RATE_LIMIT_WINDOW_SECONDS',
   'SERVED_DOMAINS',
   'SUPPORT_EMAIL',
   'SUPPORT_CC_EMAIL',
@@ -134,7 +136,7 @@ type CapturedRoute = {
   method: string[];
   url: string;
   schema: { hide?: boolean };
-  config: { rateLimit?: { max?: number; timeWindow?: string } };
+  config?: { rateLimit?: { max?: number; timeWindow?: string } };
   handler: (request: unknown, reply: unknown) => Promise<unknown>;
 };
 
@@ -214,15 +216,13 @@ describe('routes/auth/index.ts (better-auth catch-all proxy)', () => {
     expect(route.schema.hide).toBe(true);
   });
 
-  // This assertion is inverted on purpose (signals-dpg#669). It used to read
-  // `expect(route.config.rateLimit).toEqual({ max: 10, timeWindow: '10 seconds' })`
-  // and the test name claimed the route was "rate-limited" — but
-  // @fastify/rate-limit is not a dependency and is registered nowhere, so
-  // Fastify ignored that key entirely and the route was unlimited. The test
-  // asserted the shape of a config object that nothing ever read, which is how
-  // the illusion survived. Rate limiting for this path is Kong's job
-  // (apiRateLimit group + the tighter otpRateLimit on unified-otp/request), so
-  // the correct state is NO app-level config, and this guards a re-add.
+  // Inverted on purpose (#669): this used to assert `route.config.rateLimit`
+  // deep-equalled `{ max: 10, timeWindow: '10 seconds' }` under a test name
+  // claiming the route was "rate-limited" — but @fastify/rate-limit is not
+  // installed or registered, so Fastify ignored the key and the route was
+  // unlimited. Asserting the shape of an object nothing read is how the illusion
+  // survived. `/api/auth` IS an apiRateLimit group at the ingress (unlike
+  // `/api/v1/auth`), so no app-level config is the correct state here.
   it('declares no app-level rateLimit config — the plugin is not installed', async () => {
     const { route } = await registerAuthRoutes();
 
@@ -512,6 +512,35 @@ describe('config.ts derived configuration', () => {
 
     const allowed = await importConfig({ SELF_SIGNUP_MODE: 'allowed' });
     expect(allowed.authConfig.allow_self_signup).toBe(true);
+  });
+
+  // The only untested link in the env -> authConfig -> limiter chain. Nothing
+  // else covers it: secrets_schemas.test.ts stops at the parsed env object, and
+  // self_signup.test.ts mocks @/config with a hand-written signup_rate_limit —
+  // so transposing these two fields would give operators a 3-second window and a
+  // 3600-attempt ceiling while the whole suite stayed green.
+  it('maps the SIGNUP_* env vars onto signup_rate_limit without transposing them', async () => {
+    const cfg = await importConfig({
+      SIGNUP_MAX_PER_IDENTIFIER: '7',
+      SIGNUP_RATE_LIMIT_WINDOW_SECONDS: '900',
+    });
+
+    expect(cfg.authConfig.signup_rate_limit).toEqual({
+      max_per_identifier: 7,
+      window_seconds: 900,
+    });
+  });
+
+  it('defaults signup_rate_limit to the previously hardcoded values', async () => {
+    const cfg = await importConfig({
+      SIGNUP_MAX_PER_IDENTIFIER: undefined,
+      SIGNUP_RATE_LIMIT_WINDOW_SECONDS: undefined,
+    });
+
+    expect(cfg.authConfig.signup_rate_limit).toEqual({
+      max_per_identifier: 3,
+      window_seconds: 3600,
+    });
   });
 
   it('force-disables the API reference in production unless API_REFERENCE_FORCE is set', async () => {

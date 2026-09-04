@@ -153,7 +153,7 @@ LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
 # Self-signup abuse ceiling, per identifier (email/phone), counted in Redis.
 # Only bites when SELF_SIGNUP_MODE=allowed. Positive integers only — 0 or empty
-# fails boot. Per-IP limiting is the ingress's job, not the API's.
+# fails boot. A fixed per-IP ceiling applies too and is not tunable.
 SIGNUP_MAX_PER_IDENTIFIER="3"
 SIGNUP_RATE_LIMIT_WINDOW_SECONDS="3600"
 
