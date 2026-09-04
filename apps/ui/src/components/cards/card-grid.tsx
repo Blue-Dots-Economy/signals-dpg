@@ -147,6 +147,13 @@ export function CardGrid({
               shareItem={networkItem}
               actionsDisabled={actionsDisabled}
               actionsDisabledReason={openActionReason}
+              // #646 C1: this is the branch a viewer WITHOUT a profile gets.
+              // It still needs the sort, so a distance or an age can render —
+              // neither is a match score, so neither should require an account.
+              networkItem={networkItem}
+              localItem={localItem ?? null}
+              sortApplied={sortApplied}
+              relevanceBasis={relevanceBasis}
             />
           );
 

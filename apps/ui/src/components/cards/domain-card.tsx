@@ -91,7 +91,27 @@ export function DomainCard({
     );
   }
 
-  const showMatch = !!networkItem && !!onCalculateMatch;
+  // #646 C1: the card's ranking basis. Resolved here rather than inline
+  // because it decides BOTH which pill renders and whether one can render.
+  const cardMetric = sortApplied
+    ? resolveCardMetric({
+        sortApplied,
+        score: matchScore?.score ?? networkItem?.score ?? null,
+        distanceMeters: networkItem?.distanceMeters ?? null,
+        createdAt: networkItem?.created_at ? new Date(networkItem.created_at) : null,
+        freeTextScoreEnabled: isFreeTextMatchScoreEnabled(),
+        hasProfile: !!localItem,
+      })
+    : undefined;
+
+  // A distance or an age is NOT a match score, so the pill showing one must
+  // not depend on the match-score plumbing. Gating on `onCalculateMatch`
+  // (supplied only by MatchScoreCard, and only for a viewer WITH a profile)
+  // meant a signed-out viewer sorting by Newest or Nearest saw no metric at
+  // all — which defeats #646 C1 for exactly the audience browsing without an
+  // account. Relevance still needs that path; the other two do not.
+  const metricOnly = cardMetric != null && cardMetric.kind !== 'relevance';
+  const showMatch = !!networkItem && (!!onCalculateMatch || metricOnly);
   const showActions = actions.length > 0 && !!onAction;
   const footer =
     !selectionMode && (showActions || showMatch) ? (
@@ -100,30 +120,17 @@ export function DomainCard({
           <MatchScoreButton
             // Pass a metric ONLY inside a sorted list. With no `sortApplied`
             // there is no basis to follow (a share preview, a public profile),
-            // so omitting it lets MatchScoreButton fall back to the profile
-            // relevance score — an explicit `null` would suppress the pill
-            // entirely in those contexts.
-            {...(sortApplied
-              ? {
-                  metric: resolveCardMetric({
-                    sortApplied,
-                    score: matchScore?.score ?? networkItem?.score ?? null,
-                    distanceMeters: networkItem?.distanceMeters ?? null,
-                    createdAt: networkItem?.created_at
-                      ? new Date(networkItem.created_at)
-                      : null,
-                    freeTextScoreEnabled: isFreeTextMatchScoreEnabled(),
-                    hasProfile: !!localItem,
-                  }),
-                }
-              : {})}
+            // so omitting the prop lets MatchScoreButton fall back to the
+            // profile relevance score — an explicit `null` would suppress the
+            // pill entirely there.
+            {...(sortApplied ? { metric: cardMetric } : {})}
             basis={relevanceBasis ?? null}
             localItem={localItem ?? null}
             networkItem={networkItem as Item}
             score={matchScore ?? null}
             isLoading={matchScoreLoading ?? false}
             error={matchScoreError ?? null}
-            onCalculate={onCalculateMatch as () => void}
+            onCalculate={onCalculateMatch ?? (() => {})}
             onViewDetails={onViewMatchDetails}
             disabled={!localItem}
           />
