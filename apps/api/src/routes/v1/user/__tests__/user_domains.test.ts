@@ -4,12 +4,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // `user_domains` only exports the plugin, so the handlers are reached by
 // registering the plugin against a fake fastify and pulling the routes back
 // out. Both handlers run one SELECT; the POST handler then runs an UPDATE.
-const { rowQueue, updates, dbState, auth_middleware_if_enabled } = vi.hoisted(() => ({
+const { rowQueue, updates, executes, dbState, auth_middleware_if_enabled } = vi.hoisted(() => ({
   rowQueue: [] as unknown[][],
   updates: [] as { table: unknown; values: unknown; where: unknown }[],
+  executes: [] as unknown[],
   // Resettable failure flag — never monkey-patch the shared row queue, an
   // override there leaks into every later test in the file.
-  dbState: { failWith: null as Error | null },
+  dbState: {
+    failWith: null as Error | null,
+    /** What the write-once claim UPDATE returns. Non-empty `rows` = the user had
+     * no domain and this call claimed it. `{ rows: [] }` = already set, which
+     * sends the handler on to its SELECT — feed that read via `rowQueue`. */
+    claim: { rows: [{ id: 'u1' }] } as { rows: Array<{ id: string }> },
+  },
   // Params declared so the spread-through in the vi.mock factory below
   // typechecks; vi.fn(async () => {}) infers a zero-arg signature.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,6 +45,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         },
       }),
     }),
+    execute: (q: unknown) => {
+      if (dbState.failWith) return Promise.reject(dbState.failWith);
+      executes.push(q);
+      return Promise.resolve(dbState.claim);
+    },
     update: (table: unknown) => ({
       set: (values: unknown) => ({
         where: (where: unknown) => {
@@ -61,10 +73,15 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    op: 'sql',
+    text: strings.join('?'),
+    values,
+  }),
 }));
 
 vi.mock('@dpg/schemas', () => {
-  const leaf = { min: () => leaf };
+  const leaf = { min: () => leaf, max: () => leaf };
   return {
     default: {
       object: (shape: unknown) => ({ shape }),
@@ -153,7 +170,11 @@ function call(method: string, req: Record<string, unknown>) {
 beforeEach(async () => {
   rowQueue.length = 0;
   updates.length = 0;
+  executes.length = 0;
   dbState.failWith = null;
+  // Default: the user had no domain and this call claims it. Tests that need
+  // the already-locked path set `{ rows: [] }` themselves.
+  dbState.claim = { rows: [{ id: 'u1' }] };
   vi.clearAllMocks();
   await loadRoutes();
 });
@@ -264,7 +285,50 @@ describe('POST /domains', () => {
     expect(updates).toHaveLength(0);
   });
 
-  it('unions with existing domains so a second role adds rather than clobbers', async () => {
+  // WRITE-ONCE (was: union). Unioning let any authenticated user grant
+  // themselves a second domain and walk past `assertSingleDomain`, which reads
+  // this column — and a two-domain account is exactly what lets one domain's
+  // default aggregator decrypt the other's participant.
+  it('claims the domain when the user has none', async () => {
+    const reply = await call('POST', {
+      user: { id: 'u1' },
+      body: { domains: ['student'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ domains: ['student'] });
+    // Claimed by the guarded UPDATE, so no follow-up read was needed.
+    expect(executes).toHaveLength(1);
+    expect(rowQueue).toHaveLength(0);
+  });
+
+  it('the claim is guarded on the column being empty, scoped to the caller', async () => {
+    await call('POST', { user: { id: 'u1' }, body: { domains: ['student'] } });
+
+    const q = executes[0] as { text: string; values: unknown[] };
+    // The guard is what makes this write-once at the database level: two
+    // concurrent calls picking different domains cannot both succeed.
+    expect(q.text).toMatch(/domains IS NULL OR cardinality\(domains\) = 0/);
+    expect(q.text).toMatch(/RETURNING id/);
+    expect(q.values).toContain('student');
+    expect(q.values).toContain('u1');
+  });
+
+  it('is idempotent: re-posting the domain already stored returns 200', async () => {
+    dbState.claim = { rows: [] }; // already set → claim writes nothing
+    rowQueue.push([{ domains: ['student'] }]);
+
+    const reply = await call('POST', {
+      user: { id: 'u1' },
+      body: { domains: ['student'] },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ domains: ['student'] });
+  });
+
+  it('403 DOMAIN_LOCKED when switching to a different domain', async () => {
+    dbState.claim = { rows: [] };
     rowQueue.push([{ domains: ['student'] }]);
 
     const reply = await call('POST', {
@@ -272,69 +336,52 @@ describe('POST /domains', () => {
       body: { domains: ['mentor'] },
     });
 
-    expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ domains: ['student', 'mentor'] });
-    expect(updates).toHaveLength(1);
-    expect((updates[0].values as { domains: string[] }).domains).toEqual(['student', 'mentor']);
+    expect(reply.statusCode).toBe(403);
+    expect(reply.body).toEqual({
+      error: 'DOMAIN_LOCKED',
+      message: 'You are registered as "student" and cannot switch to "mentor".',
+      locked_domain: 'student',
+      requested_domain: 'mentor',
+    });
+    // Nothing was written, and no tagging ran for the domain it refused.
+    expect(tagUserForDomain).not.toHaveBeenCalled();
   });
 
-  it('is idempotent: re-posting an already stored domain does not duplicate it', async () => {
+  it('does not tag the requested domain when it refuses the switch', async () => {
+    // Regression guard: tagging on a refused switch would hand the user to the
+    // WRONG binding's default aggregator while the lock says they are elsewhere.
+    dbState.claim = { rows: [] };
     rowQueue.push([{ domains: ['student'] }]);
 
-    const reply = await call('POST', {
-      user: { id: 'u1' },
-      body: { domains: ['student'] },
-    });
+    await call('POST', { user: { id: 'u1' }, body: { domains: ['mentor'] } });
 
-    expect(reply.body).toEqual({ domains: ['student'] });
-    expect((updates[0].values as { domains: string[] }).domains).toEqual(['student']);
+    expect(tagUserForDomain).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'u1',
+      'mentor',
+    );
   });
 
-  it('de-duplicates repeats inside the request body', async () => {
-    rowQueue.push([{ domains: null }]);
-
-    const reply = await call('POST', {
-      user: { id: 'u1' },
-      body: { domains: ['mentor', 'mentor', 'student'] },
-    });
-
-    expect(reply.body).toEqual({ domains: ['mentor', 'student'] });
-  });
-
-  it('stores the posted domains when the user has none yet', async () => {
+  it('a missing user row is not reported as a domain lock', async () => {
+    // Nothing to lock and nothing to grant — do not claim the user is
+    // "registered as undefined".
+    dbState.claim = { rows: [] };
     rowQueue.push([]);
 
     const reply = await call('POST', {
-      user: { id: 'u1' },
+      user: { id: 'gone' },
       body: { domains: ['student'] },
     });
 
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ domains: ['student'] });
-  });
-
-  it('stamps updatedAt and scopes the write to the current user', async () => {
-    rowQueue.push([{ domains: [] }]);
-
-    await call('POST', { user: { id: 'u1' }, body: { domains: ['student'] } });
-
-    const values = updates[0].values as { domains: string[]; updatedAt: Date };
-    expect(values.updatedAt).toBeInstanceOf(Date);
-    expect(updates[0].where).toEqual({ op: 'eq', col: 'user.id', val: 'u1' });
-    expect(updates[0].table).toEqual({
-      id: 'user.id',
-      domains: 'user.domains',
-      updatedAt: 'user.updatedAt',
-    });
   });
 
   it('validates against served domains before touching the database', async () => {
-    // The unserved check runs before the SELECT, so the queued row is untouched.
-    rowQueue.push([{ domains: ['student'] }]);
-
+    // The unserved check runs before the claim, so nothing is executed.
     await call('POST', { user: { id: 'u1' }, body: { domains: ['martian'] } });
 
-    expect(rowQueue).toHaveLength(1);
+    expect(executes).toHaveLength(0);
+    expect(updates).toHaveLength(0);
   });
 
   it('propagates a failing write (the route has no try/catch)', async () => {
@@ -349,8 +396,7 @@ describe('POST /domains', () => {
 describe('POST /user/domains — default-aggregator tagging (SS-3, #640)', () => {
   // The user's domain is decided here, so this is the user-level moment the
   // default aggregator can own them — not on every later profile write.
-  it('tags the user for each domain it stores', async () => {
-    rowQueue.push([{ domains: [] }]);
+  it('tags the user for the domain it claims', async () => {
     const reply = await call('POST', {
       user: { id: 'u1' },
       body: { domains: ['student'] },
@@ -362,7 +408,6 @@ describe('POST /user/domains — default-aggregator tagging (SS-3, #640)', () =>
 
   // A tagging failure must not fail the domain write the client is waiting on.
   it('still returns 200 when tagging throws', async () => {
-    rowQueue.push([{ domains: [] }]);
     tagUserForDomain.mockRejectedValueOnce(new Error('boom'));
     const reply = await call('POST', {
       user: { id: 'u1' },

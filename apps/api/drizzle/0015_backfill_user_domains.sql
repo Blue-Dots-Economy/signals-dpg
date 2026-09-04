@@ -1,13 +1,24 @@
 -- Backfill `user.domains` from the items each user actually owns.
 --
--- The single-domain lock (`assertSingleDomain` in `services/item_service.ts`)
--- reads `user.domains`, and treats an empty column as "not decided yet — allow
--- any served domain". That is correct for a brand-new account and wrong for
--- everyone already in the database: `POST /api/v1/admin/participant` never
--- wrote the column, so every aggregator- and voice-onboarded participant has
--- `{}` no matter how many profiles they hold. Shipping the lock without this
--- backfill would leave it inert for exactly the population it exists to
--- constrain.
+-- `POST /api/v1/admin/participant` never wrote the column, so every
+-- aggregator- and voice-onboarded participant has `{}` no matter how many
+-- profiles they hold. Two things read it, and this fixes both:
+--
+--   * `GET /api/v1/user/domains`, which the profile form's domain picker reads.
+--     Today it returns `[]` for that whole population.
+--   * the single-domain lock (`assertSingleDomain` in
+--     `services/item_service.ts`), which treats an empty column as "not decided
+--     yet — allow any served domain".
+--
+-- NOTE this migration is a correctness aid, NOT a prerequisite for the lock.
+-- The deploy migration is a Helm `post-install,post-upgrade` hook
+-- (docs/operations/migrations.md), so new pods serve traffic BEFORE it commits
+-- — a lock that depended on it would be wrong for that whole window, and would
+-- record the WRONG domain for anyone who created in it, which this statement's
+-- "only fill empty columns" guard then could not repair. So the claim in
+-- `assertSingleDomain` is additionally guarded on the user owning no items, and
+-- falls back to reading the domains off `items` when the column is empty.
+-- `items` is the real source of truth; this column is a cache of it.
 --
 -- Only fills rows that are empty. A user whose domain was recorded at signup
 -- (`applySignupExtras`) or on a first create is already authoritative and is

@@ -76,12 +76,14 @@ function mapCreateItemError(
   }
   if (err instanceof ItemServiceError) {
     // `details` carries the extra fields a published error shape promises —
-    // DOMAIN_LOCKED's `locked_domain` / `requested_domain`, which the UI reads.
-    // Spread straight from `details`: object spread of `undefined` contributes
-    // nothing, so a `?? {}` fallback would only add an empty object literal.
+    // DOMAIN_LOCKED's `locked_domain` / `requested_domain`. Spread FIRST, so a
+    // future guard whose `details` happens to carry an `error` or `message` key
+    // cannot override the error code. Spread straight from `details`: object
+    // spread of `undefined` contributes nothing, so a `?? {}` fallback would
+    // only add an empty object literal.
     return {
       status: err.statusCode,
-      body: { error: err.errorCode, message: err.message, ...err.details },
+      body: { ...err.details, error: err.errorCode, message: err.message },
     };
   }
   if (err instanceof DrizzleQueryError && err.cause instanceof DatabaseError) {
@@ -206,12 +208,6 @@ export const create_item_handler = async (
       body.item_domain
     );
   }
-
-  // The single-domain lock used to live here, and was skipped for admin
-  // api-key callers. It now runs inside `createItemInternal` so `admin/participant`
-  // and aggregator bulk inherit it too — see `assertSingleDomain`. That is also
-  // where `user.domains` is recorded on a user's first create, so the bootstrap
-  // that used to sit at the end of this transaction is gone.
 
   try {
     await ensureItemPartition(

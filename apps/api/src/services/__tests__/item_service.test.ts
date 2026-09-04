@@ -217,10 +217,14 @@ function makeExec() {
   const state = {
     failWith: null as Error | null,
     /** What the domain-claim UPDATE returns. Non-empty `rows` = the user had no
-     * domain and this create claimed it (the default). Set to `{ rows: [] }` to
-     * simulate an already-locked user, which sends `assertSingleDomain` on to
-     * its SELECT — feed that read via `queue`. */
+     * domain and no items, so this create claimed it (the default). Set to
+     * `{ rows: [] }` to simulate an already-locked user or a pre-0015 row,
+     * which sends `assertSingleDomain` on to its SELECT — feed that read via
+     * `queue`. */
     domainClaim: { rows: [{ id: 'u1' }] } as { rows: Array<{ id: string }> },
+    /** What the `SELECT DISTINCT item_domain FROM items` fallback returns. Only
+     * reached when the claim declined AND the column read came back empty. */
+    itemDomains: { rows: [] } as { rows: Array<{ item_domain: string }> },
   };
 
   const next = (): Promise<Row[]> =>
@@ -251,12 +255,18 @@ function makeExec() {
     execute: (q: unknown) => {
       rec.order.push('execute');
       rec.executes.push(q);
-      // `{ rows: [...] }` so `assertSingleDomain`'s domain-claim UPDATE reads as
-      // "claimed" and returns without its follow-up SELECT. Without this every
-      // create in this file would consume a `queue` entry for that read, and the
-      // queued rows are positional. The advisory-lock execute ignores its
-      // result, so one shape serves both callers. `domainClaim` below is how the
-      // already-locked path is exercised.
+      // Routed by statement, so a test can drive the claim and the item-domain
+      // fallback independently. The advisory-lock execute ignores its result,
+      // so it can share the claim's shape. Returning `{ rows: [...] }` rather
+      // than `[]` matters: without it every create here would consume a
+      // positional `queue` entry for a read the real code skips.
+      const text = sqlTextOf(q);
+      // Discriminate on `SELECT DISTINCT`, not on `FROM items` — the claim's
+      // own `NOT EXISTS (SELECT 1 FROM items WHERE created_by = …)` guard
+      // matches the looser pattern.
+      if (text.includes('SELECT DISTINCT item_domain')) {
+        return Promise.resolve(state.itemDomains);
+      }
       return Promise.resolve(state.domainClaim);
     },
     insert: (table: unknown) => ({
@@ -295,6 +305,10 @@ function makeExec() {
 }
 
 const ROW = { itemNetwork: 'blue_dot', itemDomain: 'student', itemType: 'profile_1.0', itemId: 'i1' };
+
+/** The SQL text of a statement captured off the mocked `sql` tag (`drizzle-orm`
+ * mock above joins the template strings with `?` for the interpolations). */
+const sqlTextOf = (q: unknown): string => (q as { text?: string }).text ?? '';
 
 function setDefaults() {
   getCurrentApiBaseUrl.mockReturnValue('https://api.test');
@@ -561,18 +575,83 @@ describe('createItemInternal — backend-generated URLs', () => {
 });
 
 describe('createItemInternal — single-domain lock', () => {
-  it('claims the domain when the user has none, and never reads further', async () => {
+  // These assert the SQL of the claim, not just that *something* ran.
+  //
+  // A review found the recording half was entirely unpinned: replacing the
+  // UPDATE with `SET domains = ARRAY['WRONG'] WHERE id = 'not-a-real-user'`,
+  // guard deleted, still passed 161/161 tests. `rec.order` cannot tell the
+  // claim apart from `assertProfileLimit`'s advisory lock — both are
+  // `'execute'` — so an order-only assertion is satisfied by a no-op body.
+  it('claims the domain with a guarded, caller-scoped UPDATE', async () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ n: 0 }]);
     queue.push([ROW]);
 
     await createItemInternal(exec, createParams());
 
-    // The claim is one guarded UPDATE, first statement of the create.
-    expect(rec.order[0]).toBe('execute');
-    // No follow-up SELECT on `user` — the claim returning a row IS the verdict.
-    // (The one select here is the profile cap's count.)
+    const claim = rec.executes[0] as { sql?: string; queryChunks?: unknown[]; values: unknown[] };
+    const text = sqlTextOf(claim);
+    expect(text).toMatch(/UPDATE "user"/);
+    expect(text).toMatch(/SET domains = ARRAY/);
+    // Write-once at the database level: a later create can never re-point an
+    // existing lock, so moving someone stays an explicit operation.
+    expect(text).toMatch(/domains IS NULL OR cardinality\(domains\) = 0/);
+    // Correct before migration 0015 has run — see assertSingleDomain's note on
+    // the post-upgrade deploy window.
+    expect(text).toMatch(/NOT EXISTS \(SELECT 1 FROM items WHERE created_by =/);
+    expect(text).toMatch(/RETURNING id/);
+    // The domain being claimed, and the user it is scoped to.
+    expect(claim.values).toContain('student');
+    expect(claim.values).toContain('u1');
+  });
+
+  it('claiming successfully skips the follow-up read entirely', async () => {
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ n: 0 }]);
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams());
+
+    // The claim returning a row IS the verdict — no SELECT on `user`, and no
+    // read of `items`. The one select here is the profile cap's count.
     expect(rec.order.filter((o) => o === 'select')).toHaveLength(1);
+    expect(rec.executes).toHaveLength(2); // claim + the cap's advisory lock
+  });
+
+  it('falls back to the item domains when the column is empty (pre-0015 rows)', async () => {
+    // `admin/participant` never wrote `user.domains`, so a legacy participant
+    // can hold a seeker profile with an empty column. The claim declines
+    // (NOT EXISTS items fails), and the truth comes off `items`.
+    const { exec, queue, rec, state } = makeExec();
+    state.domainClaim = { rows: [] };
+    queue.push([{ domains: [] }]); // column read: empty
+    state.itemDomains = { rows: [{ item_domain: 'seeker' }] };
+
+    await expect(
+      createItemInternal(exec, createParams({ item_domain: 'provider' })),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      errorCode: 'DOMAIN_LOCKED',
+      details: { locked_domain: 'seeker', requested_domain: 'provider' },
+    });
+
+    const fallback = sqlTextOf(
+      rec.executes[rec.executes.length - 1] as { queryChunks?: unknown[] },
+    );
+    expect(fallback).toMatch(/SELECT DISTINCT item_domain FROM items/);
+  });
+
+  it('the item-domain fallback allows a create in the held domain', async () => {
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] };
+    queue.push([{ domains: [] }]);
+    state.itemDomains = { rows: [{ item_domain: 'student' }] };
+    queue.push([{ n: 0 }]);
+    queue.push([ROW]);
+
+    await expect(
+      createItemInternal(exec, createParams()),
+    ).resolves.toMatchObject({ itemId: ROW.itemId });
   });
 
   it('allows a create in the domain the user is already locked to', async () => {

@@ -94,10 +94,14 @@ export class ItemServiceError extends Error {
    * Extra machine-readable fields merged into the route's error body.
    *
    * Most service errors are `{ error, message }` and leave this undefined. It
-   * exists for guards whose response shape is already a published contract —
-   * `DOMAIN_LOCKED` carries `locked_domain` / `requested_domain`, which the UI's
-   * `domain-gate.ts` reads — so moving such a guard down into the service does
-   * not silently drop fields the client depends on.
+   * exists so a guard that moves down into the service keeps the response shape
+   * it had at the route: `DOMAIN_LOCKED` carries `locked_domain` /
+   * `requested_domain`, which is the documented body an external client can
+   * branch on.
+   *
+   * No in-repo consumer reads those two fields — `apps/ui/src/lib/domain-gate.ts`
+   * derives held domains from `items`, not from the error body — so this is
+   * about not silently narrowing a published error, not about unblocking the UI.
    */
   details?: Record<string, unknown>;
   constructor(
@@ -361,15 +365,30 @@ async function assertSingleDomain(
   exec: DbOrTx,
   params: Pick<CreateItemServiceParams, 'created_by' | 'item_domain'>,
 ): Promise<void> {
-  // Claim the domain when the user has none. A no-op for an already-locked
-  // user: the guard matches no rows, so nothing is written and no version is
-  // burned.
+  // Claim the domain when the user has none recorded AND owns no items.
+  //
+  // The `NOT EXISTS` half is what makes this correct before migration 0015 has
+  // run. `admin/participant` never wrote `user.domains`, so a legacy
+  // participant can hold a seeker profile with an empty column — and the deploy
+  // migration is a Helm `post-upgrade` hook, so new pods serve traffic BEFORE
+  // it commits (docs/operations/migrations.md). Without this guard a provider
+  // create arriving in that window would find the column empty, claim
+  // `provider`, and leave the account holding items in two domains while
+  // reading as locked to the wrong one — a state 0015 then refuses to repair,
+  // because it only fills EMPTY columns, and which 0015's own
+  // `cardinality(domains) > 1` audit query cannot even find.
+  //
+  // With the guard the claim declines, and `items` below supplies the truth. So
+  // the lock is right on a database that has never been backfilled, and 0015
+  // becomes a correctness aid for readers of the column (the profile-form
+  // picker via `GET /api/v1/user/domains`) rather than a prerequisite.
   const claimed = (await exec.execute(sql`
     UPDATE "user"
        SET domains = ARRAY[${params.item_domain}]::text[],
            updated_at = now()
      WHERE id = ${params.created_by}
        AND (domains IS NULL OR cardinality(domains) = 0)
+       AND NOT EXISTS (SELECT 1 FROM items WHERE created_by = ${params.created_by})
     RETURNING id`)) as unknown as { rows?: Array<{ id: string }> };
   if ((claimed.rows ?? []).length > 0) return;
 
@@ -378,11 +397,24 @@ async function assertSingleDomain(
     .from(user)
     .where(eq(user.id, params.created_by))
     .limit(1);
-  const allowed = row?.domains ?? [];
+  let allowed = row?.domains ?? [];
 
-  // Empty here means the user row is missing (the claim above would have fired
-  // otherwise). Let the items FK raise that, rather than dressing a missing
-  // user up as a domain error.
+  // Column empty but the claim declined ⇒ the user owns items (or the row is
+  // gone). Read the domains off the items themselves: they are the real source
+  // of truth, and unlike the column no write path can have failed to record
+  // them. `items` is LIST-partitioned on `item_network` — one partition per
+  // network, each carrying `items_created_by_idx` — so this is a handful of
+  // index probes, and it only runs for a user whose column is unset, which
+  // after 0015 means nobody.
+  if (allowed.length === 0) {
+    const held = (await exec.execute(sql`
+      SELECT DISTINCT item_domain FROM items WHERE created_by = ${params.created_by}
+    `)) as unknown as { rows?: Array<{ item_domain: string }> };
+    allowed = (held.rows ?? []).map((r) => r.item_domain);
+  }
+
+  // Still empty ⇒ the user row is missing. Let the items FK raise that, rather
+  // than dressing a missing user up as a domain error.
   if (allowed.length === 0 || allowed.includes(params.item_domain)) return;
 
   throw new ItemServiceError(

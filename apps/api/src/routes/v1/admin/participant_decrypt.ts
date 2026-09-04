@@ -14,6 +14,7 @@ import {
   type DecryptedProfileSnapshot,
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { readConfiguredDomains } from '@/utils/org_metadata';
 import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
@@ -300,12 +301,31 @@ function countAccountFallback(profiles: DecryptedProfileSnapshot[]): {
 }
 
 /** Ownership/served-network scoping shared by both query modes: aggregators
- * are restricted to items whose creator they onboarded; network_service sees
- * all items in served networks. */
-function scopeConditions(isAgg: boolean, actingOrgId: string, networks: string[]) {
+ * are restricted to items whose creator they onboarded AND to the domains they
+ * declare; network_service sees all items in served networks.
+ *
+ * The domain condition is defence in depth for per-domain default aggregators.
+ * `user.onboarded_by_org_id` is per ACCOUNT while items are per DOMAIN, so with
+ * a different default per domain an account that somehow spanned two would let
+ * one domain's default decrypt the other's participant. `assertSingleDomain`
+ * (`services/item_service.ts`) makes such an account unreachable going forward,
+ * but a single guard on a path that returns decrypted PII is thin — and legacy
+ * rows that predate the lock still hold two domains. Filtering here means the
+ * leak needs BOTH invariants to fail, not one.
+ *
+ * Scoped on the org's declared `metadata.domains`, the same source
+ * `aggregator/export.ts` already filters on, so an aggregator sees exactly the
+ * populations it reports on. */
+function scopeConditions(
+  isAgg: boolean,
+  actingOrgId: string,
+  networks: string[],
+  domains: string[],
+) {
   return [
     networks.length > 0 ? inArray(items.item_network, networks) : undefined,
     isAgg ? eq(user.onboardedByOrgId, actingOrgId) : undefined,
+    isAgg ? inArray(items.item_domain, domains) : undefined,
   ] as const;
 }
 
@@ -329,6 +349,20 @@ export const participant_decrypt_handler = async (
 
   const isAgg = acting.org_type === 'aggregator';
   const networks = servedNetworks();
+
+  // Fail closed on an aggregator that declares nothing: with no domains there
+  // is no scope to honour, and defaulting to "all of them" on a PII-decrypt
+  // path is the wrong direction. `aggregator/export.ts` already refuses the
+  // same way (`NO_DOMAINS_CONFIGURED`), and `/admin/aggregator/upsert` is
+  // called with a non-empty list by both aggregator-dpg call sites, so this
+  // only catches an org mirrored before `metadata.domains` existed.
+  const domains = isAgg ? await readConfiguredDomains(acting.org_id) : [];
+  if (isAgg && domains.length === 0) {
+    return reply.code(400).send({
+      error: 'NO_DOMAINS_CONFIGURED',
+      message: 'org.metadata.domains is empty — re-upsert with domains array',
+    });
+  }
   const body = request.body;
   const fields = body.fields;
   const contact = normalizeContact(body.contact);
@@ -353,7 +387,7 @@ export const participant_decrypt_handler = async (
       .where(
         and(
           inArray(items.item_id, requested),
-          ...scopeConditions(isAgg, acting.org_id, networks),
+          ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )) as DecryptableRow[];
 
@@ -372,7 +406,7 @@ export const participant_decrypt_handler = async (
       .where(
         and(
           eq(items.created_by, userId),
-          ...scopeConditions(isAgg, acting.org_id, networks),
+          ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )
       .orderBy(items.created_at)) as DecryptableRow[];
