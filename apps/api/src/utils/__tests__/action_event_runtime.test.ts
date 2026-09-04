@@ -27,20 +27,15 @@ vi.mock('../item_decrypt', () => ({
     decryptItemPrivate(row),
 }));
 
-// The mirror SSRF guard resolves the allowed instance origins from the source
-// item's network config. Mock both so the unit test controls the allowlist:
-// only https://peer.example.com is a registered instance for network "n".
+// The mirror SSRF guard validates the source instance URL against the source
+// network's registered `instances`. Mock the config lookup so the unit test
+// controls the allowlist: only https://peer.example.com is registered for
+// network "n" / domain "d".
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: vi.fn(async () => ({
     id: 'n',
     instances: [{ domain_id: 'd', instance_url: 'https://peer.example.com' }],
   })),
-}));
-
-vi.mock('@dpg/config', () => ({
-  getAllowedInstanceOriginsFromNetworkConfig: (config: {
-    instances?: { instance_url: string }[];
-  }) => (config.instances ?? []).map((i) => new URL(i.instance_url).origin),
 }));
 
 import { apiConfig } from '@/config';
@@ -724,6 +719,28 @@ describe('mirrorActionEventToSourceInstance', () => {
     const log = makeLog();
     const event = makeEvent({
       source_item: { ...remoteRef, item_instance_url: 'http://169.254.169.254' },
+      target_item: localRef,
+    });
+
+    await mirrorActionEventToSourceInstance(event, asLog(log));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0][1]).toMatch(/possible SSRF/i);
+  });
+
+  it('refuses to mirror (no fetch) when the origin matches but the source domain is not the one registered for that instance', async () => {
+    const fetchMock = vi.fn(async (_url: URL | string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const log = makeLog();
+    // instance_url origin is the registered peer, but item_domain is not "d",
+    // which is the domain that instance is registered under.
+    const event = makeEvent({
+      source_item: { ...remoteRef, item_domain: 'other' },
       target_item: localRef,
     });
 

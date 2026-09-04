@@ -8,7 +8,6 @@ import z, {
 } from '@dpg/schemas';
 import { action_events, items } from '@dpg/database';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import { getAllowedInstanceOriginsFromNetworkConfig } from '@dpg/config';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from './item_decrypt';
@@ -298,9 +297,15 @@ function isPlainObject(input: unknown): input is Record<string, unknown> {
  * ultimately caller-asserted (via the unauthenticated /network/action/perform
  * body, then persisted and replayed from the DB on status updates). Without this
  * check any attacker can point it at an internal address (e.g. cloud IMDS) or an
- * exfiltration endpoint. We only mirror to an instance the source item's network
- * config actually registers for a reachable domain — the same allowlist CORS is
- * built from (getAllowedInstanceOriginsFromNetworkConfig). Compared by origin.
+ * exfiltration endpoint.
+ *
+ * The allowlist is the source network's own registered `instances` — an instance
+ * whose `domain_id` matches the source item's domain and whose `instance_url`
+ * shares the source URL's origin. We validate against `networkConfig.instances`
+ * directly (NOT the served-domains-filtered CORS origin list): the mirror target
+ * is a *remote* peer, so filtering by locally-served domains would wrongly refuse
+ * legitimate peers. Compared by origin (scheme+host+port) so a path/query on
+ * either side can't smuggle a mismatch.
  */
 async function isRegisteredSourceInstance(
   event: StoredActionEvent
@@ -315,12 +320,15 @@ async function isRegisteredSourceInstance(
   const networkConfig = await getNetworkConfigById(
     event.source_item.item_network
   );
-  const allowedOrigins = getAllowedInstanceOriginsFromNetworkConfig(
-    networkConfig,
-    apiConfig.served_domains
-  );
 
-  return allowedOrigins.includes(sourceOrigin);
+  return (networkConfig.instances ?? []).some((instance) => {
+    if (instance.domain_id !== event.source_item.item_domain) return false;
+    try {
+      return new URL(instance.instance_url).origin === sourceOrigin;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export async function mirrorActionEventToSourceInstance(
