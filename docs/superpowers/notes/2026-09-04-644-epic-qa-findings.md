@@ -84,3 +84,49 @@ Re-verify logged in.
 
 - Q4 — provenance of the Area radius ladder (5/10/25/50 km).
 - Q12 — whether facets apply on the map given `/markers` returns coordinates.
+
+---
+
+# Second QA round (2026-09-04)
+
+**N1 — Area made no sense on the map. FIXED.** It was also inert:
+`useMapMarkers` is called with the viewport, never with `area`, so the control
+changed nothing there. Removed from map view, same as Sort (spec D26).
+
+**N2 — dense-cell-at-max-zoom.** See the answer recorded below; the escape
+hatch is "switch to the list", which #644 made unbounded. The map itself still
+cannot plot more than its cap, and the `viewport` area mode that would have
+made "the area I'm looking at" one click was deliberately skipped.
+
+**N3 — empty-sidebar divider alignment. FIXED.** The group now stretches to
+`--dpg-toolbar-h` (measured by PageShell) and owns its own bottom border, so
+the two rules form one line at y=150. Empty state only, per the user.
+
+**N4 — map viewport resets but the count does not. OPEN.**
+Diagnosis: `focusPoint={userLocation}` makes `MapView` compute
+`initialViewSet: true`, which mounts `SetView`; on remount `SetView`'s
+`prevCenter` ref is null, so it unconditionally `map.setView(focusPoint,
+PROFILE_ZOOM)`. That snap races `ViewportReporter`'s mount emit, and the
+post-snap `moveend` emit is debounced — so `mapViewport` (which the count is
+derived from) can keep the pre-switch bounds while the map displays the
+snapped view.
+Corroborating evidence: the mismatch requires a resolved `userLocation`. With
+geolocation denied there is no `focusPoint`, no `SetView`, no snap — and the
+count stayed consistent across three list<->map switches in that state.
+Fix options: (a) persist center/zoom across the switch — needs `SetView` to
+take the initial view and the nonce-snap target as separate inputs, since
+today one center/zoom serves both; (b) reset `mapViewport` on leaving the map
+so the reporter re-derives it. (a) is the better UX and removes the whole
+mismatch class.
+
+**N5 — the two map counts. OPEN.** The toolbar count on the map is
+`mapMarkers.total`: viewport-scoped AND multi-domain (measured 94 = 22
+provider + 72 seeker), while the list's is single-domain and network-wide
+(22). Proposal: keep the on-map pill as the viewport count, and make the
+toolbar count filter-scoped and location-independent so it matches the list —
+plus an explicit "N with location, M without" so the map/list gap is stated
+rather than inferred. Needs one extra count request (`/discover` with
+`limit: 1` gives the filter-scoped total; markers without a bbox gives
+"has a location").
+
+**N6 — "Showing N of M" removed from the list. FIXED.**
