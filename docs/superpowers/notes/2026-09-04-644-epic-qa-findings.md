@@ -168,3 +168,22 @@ the native fallback orders by distance while projecting no distance column.
 Backfilled client-side from `item_locations` + the ordering centre. Also
 exposed that the home-page browse mock never returned `sortApplied`, so the
 metric pill had no test coverage at all — now threaded through.
+
+---
+
+# GATE before marking PR #665 ready
+
+**Mobile-view QA of everything this PR introduces.** Explicitly requested, and
+not yet done — all QA so far has been desktop-width. Cover at minimum:
+
+- the browse toolbar's single row (sort / area / chips / clear-all / count +
+  "N not on the map") — it wraps, so check it does not eat the viewport
+- the domain control: 3 domains on a phone (up-gzb has three), the horizontal
+  scroll rather than wrap, and the collapsed "Showing <Domains>" heading
+- the browse-context row: domain heading left, "Search near" + Select right,
+  at a width where they must wrap onto two lines
+- the Area control's custom-radius input, tick and clear, with a numeric
+  keyboard; `pointer-coarse:min-h-11` touch targets on every new control
+- the card metric pill (span vs button) and the filters panel as a bottom
+  sheet (`ResponsiveDialog` → Drawer on mobile)
+- the map: count pill, cluster badges, and the error-boundary fallback box

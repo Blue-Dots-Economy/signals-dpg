@@ -456,7 +456,12 @@ describe('buildSignalsSearchRequest — sort and ordering centre (#644)', () => 
       orderingLng: 4,
     });
 
-    expect(req.message.intent.spatial?.[0].geometry.coordinates).toEqual([2, 1]);
+    const clause = req.message.intent.spatial?.[0];
+    // `spatial` is a discriminated union since the bbox op landed (§1.5), so
+    // narrow before reaching for the Point's geometry.
+    expect(clause?.op).toBe('s_dwithin');
+    if (clause?.op !== 's_dwithin') throw new Error('expected an s_dwithin clause');
+    expect(clause.geometry.coordinates).toEqual([2, 1]);
     expect(req.message.intent.orderingCenter?.coordinates).toEqual([4, 3]);
   });
 

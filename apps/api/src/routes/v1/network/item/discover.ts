@@ -136,15 +136,51 @@ function resolveNativeGeoFilters(input: {
   effectiveDistanceMeters: number | undefined;
   body: Pick<
     z.infer<typeof DiscoverItemsBodySchema>,
-    'item_latitude' | 'item_longitude' | 'ordering_latitude' | 'ordering_longitude'
+    | 'item_latitude'
+    | 'item_longitude'
+    | 'ordering_latitude'
+    | 'ordering_longitude'
+    | 'min_lat'
+    | 'min_lng'
+    | 'max_lat'
+    | 'max_lng'
   >;
 }): {
   item_latitude?: number;
   item_longitude?: number;
   radius_meters?: number;
+  min_lat?: number;
+  min_lng?: number;
+  max_lat?: number;
+  max_lng?: number;
   order_by?: 'distance' | 'created_at';
 } {
   const { sortApplied, hasAreaFilter, effectiveDistanceMeters, body } = input;
+
+  // VIEWPORT: the native path has supported a bbox all along
+  // (`buildWhereClause`'s min_lat/min_lng/max_lat/max_lng), so this mode works
+  // even with signals-search down — which is every local run. The bbox
+  // filters; the order still comes from `sort`, and `nearest` inside a
+  // viewport uses the ordering centre the UI sends alongside it.
+  if (body.min_lat !== undefined) {
+    const nearestCentreGiven =
+      sortApplied === 'nearest' &&
+      body.ordering_latitude !== undefined &&
+      body.ordering_longitude !== undefined;
+    return {
+      min_lat: body.min_lat,
+      min_lng: body.min_lng,
+      max_lat: body.max_lat,
+      max_lng: body.max_lng,
+      ...(nearestCentreGiven
+        ? {
+            item_latitude: body.ordering_latitude,
+            item_longitude: body.ordering_longitude,
+            order_by: 'distance' as const,
+          }
+        : { order_by: 'created_at' as const }),
+    };
+  }
 
   if (sortApplied === 'nearest') {
     return {
@@ -275,8 +311,11 @@ const discover_items_handler = async (
     // viewer location on every list request and signals-search treats a
     // spatial clause as a hard `s_dwithin` predicate, so every signed-in
     // viewer silently saw only items within ~30 km with no way to widen it.
+    // Either area mode counts as "the caller asked to be bounded". `radius`
+    // sends a centre + distance; `viewport` sends a rectangle (contract §1.5).
+    const hasBbox = body.min_lat !== undefined;
     const hasAreaFilter =
-      body.item_latitude !== undefined && body.item_longitude !== undefined;
+      (body.item_latitude !== undefined && body.item_longitude !== undefined) || hasBbox;
 
     // Effective reported radius (#394): only meaningful when an AREA FILTER
     // exists. Precedence: the request's own override, then the configured env,
@@ -294,14 +333,19 @@ const discover_items_handler = async (
     const hasOrderingCenter =
       body.ordering_latitude !== undefined && body.ordering_longitude !== undefined;
 
-    // `nearest` needs a centre from somewhere; an area filter's centre serves
-    // as one (signals-search reuses it), which is why either satisfies the
-    // precondition here.
+    // `nearest` needs a centre from somewhere. A RADIUS area's centre serves
+    // as one (signals-search reuses it, contract §1.3 rule 2) — a VIEWPORT
+    // does NOT: a bbox has no centre on the wire, and deriving one from the
+    // rectangle's midpoint would let "search this area" silently change the
+    // sort the user chose. So nearest-within-a-viewport requires the UI to
+    // send `ordering_latitude`/`ordering_longitude` alongside the bbox.
+    const hasRadiusCenter =
+      body.item_latitude !== undefined && body.item_longitude !== undefined;
     const sortApplied = resolveDiscoverSort({
       requested: body.sort,
       hasAnchor: body.anchor_item_id !== undefined,
       hasQ: body.q !== undefined,
-      hasOrderingCenter: hasOrderingCenter || hasAreaFilter,
+      hasOrderingCenter: hasOrderingCenter || hasRadiusCenter,
     });
 
     const searchInput: SearchSignalsInput = {
@@ -310,7 +354,15 @@ const discover_items_handler = async (
       itemType: body.item_type,
       q: body.q,
       filters: allowedFilters,
-      ...(hasAreaFilter
+      ...(hasBbox
+        ? {
+            minLat: body.min_lat,
+            minLng: body.min_lng,
+            maxLat: body.max_lat,
+            maxLng: body.max_lng,
+          }
+        : {}),
+      ...(hasRadiusCenter
         ? {
             lat: body.item_latitude,
             lng: body.item_longitude,

@@ -1234,3 +1234,145 @@ describe('POST /discover — native fallback ordering (contract §7)', () => {
     expect(body.meta.distance_meters).toBe(25000);
   });
 });
+
+describe('POST /discover — viewport area mode (contract §1.5)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+  });
+
+  const BOX = { min_lat: 12.8, min_lng: 77.4, max_lat: 13.1, max_lng: 77.8 };
+
+  async function post(
+    extra: Record<string, unknown> = {},
+    upstreamSort: 'relevance' | 'newest' | 'nearest' = 'newest',
+  ) {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: upstreamSort },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(extra),
+    });
+    return {
+      res,
+      body: res.json() as { meta: Record<string, unknown> },
+      sent: searchSignalsMock.mock.calls[0]?.[0] as Record<string, unknown> | undefined,
+    };
+  }
+
+  it('forwards the four bounds and no radius', async () => {
+    // Spec D6 dropped this mode because signals-search had only a Point +
+    // radius op, and a circumscribed circle is always LARGER than the
+    // rectangle — the list would have shown items that were off the edges of
+    // the map. The bbox op makes it exact, so the mode is back.
+    const { res, sent } = await post(BOX);
+
+    expect(res.statusCode).toBe(200);
+    expect(sent?.minLat).toBe(12.8);
+    expect(sent?.minLng).toBe(77.4);
+    expect(sent?.maxLat).toBe(13.1);
+    expect(sent?.maxLng).toBe(77.8);
+    expect(sent?.lat).toBeUndefined();
+    expect(sent?.distanceMeters).toBeUndefined();
+  });
+
+  it('a viewport contributes NO ordering centre, so nearest degrades', async () => {
+    // Contract §1.3 rule 2 is `s_dwithin` only. Deriving a centre from the
+    // rectangle's midpoint would let "search this area" silently change the
+    // sort the user picked.
+    const { body } = await post({ ...BOX, sort: 'nearest' });
+
+    expect(body.meta.sort_applied).toBe('newest');
+  });
+
+  it('orders by distance when an ordering centre accompanies the viewport', async () => {
+    const { body, sent } = await post(
+      { ...BOX, sort: 'nearest', ordering_latitude: 12.97, ordering_longitude: 77.59 },
+      'nearest',
+    );
+
+    expect(body.meta.sort_applied).toBe('nearest');
+    expect(sent?.orderingLat).toBe(12.97);
+    expect(sent?.minLat).toBe(12.8);
+  });
+
+  it('rejects a partial box rather than defaulting the missing side', async () => {
+    // Defaulting a side would search somewhere the caller did not ask about.
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ min_lat: 12.8, min_lng: 77.4 }),
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects transposed bounds rather than silently swapping them', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ min_lat: 13.1, min_lng: 77.4, max_lat: 12.8, max_lng: 77.8 }),
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects an antimeridian-crossing box instead of returning nothing', async () => {
+    // signals-search does not support it, and an empty set reads as
+    // "nothing here" rather than "unsupported".
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ min_lat: 12.8, min_lng: 170, max_lat: 13.1, max_lng: -170 }),
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects a bbox and a radius together — they are alternative area modes', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({
+        ...BOX,
+        item_latitude: 12.97,
+        item_longitude: 77.59,
+        distance_meters: 5000,
+      }),
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('passes the bbox to the NATIVE fallback, which has always supported one', async () => {
+    // So the mode works with signals-search down — which is every local run.
+    searchSignalsMock.mockRejectedValueOnce(new Error('unavailable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(BOX),
+    });
+
+    expect(res.statusCode).toBe(200);
+    const nativeFilters = fetchItemsAcrossInstancesMock.mock.calls[0]?.[0]?.filters as
+      | Record<string, unknown>
+      | undefined;
+    expect(nativeFilters?.min_lat).toBe(12.8);
+    expect(nativeFilters?.max_lng).toBe(77.8);
+    // The bbox filters; the order still comes from `sort`.
+    expect(nativeFilters?.order_by).toBe('created_at');
+    expect(nativeFilters?.radius_meters).toBeUndefined();
+  });
+});

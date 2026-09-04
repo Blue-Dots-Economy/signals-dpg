@@ -58,6 +58,20 @@ const DiscoverItemsBodyBase = z.object({
   // items within ~30 km, with no control to widen it.
   item_latitude: z.number().min(-90).max(90).optional(),
   item_longitude: z.number().min(-180).max(180).optional(),
+  // VIEWPORT area mode (#644, contract §1.5). The exact rectangle the map is
+  // showing, restored now that signals-search has a `bbox` spatial op —
+  // spec D6 had dropped this mode because the only op was a Point + radius,
+  // and a circumscribed circle is always larger than the rectangle, so the
+  // list would have included items that were off the edges of the map.
+  //
+  // Mutually exclusive with the radius trio above: the search envelope's
+  // `spatial` array is `.max(1)`, so sending both is two clauses and is
+  // rejected upstream — this refine catches it here, with a message a caller
+  // can act on.
+  min_lat: z.number().min(-90).max(90).optional(),
+  min_lng: z.number().min(-180).max(180).optional(),
+  max_lat: z.number().min(-90).max(90).optional(),
+  max_lng: z.number().min(-180).max(180).optional(),
   distance_meters: z.number().positive().optional(),
   // ORDERING CENTRE for `sort: 'nearest'` — DISTINCT from the area filter
   // above. Sending only these two orders the whole network nearest-first
@@ -89,7 +103,51 @@ export const DiscoverItemsBodySchema = DiscoverItemsBodyBase.refine(
     message: 'ordering_latitude and ordering_longitude must be provided together',
     path: ['ordering_longitude'],
   }
-);
+)
+  .refine(
+    (data) => {
+      const sides = [data.min_lat, data.min_lng, data.max_lat, data.max_lng];
+      const given = sides.filter((v) => v !== undefined).length;
+      // All four or none. A partial box is rejected, never defaulted —
+      // defaulting a side searches somewhere the caller did not ask about.
+      return given === 0 || given === 4;
+    },
+    {
+      message: 'min_lat, min_lng, max_lat and max_lng must be provided together',
+      path: ['max_lng'],
+    }
+  )
+  .refine(
+    (data) =>
+      data.min_lat === undefined ||
+      data.max_lat === undefined ||
+      data.min_lng === undefined ||
+      data.max_lng === undefined ||
+      (data.min_lat < data.max_lat && data.min_lng < data.max_lng),
+    {
+      // Rejected rather than silently swapped: a transposed box is a caller
+      // bug, and quietly fixing it hides the bug while returning results for
+      // an area nobody asked for. `min_lng > max_lng` (an antimeridian
+      // crossing) is rejected by the same rule — signals-search does not
+      // support it, and returning an empty set would read as "nothing here".
+      message:
+        'min_lat must be less than max_lat and min_lng less than max_lng (antimeridian crossing is not supported)',
+      path: ['min_lng'],
+    }
+  )
+  .refine(
+    (data) =>
+      data.min_lat === undefined ||
+      (data.item_latitude === undefined && data.distance_meters === undefined),
+    {
+      // The search envelope's `spatial` array is `.max(1)`, so a bbox AND a
+      // radius is two clauses and would be rejected upstream anyway. Caught
+      // here so the caller gets a message naming both modes instead of a
+      // generic upstream validation error.
+      message: 'a bounding box and a radius are mutually exclusive area modes',
+      path: ['min_lat'],
+    }
+  );
 
 // Overrides beyond ItemResponseSchema's DB-derived shape: signals-search's
 // item is a serialized-over-the-wire copy (ISO date strings, and it declares

@@ -48,6 +48,16 @@ export interface SearchSignalsInput {
   lat?: number;
   lng?: number;
   distanceMeters?: number;
+  /**
+   * VIEWPORT area mode — the exact rectangle the map is showing (contract
+   * §1.5). Mutually exclusive with `lat`/`lng`/`distanceMeters`; all four
+   * bounds travel together or none do, enforced on the way in by
+   * `DiscoverItemsBodySchema`.
+   */
+  minLat?: number;
+  minLng?: number;
+  maxLat?: number;
+  maxLng?: number;
   limit: number;
   offset: number;
   /**
@@ -88,15 +98,33 @@ const SignalsSearchFilterClauseSchema = z.object({
   value: z.unknown(),
 });
 
-const SignalsSearchSpatialClauseSchema = z.object({
-  op: z.literal('s_dwithin'),
-  geometry: z.object({
-    type: z.literal('Point'),
-    // GeoJSON order — [lng, lat], not [lat, lng].
-    coordinates: z.tuple([z.number(), z.number()]),
+// Two ops, discriminated on `op` (contract §1.5). A DISCRIMINATED union, not
+// a plain one, so adding a third op makes the compiler point at every site
+// that has to branch — which is how signals-search found that its
+// anchorless-spatial refine had to be scoped to `s_dwithin` (a bbox carries
+// its own bounds, so it must not demand an anchor).
+const SignalsSearchSpatialClauseSchema = z.discriminatedUnion('op', [
+  z.object({
+    op: z.literal('s_dwithin'),
+    geometry: z.object({
+      type: z.literal('Point'),
+      // GeoJSON order — [lng, lat], not [lat, lng].
+      coordinates: z.tuple([z.number(), z.number()]),
+    }),
+    distanceMeters: z.number().optional(),
   }),
-  distanceMeters: z.number().optional(),
-});
+  // Named fields rather than a GeoJSON [west,south,east,north] tuple:
+  // `orderingCenter` already carries one [lng,lat] transposition hazard and a
+  // second was not worth the brevity. camelCase matches signals-search's wire
+  // convention; the UI's snake_case `min_lat` etc. map straight across.
+  z.object({
+    op: z.literal('bbox'),
+    minLat: z.number(),
+    minLng: z.number(),
+    maxLat: z.number(),
+    maxLng: z.number(),
+  }),
+]);
 
 // The ORDERING centre (#644). Same GeoJSON shape as the spatial clause's
 // geometry, but a separate schema because it must never be mistaken for one:
@@ -232,7 +260,30 @@ function buildFilterClause(facet: SignalsSearchFacetInput) {
   };
 }
 
+/**
+ * The ONE spatial clause, or none.
+ *
+ * A bbox wins over a radius when both somehow arrive, but that state is
+ * already rejected by `DiscoverItemsBodySchema` — the envelope's `spatial`
+ * array is `.max(1)`, so there is no shape in which both could be sent
+ * anyway. The ordering here is a last line of defence, not a policy.
+ */
 function buildSpatialClause(input: SearchSignalsInput) {
+  if (
+    input.minLat !== undefined &&
+    input.minLng !== undefined &&
+    input.maxLat !== undefined &&
+    input.maxLng !== undefined
+  ) {
+    return {
+      op: 'bbox' as const,
+      minLat: input.minLat,
+      minLng: input.minLng,
+      maxLat: input.maxLat,
+      maxLng: input.maxLng,
+    };
+  }
+
   if (input.lat === undefined || input.lng === undefined) {
     return undefined;
   }
