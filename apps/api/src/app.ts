@@ -177,6 +177,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
+  // No-store on authenticated responses (AUTH-VULN-07). Any response produced
+  // for a request that resolved a user carries PII/session state, so it must not
+  // be cached by browsers or shared proxies. Public/unauthenticated responses
+  // (request.user unset) are left untouched so genuinely cacheable routes keep
+  // their own caching semantics. A route that already set Cache-Control wins.
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.user && !reply.getHeader('cache-control')) {
+      reply.header('Cache-Control', 'no-store');
+    }
+    return payload;
+  });
+
   // CORS
   await app.register(cors, {
     origin: (origin, cb) => {
