@@ -77,17 +77,88 @@ Applied in this order. The result is reported back as `meta.sort_applied`.
 First match wins:
 
 1. `intent.orderingCenter.coordinates`
-2. `intent.spatial[0].geometry.coordinates` (when an area filter is also set,
-   its centre doubles as the ordering centre)
+2. `intent.spatial[0].geometry.coordinates` — **`op: 's_dwithin'` ONLY.** A
+   `bbox` clause contributes NO ordering centre (see 1.5).
 3. the anchor item's own stored location (already resolved as `anchorLat` /
    `anchorLng`, `search_route.ts:58-59`)
 4. none of the above → fall back to `newest`
 
-### 1.4 `spatial` is unchanged
+### 1.4 `spatial` — `s_dwithin` is unchanged
 
-`intent.spatial` keeps its exact current meaning: an `ST_DWithin` **filter**,
-with `distanceMeters` defaulting to `SEARCH_DEFAULT_DISTANCE_METERS` (30 000)
-when omitted. Do not alter it, and do not make `sort: 'nearest'` imply it.
+The `op: 's_dwithin'` clause keeps its exact current meaning: an `ST_DWithin`
+**filter**, with `distanceMeters` defaulting to
+`SEARCH_DEFAULT_DISTANCE_METERS` (30 000) when omitted. Do not alter it, and do
+not make `sort: 'nearest'` imply it.
+
+### 1.5 `spatial` gains a second op: `bbox` (unfreezes 1.4 for this addition)
+
+Added so the list can offer an EXACT "search this area" from the map viewport.
+Spec D6 had dropped that mode because the only spatial op was a Point +
+radius, and approximating a rectangle by its circumscribed circle is always
+larger than the rectangle — the list would include items that were off the
+edges of the map the user was looking at.
+
+```
+intent.spatial = [{ op: 'bbox', minLat, minLng, maxLat, maxLng }]
+intent.spatial = [{ op: 's_dwithin', geometry, distanceMeters }]   // unchanged
+```
+
+- **A second `op` on the existing array, NOT a top-level `intent.bbox`.** The
+  array already carries `.max(1)`, so a bbox AND a radius is two clauses and is
+  rejected structurally — there is no code path where one silently wins. Both
+  repos already model this exact shape (`SignalsSearchSpatialClauseSchema` with
+  `op: z.literal(...)` and `.max(1)`), so it lands as a discriminated union on
+  `op` with no restructuring on either side.
+- **camelCase**, matching signals-search's wire convention (`textSearch`,
+  `distanceMeters`, `orderingCenter`); DPG's `min_lat`/`min_lng`/`max_lat`/
+  `max_lng` map straight across.
+- **Named fields, not a GeoJSON `[west,south,east,north]` tuple.**
+  `orderingCenter` already carries one `[lng,lat]` transposition hazard; a
+  second was not worth the brevity.
+- **All four bounds required.** A partial box is rejected, never defaulted —
+  defaulting a side searches somewhere the caller did not ask about.
+  Transposed bounds are rejected rather than silently swapped, and
+  `minLng > maxLng` is rejected with an explicit "antimeridian not supported"
+  message rather than returning an empty set that reads as "nothing here".
+- **The anchorless-spatial refine is scoped to `s_dwithin`.** A bbox carries
+  its own bounds, so it must not demand an anchor.
+
+**Geodesic edges — why the predicate is two clauses.** A `geography` polygon's
+edges are geodesics: the arc joining two corners at the same latitude bows
+poleward, so the shape sits slightly north of the intended rectangle. Measured
+on a 0.1° x 0.2° box at 12.9°N, a pin exactly on the southern edge fell ~2 m
+OUTSIDE and was dropped, while a pin just north of the top edge was wrongly
+included. Two metres is trivial next to the circumscribed circle, but it is the
+SAME CLASS of error D6 rejected — the list disagreeing with the map — so it is
+fixed rather than documented:
+
+```sql
+s.geo && ST_MakeEnvelope(...)::geography                 -- index prefilter
+AND ST_Intersects(s.geo::geometry, ST_MakeEnvelope(...))  -- exact, planar
+```
+
+The planar test gives true rectangle semantics. The `&&` is load-bearing, not
+decoration: the geometry cast alone defeats the GiST index. The prefilter's
+geodetic box strictly contains the planar rectangle, so it can never exclude a
+row the exact test would keep. Measured on 20 000 geo rows:
+
+| predicate | plan | time |
+| --- | --- | --- |
+| as shipped | Index Scan using `item_search_geo_gist` | **0.261 ms** |
+| planar alone, no prefilter | double Seq Scan | 240.8 ms |
+| existing `ST_DWithin` | Bitmap Index Scan, same index | 38.6 ms |
+
+So bbox is index-backed on the same path as the radius filter, and cheaper. It
+touches only the `WHERE`; `ORDER BY` is untouched and HNSW is not involved in a
+geo query at all.
+
+**Consequence for Signals-DPG.** `bbox` filters, `orderingCenter` orders — the
+two never derive from each other. So `sort: 'nearest'` scoped to a viewport
+requires DPG to send `orderingCenter` (the viewport centre) ALONGSIDE the bbox;
+a bbox alone degrades to `newest` per 1.3 rule 4. This is deliberate: making
+the viewport midpoint a rule-2 centre would let "search this area" silently
+change the user's chosen sort, re-coupling the filtering centre and the
+ordering centre that #644 separated on purpose.
 
 ---
 
