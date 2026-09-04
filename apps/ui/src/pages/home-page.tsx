@@ -68,6 +68,7 @@ import {
 } from '@/lib/browse-discover';
 import { BrowseToolbar } from '@/components/filters/browse-toolbar';
 import { useAppliedFilterChips } from '@/hooks/use-applied-filter-chips';
+import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 import type { DomainOption } from '@/components/filters/domain-control';
 import { resolveDefaultDomain } from '@/lib/browse-domain';
 import { getServedScope } from '@/lib/served-binding';
@@ -935,22 +936,34 @@ export function HomePage() {
     [network, viewerDomain],
   );
 
-  // Domains whose fields drive the browse filters, keyed on the sidebar Browse
-  // selection: a specific domain → only that domain's fields (a provider
-  // viewing "Seekers" filters by seeker fields, viewing "Providers" by provider
-  // fields). "All" (null) → the counterpart domains (visible minus the viewer's
-  // own) so a provider's default view filters seekers, not the provider fields
-  // pulled in by a provider→provider "connect" self-edge; falls back to all
-  // visible domains when that would leave nothing (self-only interaction, or a
-  // signed-out viewer with no domain identity).
+  const mapDomains = React.useMemo(
+    () =>
+      mapSelectedDomains.length > 0
+        ? visibleDomains.filter((d) => mapSelectedDomains.includes(d.id))
+        : visibleDomains,
+    [mapSelectedDomains, visibleDomains],
+  );
+
+  // Domains whose fields drive the browse filters. This MUST match the domains
+  // actually queried, or the facet is silently dropped and that domain comes
+  // back unfiltered: `resolveAllowedFacetFields` honours a facet only when the
+  // field is declared for the item's own domain, and drops it with no error so
+  // a caller cannot enumerate undeclared/private fields (Q6). blue_dot's
+  // seeker and provider schemas share ZERO field names, so a mismatch here
+  // means every facet is a no-op.
+  //
+  // The map is multi-domain and takes its selection from `mapSelectedDomains`;
+  // the list is single-domain on `selectedDomain`. Reading `selectedDomain` in
+  // both cases scoped the panel to a stale domain on the map (Q7).
   const filterFieldDomains = React.useMemo(() => {
+    if (viewMode === 'map') return mapDomains;
     if (selectedDomain) {
       const selected = visibleDomains.filter((d) => d.id === selectedDomain);
       if (selected.length > 0) return selected;
     }
     const counterparts = visibleDomains.filter((d) => d.id !== viewerDomain);
     return counterparts.length > 0 ? counterparts : visibleDomains;
-  }, [visibleDomains, viewerDomain, selectedDomain]);
+  }, [visibleDomains, viewerDomain, selectedDomain, viewMode, mapDomains]);
 
   // #644 (spec D19): a domain is ALWAYS selected — `null` no longer means
   // "all", it is only a transient pre-network state. This resolves the default
@@ -1038,13 +1051,6 @@ export function HomePage() {
   // fetched markers survive a post-filter (spec D12) — deselecting a domain
   // saves a request instead of wasting one. Empty selection means all visible,
   // matching the control's own semantics.
-  const mapDomains = React.useMemo(
-    () =>
-      mapSelectedDomains.length > 0
-        ? visibleDomains.filter((d) => mapSelectedDomains.includes(d.id))
-        : visibleDomains,
-    [mapSelectedDomains, visibleDomains],
-  );
   const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
   // On the "All" tab the Filters-panel domain multi-select narrows which pins
@@ -1452,6 +1458,62 @@ export function HomePage() {
   );
 
   // #645 §4.1: the applied-filter state (chips, per-chip removal, reset, and
+  // Every facet the queried domain will actually honour, key → human label.
+  // Serves both the chip labels and the stale-facet prune below, so the two
+  // can never disagree about what counts as a valid facet. Mirrors the
+  // server's allowlist (declared + non-private) rather than the narrower
+  // enum-only set the filter panel renders — see `resolveFacetFieldLabels`.
+  const facetFieldLabels = React.useMemo(
+    () => resolveFacetFieldLabels(filterFieldDomains),
+    [filterFieldDomains],
+  );
+
+  // Memoized: the stale-facet pruning effect below depends on it, and a fresh
+  // identity each render would re-run that effect on every render.
+  const handleMapFieldsChange = React.useCallback((fields: Record<string, string[]>) => {
+    setMapSelectedFields(fields);
+    setSearchParams((prev) => {
+      // Remove all existing f_* params before re-writing
+      const keysToDelete: string[] = [];
+      for (const key of prev.keys()) {
+        if (key.startsWith('f_')) keysToDelete.push(key);
+      }
+      for (const key of keysToDelete) prev.delete(key);
+      // Write active field selections as ?f_<key>=value1,value2
+      for (const [fieldKey, values] of Object.entries(fields)) {
+        if (values.length > 0) {
+          prev.set(`f_${fieldKey}`, values.map(encodeURIComponent).join(','));
+        }
+      }
+      return prev;
+    });
+  }, [setSearchParams]);
+
+  // Drop facets the queried domain cannot honour (Q6/Q7).
+  //
+  // Switching domain used to leave the previous domain's facets in state AND
+  // in the `?f_*` params. The server then dropped each one silently
+  // (`resolveAllowedFacetFields` — an undeclared field is never an error, so a
+  // caller cannot probe for private fields) and returned that domain
+  // UNFILTERED, while the chip bar still advertised the filter as active. With
+  // blue_dot's seeker and provider schemas sharing no field names, every facet
+  // survived a domain switch as a visible no-op.
+  //
+  // Pruning here rather than at each call site is deliberate: the chips, the
+  // trigger badge, the `?f_*` params and the request all read this one state,
+  // so they stay consistent by construction. Goes through
+  // `handleMapFieldsChange` so the URL is rewritten too — otherwise a reload
+  // would restore what was just pruned.
+  React.useEffect(() => {
+    const allowed = new Set(Object.keys(facetFieldLabels));
+    if (allowed.size === 0) return; // schemas not resolved yet — prune nothing
+    const stale = Object.keys(mapSelectedFields).filter((key) => !allowed.has(key));
+    if (stale.length === 0) return;
+    const next = { ...mapSelectedFields };
+    for (const key of stale) delete next[key];
+    handleMapFieldsChange(next);
+  }, [facetFieldLabels, mapSelectedFields, handleMapFieldsChange]);
+
   // "is anything applied") lives in one hook so the four always agree and a
   // page component this size doesn't also carry a loop and a switch.
   const {
@@ -1463,7 +1525,12 @@ export function HomePage() {
     search,
     setSearch,
     activeFieldFilters,
-    setFieldFilters: setMapSelectedFields,
+    // `handleMapFieldsChange`, NOT the bare `setMapSelectedFields`: facets are
+    // mirrored into the URL as `?f_<key>=…` and that handler is what rewrites
+    // them. Clearing state alone left the params in place, so a reload
+    // re-seeded the very filters the user had just cleared.
+    setFieldFilters: handleMapFieldsChange,
+    fieldLabels: facetFieldLabels,
     area,
     setArea,
     sort,
@@ -1550,24 +1617,6 @@ export function HomePage() {
     });
   };
 
-  const handleMapFieldsChange = (fields: Record<string, string[]>) => {
-    setMapSelectedFields(fields);
-    setSearchParams((prev) => {
-      // Remove all existing f_* params before re-writing
-      const keysToDelete: string[] = [];
-      for (const key of prev.keys()) {
-        if (key.startsWith('f_')) keysToDelete.push(key);
-      }
-      for (const key of keysToDelete) prev.delete(key);
-      // Write active field selections as ?f_<key>=value1,value2
-      for (const [fieldKey, values] of Object.entries(fields)) {
-        if (values.length > 0) {
-          prev.set(`f_${fieldKey}`, values.map(encodeURIComponent).join(','));
-        }
-      }
-      return prev;
-    });
-  };
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
@@ -1819,6 +1868,13 @@ export function HomePage() {
   if (hasProfileAnchor) relevanceBasis = 'profile';
   else if (search.trim()) relevanceBasis = 'search';
 
+  // Relevance needs BOTH a query vector (an anchor or typed text) and a live
+  // signals-search: the native fallback does no ranking, so a relevance
+  // request there comes back `sort_applied: 'newest'`. Offering the option in
+  // either case produced a menu that ticked relevance while the trigger read
+  // "Newest" (Q2).
+  const relevanceAvailable = relevanceBasis !== null && !listDegraded;
+
   const contentCount = viewMode === 'map' ? mapMarkers.total : singleDomainList.total;
   const contentLoading =
     viewMode === 'map' ? mapMarkers.isLoading : singleDomainList.isLoading;
@@ -1925,13 +1981,8 @@ export function HomePage() {
     <BrowseFiltersPanel
       domains={visibleDomains}
       filterFieldDomains={filterFieldDomains}
-      selectedDomains={mapSelectedDomains}
-      onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
-      // A specific sidebar domain already scopes browse + the enum groups to
-      // that domain, so the domain chip toggle is redundant there.
-      showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
     />
   );
@@ -1948,11 +1999,8 @@ export function HomePage() {
     <BrowseFiltersPanel
       domains={visibleDomains}
       filterFieldDomains={filterFieldDomains}
-      selectedDomains={mapSelectedDomains}
-      onDomainsChange={handleMapDomainsChange}
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
-      showDomainToggle={selectedDomain === null}
       viewMode={viewMode}
     />
   );
@@ -2001,6 +2049,7 @@ export function HomePage() {
             sortApplied={listSortApplied}
             // `nearest` needs a centre to order around.
             nearestAvailable={browseCoords !== null}
+            relevanceAvailable={relevanceAvailable}
             relevanceBasis={relevanceBasis}
             onSortChange={setSort}
             area={area}

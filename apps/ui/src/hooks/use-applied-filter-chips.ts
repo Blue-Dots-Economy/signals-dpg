@@ -7,7 +7,22 @@ export interface UseAppliedFilterChipsInput {
   search: string;
   setSearch: (next: string) => void;
   activeFieldFilters: Record<string, string[]>;
-  setFieldFilters: React.Dispatch<React.SetStateAction<Record<string, string[]>>>;
+  /**
+   * Applies a COMPLETE replacement facet set. Deliberately a plain setter and
+   * not `Dispatch<SetStateAction<…>>`: the caller has to be the handler that
+   * also rewrites the `?f_*` query params, and an updater-function form let a
+   * caller satisfy the type with the bare `useState` setter — which is exactly
+   * the bug this replaces (facets cleared in state, left in the URL, restored
+   * on the next reload).
+   */
+  setFieldFilters: (next: Record<string, string[]>) => void;
+  /**
+   * Human labels for facet keys, `field.key` → `field.label`, from
+   * `getEnumFilterFieldsForDomains`. Chips previously printed the raw schema
+   * key (`workExperienceYearsConditional`) while the filter panel showed the
+   * resolved title ("Years of Work Experience") for the same field.
+   */
+  fieldLabels: Record<string, string>;
   area: BrowseArea;
   setArea: (next: BrowseArea) => void;
   sort: BrowseSort;
@@ -43,8 +58,17 @@ export interface UseAppliedFilterChipsResult {
 export function useAppliedFilterChips(
   input: UseAppliedFilterChipsInput,
 ): UseAppliedFilterChipsResult {
-  const { search, setSearch, activeFieldFilters, setFieldFilters, area, setArea, sort, setSort } =
-    input;
+  const {
+    search,
+    setSearch,
+    activeFieldFilters,
+    setFieldFilters,
+    fieldLabels,
+    area,
+    setArea,
+    sort,
+    setSort,
+  } = input;
 
   const chips = React.useMemo<AppliedChip[]>(() => {
     const out: AppliedChip[] = [];
@@ -57,13 +81,13 @@ export function useAppliedFilterChips(
       out.push({
         kind: 'facet',
         id: `facet:${field}`,
-        label: `${field}: ${values.join(', ')}`,
+        label: `${fieldLabels[field] ?? field}: ${values.join(', ')}`,
         removable: true,
       });
     }
 
     return out;
-  }, [search, activeFieldFilters]);
+  }, [search, activeFieldFilters, fieldLabels]);
 
   const onRemove = React.useCallback(
     (chip: AppliedChip) => {
@@ -75,11 +99,9 @@ export function useAppliedFilterChips(
           break;
         case 'facet': {
           const field = chip.id.slice('facet:'.length);
-          setFieldFilters((prev) => {
-            const next = { ...prev };
-            delete next[field];
-            return next;
-          });
+          const next = { ...activeFieldFilters };
+          delete next[field];
+          setFieldFilters(next);
           break;
         }
         case 'area':
@@ -93,7 +115,7 @@ export function useAppliedFilterChips(
           break;
       }
     },
-    [setSearch, setFieldFilters, setArea, setSort],
+    [setSearch, setFieldFilters, activeFieldFilters, setArea, setSort],
   );
 
   const onClearAll = React.useCallback(() => {

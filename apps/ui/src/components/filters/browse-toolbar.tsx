@@ -19,6 +19,12 @@ export interface BrowseToolbarProps {
   /** `meta.sort_applied` — what the server actually did. */
   sortApplied?: BrowseSort;
   nearestAvailable: boolean;
+  /**
+   * False when the server cannot rank by relevance for this request (no anchor
+   * and no typed text, or the discover BFF degraded to its native path). The
+   * option is then omitted from the sort menu — see `SortSelect`.
+   */
+  relevanceAvailable?: boolean;
   relevanceBasis: 'profile' | 'search' | null;
   onSortChange: (next: BrowseSort) => void;
   area: BrowseArea;
@@ -95,6 +101,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             value={props.sort}
             applied={props.sortApplied}
             nearestAvailable={props.nearestAvailable}
+            relevanceAvailable={props.relevanceAvailable}
             basis={props.relevanceBasis}
             onChange={props.onSortChange}
           />

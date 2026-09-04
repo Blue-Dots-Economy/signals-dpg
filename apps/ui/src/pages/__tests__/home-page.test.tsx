@@ -428,11 +428,8 @@ vi.mock('@/components/map/map-container', () => ({
 interface FiltersStubProps {
   domains: DotNetworkDomain[];
   filterFieldDomains: DotNetworkDomain[];
-  selectedDomains: string[];
-  onDomainsChange: (domains: string[]) => void;
   selectedFields: Record<string, string[]>;
   onFieldsChange: (fields: Record<string, string[]>) => void;
-  showDomainToggle?: boolean;
   viewMode?: ViewMode;
 }
 
@@ -441,27 +438,19 @@ interface FiltersStubProps {
 // filter handlers and reflecting what the page hands back down.
 function FiltersStub({
   filterFieldDomains,
-  selectedDomains,
-  onDomainsChange,
   selectedFields,
   onFieldsChange,
-  showDomainToggle,
   viewMode,
 }: FiltersStubProps) {
   return (
     <div
       data-testid="filters-panel"
       data-view-mode={viewMode}
-      data-show-domain-toggle={String(showDomainToggle)}
       data-filter-field-domains={filterFieldDomains.map((d) => d.id).join(',')}
-      data-selected-domains={selectedDomains.join(',')}
       data-selected-fields={JSON.stringify(selectedFields)}
     >
       <button type="button" onClick={() => onFieldsChange({ gender: ['female'] })}>
         apply gender filter
-      </button>
-      <button type="button" onClick={() => onDomainsChange(['mentor'])}>
-        apply domain filter
       </button>
     </div>
   );
@@ -901,19 +890,54 @@ describe('HomePage — filter panel wiring', () => {
     );
   });
 
-  // #644 (spec D12): the map's domain selection is a MAP concern. It used to
-  // feed the list's client-side card filter too, which meant picking a domain
-  // other than the browsed one blanked the list entirely. It is recorded in
-  // the URL and shapes the map; it must not empty the list.
-  it('records the map domain selection in the URL without emptying the list', async () => {
+  // #644 (spec D12): the map's domain selection is a MAP concern, recorded
+  // separately from the list's `?domain=`. Since #645 D10/D11 there is ONE
+  // domain control: multi-select on the map (writing `map_domains`),
+  // single-select on the list (writing `domain`). The old panel multi-select
+  // that could set `map_domains` while sitting on the list — and blank the
+  // list by doing so — no longer exists, so this asserts the map half.
+  it('records the map domain selection in the URL', async () => {
     signedInSeeker();
-    renderHome('/?view=list');
+    renderHome('/?view=map');
+
+    // The map starts with every visible domain selected, so clicking one
+    // DESELECTS it and the URL records the remainder.
+    await userEvent.click(await screen.findByRole('button', { name: /Mentor/ }));
+
+    await waitFor(() => expect(url()).toContain('map_domains='));
+    expect(url()).toContain('map_domains=provider');
+    expect(url()).not.toContain('mentor');
+  });
+
+  // #644 QA (Q6/Q7). The fixture's `city` is declared by SEEKER only and
+  // `gender` by PROVIDER only, mirroring blue_dot, where the seeker and
+  // provider schemas share no field names at all.
+  it('prunes a facet the queried domain does not declare, from state AND the URL', async () => {
+    signedInSeeker();
+    renderHome('/?view=list&domain=provider&f_city=Mysuru');
     await findCard('Acme Welding');
 
-    await userEvent.click(screen.getByRole('button', { name: 'apply domain filter' }));
+    // The server drops an undeclared facet SILENTLY (`resolveAllowedFacetFields`
+    // — never a 4xx, so a caller cannot probe for private fields), so leaving
+    // it applied returned the domain UNFILTERED while the chip bar still
+    // advertised the filter as active.
+    await waitFor(() => expect(url()).not.toContain('f_city'));
+    expect(screen.getByTestId('filters-panel')).toHaveAttribute(
+      'data-selected-fields',
+      '{}',
+    );
+    expect(browseOptsFor('provider')?.filters).toEqual([]);
+  });
 
-    await waitFor(() => expect(url()).toContain('map_domains=mentor'));
-    expectCard('Acme Welding');
+  it('keeps a facet the queried domain DOES declare', async () => {
+    signedInSeeker();
+    renderHome('/?view=list&domain=provider&f_gender=female');
+    await findCard('Acme Welding');
+
+    expect(url()).toContain('f_gender=female');
+    expect(browseOptsFor('provider')?.filters).toEqual([
+      { field: 'gender', values: ['female'] },
+    ]);
   });
 
   it('forwards facet selections to the map marker fetch as server-side filters', async () => {

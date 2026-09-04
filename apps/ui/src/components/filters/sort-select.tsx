@@ -21,6 +21,15 @@ export interface SortSelectProps {
    * applies.
    */
   basis: 'profile' | 'search' | null;
+  /**
+   * False when the server cannot rank by relevance for this request — no
+   * anchor and no typed text, or signals-search is unreachable and the BFF
+   * degraded to the native path (`meta.source: 'native_fallback'`). The option
+   * is then OMITTED rather than offered: picking it produced a menu that
+   * ticked "Relevance to your profile" while the trigger read "Newest",
+   * because the server reported `sort_applied: newest` (Q2).
+   */
+  relevanceAvailable?: boolean;
   onChange: (next: BrowseSort) => void;
 }
 
@@ -39,6 +48,7 @@ export function SortSelect({
   applied,
   nearestAvailable,
   basis,
+  relevanceAvailable = true,
   onChange,
 }: Readonly<SortSelectProps>) {
   const { t } = useTranslation();
@@ -70,8 +80,16 @@ export function SortSelect({
       value={value}
       onChange={onChange}
       options={[
-        { value: 'relevance', label: relevanceLabel },
-        { value: 'newest', label: t('browse.sort_newest') },
+        ...(relevanceAvailable
+          ? [{ value: 'relevance' as const, label: relevanceLabel }]
+          : []),
+        // Names its basis (`items.created_at`) so a card's "6 days ago" is not
+        // ambiguous between posting date and last-edit date (Q3).
+        {
+          value: 'newest' as const,
+          label: t('browse.sort_newest'),
+          hint: t('browse.sort_newest_hint'),
+        },
         {
           value: 'nearest',
           label: t('browse.sort_nearest'),

@@ -96,8 +96,6 @@ export function TouristApp() {
       domain ? (
         <BrowseFiltersPanel
           domains={[domain]}
-          selectedDomains={[]}
-          onDomainsChange={() => {}}
           selectedFields={selectedFields}
           onFieldsChange={setSelectedFields}
           viewMode={viewMode}

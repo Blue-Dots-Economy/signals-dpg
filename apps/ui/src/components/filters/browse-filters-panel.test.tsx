@@ -32,8 +32,6 @@ describe('BrowseFiltersPanel — same enum-field set on map and list (#394)', ()
     render(
       <BrowseFiltersPanel
         domains={[domain]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
         viewMode="map"
@@ -47,8 +45,6 @@ describe('BrowseFiltersPanel — same enum-field set on map and list (#394)', ()
     render(
       <BrowseFiltersPanel
         domains={[domain]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
         viewMode="list"
@@ -74,8 +70,6 @@ describe('BrowseFiltersPanel — same enum-field set on map and list (#394)', ()
     const { container } = render(
       <BrowseFiltersPanel
         domains={[domain]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
         viewMode="map"

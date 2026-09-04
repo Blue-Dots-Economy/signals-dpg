@@ -132,3 +132,57 @@ describe('DomainControl — accessibility', () => {
     }
   });
 });
+
+describe('DomainControl — single selectable domain', () => {
+  it('states the domain instead of rendering a control (Q1)', () => {
+    // A seeker in a network with no seeker->seeker edge had exactly one
+    // selectable domain and still got a permanently disabled `Seeker` button
+    // beside it, which reads as a broken control rather than "this is the
+    // only thing you can browse".
+    render(
+      <DomainControl
+        options={[
+          { id: 'provider', label: 'Provider', available: true },
+          { id: 'seeker', label: 'Seeker', available: false, unavailableReason: "You can't connect with other seekers" },
+        ]}
+        mode="single"
+        selected={['provider']}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId('domain-single-label')).toHaveTextContent('Provider');
+    expect(screen.queryByRole('group')).toBeNull();
+    expect(screen.queryByRole('button', { name: /Seeker/ })).toBeNull();
+  });
+
+  it('still renders the control when two domains are selectable', () => {
+    render(
+      <DomainControl
+        options={[
+          { id: 'provider', label: 'Provider', available: true },
+          { id: 'seeker', label: 'Seeker', available: true },
+        ]}
+        mode="single"
+        selected={['provider']}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.queryByTestId('domain-single-label')).toBeNull();
+    expect(screen.getByRole('group')).toBeInTheDocument();
+  });
+
+  it('renders nothing when no domain is selectable at all', () => {
+    const { container } = render(
+      <DomainControl
+        options={[{ id: 'seeker', label: 'Seeker', available: false }]}
+        mode="single"
+        selected={[]}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
+});

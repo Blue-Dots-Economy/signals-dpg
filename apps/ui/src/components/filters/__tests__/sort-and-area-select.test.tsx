@@ -170,3 +170,58 @@ describe('AreaSelect', () => {
     expect(screen.getByRole('button', { name: /area/i })).toHaveTextContent(/10 km/i);
   });
 });
+
+describe('SortSelect — relevance availability', () => {
+  it('OMITS relevance when the server cannot rank by it (Q2)', async () => {
+    // Signed out with no typed text, or signals-search down and the BFF
+    // degraded to its native path: the request comes back
+    // `sort_applied: 'newest'`. Offering the option produced a menu that
+    // ticked "Relevance to your profile" while the trigger read "Newest".
+    render(
+      <SortSelect
+        value="newest"
+        applied="newest"
+        nearestAvailable
+        basis={null}
+        relevanceAvailable={false}
+        onChange={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /sort/i }));
+
+    expect(screen.queryByRole('option', { name: /relevance/i })).toBeNull();
+    expect(screen.getByRole('option', { name: /newest/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /nearest/i })).toBeInTheDocument();
+  });
+
+  it('offers relevance when it is available', async () => {
+    render(
+      <SortSelect
+        value="relevance"
+        applied="relevance"
+        nearestAvailable
+        basis="profile"
+        relevanceAvailable
+        onChange={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /sort/i }));
+
+    expect(screen.getByRole('option', { name: /relevance/i })).toBeInTheDocument();
+  });
+
+  it('names what Newest sorts on, so a card age is unambiguous (Q3)', async () => {
+    render(
+      <SortSelect
+        value="newest"
+        applied="newest"
+        nearestAvailable
+        basis={null}
+        onChange={() => {}}
+      />,
+    );
+    await userEvent.click(screen.getByRole('button', { name: /sort/i }));
+
+    expect(screen.getByRole('option', { name: /newest/i })).toHaveTextContent(/date posted/i);
+  });
+});

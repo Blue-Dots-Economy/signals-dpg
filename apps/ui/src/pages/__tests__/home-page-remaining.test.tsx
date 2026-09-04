@@ -58,6 +58,11 @@ const providerSchema: RJSFSchema = {
   properties: {
     company: { type: 'string', title: 'Company' },
     gender: { type: 'string', title: 'Gender', enum: ['female', 'male'] },
+    // Declared so the facet-replacement test below filters on a field this
+    // domain actually honours. An undeclared facet is now pruned before it
+    // reaches the URL or the feed, mirroring the server's silent drop
+    // (`resolveAllowedFacetFields`) — see `resolveFacetFieldLabels`.
+    city: { type: 'string', title: 'City', enum: ['Mysuru', 'Bengaluru'] },
   },
 };
 

@@ -8,7 +8,6 @@ import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
-import { formatDomainLabel } from '@/lib/domain-icons';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
 import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
@@ -34,10 +33,6 @@ export interface BrowseFiltersPanelProps {
    * domain.
    */
   filterFieldDomains?: DotNetworkDomain[];
-  /** Currently selected domain filter values. Empty array = all. */
-  selectedDomains: string[];
-  /** Called when the domain filter selection changes. */
-  onDomainsChange: (domains: string[]) => void;
   /**
    * Currently selected enum-field filter values.
    * Map of fieldKey → selected option values. Empty array = all.
@@ -45,12 +40,6 @@ export interface BrowseFiltersPanelProps {
   selectedFields: Record<string, string[]>;
   /** Called when any enum field filter selection changes. */
   onFieldsChange: (fields: Record<string, string[]>) => void;
-  /**
-   * Whether to show the DOMAIN chip group. Defaults to true. Hidden when the
-   * sidebar already scopes browse to a single domain — the toggle would be
-   * redundant, and the enum groups below already reflect just that domain.
-   */
-  showDomainToggle?: boolean;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
 }
@@ -123,11 +112,8 @@ function FilterGroup({ title, children }: Readonly<FilterGroupProps>) {
 export function BrowseFiltersPanel({
   domains,
   filterFieldDomains,
-  selectedDomains,
-  onDomainsChange,
   selectedFields,
   onFieldsChange,
-  showDomainToggle = true,
   viewMode = 'map',
 }: Readonly<BrowseFiltersPanelProps>) {
   const { t } = useTranslation();
@@ -148,7 +134,6 @@ export function BrowseFiltersPanel({
     [filterFieldDomains, domains],
   );
 
-  const showDomainGroup = showDomainToggle && domains.length > 1;
   const showEnumGroups = enumFilterFields.length > 0;
 
   // Count of active selections across all enum fields
@@ -157,19 +142,13 @@ export function BrowseFiltersPanel({
     0,
   );
 
-  const activeCount = selectedDomains.length + enumActiveCount;
+  // Facets ONLY. Domain used to be counted here, which made a single facet
+  // read as "2" on the trigger badge — domain moved out to the toolbar's
+  // DomainControl (#645 D10) and is no longer one of this panel's groups.
+  const activeCount = enumActiveCount;
 
   const handleClearAll = () => {
-    onDomainsChange([]);
     onFieldsChange({});
-  };
-
-  const toggleDomain = (domainId: string) => {
-    onDomainsChange(
-      selectedDomains.includes(domainId)
-        ? selectedDomains.filter((d) => d !== domainId)
-        : [...selectedDomains, domainId],
-    );
   };
 
   const toggleEnumValue = (fieldKey: string, value: string) => {
@@ -186,8 +165,10 @@ export function BrowseFiltersPanel({
     onFieldsChange(updated);
   };
 
-  // Nothing to filter — don't render the pill at all
-  if (!showDomainGroup && !showEnumGroups) return null;
+  // Nothing to filter — don't render the pill at all. Facets are now the only
+  // group (domain moved to the toolbar's DomainControl), so this is the sole
+  // condition.
+  if (!showEnumGroups) return null;
 
   const renderTrigger = (onClick?: () => void) => (
     <Button
@@ -259,23 +240,6 @@ export function BrowseFiltersPanel({
 
       {/* ── Scrollable filter groups ────────────────────────────────────────── */}
       <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
-        {showDomainGroup && (
-          <FilterGroup title={t('filters.domain_group')}>
-            {domains.map((domain) => {
-              const label = formatDomainLabel(domain.id, domains);
-              return (
-                <Chip
-                  key={domain.id}
-                  label={label}
-                  selected={selectedDomains.includes(domain.id)}
-                  onToggle={() => toggleDomain(domain.id)}
-                  ariaLabel={`Filter by domain: ${label}`}
-                />
-              );
-            })}
-          </FilterGroup>
-        )}
-
         {enumFilterFields.map((field) => {
           const fieldSelected = selectedFields[field.key] ?? [];
 

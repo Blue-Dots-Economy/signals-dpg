@@ -650,76 +650,30 @@ describe('BrowseFiltersPanel — domain chips', () => {
     bridge().isMobile = false;
   });
 
-  it('humanises each domain id into a chip and toggles it on selection', async () => {
-    const onDomainsChange = vi.fn();
+  it('offers NO domain group — domain moved to the toolbar DomainControl', async () => {
+    // #645 D10: domain is selected in the browse toolbar, not here. The panel
+    // kept a second, multi-select copy that was already unreachable
+    // (`showDomainToggle` was `selectedDomain === null`, and a domain is now
+    // always selected), while still counting toward the trigger badge.
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={onDomainsChange}
         selectedFields={{}}
         onFieldsChange={() => {}}
-      />,
-    );
-    await openPanel();
-
-    const chip = screen.getByRole('button', { name: 'Filter by domain: Job Provider' });
-    expect(chip).toHaveAttribute('aria-pressed', 'false');
-    expect(chip).toHaveTextContent('Job Provider');
-
-    await userEvent.click(chip);
-
-    expect(onDomainsChange).toHaveBeenCalledWith(['job_provider']);
-  });
-
-  it('deselects an already-selected domain chip', async () => {
-    const onDomainsChange = vi.fn();
-    render(
-      <BrowseFiltersPanel
-        domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={['seeker', 'job_provider']}
-        onDomainsChange={onDomainsChange}
-        selectedFields={{}}
-        onFieldsChange={() => {}}
-      />,
-    );
-    await openPanel();
-
-    const chip = screen.getByRole('button', { name: 'Filter by domain: Seeker' });
-    expect(chip).toHaveAttribute('aria-pressed', 'true');
-
-    await userEvent.click(chip);
-
-    expect(onDomainsChange).toHaveBeenCalledWith(['job_provider']);
-  });
-
-  it('hides the domain group when the sidebar already scopes browse to one domain', async () => {
-    render(
-      <BrowseFiltersPanel
-        domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
-        selectedFields={{}}
-        onFieldsChange={() => {}}
-        showDomainToggle={false}
       />,
     );
     await openPanel();
 
     expect(screen.queryByText('Domain')).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: 'Filter by domain: Seeker' }),
+      screen.queryByRole('button', { name: /^Filter by domain:/ }),
     ).not.toBeInTheDocument();
-    // The enum groups are still offered.
-    expect(screen.getByRole('button', { name: 'Filter by Looking For: Job' })).toBeInTheDocument();
   });
 
-  it('renders nothing at all when there is neither a domain group nor an enum group', () => {
+  it('renders nothing at all when the domain declares no enum field', () => {
     const { container } = render(
       <BrowseFiltersPanel
         domains={[domain('seeker', { bio: { type: 'string' } })]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -739,8 +693,6 @@ describe('BrowseFiltersPanel — enum chip groups', () => {
       <BrowseFiltersPanel
         domains={[SEEKER]}
         filterFieldDomains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -758,8 +710,6 @@ describe('BrowseFiltersPanel — enum chip groups', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{ looking_for: ['Job'] }}
         onFieldsChange={onFieldsChange}
       />,
@@ -778,8 +728,6 @@ describe('BrowseFiltersPanel — enum chip groups', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{ looking_for: ['Job'] }}
         onFieldsChange={onFieldsChange}
       />,
@@ -791,26 +739,24 @@ describe('BrowseFiltersPanel — enum chip groups', () => {
     expect(onFieldsChange).toHaveBeenCalledWith({});
   });
 
-  it('badges the trigger with the total active count across domains and fields', () => {
+  it('badges the trigger with the FACET count only, never the domain', () => {
+    // Was `selectedDomains.length + enumActiveCount`, so a single facet read
+    // as "2" on the badge (Q9). Domain is not one of this panel's groups.
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={['seeker']}
-        onDomainsChange={() => {}}
         selectedFields={{ looking_for: ['Job', 'Internship'] }}
         onFieldsChange={() => {}}
       />,
     );
 
-    expect(screen.getByLabelText('3 selected')).toHaveTextContent('3');
+    expect(screen.getByLabelText('2 selected')).toHaveTextContent('2');
   });
 
   it('shows no count badge when nothing is selected', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -825,14 +771,14 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     bridge().isMobile = false;
   });
 
-  it('clears both the domain and field selections from one link', async () => {
-    const onDomainsChange = vi.fn();
+  it('clears the field selections from one link, leaving domain alone', async () => {
+    // Clear-all used to also fire `onDomainsChange([])`. The list needs
+    // exactly one domain at all times (#645 D11), so resetting it to "none"
+    // is not a state the browse feed can fetch from.
     const onFieldsChange = vi.fn();
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={['seeker']}
-        onDomainsChange={onDomainsChange}
         selectedFields={{ looking_for: ['Job'] }}
         onFieldsChange={onFieldsChange}
       />,
@@ -841,7 +787,6 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear all' }));
 
-    expect(onDomainsChange).toHaveBeenCalledWith([]);
     expect(onFieldsChange).toHaveBeenCalledWith({});
   });
 
@@ -849,8 +794,6 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -864,20 +807,20 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
     );
     await openPanel();
-    expect(screen.getByRole('button', { name: 'Filter by domain: Seeker' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Filter by Looking For: Job' }),
+    ).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Close filters' }));
 
     await waitFor(() =>
       expect(
-        screen.queryByRole('button', { name: 'Filter by domain: Seeker' }),
+        screen.queryByRole('button', { name: 'Filter by Looking For: Job' }),
       ).not.toBeInTheDocument(),
     );
   });
@@ -886,8 +829,6 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
         viewMode="map"
@@ -904,8 +845,6 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
         viewMode="list"
@@ -920,9 +859,7 @@ describe('BrowseFiltersPanel — clear all, close and help text', () => {
     render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={['seeker']}
-        onDomainsChange={() => {}}
-        selectedFields={{}}
+        selectedFields={{ looking_for: ['Job'] }}
         onFieldsChange={() => {}}
       />,
     );
@@ -943,8 +880,6 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     render(
       <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -968,8 +903,6 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     render(
       <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{ district: ['Mysuru', 'Ballari'] }}
         onFieldsChange={() => {}}
       />,
@@ -986,8 +919,6 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     render(
       <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -1006,8 +937,6 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     render(
       <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -1026,8 +955,6 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     render(
       <BrowseFiltersPanel
         domains={[MANY_OPTION_DOMAIN]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{ district: ['Mysuru'] }}
         onFieldsChange={onFieldsChange}
       />,
@@ -1062,8 +989,6 @@ describe('BrowseFiltersPanel — mobile bottom sheet', () => {
     const { baseElement } = render(
       <BrowseFiltersPanel
         domains={[SEEKER, JOB_PROVIDER]}
-        selectedDomains={[]}
-        onDomainsChange={() => {}}
         selectedFields={{}}
         onFieldsChange={() => {}}
       />,
@@ -1079,7 +1004,7 @@ describe('BrowseFiltersPanel — mobile bottom sheet', () => {
     expect(baseElement.querySelector('[data-slot="drawer-close"]')).toBeFalsy();
     expect(screen.getByRole('button', { name: 'Close filters' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Filter by domain: Job Provider' }),
+      screen.getByRole('button', { name: 'Filter by Looking For: Job' }),
     ).toBeInTheDocument();
   });
 });

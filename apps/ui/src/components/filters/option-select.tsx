@@ -10,6 +10,12 @@ export interface SelectOption<T extends string> {
   available?: boolean;
   /** Required when `available` is false — already localized. */
   reason?: string;
+  /**
+   * Sub-label for a CHOOSABLE option, explaining what it sorts/filters on
+   * (e.g. "By date posted"). Distinct from `reason`, which explains why an
+   * option cannot be picked; an option never shows both.
+   */
+  hint?: string;
 }
 
 export interface OptionSelectProps<T extends string> {
@@ -102,6 +108,11 @@ export function OptionSelect<T extends string>({
                     {unavailable && o.reason && (
                       <span id={reasonId} className="mt-0.5 block font-normal">
                         {o.reason}
+                      </span>
+                    )}
+                    {!unavailable && o.hint && (
+                      <span className="mt-0.5 block font-normal text-muted-foreground">
+                        {o.hint}
                       </span>
                     )}
                   </span>

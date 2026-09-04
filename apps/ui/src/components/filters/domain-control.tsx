@@ -64,6 +64,25 @@ export function DomainControl({
     onChange(isOn ? selected.filter((s) => s !== id) : [...selected, id]);
   };
 
+  // Exactly one selectable domain → there is no choice to offer, so state the
+  // domain instead of rendering a control (Q1). A network whose interaction
+  // matrix gives a seeker no seeker->seeker edge otherwise showed a permanently
+  // disabled `Seeker` button next to `Provider`, which reads as a broken
+  // control rather than as "this is the only thing you can browse".
+  const selectable = options.filter((o) => o.available);
+  if (selectable.length <= 1) {
+    const only = selectable[0];
+    if (!only) return null;
+    return (
+      <p
+        data-testid="domain-single-label"
+        className="text-xs font-semibold text-muted-foreground"
+      >
+        {t('browse.domain_only', { domain: only.label })}
+      </p>
+    );
+  }
+
   return (
     // <fieldset> rather than <div role="group">: it carries an IMPLICIT group
     // role, so assistive tech and `getByRole('group')` behave identically while
