@@ -310,12 +310,9 @@ function isPlainObject(input: unknown): input is Record<string, unknown> {
 async function isRegisteredSourceInstance(
   event: StoredActionEvent
 ): Promise<boolean> {
-  let sourceOrigin: string;
-  try {
-    sourceOrigin = new URL(event.source_item.item_instance_url).origin;
-  } catch {
-    return false;
-  }
+  // The caller (mirrorActionEventToSourceInstance) has already parsed this URL
+  // via normalizeInstanceUrl before reaching here, so `new URL` cannot throw.
+  const sourceOrigin = new URL(event.source_item.item_instance_url).origin;
 
   const networkConfig = await getNetworkConfigById(
     event.source_item.item_network

@@ -39,6 +39,7 @@ vi.mock('@/network_configs', () => ({
 }));
 
 import { apiConfig } from '@/config';
+import { getNetworkConfigById } from '@/network_configs';
 import {
   buildActionEventPayload,
   buildNetworkActionTargetItem,
@@ -749,5 +750,45 @@ describe('mirrorActionEventToSourceInstance', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledTimes(1);
     expect(log.error.mock.calls[0][1]).toMatch(/possible SSRF/i);
+  });
+
+  it('refuses to mirror (no fetch) when a registered instance_url is itself unparseable', async () => {
+    vi.mocked(getNetworkConfigById).mockResolvedValueOnce({
+      id: 'n',
+      instances: [{ domain_id: 'd', instance_url: 'not-a-url' }],
+    } as unknown as Awaited<ReturnType<typeof getNetworkConfigById>>);
+    const fetchMock = vi.fn(async (_url: URL | string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const log = makeLog();
+    const event = makeEvent({ source_item: remoteRef, target_item: localRef });
+
+    await mirrorActionEventToSourceInstance(event, asLog(log));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.error.mock.calls[0][1]).toMatch(/possible SSRF/i);
+  });
+
+  it('refuses to mirror (no fetch) and logs when the network-config lookup throws', async () => {
+    vi.mocked(getNetworkConfigById).mockRejectedValueOnce(
+      new Error('network "n" is not configured')
+    );
+    const fetchMock = vi.fn(async (_url: URL | string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const log = makeLog();
+    const event = makeEvent({ source_item: remoteRef, target_item: localRef });
+
+    await mirrorActionEventToSourceInstance(event, asLog(log));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(log.error.mock.calls[0][1]).toMatch(/Failed to validate source instance/i);
   });
 });
