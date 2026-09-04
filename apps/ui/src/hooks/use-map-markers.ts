@@ -7,6 +7,7 @@ import { queryKeys } from '@/lib/query-keys';
 import { snapViewportForKey, padBbox, shouldRefetch, zoomBand, clampBbox } from '@/lib/map-viewport-snap';
 import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
 import { capForZoom } from '@/lib/map-caps';
+import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 
 // Map tier (spec §5.2 / §8): markers are lightweight pins, cached ~90s
 // client-side, mirrored by `cache_ttl_seconds` sent to the server so the
@@ -145,6 +146,37 @@ export function useMapMarkers(
   const q = search.trim();
   const active = network && viewport ? domains : [];
 
+  // Route each active facet to the domains that can actually honour it.
+  //
+  // The map issues ONE markers request per selected domain but used to send
+  // the same `filters` object to all of them. The server honours a facet only
+  // when the field is declared, non-private, on that domain's schema and
+  // drops any other one SILENTLY (`resolveAllowedFacetFields` — never a 4xx,
+  // so a caller cannot probe for private fields). With blue_dot's seeker and
+  // provider schemas sharing zero field names, filtering on a seeker field
+  // while both domains were selected returned every PROVIDER unfiltered.
+  //
+  // A domain that cannot satisfy an active facet is dropped from the fetch
+  // entirely rather than queried without it: the user constrained on an
+  // attribute those items do not have, so the honest answer is that none of
+  // them match — not all of them.
+  const facetRouting = React.useMemo(() => {
+    const activeFields = Object.keys(filters);
+    return new Map(
+      active.map((domain) => {
+        if (activeFields.length === 0) return [domain.id, { filters: {}, satisfiable: true }];
+        const declared = resolveFacetFieldLabels([domain]);
+        const applicable: Record<string, unknown> = {};
+        let satisfiable = true;
+        for (const field of activeFields) {
+          if (field in declared) applicable[field] = filters[field];
+          else satisfiable = false;
+        }
+        return [domain.id, { filters: applicable, satisfiable }];
+      }),
+    );
+  }, [active, filters]);
+
   // Bbox path (#203 map-serverside-search Task 4): both live map providers
   // now report `map.getBounds()` corners on every emit, so `viewport` has a
   // bbox in practice.
@@ -266,16 +298,29 @@ export function useMapMarkers(
     queries: active.map((domain) => {
       const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
       const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+      // Per-domain, so the cache key matches what is actually sent and two
+      // domains under the same facet selection don't share an entry.
+      const routed = facetRouting.get(domain.id) ?? { filters: {}, satisfiable: true };
+      const domainFilters = routed.filters;
       const keyFilters = snappedKey
         ? {
             snappedBbox: snappedKey.snappedBbox,
             zoomBand: snappedKey.zoomBand,
             bboxToken: bboxTokenRef.current,
-            filters,
+            filters: domainFilters,
+            satisfiable: routed.satisfiable,
             q,
             limit,
           }
-        : { latBucket, lngBucket, radiusBucket, filters, q, limit };
+        : {
+            latBucket,
+            lngBucket,
+            radiusBucket,
+            filters: domainFilters,
+            satisfiable: routed.satisfiable,
+            q,
+            limit,
+          };
       return {
         queryKey: queryKeys.markers(network!.id, domain.id, keyFilters),
         queryFn: async ({ signal }: { signal: AbortSignal }) =>
@@ -301,7 +346,7 @@ export function useMapMarkers(
                     item_longitude: viewport!.lng,
                     radius_meters: viewport!.radiusMeters,
                   }),
-              ...(Object.keys(filters).length > 0 ? { item_state: filters } : {}),
+              ...(Object.keys(domainFilters).length > 0 ? { item_state: domainFilters } : {}),
               ...(q ? { q } : {}),
               limit,
               cache_ttl_seconds: MAP_CACHE_TTL_SECONDS,
@@ -309,6 +354,11 @@ export function useMapMarkers(
             signal,
           ),
         staleTime: MAP_STALE_TIME_MS,
+        // A domain that cannot honour one of the active facets contributes
+        // nothing. Skipping the request (rather than sending it and letting
+        // the server drop the facet) is what makes the map agree with the
+        // filter: the alternative returned that domain's pins UNFILTERED.
+        enabled: routed.satisfiable,
       };
     }),
   });

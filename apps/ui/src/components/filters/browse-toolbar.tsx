@@ -1,18 +1,13 @@
 import { useTranslation } from 'react-i18next';
-import { DomainControl } from './domain-control';
 import { AppliedFilterChips } from './applied-filter-chips';
 import { SortSelect } from './sort-select';
 import { AreaSelect } from './area-select';
-import type { DomainOption } from './domain-control';
 import type { AppliedChip } from './applied-filter-chips';
 import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
 import type { ViewMode } from '@/engine/types';
 
 export interface BrowseToolbarProps {
   viewMode: ViewMode;
-  domainOptions: DomainOption[];
-  selectedDomains: string[];
-  onDomainsChange: (next: string[]) => void;
   /** Server-reported total for the active feed; omitted while loading. */
   count?: number;
   sort: BrowseSort;
@@ -73,25 +68,14 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
   const isMap = props.viewMode === 'map';
 
   return (
+    // ONE row. The domain control used to sit in a row of its own above this
+    // one; it now renders beside "Search near" over the content (see
+    // `PageShell`/`ContentHeader`), which frees this bar to be purely "what is
+    // filtering this list, and what does it total".
     <div data-testid="browse-toolbar" className="px-4 py-2 sm:px-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <DomainControl
-          options={props.domainOptions}
-          mode={isMap ? 'multi' : 'single'}
-          selected={props.selectedDomains}
-          onChange={props.onDomainsChange}
-        />
-        <span className="flex-1" />
-        {props.count !== undefined && (
-          <span className="text-xs font-semibold text-muted-foreground">
-            {t('browse.count_listings', { count: props.count })}
-          </span>
-        )}
-      </div>
-
       <div
         data-testid="toolbar-row-2"
-        className="mt-2 flex flex-wrap items-center gap-2 border-t border-dashed border-border pt-2"
+        className="flex flex-wrap items-center gap-2"
       >
         {/* Sort is ABSENT on the map (spec D26), not disabled: ordering is
             meaningless for a marker layer, and a disabled control invites the
@@ -141,6 +125,12 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
         ) : (
           <span className="text-xs italic text-muted-foreground">
             {t('browse.no_filters')}
+          </span>
+        )}
+        <span className="flex-1" />
+        {props.count !== undefined && (
+          <span className="text-xs font-semibold text-muted-foreground">
+            {t('browse.count_listings', { count: props.count })}
           </span>
         )}
       </div>

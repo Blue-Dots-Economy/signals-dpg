@@ -5,12 +5,6 @@ import type { BrowseToolbarProps } from '../browse-toolbar';
 
 const base: BrowseToolbarProps = {
   viewMode: 'list',
-  domainOptions: [
-    { id: 'provider', label: 'Provider', available: true },
-    { id: 'trainer', label: 'Trainer', available: true },
-  ],
-  selectedDomains: ['provider'],
-  onDomainsChange: vi.fn(),
   count: 248,
   sort: 'relevance',
   sortApplied: 'relevance',
@@ -27,12 +21,19 @@ const base: BrowseToolbarProps = {
 };
 
 describe('BrowseToolbar', () => {
-  it('renders the domain control, sort, area and the result count', () => {
+  // Domain selection moved OUT of this bar (it renders beside "Search near"
+  // over the content now), so its rendering and single-vs-multi behaviour are
+  // covered by domain-control.test.tsx rather than duplicated here.
+  it('renders sort, area and the result count', () => {
     render(<BrowseToolbar {...base} />);
-    expect(screen.getByRole('group', { name: /domain/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sort/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /area/i })).toBeInTheDocument();
     expect(screen.getByText(/248/)).toBeInTheDocument();
+  });
+
+  it('offers no domain control of its own', () => {
+    render(<BrowseToolbar {...base} />);
+    expect(screen.queryByRole('group', { name: /domain/i })).toBeNull();
   });
 
   it('omits the count while it is still loading', () => {
@@ -53,26 +54,6 @@ describe('BrowseToolbar', () => {
   it('offers area on the list, where it is the dense-map escape hatch', () => {
     render(<BrowseToolbar {...base} viewMode="list" />);
     expect(screen.getByRole('button', { name: /area/i })).toBeInTheDocument();
-  });
-
-  it('uses single-select domain on the list and multi-select on the map', () => {
-    const { rerender } = render(<BrowseToolbar {...base} viewMode="list" />);
-    expect(screen.getByRole('button', { name: /Provider/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
-    expect(screen.getByRole('button', { name: /Trainer/ })).toHaveAttribute(
-      'aria-pressed',
-      'false',
-    );
-
-    rerender(
-      <BrowseToolbar {...base} viewMode="map" selectedDomains={['provider', 'trainer']} />,
-    );
-    expect(screen.getByRole('button', { name: /Trainer/ })).toHaveAttribute(
-      'aria-pressed',
-      'true',
-    );
   });
 
   it('offers clear-all when only sort or area is non-default, though neither chips', () => {
@@ -121,23 +102,4 @@ describe('BrowseToolbar', () => {
     expect(screen.getByTestId('browse-toolbar').className).not.toMatch(/sticky/);
   });
 
-  it('surfaces an unavailable domain with its reason', () => {
-    render(
-      <BrowseToolbar
-        {...base}
-        domainOptions={[
-          ...base.domainOptions,
-          {
-            id: 'seeker',
-            label: 'Seeker',
-            available: false,
-            unavailableReason: "You can't connect with other seekers",
-          },
-        ]}
-      />,
-    );
-    const seeker = screen.getByRole('button', { name: /Seeker/ });
-    expect(seeker).toBeDisabled();
-    expect(seeker).toHaveAccessibleDescription(/can't connect with other seekers/i);
-  });
 });

@@ -20,7 +20,13 @@ interface ContentHeaderProps {
   actions?: ReactNode;
 }
 
-export function ContentHeader({ title, description, count, noProfilePrompt, actions }: ContentHeaderProps) {
+export function ContentHeader({
+  title,
+  description,
+  count,
+  noProfilePrompt,
+  actions,
+}: ContentHeaderProps) {
   const { t } = useTranslation();
   return (
     <div className="mb-6 space-y-3">

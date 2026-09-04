@@ -222,6 +222,6 @@ describe('SortSelect — relevance availability', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: /sort/i }));
 
-    expect(screen.getByRole('option', { name: /newest/i })).toHaveTextContent(/date posted/i);
+    expect(screen.getByRole('option', { name: /newest/i })).toHaveTextContent(/when it was posted/i);
   });
 });

@@ -25,9 +25,14 @@ const marker = (id: string, domain: string): Marker => ({
 });
 
 const network = { id: 'blue_dot' } as unknown as DotNetworkSchema;
+// Both declare `gender`, because the facet tests below filter on it and a
+// facet is only routed to a domain whose schema declares it — the server
+// drops an undeclared one silently, so sending it would return that domain
+// UNFILTERED (see "per-domain facet routing" at the bottom of this file).
+const genderSchema = { properties: { gender: { type: 'string' } } };
 const domains = [
-  { id: 'student', item_schemas: { 'profile_1.0': {} } },
-  { id: 'mentor', item_schemas: { 'profile_1.0': {} } },
+  { id: 'student', item_schemas: { 'profile_1.0': genderSchema } },
+  { id: 'mentor', item_schemas: { 'profile_1.0': genderSchema } },
 ] as unknown as DotNetworkDomain[];
 const viewport = { lat: 19.076, lng: 72.8777, radiusMeters: 3000 };
 
@@ -502,5 +507,76 @@ describe('useMapMarkers', () => {
       const secondCall = vi.mocked(fetchNetworkMarkers).mock.calls[1][0];
       expect(secondCall).toEqual(expect.objectContaining({ q: 'john' }));
     });
+  });
+});
+
+describe('useMapMarkers — per-domain facet routing', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Two domains declaring DIFFERENT facet fields, mirroring blue_dot, whose
+  // seeker and provider schemas share none.
+  const splitDomains = [
+    {
+      id: 'seeker',
+      item_schemas: { 'profile_1.0': { properties: { gender: { type: 'string' } } } },
+    },
+    {
+      id: 'provider',
+      item_schemas: { 'job_posting_1.0': { properties: { natureOfJob: { type: 'string' } } } },
+    },
+  ] as unknown as DotNetworkDomain[];
+
+  const okResponse = (domain: string): MarkersResponse => ({
+    meta: { total: 1, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+    markers: [marker(`m-${domain}`, domain)],
+  });
+
+  it('sends a facet ONLY to the domain that declares it', async () => {
+    vi.mocked(fetchNetworkMarkers).mockImplementation(async (q) => okResponse(q.item_domain));
+
+    renderHook(
+      () => useMapMarkers(network, splitDomains, viewport, { gender: ['Female'] }),
+      { wrapper },
+    );
+
+    // The server drops an undeclared facet SILENTLY, so sending `gender` to
+    // `provider` returned every provider pin UNFILTERED while the UI showed
+    // the filter as active. That domain is skipped instead.
+    await waitFor(() => expect(vi.mocked(fetchNetworkMarkers)).toHaveBeenCalled());
+    const calls = vi.mocked(fetchNetworkMarkers).mock.calls.map(([q]) => q);
+    const seeker = calls.find((q) => q.item_domain === 'seeker');
+    expect(seeker?.item_state).toEqual({ gender: ['Female'] });
+    expect(calls.some((q) => q.item_domain === 'provider')).toBe(false);
+  });
+
+  it('queries every domain when no facet is active', async () => {
+    vi.mocked(fetchNetworkMarkers).mockImplementation(async (q) => okResponse(q.item_domain));
+
+    renderHook(() => useMapMarkers(network, splitDomains, viewport), { wrapper });
+
+    await waitFor(() =>
+      expect(vi.mocked(fetchNetworkMarkers).mock.calls.length).toBe(2),
+    );
+    for (const [q] of vi.mocked(fetchNetworkMarkers).mock.calls) {
+      expect(q.item_state).toBeUndefined();
+    }
+  });
+
+  it('splits a mixed selection so each domain gets only its own field', async () => {
+    vi.mocked(fetchNetworkMarkers).mockImplementation(async (q) => okResponse(q.item_domain));
+
+    renderHook(
+      () =>
+        useMapMarkers(network, splitDomains, viewport, {
+          gender: ['Female'],
+          natureOfJob: ['Internship'],
+        }),
+      { wrapper },
+    );
+
+    // Neither domain declares BOTH fields, so neither can satisfy the full
+    // selection and the map legitimately shows nothing.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(vi.mocked(fetchNetworkMarkers)).not.toHaveBeenCalled();
   });
 });

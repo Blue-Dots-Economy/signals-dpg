@@ -175,10 +175,15 @@ describe('MapView — active map provider resolution', () => {
         </Boundary>,
       );
 
-      // Default active name comes from VITE_MAP_PROVIDER (unset in tests →
-      // 'leaflet'), and nothing has registered it, so MapView must fail loudly
-      // rather than silently rendering a map-less page.
-      expect(screen.getByText(/caught: No active map provider "leaflet"/)).toBeInTheDocument();
+      // The active name comes from VITE_MAP_PROVIDER, so it is NOT hardcoded
+      // here: a developer with `VITE_MAP_PROVIDER=google-maps` in their local
+      // .env would otherwise see this fail for a reason that has nothing to do
+      // with the behaviour under test. What matters is that MapView fails
+      // LOUDLY for an unregistered name rather than silently rendering a
+      // map-less page.
+      expect(
+        screen.getByText(/caught: No active map provider "[^"]+"/),
+      ).toBeInTheDocument();
     } finally {
       consoleError.mockRestore();
     }

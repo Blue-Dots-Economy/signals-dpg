@@ -29,6 +29,7 @@ import {
 } from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { MapErrorBoundary } from '@/components/map/map-error-boundary';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
@@ -69,6 +70,7 @@ import {
 import { BrowseToolbar } from '@/components/filters/browse-toolbar';
 import { useAppliedFilterChips } from '@/hooks/use-applied-filter-chips';
 import { resolveFacetFieldLabels } from '@/lib/facet-fields';
+import { DomainControl } from '@/components/filters/domain-control';
 import type { DomainOption } from '@/components/filters/domain-control';
 import { resolveDefaultDomain } from '@/lib/browse-domain';
 import { getServedScope } from '@/lib/served-binding';
@@ -1967,22 +1969,51 @@ export function HomePage() {
         </div>
       ) : undefined;
 
-    return !user ? (
-      <GuestHero />
-    ) : (
-      <ContentHeader
-        // No title/description/count here any more (#645). All three were
-        // duplicates of the browse toolbar directly above — and the title was
-        // actively WRONG on the map: it named a single domain (the sole visible
-        // one, or the list's selection) while the map's multi-select could have several
-        // selected, so choosing Seeker + Provider still read "Seeker". The
-        // toolbar's domain control is the one statement of what is on screen.
-        // This header now carries only the location toggle, Select, and the
-        // no-profile prompt.
-        count={undefined}
-        noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
-        actions={headerActions}
-      />
+    // The browse-context row, rendered for guests AND signed-in viewers.
+    //
+    // The domain control sits on the left, opposite the location/select
+    // controls — that half of the row was empty space. It CANNOT live inside
+    // `ContentHeader`, which only renders for a signed-in viewer: a guest gets
+    // `GuestHero` instead, so putting it there would hide the domain control
+    // from exactly the audience browsing without an account.
+    const browseContextRow = (
+      <div
+        data-testid="browse-context-row"
+        className="mb-4 flex flex-wrap items-center justify-between gap-3"
+      >
+        <DomainControl
+          options={domainOptions}
+          // The map is multi-domain and takes its own selection; the list is
+          // single-select on the one domain driving its feed (spec D11).
+          mode={viewMode === 'map' ? 'multi' : 'single'}
+          selected={toolbarSelectedDomains}
+          onChange={(next) => {
+            if (viewMode === 'map') {
+              handleMapDomainsChange(next);
+              return;
+            }
+            // Single-select: DomainControl always emits exactly one here.
+            if (next[0]) handleDomainSelect(next[0]);
+          }}
+        />
+        {headerActions}
+      </div>
+    );
+
+    return (
+      <>
+        {!user && <GuestHero />}
+        {browseContextRow}
+        {/* Signed-in only, and now its sole remaining job: prompt a viewer who
+            has no profile yet. Title/description/count all moved or went away
+            (#645) — see `ContentHeader`. */}
+        {user && (
+          <ContentHeader
+            count={undefined}
+            noProfilePrompt={{ show: !myItem, networkId: selectedNetworkId ?? '' }}
+          />
+        )}
+      </>
     );
   };
 
@@ -2041,18 +2072,6 @@ export function HomePage() {
         network ? (
           <BrowseToolbar
             viewMode={viewMode}
-            domainOptions={domainOptions}
-            // The map is multi-domain and takes its own selection; the list is
-            // single-select on the one domain driving its feed (spec D11).
-            selectedDomains={toolbarSelectedDomains}
-            onDomainsChange={(next) => {
-              if (viewMode === 'map') {
-                handleMapDomainsChange(next);
-                return;
-              }
-              // Single-select: DomainControl always emits exactly one here.
-              if (next[0]) handleDomainSelect(next[0]);
-            }}
             count={contentLoading ? undefined : contentCount}
             sort={sort}
             sortApplied={listSortApplied}
@@ -2296,6 +2315,7 @@ export function HomePage() {
               </>
             ) : (
               <div className="relative h-full">
+                <MapErrorBoundary>
                 <MapView
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
@@ -2356,6 +2376,7 @@ export function HomePage() {
                     );
                   }}
                 />
+                </MapErrorBoundary>
                 {/* Map count pill (#203 §7, revised; extended by Task 6):
                     logged-out map view has no header count badge (that's a
                     logged-in ContentHeader), so this small non-blocking pill
