@@ -214,7 +214,14 @@ function makeExec() {
     order: [],
   };
   const queue: Row[][] = [];
-  const state = { failWith: null as Error | null };
+  const state = {
+    failWith: null as Error | null,
+    /** What the domain-claim UPDATE returns. Non-empty `rows` = the user had no
+     * domain and this create claimed it (the default). Set to `{ rows: [] }` to
+     * simulate an already-locked user, which sends `assertSingleDomain` on to
+     * its SELECT — feed that read via `queue`. */
+    domainClaim: { rows: [{ id: 'u1' }] } as { rows: Array<{ id: string }> },
+  };
 
   const next = (): Promise<Row[]> =>
     state.failWith
@@ -244,7 +251,13 @@ function makeExec() {
     execute: (q: unknown) => {
       rec.order.push('execute');
       rec.executes.push(q);
-      return Promise.resolve([]);
+      // `{ rows: [...] }` so `assertSingleDomain`'s domain-claim UPDATE reads as
+      // "claimed" and returns without its follow-up SELECT. Without this every
+      // create in this file would consume a `queue` entry for that read, and the
+      // queued rows are positional. The advisory-lock execute ignores its
+      // result, so one shape serves both callers. `domainClaim` below is how the
+      // already-locked path is exercised.
+      return Promise.resolve(state.domainClaim);
     },
     insert: (table: unknown) => ({
       values: (values: Row) => {
@@ -547,6 +560,90 @@ describe('createItemInternal — backend-generated URLs', () => {
   });
 });
 
+describe('createItemInternal — single-domain lock', () => {
+  it('claims the domain when the user has none, and never reads further', async () => {
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ n: 0 }]);
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams());
+
+    // The claim is one guarded UPDATE, first statement of the create.
+    expect(rec.order[0]).toBe('execute');
+    // No follow-up SELECT on `user` — the claim returning a row IS the verdict.
+    // (The one select here is the profile cap's count.)
+    expect(rec.order.filter((o) => o === 'select')).toHaveLength(1);
+  });
+
+  it('allows a create in the domain the user is already locked to', async () => {
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] }; // already locked → claim writes nothing
+    queue.push([{ domains: ['student'] }]); // the domain read
+    queue.push([{ n: 0 }]); // profile-cap count
+    queue.push([ROW]);
+
+    await expect(
+      createItemInternal(exec, createParams()),
+    ).resolves.toMatchObject({ itemId: ROW.itemId });
+  });
+
+  it('403 DOMAIN_LOCKED for a create in a different domain', async () => {
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] };
+    queue.push([{ domains: ['employer'] }]); // createParams defaults to 'student'
+
+    await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
+      statusCode: 403,
+      errorCode: 'DOMAIN_LOCKED',
+      // The UI reads these off the body — see create_item.ts's error mapper.
+      details: { locked_domain: 'employer', requested_domain: 'student' },
+    });
+  });
+
+  it('rejects the SECOND domain, whichever one it is', async () => {
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] };
+    queue.push([{ domains: ['seeker'] }]);
+
+    await expect(
+      createItemInternal(exec, createParams({ item_domain: 'service_provider' })),
+    ).rejects.toMatchObject({
+      statusCode: 403,
+      errorCode: 'DOMAIN_LOCKED',
+      details: { locked_domain: 'seeker', requested_domain: 'service_provider' },
+    });
+  });
+
+  it('allows a multi-domain legacy user in either of their recorded domains', async () => {
+    // Migration 0015 backfills BOTH domains for a user who already held items
+    // in two. The lock must not retroactively break them — it exists to stop
+    // NEW ones. `includes`, not `[0] ===`.
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] };
+    queue.push([{ domains: ['seeker', 'provider'] }]);
+    queue.push([{ n: 0 }]);
+    queue.push([ROW]);
+
+    await expect(
+      createItemInternal(exec, createParams({ item_domain: 'provider' })),
+    ).resolves.toMatchObject({ itemId: ROW.itemId });
+  });
+
+  it('lets a missing user row fall through to the items FK, not DOMAIN_LOCKED', async () => {
+    const { exec, queue, state } = makeExec();
+    state.domainClaim = { rows: [] }; // no row matched: user does not exist
+    queue.push([]); // the domain read finds nothing either
+    queue.push([{ n: 0 }]);
+    queue.push([ROW]);
+
+    // Reporting "you are registered as undefined" would be worse than letting
+    // the foreign key say what is actually wrong.
+    await expect(
+      createItemInternal(exec, createParams()),
+    ).resolves.toMatchObject({ itemId: ROW.itemId });
+  });
+});
+
 describe('createItemInternal — profile cap', () => {
   it('takes a transaction advisory lock on the (user, network, domain, type) scope before counting', async () => {
     const { exec, queue, rec } = makeExec();
@@ -555,8 +652,11 @@ describe('createItemInternal — profile cap', () => {
 
     await createItemInternal(exec, createParams());
 
-    expect(rec.order.slice(0, 2)).toEqual(['execute', 'select']);
-    expect(rec.executes[0]).toMatchObject({
+    // executes[0] is assertSingleDomain's domain claim, which runs first by
+    // design (see the ordering note at its call site); the cap's advisory lock
+    // is executes[1].
+    expect(rec.order.slice(0, 3)).toEqual(['execute', 'execute', 'select']);
+    expect(rec.executes[1]).toMatchObject({
       values: ['u1:blue_dot:student:profile_1.0'],
     });
   });
@@ -592,8 +692,10 @@ describe('createItemInternal — profile cap', () => {
 
     await createItemInternal(exec, createParams());
 
-    expect(rec.executes).toHaveLength(0);
-    expect(rec.order).toEqual(['insert']);
+    // The one execute is assertSingleDomain's domain claim, which is not part
+    // of the cap and is never skipped. No advisory lock, no count.
+    expect(rec.executes).toHaveLength(1);
+    expect(rec.order).toEqual(['execute', 'insert']);
   });
 
   it('skips the cap entirely for trusted callers (skip_profile_limit)', async () => {
@@ -602,8 +704,11 @@ describe('createItemInternal — profile cap', () => {
 
     await createItemInternal(exec, createParams({ skip_profile_limit: true }));
 
-    expect(rec.executes).toHaveLength(0);
-    expect(rec.order).toEqual(['insert']);
+    // `skip_profile_limit` skips the cap only. The single-domain lock has no
+    // opt-out — it underwrites per-domain default aggregators, so a trusted
+    // caller must not be able to introduce a second domain either.
+    expect(rec.executes).toHaveLength(1);
+    expect(rec.order).toEqual(['execute', 'insert']);
   });
 
   it('counts with no cap when the network config cannot be read', async () => {

@@ -45,10 +45,17 @@ const {
   class FakeItemServiceError extends Error {
     statusCode: number;
     errorCode: string;
-    constructor(statusCode: number, errorCode: string, message: string) {
+    details?: Record<string, unknown>;
+    constructor(
+      statusCode: number,
+      errorCode: string,
+      message: string,
+      details?: Record<string, unknown>,
+    ) {
       super(message);
       this.statusCode = statusCode;
       this.errorCode = errorCode;
+      this.details = details;
     }
   }
   return {
@@ -408,8 +415,20 @@ describe('create_item_handler guards', () => {
     expect(createItemInternal).not.toHaveBeenCalled();
   });
 
-  it('403 DOMAIN_LOCKED when user.domains holds a different domain', async () => {
-    rowQueue.push([{ domains: ['student'] }]);
+  // The single-domain lock itself now lives in `createItemInternal`
+  // (`assertSingleDomain`), so that it also covers `admin/participant` and
+  // admin api-key callers — both of which bypassed the check when it sat here.
+  // Its behaviour is covered in `services/__tests__/item_service.test.ts`.
+  // What remains this route's job is surfacing the error body intact.
+  it('surfaces DOMAIN_LOCKED with locked_domain / requested_domain from the service', async () => {
+    createItemInternal.mockRejectedValue(
+      new FakeItemServiceError(
+        403,
+        'DOMAIN_LOCKED',
+        'You are registered as "student" and cannot create items under "employer".',
+        { locked_domain: 'student', requested_domain: 'employer' },
+      )
+    );
 
     const reply = await call({
       user: { id: 'u1' },
@@ -421,26 +440,10 @@ describe('create_item_handler guards', () => {
 
     expect(reply.statusCode).toBe(403);
     expect(bodyOf(reply).error).toBe('DOMAIN_LOCKED');
+    // `apps/ui/src/lib/domain-gate.ts` reads both of these, so dropping them
+    // when the guard moved would have been a silent contract break.
     expect(bodyOf(reply).locked_domain).toBe('student');
     expect(bodyOf(reply).requested_domain).toBe('employer');
-  });
-
-  it('allows any served domain when user.domains is empty (first create)', async () => {
-    rowQueue.push([{ domains: [] }]);
-
-    const reply = await call({
-      user: { id: 'u1' },
-      body: baseBody({
-        item_domain: 'employer',
-        consent: { category: 'profile_creation', version: 1 },
-      }),
-    });
-
-    expect(reply.statusCode).toBe(201);
-    // ...and the first create bootstraps the single role on the user row.
-    expect(txUpdateSet).toHaveBeenCalledWith(
-      expect.objectContaining({ domains: ['employer'] })
-    );
   });
 
   // REGRESSION (#640): the tag must NOT be gated on the role bootstrap firing.
@@ -871,13 +874,4 @@ describe('error mapping', () => {
     expect(bodyOf(reply).error).toBe('INTERNAL_SERVER_ERROR');
   });
 
-  it('lets a domain-lock lookup rejection escape unmapped (pre-try/catch)', async () => {
-    dbState.failWith = new Error('db down');
-
-    // The lookup happens BEFORE the try/catch, so this rejection escapes the
-    // handler rather than being mapped to a response body.
-    await expect(
-      call({ user: { id: 'u1' }, body: consentBody() })
-    ).rejects.toThrow('db down');
-  });
 });

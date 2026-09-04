@@ -90,10 +90,26 @@ function locationsForStorage(
 export class ItemServiceError extends Error {
   statusCode: number;
   errorCode: string;
-  constructor(statusCode: number, errorCode: string, message: string) {
+  /**
+   * Extra machine-readable fields merged into the route's error body.
+   *
+   * Most service errors are `{ error, message }` and leave this undefined. It
+   * exists for guards whose response shape is already a published contract —
+   * `DOMAIN_LOCKED` carries `locked_domain` / `requested_domain`, which the UI's
+   * `domain-gate.ts` reads — so moving such a guard down into the service does
+   * not silently drop fields the client depends on.
+   */
+  details?: Record<string, unknown>;
+  constructor(
+    statusCode: number,
+    errorCode: string,
+    message: string,
+    details?: Record<string, unknown>,
+  ) {
     super(message);
     this.statusCode = statusCode;
     this.errorCode = errorCode;
+    this.details = details;
   }
 }
 
@@ -302,6 +318,81 @@ async function assertProfileLimit(
   }
 }
 
+/**
+ * Single-domain lock: a user holds profiles in exactly ONE domain, for life.
+ *
+ * The rule the network wants is simple — if Ravi is a seeker, every profile he
+ * ever creates is a seeker profile. The reason it is enforced *here* rather
+ * than at the route is that it is load-bearing for PII isolation, not just a
+ * product rule.
+ *
+ * `user.onboarded_by_org_id` (the aggregator that owns a participant, and so
+ * the org allowed to decrypt their PII) is per ACCOUNT and write-once, while
+ * profiles are per DOMAIN. A user holding profiles in two domains therefore has
+ * one owner covering both — so with a per-domain default aggregator, the seeker
+ * default could decrypt that user's provider profile. Keeping every account to
+ * a single domain removes the ambiguity at the source, which is what allows
+ * separate default aggregators per domain to exist at all
+ * (`organization_single_default_idx` was the blunt stand-in for this).
+ *
+ * Enforced at this choke point so every create path inherits it — the same
+ * reasoning as the profile cap directly below. The route-level check this
+ * replaces was skipped for admin api-key callers and absent entirely from
+ * `POST /admin/participant`, which is precisely the aggregator/voice path where
+ * a second domain could be introduced.
+ *
+ * Also *records* the domain on a user who has none yet, so the lock has data to
+ * work with: `admin/participant` never wrote `user.domains`, which left every
+ * aggregator-onboarded participant permanently unlocked. Recording it here
+ * means no create path can leave the column unset. Historical rows are handled
+ * by the backfill in migration 0015.
+ *
+ * Concurrency: the UPDATE's row lock serialises two racing first-creates in
+ * different domains. The second blocks on the row, re-evaluates its WHERE
+ * against the committed value, matches nothing, and falls through to the read
+ * below — which now sees the winner's domain and rejects. No advisory lock
+ * needed, and none taken, so this cannot deadlock against `assertProfileLimit`.
+ *
+ * @throws ItemServiceError 403 DOMAIN_LOCKED when the user is locked to another
+ *   domain. The body carries `locked_domain` / `requested_domain`, the shape
+ *   `apps/ui/src/lib/domain-gate.ts` already expects.
+ */
+async function assertSingleDomain(
+  exec: DbOrTx,
+  params: Pick<CreateItemServiceParams, 'created_by' | 'item_domain'>,
+): Promise<void> {
+  // Claim the domain when the user has none. A no-op for an already-locked
+  // user: the guard matches no rows, so nothing is written and no version is
+  // burned.
+  const claimed = (await exec.execute(sql`
+    UPDATE "user"
+       SET domains = ARRAY[${params.item_domain}]::text[],
+           updated_at = now()
+     WHERE id = ${params.created_by}
+       AND (domains IS NULL OR cardinality(domains) = 0)
+    RETURNING id`)) as unknown as { rows?: Array<{ id: string }> };
+  if ((claimed.rows ?? []).length > 0) return;
+
+  const [row] = await exec
+    .select({ domains: user.domains })
+    .from(user)
+    .where(eq(user.id, params.created_by))
+    .limit(1);
+  const allowed = row?.domains ?? [];
+
+  // Empty here means the user row is missing (the claim above would have fired
+  // otherwise). Let the items FK raise that, rather than dressing a missing
+  // user up as a domain error.
+  if (allowed.length === 0 || allowed.includes(params.item_domain)) return;
+
+  throw new ItemServiceError(
+    403,
+    'DOMAIN_LOCKED',
+    `You are registered as "${allowed[0]}" and cannot create items under "${params.item_domain}".`,
+    { locked_domain: allowed[0], requested_domain: params.item_domain },
+  );
+}
+
 export async function createItemInternal(
   exec: DbOrTx,
   params: CreateItemServiceParams
@@ -313,6 +404,11 @@ export async function createItemInternal(
     item_type: params.item_type,
     submittedItemState,
   });
+
+  // Single-domain lock. Before the cap: being in the wrong domain entirely is a
+  // more fundamental refusal than being at the cap within the right one, and a
+  // fixed order between the two guards keeps their locking non-reorderable.
+  await assertSingleDomain(exec, params);
 
   // Per-user profile cap (#349). Enforced at this single choke point so every
   // create path (item/create, admin/participant, aggregator bulk + reg-links)

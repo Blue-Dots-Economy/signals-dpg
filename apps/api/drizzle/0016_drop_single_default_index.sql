@@ -1,0 +1,1 @@
+DROP INDEX "organization_single_default_idx";
