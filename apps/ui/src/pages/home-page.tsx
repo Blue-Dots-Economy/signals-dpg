@@ -1111,9 +1111,29 @@ export function HomePage() {
   const [area, setArea] = React.useState<BrowseArea>(DEFAULT_BROWSE_AREA);
   const [sort, setSort] = React.useState<BrowseSort>('relevance');
 
+  // An active RADIUS is re-centred on whatever "Search near" currently
+  // resolves, rather than on the centre captured when it was picked.
+  //
+  // `AreaSelect` snapshots `center` into the area state at pick time (the
+  // shape #644 specifies), so without this, choosing "Within 5 km" while on
+  // "My profile" and then switching to "Current location" left the radius
+  // measuring from the profile — the control said one thing and the query did
+  // another. `browseCoords` follows `preferredSource`
+  // (`useUserLocation(profileLocation, profilesResolved, preferredSource)`),
+  // so re-deriving here is all it takes.
+  //
+  // Falls back to the captured centre when no location resolves at all:
+  // dropping the filter silently would be worse than measuring from where the
+  // user last asked. `viewport` is untouched — its centre IS the rectangle.
+  const resolvedArea = React.useMemo<BrowseArea>(
+    () =>
+      area.mode === 'radius' ? { ...area, center: browseCoords ?? area.center } : area,
+    [area, browseCoords],
+  );
+
   const browseParams = React.useMemo<DerivedBrowseParams>(
-    () => deriveBrowseParams({ search, activeFieldFilters, area, sort }),
-    [search, activeFieldFilters, area, sort],
+    () => deriveBrowseParams({ search, activeFieldFilters, area: resolvedArea, sort }),
+    [search, activeFieldFilters, resolvedArea, sort],
   );
   // Passed to the feed as the ORDERING centre only — it never filters.
   const browseLocation = browseCoords;

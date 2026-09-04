@@ -1376,3 +1376,160 @@ describe('POST /discover — viewport area mode (contract §1.5)', () => {
     expect(nativeFilters?.radius_meters).toBeUndefined();
   });
 });
+
+/**
+ * PARITY. Every area mode and sort has to behave the same whether
+ * signals-search answers or the native fallback does — otherwise the list
+ * silently changes meaning when the search service is down, which locally is
+ * always and in production is an outage.
+ *
+ * The two implementations necessarily differ (an HTTP envelope vs SQL), so
+ * this asserts the OBSERVABLE contract on both: which spatial constraint is
+ * applied, and which ordering. It is the test that would have caught the
+ * native path still inferring its ORDER BY from the presence of coordinates
+ * (#644 P3), where an area filter silently reordered a `newest` list.
+ */
+describe('POST /discover — signals-search and native parity (contract §7)', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    searchSignalsMock.mockReset();
+    fetchItemsAcrossInstancesMock.mockReset();
+    signalsSearchConfig.distanceMeters = undefined;
+    app = buildApp();
+  });
+
+  const RADIUS = { item_latitude: 12.97, item_longitude: 77.59, distance_meters: 5000 };
+  const BOX = { min_lat: 12.8, min_lng: 77.4, max_lat: 13.1, max_lng: 77.8 };
+
+  async function viaSearch(extra: Record<string, unknown>, applied = 'newest') {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, sort_applied: applied },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(extra),
+    });
+    return {
+      applied: (res.json() as { meta: { sort_applied: string } }).meta.sort_applied,
+      sent: searchSignalsMock.mock.calls[0]?.[0] as Record<string, unknown>,
+    };
+  }
+
+  async function viaNative(extra: Record<string, unknown>) {
+    searchSignalsMock.mockRejectedValueOnce(new Error('unavailable'));
+    fetchItemsAcrossInstancesMock.mockResolvedValueOnce({
+      items: [],
+      meta: { total: 0, limit: 20, offset: 0, partial: false, unavailable_instances: [] },
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody(extra),
+    });
+    return {
+      applied: (res.json() as { meta: { sort_applied: string } }).meta.sort_applied,
+      filters: fetchItemsAcrossInstancesMock.mock.calls[0]?.[0]?.filters as Record<
+        string,
+        unknown
+      >,
+    };
+  }
+
+  it('anywhere + newest: neither path applies any spatial constraint', async () => {
+    const search = await viaSearch({ sort: 'newest' });
+    expect(search.sent.lat).toBeUndefined();
+    expect(search.sent.minLat).toBeUndefined();
+
+    const native = await viaNative({ sort: 'newest' });
+    expect(native.filters.item_latitude).toBeUndefined();
+    expect(native.filters.min_lat).toBeUndefined();
+    expect(native.filters.order_by).toBe('created_at');
+  });
+
+  it('radius + newest: both bound by the radius, and NEITHER reorders', async () => {
+    // The defect this pins: the native ORDER BY used to key off the presence
+    // of coordinates, so this exact request came back distance-ordered.
+    const search = await viaSearch({ sort: 'newest', ...RADIUS });
+    expect(search.sent.lat).toBe(12.97);
+    expect(search.sent.distanceMeters).toBe(5000);
+    expect(search.applied).toBe('newest');
+
+    const native = await viaNative({ sort: 'newest', ...RADIUS });
+    expect(native.filters.item_latitude).toBe(12.97);
+    expect(native.filters.radius_meters).toBe(5000);
+    expect(native.filters.order_by).toBe('created_at');
+    expect(native.applied).toBe('newest');
+  });
+
+  it('radius + nearest: both bound AND order by distance', async () => {
+    const search = await viaSearch({ sort: 'nearest', ...RADIUS }, 'nearest');
+    expect(search.sent.lat).toBe(12.97);
+    expect(search.applied).toBe('nearest');
+
+    const native = await viaNative({ sort: 'nearest', ...RADIUS });
+    expect(native.filters.item_latitude).toBe(12.97);
+    expect(native.filters.order_by).toBe('distance');
+    expect(native.applied).toBe('nearest');
+  });
+
+  it('viewport + newest: both bound by the box, and NEITHER reorders', async () => {
+    const search = await viaSearch({ sort: 'newest', ...BOX });
+    expect(search.sent.minLat).toBe(12.8);
+    expect(search.sent.maxLng).toBe(77.8);
+    expect(search.sent.lat).toBeUndefined();
+
+    const native = await viaNative({ sort: 'newest', ...BOX });
+    expect(native.filters.min_lat).toBe(12.8);
+    expect(native.filters.max_lng).toBe(77.8);
+    expect(native.filters.radius_meters).toBeUndefined();
+    expect(native.filters.order_by).toBe('created_at');
+  });
+
+  it('viewport alone + nearest: BOTH degrade to newest, having no centre', async () => {
+    // A bbox carries no centre, and neither path may invent one from the
+    // rectangle's midpoint — that would let "search this area" change the
+    // sort (contract §1.3 rule 2 is s_dwithin-only).
+    const search = await viaSearch({ sort: 'nearest', ...BOX });
+    expect(search.applied).toBe('newest');
+
+    const native = await viaNative({ sort: 'nearest', ...BOX });
+    expect(native.applied).toBe('newest');
+    expect(native.filters.order_by).toBe('created_at');
+  });
+
+  it('viewport + an explicit ordering centre + nearest: both bound by the box and order by distance', async () => {
+    const centre = { ordering_latitude: 12.95, ordering_longitude: 77.6 };
+
+    const search = await viaSearch({ sort: 'nearest', ...BOX, ...centre }, 'nearest');
+    expect(search.sent.minLat).toBe(12.8);
+    expect(search.sent.orderingLat).toBe(12.95);
+    expect(search.applied).toBe('nearest');
+
+    const native = await viaNative({ sort: 'nearest', ...BOX, ...centre });
+    expect(native.filters.min_lat).toBe(12.8);
+    // The native path measures distance from the ordering centre it was given.
+    expect(native.filters.item_latitude).toBe(12.95);
+    expect(native.filters.order_by).toBe('distance');
+    expect(native.applied).toBe('nearest');
+  });
+
+  it('nearest with an ordering centre and NO area: both order without bounding', async () => {
+    // #644's headline: location may sort without truncating.
+    const centre = { ordering_latitude: 12.97, ordering_longitude: 77.59 };
+
+    const search = await viaSearch({ sort: 'nearest', ...centre }, 'nearest');
+    expect(search.sent.orderingLat).toBe(12.97);
+    expect(search.sent.distanceMeters).toBeUndefined();
+    expect(search.sent.minLat).toBeUndefined();
+
+    const native = await viaNative({ sort: 'nearest', ...centre });
+    expect(native.filters.item_latitude).toBe(12.97);
+    expect(native.filters.order_by).toBe('distance');
+    // No bound of any kind.
+    expect(native.filters.radius_meters).toBeUndefined();
+    expect(native.filters.min_lat).toBeUndefined();
+  });
+});
