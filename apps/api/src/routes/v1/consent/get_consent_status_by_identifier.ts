@@ -21,6 +21,14 @@ const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as numbe
 // window blunts the bulk-enumeration oracle the audit flagged (previously only
 // Kong's 10k/min global cap applied). Fail-open on a Redis blip: a rate-limit
 // backend outage must not break the login/consent flow for legitimate users.
+//
+// Keyed on `request.ip`, consistent with every other per-IP limiter in this API
+// (u18_precheck, u18_signup_guardian, signup). That resolves via `trustProxy`
+// (app.ts) from the X-Forwarded-For chain, so it is only as trustworthy as the
+// edge's XFF handling — the durable, spoof-proof control is a Kong-level per-route
+// rate-limit plugin (limit_by: ip, which sees the real socket IP), the same
+// mechanism the aggregator's api-endpoint-groups ingress already uses. This
+// app-level limit is defence-in-depth on top of that.
 const CONSENT_RL_WINDOW_SEC = 60;
 const CONSENT_RL_MAX_PER_WINDOW = 30;
 
