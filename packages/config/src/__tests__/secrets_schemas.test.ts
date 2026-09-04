@@ -114,6 +114,44 @@ describe('AuthSecretsSchema', () => {
       AuthSecretsSchema.parse({ ...base, LOGIN_CHANNELS: 'email' }).LOGIN_CHANNELS
     ).toBe('email');
   });
+
+  // These three replaced hardcoded constants in services/auth/self_signup.ts.
+  // The defaults ARE the previous behaviour, so pin them: a changed default is a
+  // silent change to the public signup abuse ceiling.
+  it('defaults the signup rate limit to the previously hardcoded constants', () => {
+    const parsed = AuthSecretsSchema.parse(base);
+    expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(3);
+    expect(parsed.SIGNUP_MAX_PER_IP).toBe(10);
+    expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(3600);
+  });
+
+  it('coerces the signup rate limit overrides from strings', () => {
+    const parsed = AuthSecretsSchema.parse({
+      ...base,
+      SIGNUP_MAX_PER_IDENTIFIER: '50',
+      SIGNUP_MAX_PER_IP: '200',
+      SIGNUP_RATE_LIMIT_WINDOW_SECONDS: '300',
+    });
+    expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(50);
+    expect(parsed.SIGNUP_MAX_PER_IP).toBe(200);
+    expect(parsed.SIGNUP_RATE_LIMIT_WINDOW_SECONDS).toBe(300);
+  });
+
+  // Both of these reach the schema in practice: the chart renders env from a
+  // generic `config:` passthrough, so a key left blank in a cluster values file
+  // arrives as "". loadEnv() parses bare, so either one crash-loops the pod —
+  // asserted here so the sharp edge is at least documented by a test.
+  it.each([['0'], ['']])('rejects %j for a signup rate limit', (value) => {
+    expect(() =>
+      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IP: value })
+    ).toThrow();
+  });
+
+  it('rejects a non-integer signup rate limit', () => {
+    expect(() =>
+      AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IDENTIFIER: '2.5' })
+    ).toThrow();
+  });
 });
 
 describe('NotificationSecretsSchema', () => {

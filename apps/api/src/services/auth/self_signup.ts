@@ -88,6 +88,15 @@ function normalizePhone(value: string | null | undefined): string | null {
  * Fixed-window counter in Redis. Coarse on purpose: this endpoint is public and
  * creates Keycloak entries, so the point is to make bulk abuse impractical, not
  * to be precise. Fails OPEN — a Redis outage must not block legitimate signup.
+ *
+ * The TTL is stamped only on the first increment of a window, which matters now
+ * that `windowSeconds` is operator-tunable: RAISING a max takes effect on the
+ * next request, but SHORTENING the window does not retroactively shorten keys
+ * already counting. An operator who cuts the window from 3600 to 300 to release
+ * someone still has to wait out (or DEL) the existing key. Left as a fixed
+ * window deliberately — re-stamping on every increment would turn it into a
+ * sliding window and change the abuse ceiling's meaning, which is not this
+ * change's job.
  */
 async function overLimit(
   key: string,
