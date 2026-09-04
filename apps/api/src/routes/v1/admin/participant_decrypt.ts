@@ -315,7 +315,23 @@ function countAccountFallback(profiles: DecryptedProfileSnapshot[]): {
  *
  * Scoped on the org's declared `metadata.domains`, the same source
  * `aggregator/export.ts` already filters on, so an aggregator sees exactly the
- * populations it reports on. */
+ * populations it reports on.
+ *
+ * CONSEQUENCE WORTH KNOWING: this makes PII access retroactively mutable by a
+ * metadata edit. Ownership is historical — `user.onboarded_by_org_id` is
+ * write-once — but the domain scope is read live, so NARROWING an org's
+ * `metadata.domains` via `POST /api/v1/admin/aggregator/upsert` silently removes
+ * its ability to decrypt participants it already onboarded. That upsert is a
+ * routine sync from aggregator-dpg, not an access-control operation, and it
+ * rewrites `metadata` wholesale (`admin/aggregator/upsert.ts`), so a sync that
+ * drops a domain revokes decrypt for that domain's back catalogue.
+ *
+ * Kept anyway, for two reasons: `dashboard.ts` and `export.ts` have always
+ * behaved this way, so decrypt matching them is the consistent choice rather
+ * than a new hazard; and the alternative — pinning scope at onboarding time —
+ * needs the per-profile ownership record from #661 to have anywhere to live.
+ * Stated here so it is a documented property rather than something discovered
+ * during an incident. */
 function scopeConditions(
   isAgg: boolean,
   actingOrgId: string,

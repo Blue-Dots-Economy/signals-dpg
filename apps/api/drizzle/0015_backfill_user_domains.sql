@@ -28,6 +28,25 @@
 -- `db/postgres/schema/*.ts`, so per `apps/api/drizzle/README.md` it is
 -- hand-written rather than generated.
 --
+-- UNBATCHED, deliberately. Backfills elsewhere in this ecosystem are batched,
+-- so the inconsistency needs a reason rather than an omission: drizzle runs each
+-- migration in one transaction, so this holds row locks on the matched `user`
+-- rows for the duration of the scan below. Two things make that acceptable here
+-- and neither is "it's probably small enough":
+--
+--   * It is no longer on the correctness path. `assertSingleDomain` reads the
+--     domains off `items` when the column is empty, so the lock is right whether
+--     or not this has run (see the NOTE above). A slow backfill delays the
+--     profile-form picker showing the right domain; it cannot mislabel anyone.
+--   * It only ever locks rows it changes — `AND (u.domains IS NULL OR
+--     cardinality(u.domains) = 0)`. A concurrent `assertSingleDomain` claim on
+--     one of those rows blocks, then re-reads the backfilled value and behaves
+--     correctly; it does not fail.
+--
+-- Batch it if `items` grows to where a single GROUP BY over every partition is a
+-- multi-minute statement. Today it is one pass over a table whose row count is
+-- in the thousands.
+--
 -- Deliberately NOT filtered to one network. `user.domains` stores a bare domain
 -- with no network qualifier, and an instance may serve several networks, so the
 -- authoritative answer is "every domain this user has items in" regardless of

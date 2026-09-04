@@ -120,6 +120,13 @@
       "when": 1788505548765,
       "tag": "0016_drop_single_default_index",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788520438886,
+      "tag": "0017_nomination_requires_declared_domains",
+      "breakpoints": true
     }
   ]
 }
