@@ -21,8 +21,13 @@
 # the short init phase does. Pinning `USER postgres` here breaks first-boot
 # initialisation on any volume not already owned by uid 999.
 #
-# DS-0026: liveness/readiness for Postgres is configured in the deploy chart's
-# probes, which Kubernetes uses in preference to a Docker HEALTHCHECK anyway.
+# DS-0026: this image is never deployed to Kubernetes — helm/signals/charts/
+# contains api, ui, notification-service, search, search-embeddings and
+# s3-export, and no Postgres component (the clusters use an external/managed
+# Postgres). Its only consumers already health-check it at their own layer:
+# local-setup/docker-compose.yml runs a `pg_isready` healthcheck, and CI builds
+# it as `dpg-ci-db` (.github/workflows/ci.yaml) and polls for readiness
+# explicitly. A Docker HEALTHCHECK here would duplicate both.
 FROM pgvector/pgvector:pg17
 
 RUN apt-get update \

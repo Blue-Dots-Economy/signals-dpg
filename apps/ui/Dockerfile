@@ -78,7 +78,12 @@ FROM dhi.io/nginx:1.31-alpine AS runner
 #      Docker default), so uid 65532 CAN bind 80 — verified serving HTTP 200
 #      with all capabilities dropped. So the port contract stays 80, unchanged
 #      from the pre-hardening image. If a host ever restores the traditional
-#      sysctl, this and the chart's service.targetPort move to 8080 together.
+#      sysctl, FOUR places move to 8080 together: the chart's service.targetPort,
+#      `EXPOSE 80` below, the entrypoint's `listen 80;`, and the HEALTHCHECK's
+#      http://127.0.0.1:80/ (HEALTHCHECK does not expand ${...}, so it cannot be
+#      derived from an ENV without switching to shell form). Missing the last one
+#      leaves the probe hitting a dead port and flaps the container to
+#      `unhealthy` for docker run / compose users.
 #   3. busybox IS present (unlike the hardened node image), so /bin/sh exists and
 #      the config-generation script below still runs.
 # /etc/nginx is chowned to 65532 with g+w by the base image, so the entrypoint
