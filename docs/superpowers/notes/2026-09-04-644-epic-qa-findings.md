@@ -102,7 +102,7 @@ made "the area I'm looking at" one click was deliberately skipped.
 `--dpg-toolbar-h` (measured by PageShell) and owns its own bottom border, so
 the two rules form one line at y=150. Empty state only, per the user.
 
-**N4 — map viewport resets but the count does not. OPEN.**
+**N4 — map viewport resets but the count does not. FIXED (see round 4 below).**
 Diagnosis: `focusPoint={userLocation}` makes `MapView` compute
 `initialViewSet: true`, which mounts `SetView`; on remount `SetView`'s
 `prevCenter` ref is null, so it unconditionally `map.setView(focusPoint,
@@ -119,7 +119,7 @@ today one center/zoom serves both; (b) reset `mapViewport` on leaving the map
 so the reporter re-derives it. (a) is the better UX and removes the whole
 mismatch class.
 
-**N5 — the two map counts. OPEN.** The toolbar count on the map is
+**N5 — the two map counts. FIXED (see round 4 below).** The toolbar count on the map is
 `mapMarkers.total`: viewport-scoped AND multi-domain (measured 94 = 22
 provider + 72 seeker), while the list's is single-domain and network-wide
 (22). Proposal: keep the on-map pill as the viewport count, and make the
@@ -187,3 +187,51 @@ not yet done — all QA so far has been desktop-width. Cover at minimum:
 - the card metric pill (span vs button) and the filters panel as a bottom
   sheet (`ResponsiveDialog` → Drawer on mobile)
 - the map: count pill, cluster badges, and the error-boundary fallback box
+
+---
+
+# Fourth round — resolutions, and what is genuinely still open
+
+**N2 — dense-map escape hatch. FIXED, cross-repo.** signals-search added a
+`bbox` spatial op (#152, `8189c68`), which removed the reason spec D6 dropped
+`area: 'viewport'`. Contract §1.5 records the wire shape; DPG has the schema,
+the client clause, the native-path bbox, the UI mode, and a "Search this area"
+button on the map. The "approximate" caveat #644 asked for is gone with the
+approximation.
+
+**N4 — FIXED.** `shouldRefetch` reuses a cached result when the new bbox is
+contained in the previous padded one, which is right for markers but left
+`meta.total` describing the larger fetched area. The count is now derived from
+the markers inside the bbox actually on screen, guarded by a coverage check so
+a not-yet-refetched zoom-out keeps the server total instead of under-reporting.
+
+**N5 — FIXED.** The filter bar shows the FILTER total in both views (so it
+matches the list), the on-map pill owns the VIEWPORT count, and the shortfall
+is stated as "· N not on the map". Measuring "mappable" required a global
+bbox, not a bbox-less call — the latter counts every match regardless of
+coordinates, so the difference was always zero.
+
+## Still open
+
+1. **Mobile-view QA — the PR-ready gate above. NOT DONE.** All QA has been
+   desktop-width.
+2. **signals-search path never exercised end to end locally.** Every e2e check
+   has run against the NATIVE fallback, because no signals-search is running
+   here. Covered instead by request-builder tests (what DPG sends), the other
+   repo's SQL tests (what it does), the §9 cross-repo fixture, and a
+   signals-search/native parity suite — but no single local test runs both
+   processes together. Closable by bringing up the worker with a stub embedder.
+3. **Bug found, not filed: a `±90/±180` bbox returns 0 rows.** Measured:
+   `±80/±170` → 72, `±90/±180` → 0. Worked around by insetting the global box
+   in `useBrowseTotals`; the underlying predicate is still wrong at the exact
+   global envelope.
+4. **Bug found, not filed: the geo read-model lags.** On blue_dot, 4 items
+   have coordinates but no `item_search` row, so they can never appear as pins
+   and land in the "not on the map" count alongside genuinely location-less
+   items. Related to the known lifecycle/index race.
+5. **#404 still needs its "remove the standalone filter facet panel" checkbox
+   dropped** before it is planned — #645 re-scoped it, and the panel is now
+   load-bearing (it is the facet editor the chip bar reads out).
+6. **Keyset paging** remains a follow-up: LIMIT/OFFSET is correct now that
+   every ORDER BY has an `item_id` tiebreaker, but it still scans.
+7. **Merge order:** signals-search #152 must land before the Signals-DPG half.
