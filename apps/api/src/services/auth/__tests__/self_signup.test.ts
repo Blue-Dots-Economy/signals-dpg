@@ -26,9 +26,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
   },
 }));
 
-// `expires` records the (key, ttl) pairs so a test can assert the operator-set
-// window actually reaches Redis — the stub used to discard its arguments, which
-// left the whole point of the tunable limits unasserted.
+// `expires` records (key, ttl) so tests can assert the configured window reaches
+// Redis, and that no per-IP key is ever written.
 const redisState = {
   counts: new Map<string, number>(),
   expires: [] as Array<{ key: string; ttl: number }>,
@@ -113,8 +112,7 @@ beforeEach(() => {
   mockAuthConfig.keycloak_enabled = true;
   mockAuthConfig.allow_self_signup = true;
   mockAuthConfig.login_channels = ['phone', 'email'];
-  // mockAuthConfig is module-level and mutated in place, so a test that tunes a
-  // limit would otherwise leak it into every test after it.
+  // Mutated in place by the tunability tests below, so it must be reset here.
   mockAuthConfig.signup_rate_limit = {
     window_seconds: 3600,
     max_per_identifier: 3,
@@ -346,13 +344,9 @@ describe('rate limiting', () => {
     expect(result.code).toBe('SIGNUP_RATE_LIMITED');
   });
 
-  // Inverted deliberately (#669). This used to assert an 11th signup from one
-  // IP across different identifiers was blocked, by an in-process per-IP
-  // counter. That counter is gone: per-IP is Kong's apiRateLimit at the
-  // ingress, keyed on the unforgeable PROXY-protocol address rather than the
-  // X-Forwarded-For that request.ip trusts. So the service itself must NOT
-  // limit by IP — asserted here so a re-add is a failing test, not a silent
-  // duplicate of the ingress control.
+  // Inverted deliberately (#669): this used to assert an 11th signup from one IP
+  // was blocked. That counter is gone — per-IP is Kong's job — so the assertion
+  // is now that the service writes no IP key at all, making a re-add fail here.
   it('does not limit by IP — that is the ingress layer\'s job', async () => {
     for (let i = 0; i < 15; i += 1) {
       const res = await selfSignup({ ...INPUT, email: `user${i}@example.org` }, makeLog());
@@ -373,8 +367,8 @@ describe('rate limiting', () => {
     expect(log.error).toHaveBeenCalled();
   });
 
-  // The two tests above pass identically against the old hardcoded 3/10/3600, so
-  // neither one actually exercises the tunability this change adds. These do.
+  // The tests above pass against the old hardcoded values too, so they don't
+  // exercise tunability. These do.
   it('honours an operator-raised per-identifier limit', async () => {
     mockAuthConfig.signup_rate_limit.max_per_identifier = 5;
 

@@ -158,11 +158,8 @@ Open **http://localhost:5173** in your browser.
   value are rejected at boot, so to effectively remove the ceiling set it high
   rather than to zero. Note that *shortening* the window does not shorten
   counters already running; only the max takes effect immediately.
-- There is deliberately **no per-IP signup limit in the API**. Per-IP rate
-  limiting is the ingress's job (Kong `apiRateLimit` in the signals api chart),
-  keyed on the PROXY-protocol address a client cannot forge and counted across
-  proxy replicas. Only the per-identifier limit lives here, because Kong cannot
-  key on a request-body field.
+  Per-IP limiting is not done here — that is the ingress's job (Kong
+  `apiRateLimit`).
 
 ---
 

@@ -87,35 +87,13 @@ function normalizePhone(value: string | null | undefined): string | null {
  * creates Keycloak entries, so the point is to make bulk abuse impractical, not
  * to be precise. Fails OPEN — a Redis outage must not block legitimate signup.
  *
- * WHY THIS EXISTS IN THE APP AT ALL, given Kong rate-limits at the ingress
- * (signals-dpg#669). Rate limiting is otherwise deployment config, not
- * application code — the per-route per-IP ceilings live in the signals api
- * chart's `apiRateLimit.groups`, and CodeQL's `js/missing-rate-limiting` on the
- * other routes is answered by that, not by adding limiters here.
+ * Keyed on the IDENTIFIER only, never the IP. Per-IP limiting is Kong's
+ * `apiRateLimit` at the ingress; Kong's `limit_by` cannot key on a request-body
+ * field, which is why this one limit has to live in the app (#669).
  *
- * The one exception is the per-IDENTIFIER limit below. Kong's rate-limiting
- * plugin keys on ip / credential / consumer / service / header / path — it
- * cannot key on a field in the request body, and the signup identifier is the
- * email/phone in the POST body. So "N attempts per identifier" is not
- * expressible at the ingress at any setting, and this is the only place it can
- * live.
- *
- * There is deliberately NO per-IP counter here any more. Per-IP is precisely
- * what Kong's `apiRateLimit` does, keyed on the PROXY-protocol address the L4
- * ELB prepends — which a client cannot forge, unlike the X-Forwarded-For that
- * Fastify's `request.ip` ultimately trusts — and counted in shared Redis so the
- * ceiling holds across proxy replicas. An in-process per-IP counter was a
- * weaker duplicate of a control that already exists one layer up, so it was
- * removed rather than made operator-tunable.
- *
- * The TTL is stamped only on the first increment of a window, which matters now
- * that `windowSeconds` is operator-tunable: RAISING a max takes effect on the
- * next request, but SHORTENING the window does not retroactively shorten keys
- * already counting. An operator who cuts the window from 3600 to 300 to release
- * someone still has to wait out (or DEL) the existing key. Left as a fixed
- * window deliberately — re-stamping on every increment would turn it into a
- * sliding window and change the abuse ceiling's meaning, which is not this
- * change's job.
+ * The TTL is stamped only on the first increment, so raising `max` takes effect
+ * next request but SHORTENING `windowSeconds` does not shorten keys already
+ * counting — an operator releasing someone must wait out or DEL the key.
  */
 async function overLimit(
   key: string,
@@ -224,9 +202,8 @@ async function prepareSignup(
   }
 
   const identifier = email ?? phoneNumber;
-  // Read at request time, not module scope: the limits are operator-tunable
-  // (SIGNUP_MAX_PER_IDENTIFIER / SIGNUP_RATE_LIMIT_WINDOW_SECONDS) and reading
-  // them here keeps this file free of import-time config evaluation.
+  // Read at request time, not module scope: evaluating authConfig at import time
+  // breaks self_signup.test.ts, which mocks @/config.
   const { window_seconds, max_per_identifier } = authConfig.signup_rate_limit;
   if (await overLimit(`signup:id:${identifier}`, max_per_identifier, window_seconds, log)) {
     return {

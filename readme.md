@@ -151,12 +151,9 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
-# Self-signup abuse ceiling, counted in Redis, PER IDENTIFIER (email/phone).
-# Only bites when SELF_SIGNUP_MODE=allowed. Raise SIGNUP_MAX_PER_IDENTIFIER to
-# release a legitimate retry (takes effect next request). Positive integers
-# only — 0 or empty fails boot; set high to effectively disable the ceiling.
-# There is no per-IP knob here: per-IP limiting is Kong's apiRateLimit at the
-# ingress, which keys on an address a client cannot forge.
+# Self-signup abuse ceiling, per identifier (email/phone), counted in Redis.
+# Only bites when SELF_SIGNUP_MODE=allowed. Positive integers only — 0 or empty
+# fails boot. Per-IP limiting is the ingress's job, not the API's.
 SIGNUP_MAX_PER_IDENTIFIER="3"
 SIGNUP_RATE_LIMIT_WINDOW_SECONDS="3600"
 

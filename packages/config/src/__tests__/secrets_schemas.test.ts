@@ -115,9 +115,8 @@ describe('AuthSecretsSchema', () => {
     ).toBe('email');
   });
 
-  // These three replaced hardcoded constants in services/auth/self_signup.ts.
-  // The defaults ARE the previous behaviour, so pin them: a changed default is a
-  // silent change to the public signup abuse ceiling.
+  // The defaults ARE the previously hardcoded behaviour, so pin them: a changed
+  // default is a silent change to the public signup abuse ceiling.
   it('defaults the signup rate limit to the previously hardcoded constants', () => {
     const parsed = AuthSecretsSchema.parse(base);
     expect(parsed.SIGNUP_MAX_PER_IDENTIFIER).toBe(3);
@@ -135,18 +134,14 @@ describe('AuthSecretsSchema', () => {
   });
 
   // Per-IP is Kong's apiRateLimit at the ingress (#669), never an app env var.
-  // Guards a well-meaning re-add: the schema is strict about nothing, so an
-  // unknown key would be silently dropped rather than rejected — this asserts
-  // the parsed config exposes no per-IP knob to read.
+  // Fails if the key is re-added to the schema.
   it('exposes no SIGNUP_MAX_PER_IP — per-IP limiting is Kong\'s job', () => {
     const parsed = AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IP: '10' });
     expect('SIGNUP_MAX_PER_IP' in parsed).toBe(false);
   });
 
-  // Both of these reach the schema in practice: the chart renders env from a
-  // generic `config:` passthrough, so a key left blank in a cluster values file
-  // arrives as "". loadEnv() parses bare, so either one crash-loops the pod —
-  // asserted here so the sharp edge is at least documented by a test.
+  // Reachable in practice: the chart's generic `config:` passthrough turns a
+  // blank value in a cluster values file into "", and loadEnv() parses bare.
   it.each([['0'], ['']])('rejects %j for a signup rate limit', (value) => {
     expect(() =>
       AuthSecretsSchema.parse({ ...base, SIGNUP_MAX_PER_IDENTIFIER: value })

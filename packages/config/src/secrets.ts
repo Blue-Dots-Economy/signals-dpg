@@ -42,31 +42,17 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
-  // Self-signup abuse ceiling (fixed window, counted in Redis by
-  // services/auth/self_signup.ts). Previously hardcoded, which made a legitimate
-  // onboarding retry indistinguishable from abuse and un-tunable per deployment:
-  // a field worker re-attempting the same identifier hits SIGNUP_RATE_LIMITED and
-  // the only remedy was deleting the `signup:id:<identifier>` Redis key by hand.
-  // Defaults reproduce the previous constants exactly, so behaviour is unchanged
-  // unless an operator opts in.
+  // Self-signup abuse ceiling, per IDENTIFIER (fixed window, counted in Redis by
+  // services/auth/self_signup.ts). Defaults reproduce the previously hardcoded
+  // constants, so behaviour is unchanged unless an operator opts in. There is no
+  // SIGNUP_MAX_PER_IP — per-IP limiting is Kong's apiRateLimit at the ingress
+  // (#669).
   //
-  // Per-IDENTIFIER only. There is no SIGNUP_MAX_PER_IP: per-IP rate limiting is
-  // Kong's `apiRateLimit` at the ingress (#669), keyed on the unforgeable
-  // PROXY-protocol address and counted across proxy replicas. The identifier is
-  // a request-BODY field, which Kong's limit_by cannot key on — that asymmetry
-  // is the whole reason this one lives in application config.
-  //
-  // Both are `.positive()`, so 0 and the EMPTY STRING are rejected — and
-  // loadEnv() parses this schema bare, so a bad value crash-loops the api on a
-  // raw Zod error rather than degrading. That matters because these are set
-  // through the chart's generic `config:` passthrough, where a key left as
-  // `SIGNUP_MAX_PER_IDENTIFIER: ""` renders an empty env var. There is no "0
-  // means unlimited" escape hatch: to effectively disable the ceiling, set it
-  // high.
-  //
-  // Raising the max takes effect on the next request. SHORTENING the window does
-  // NOT retroactively shorten keys already counting — see the TTL note in
-  // services/auth/self_signup.ts.
+  // `.positive()` rejects both 0 and the empty string, and loadEnv() parses this
+  // schema bare, so either crash-loops the api on a raw Zod error. That is
+  // reachable: these are set through the chart's generic `config:` passthrough,
+  // where a blank value renders an empty env var. To disable the ceiling set it
+  // high; 0 does not mean unlimited.
   SIGNUP_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(3600),
   SIGNUP_MAX_PER_IDENTIFIER: z.coerce.number().int().positive().default(3),
   // Identity provider. Single rollback lever:
