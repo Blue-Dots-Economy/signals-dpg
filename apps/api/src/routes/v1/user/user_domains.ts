@@ -1,12 +1,17 @@
 import z from '@dpg/schemas';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { tagUserForDomain } from '@/services/aggregator/default_aggregator';
+import {
+  claimDomain,
+  domainLockedMessage,
+  readLockedDomains,
+} from '@/services/items/single_domain_lock';
 
 // `.max(1)`: the column is an array for a future multi-role case, but one
 // account may declare exactly ONE domain. Two in a single call would mint the
@@ -28,10 +33,15 @@ type SetReq = FastifyRequest<{ Body: z.infer<typeof SetDomainsBody> }>;
  *
  * So POST is write-once, matching the create path: set it when unset, accept a
  * no-op repeat, and refuse a different domain with the same `DOMAIN_LOCKED`
- * body `create_item` returns. It used to UNION the submitted domains with the
- * existing ones, which let any authenticated user grant themselves a second
- * domain and walk straight past the lock — the exact state the whole design
- * rules out.
+ * body `create_item` returns, via the shared primitives in
+ * `services/items/single_domain_lock.ts`.
+ *
+ * Two bugs lived here, both letting a user grant themselves a second domain and
+ * walk past the lock: it UNIONed the submitted domains onto the existing ones,
+ * and then — once that was fixed with a local copy of the create path's claim —
+ * that copy was missing the `NOT EXISTS items` guard, so an account with an
+ * empty column but existing items was still handed a second domain. Hence one
+ * shared implementation rather than a third copy.
  *
  * Deliberately no reset path: clearing a domain is a support operation
  * (`UPDATE "user" SET domains='{}' WHERE id=…`), the same shape as nominating a
@@ -78,30 +88,22 @@ const set_domains_handler = async (request: SetReq, reply: FastifyReply) => {
 
   const requested = request.body.domains[0] as string;
 
-  // Write-once. The guard is in the WHERE, so two concurrent calls picking
-  // different domains cannot both succeed: the second blocks on the row lock,
-  // re-evaluates against the committed value, and matches nothing.
-  const claimed = (await db.execute(sql`
-    UPDATE "user"
-       SET domains = ARRAY[${requested}]::text[],
-           updated_at = now()
-     WHERE id = ${userId}
-       AND (domains IS NULL OR cardinality(domains) = 0)
-    RETURNING id`)) as unknown as { rows?: Array<{ id: string }> };
-
+  // Write-once, through the SAME primitives the create path uses
+  // (`services/items/single_domain_lock.ts`). This handler used to carry its own
+  // copy of the claim UPDATE, missing that module's `NOT EXISTS items` guard —
+  // so an account with an empty column but existing items (every aggregator- and
+  // voice-onboarded participant until migration 0015 runs, and every account the
+  // documented `SET domains='{}'` support reset touches) could be granted a
+  // second domain here and then create in it, because the create path saw a
+  // non-empty column and trusted it.
   let effective = [requested];
-  if ((claimed.rows ?? []).length === 0) {
-    const [row] = await db
-      .select({ domains: user.domains })
-      .from(user)
-      .where(eq(user.id, userId))
-      .limit(1);
-    const held = row?.domains ?? [];
-    // Empty here means the user row is gone; nothing to lock, nothing to grant.
+  if (!(await claimDomain(db, userId, requested))) {
+    const held = await readLockedDomains(db, userId);
+    // Empty ⇒ the user row is gone. Nothing to lock, nothing to grant.
     if (held.length > 0 && !held.includes(requested)) {
       return reply.code(403).send({
         error: 'DOMAIN_LOCKED',
-        message: `You are registered as "${held[0]}" and cannot switch to "${requested}".`,
+        message: domainLockedMessage(held[0] as string, requested, 'switch to'),
         locked_domain: held[0],
         requested_domain: requested,
       });

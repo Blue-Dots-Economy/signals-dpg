@@ -8285,6 +8285,7 @@
                 "properties": {
                   "domains": {
                     "minItems": 1,
+                    "maxItems": 1,
                     "type": "array",
                     "items": {
                       "type": "string",

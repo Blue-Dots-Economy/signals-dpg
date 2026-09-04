@@ -222,8 +222,10 @@ function makeExec() {
      * which sends `assertSingleDomain` on to its SELECT — feed that read via
      * `queue`. */
     domainClaim: { rows: [{ id: 'u1' }] } as { rows: Array<{ id: string }> },
-    /** What the `SELECT DISTINCT item_domain FROM items` fallback returns. Only
-     * reached when the claim declined AND the column read came back empty. */
+    /** `readLockedDomains`' column read (`SELECT domains FROM "user"`). */
+    heldColumn: { rows: [] } as { rows: Array<{ domains: string[] | null }> },
+    /** `readLockedDomains`' items fallback, reached only when the column read
+     * came back empty — the pre-0015 legacy state. */
     itemDomains: { rows: [] } as { rows: Array<{ item_domain: string }> },
   };
 
@@ -266,6 +268,9 @@ function makeExec() {
       // matches the looser pattern.
       if (text.includes('SELECT DISTINCT item_domain')) {
         return Promise.resolve(state.itemDomains);
+      }
+      if (text.includes('SELECT domains FROM')) {
+        return Promise.resolve(state.heldColumn);
       }
       return Promise.resolve(state.domainClaim);
     },
@@ -624,7 +629,7 @@ describe('createItemInternal — single-domain lock', () => {
     // (NOT EXISTS items fails), and the truth comes off `items`.
     const { exec, queue, rec, state } = makeExec();
     state.domainClaim = { rows: [] };
-    queue.push([{ domains: [] }]); // column read: empty
+    state.heldColumn = { rows: [{ domains: [] }] }; // column read: empty
     state.itemDomains = { rows: [{ item_domain: 'seeker' }] };
 
     await expect(
@@ -644,7 +649,7 @@ describe('createItemInternal — single-domain lock', () => {
   it('the item-domain fallback allows a create in the held domain', async () => {
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] };
-    queue.push([{ domains: [] }]);
+    state.heldColumn = { rows: [{ domains: [] }] };
     state.itemDomains = { rows: [{ item_domain: 'student' }] };
     queue.push([{ n: 0 }]);
     queue.push([ROW]);
@@ -657,7 +662,7 @@ describe('createItemInternal — single-domain lock', () => {
   it('allows a create in the domain the user is already locked to', async () => {
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] }; // already locked → claim writes nothing
-    queue.push([{ domains: ['student'] }]); // the domain read
+    state.heldColumn = { rows: [{ domains: ['student'] }] };
     queue.push([{ n: 0 }]); // profile-cap count
     queue.push([ROW]);
 
@@ -669,7 +674,7 @@ describe('createItemInternal — single-domain lock', () => {
   it('403 DOMAIN_LOCKED for a create in a different domain', async () => {
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] };
-    queue.push([{ domains: ['employer'] }]); // createParams defaults to 'student'
+    state.heldColumn = { rows: [{ domains: ['employer'] }] }; // createParams defaults to 'student'
 
     await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
       statusCode: 403,
@@ -682,7 +687,7 @@ describe('createItemInternal — single-domain lock', () => {
   it('rejects the SECOND domain, whichever one it is', async () => {
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] };
-    queue.push([{ domains: ['seeker'] }]);
+    state.heldColumn = { rows: [{ domains: ['seeker'] }] };
 
     await expect(
       createItemInternal(exec, createParams({ item_domain: 'service_provider' })),
@@ -699,7 +704,7 @@ describe('createItemInternal — single-domain lock', () => {
     // NEW ones. `includes`, not `[0] ===`.
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] };
-    queue.push([{ domains: ['seeker', 'provider'] }]);
+    state.heldColumn = { rows: [{ domains: ['seeker', 'provider'] }] };
     queue.push([{ n: 0 }]);
     queue.push([ROW]);
 
@@ -711,7 +716,7 @@ describe('createItemInternal — single-domain lock', () => {
   it('lets a missing user row fall through to the items FK, not DOMAIN_LOCKED', async () => {
     const { exec, queue, state } = makeExec();
     state.domainClaim = { rows: [] }; // no row matched: user does not exist
-    queue.push([]); // the domain read finds nothing either
+    state.heldColumn = { rows: [] }; // the column read finds nothing either
     queue.push([{ n: 0 }]);
     queue.push([ROW]);
 

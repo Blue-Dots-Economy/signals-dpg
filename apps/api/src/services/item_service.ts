@@ -15,6 +15,11 @@ import {
 import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
 import type { DbOrTx } from '@/services/db_types';
 import {
+  claimDomain,
+  domainLockedMessage,
+  readLockedDomains,
+} from './items/single_domain_lock.js';
+import {
   resolveOwnerGateContext,
   type OwnerGateContext,
 } from './aggregator/default_aggregator.js';
@@ -323,104 +328,43 @@ async function assertProfileLimit(
 }
 
 /**
- * Single-domain lock: a user holds profiles in exactly ONE domain, for life.
- *
- * The rule the network wants is simple — if Ravi is a seeker, every profile he
- * ever creates is a seeker profile. The reason it is enforced *here* rather
- * than at the route is that it is load-bearing for PII isolation, not just a
- * product rule.
- *
- * `user.onboarded_by_org_id` (the aggregator that owns a participant, and so
- * the org allowed to decrypt their PII) is per ACCOUNT and write-once, while
- * profiles are per DOMAIN. A user holding profiles in two domains therefore has
- * one owner covering both — so with a per-domain default aggregator, the seeker
- * default could decrypt that user's provider profile. Keeping every account to
- * a single domain removes the ambiguity at the source, which is what allows
- * separate default aggregators per domain to exist at all
- * (`organization_single_default_idx` was the blunt stand-in for this).
+ * Single-domain lock, on the create path.
  *
  * Enforced at this choke point so every create path inherits it — the same
  * reasoning as the profile cap directly below. The route-level check this
- * replaces was skipped for admin api-key callers and absent entirely from
+ * replaced was skipped for admin api-key callers and absent entirely from
  * `POST /admin/participant`, which is precisely the aggregator/voice path where
  * a second domain could be introduced.
  *
- * Also *records* the domain on a user who has none yet, so the lock has data to
- * work with: `admin/participant` never wrote `user.domains`, which left every
- * aggregator-onboarded participant permanently unlocked. Recording it here
- * means no create path can leave the column unset. Historical rows are handled
- * by the backfill in migration 0015.
+ * The rule, the SQL and the reasoning live in
+ * `services/items/single_domain_lock.ts`, shared with
+ * `POST /api/v1/user/domains` — the other place an account's domain is decided.
+ * They were two copies of the same statement and the copies drifted, which is
+ * how the route ended up without the `NOT EXISTS items` guard.
  *
- * Concurrency: the UPDATE's row lock serialises two racing first-creates in
- * different domains. The second blocks on the row, re-evaluates its WHERE
- * against the committed value, matches nothing, and falls through to the read
- * below — which now sees the winner's domain and rejects. No advisory lock
- * needed, and none taken, so this cannot deadlock against `assertProfileLimit`.
+ * Only a MISMATCH is refused: a first create, a repeat in the same domain, and a
+ * backfilled legacy account in either of its domains all pass.
  *
- * @throws ItemServiceError 403 DOMAIN_LOCKED when the user is locked to another
- *   domain. The body carries `locked_domain` / `requested_domain`, the shape
- *   `apps/ui/src/lib/domain-gate.ts` already expects.
+ * @throws ItemServiceError 403 DOMAIN_LOCKED when the account is locked to
+ *   another domain. The body carries `locked_domain` / `requested_domain`.
  */
 async function assertSingleDomain(
   exec: DbOrTx,
   params: Pick<CreateItemServiceParams, 'created_by' | 'item_domain'>,
 ): Promise<void> {
-  // Claim the domain when the user has none recorded AND owns no items.
-  //
-  // The `NOT EXISTS` half is what makes this correct before migration 0015 has
-  // run. `admin/participant` never wrote `user.domains`, so a legacy
-  // participant can hold a seeker profile with an empty column — and the deploy
-  // migration is a Helm `post-upgrade` hook, so new pods serve traffic BEFORE
-  // it commits (docs/operations/migrations.md). Without this guard a provider
-  // create arriving in that window would find the column empty, claim
-  // `provider`, and leave the account holding items in two domains while
-  // reading as locked to the wrong one — a state 0015 then refuses to repair,
-  // because it only fills EMPTY columns, and which 0015's own
-  // `cardinality(domains) > 1` audit query cannot even find.
-  //
-  // With the guard the claim declines, and `items` below supplies the truth. So
-  // the lock is right on a database that has never been backfilled, and 0015
-  // becomes a correctness aid for readers of the column (the profile-form
-  // picker via `GET /api/v1/user/domains`) rather than a prerequisite.
-  const claimed = (await exec.execute(sql`
-    UPDATE "user"
-       SET domains = ARRAY[${params.item_domain}]::text[],
-           updated_at = now()
-     WHERE id = ${params.created_by}
-       AND (domains IS NULL OR cardinality(domains) = 0)
-       AND NOT EXISTS (SELECT 1 FROM items WHERE created_by = ${params.created_by})
-    RETURNING id`)) as unknown as { rows?: Array<{ id: string }> };
-  if ((claimed.rows ?? []).length > 0) return;
+  if (await claimDomain(exec, params.created_by, params.item_domain)) return;
 
-  const [row] = await exec
-    .select({ domains: user.domains })
-    .from(user)
-    .where(eq(user.id, params.created_by))
-    .limit(1);
-  let allowed = row?.domains ?? [];
+  const allowed = await readLockedDomains(exec, params.created_by);
 
-  // Column empty but the claim declined ⇒ the user owns items (or the row is
-  // gone). Read the domains off the items themselves: they are the real source
-  // of truth, and unlike the column no write path can have failed to record
-  // them. `items` is LIST-partitioned on `item_network` — one partition per
-  // network, each carrying `items_created_by_idx` — so this is a handful of
-  // index probes, and it only runs for a user whose column is unset, which
-  // after 0015 means nobody.
-  if (allowed.length === 0) {
-    const held = (await exec.execute(sql`
-      SELECT DISTINCT item_domain FROM items WHERE created_by = ${params.created_by}
-    `)) as unknown as { rows?: Array<{ item_domain: string }> };
-    allowed = (held.rows ?? []).map((r) => r.item_domain);
-  }
-
-  // Still empty ⇒ the user row is missing. Let the items FK raise that, rather
-  // than dressing a missing user up as a domain error.
+  // Empty ⇒ the user row is missing (`claimDomain` declines for an account that
+  // owns items, so an existing account never lands here empty). Let the items
+  // FK raise that, rather than dressing a missing user up as a domain error.
   if (allowed.length === 0 || allowed.includes(params.item_domain)) return;
 
   throw new ItemServiceError(
     403,
     'DOMAIN_LOCKED',
-    `You are registered as "${allowed[0]}" and cannot create items under "${params.item_domain}".`,
+    domainLockedMessage(allowed[0] as string, params.item_domain, 'create items under'),
     { locked_domain: allowed[0], requested_domain: params.item_domain },
   );
 }
