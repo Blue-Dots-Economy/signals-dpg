@@ -152,6 +152,13 @@ describe('DomainControl — single selectable domain', () => {
     );
 
     expect(screen.getByTestId('domain-single-label')).toHaveTextContent('Provider');
+    // A real heading, not small muted text: with the page-header title removed
+    // (#645) this is the browse page's only statement of what is on screen, so
+    // it carries the document's heading rank too.
+    expect(screen.getByRole('heading', { level: 1 })).toHaveAttribute(
+      'data-testid',
+      'domain-single-label',
+    );
     expect(screen.queryByRole('group')).toBeNull();
     expect(screen.queryByRole('button', { name: /Seeker/ })).toBeNull();
   });

@@ -80,12 +80,16 @@ export function DomainControl({
     const only = selectable[0];
     if (!only) return null;
     return (
-      <p
+      // An <h1>: with the old page-header title removed (#645) this is the
+      // browse page's only statement of what is on screen, so it should carry
+      // the document's heading rank as well as the visual weight. Matches the
+      // type scale the removed ContentHeader title used.
+      <h1
         data-testid="domain-single-label"
-        className="text-xs font-semibold text-muted-foreground"
+        className="text-xl font-semibold tracking-tight text-foreground"
       >
         {t('browse.domain_only', { domain: only.pluralLabel ?? only.label })}
-      </p>
+      </h1>
     );
   }
 
@@ -113,7 +117,7 @@ export function DomainControl({
               aria-describedby={reasonId}
               onClick={() => toggle(o.id, o.available)}
               className={cn(
-                'inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-border px-3 py-1.5 text-xs font-semibold transition-colors last:border-r-0',
+                'inline-flex shrink-0 items-center gap-2 whitespace-nowrap border-r border-border px-4 py-2.5 text-sm font-semibold transition-colors last:border-r-0',
                 'pointer-coarse:min-h-11',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
                 on && 'bg-primary text-primary-foreground',
@@ -121,7 +125,7 @@ export function DomainControl({
                 !o.available && 'cursor-not-allowed text-muted-foreground/40',
               )}
             >
-              {mode === 'multi' && on && <Check className="h-3 w-3 shrink-0" />}
+              {mode === 'multi' && on && <Check className="h-4 w-4 shrink-0" />}
               {o.label}
             </button>
             {reasonId && (
