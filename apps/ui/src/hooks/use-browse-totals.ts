@@ -8,6 +8,18 @@ import type { DotNetworkSchema, DotNetworkDomain } from '@/engine/types';
 /** Matches the browse feeds' tier (spec §5.2) — this is the same kind of data. */
 const TOTALS_STALE_TIME_MS = 90 * 1000;
 
+/**
+ * A global bbox, deliberately INSET from ±90/±180.
+ *
+ * Two things force this shape. A bbox is required at all because the markers
+ * total WITHOUT one counts every matching item, coordinates or not — it equals
+ * the discover total, so subtracting it would always yield zero. And the exact
+ * ±90/±180 envelope returns 0 rows (measured: ±80/±170 → 72, ±90/±180 → 0), so
+ * the corners are inset to stay inside whatever the predicate accepts. Nothing
+ * real sits beyond 85° anyway — Web Mercator cannot even render it.
+ */
+const GLOBAL_BBOX = { min_lat: -85, min_lng: -179, max_lat: 85, max_lng: 179 } as const;
+
 export interface UseBrowseTotalsResult {
   /**
    * Items matching the active filters, IGNORING location entirely. This is
@@ -15,15 +27,20 @@ export interface UseBrowseTotalsResult {
    * figure rather than a viewport-scoped one.
    */
   total: number;
-  /** Of those, how many carry at least one coordinate — i.e. can appear as a pin. */
-  withLocation: number;
+  /** Of those, how many the map can actually plot anywhere in the world. */
+  mappable: number;
   /**
-   * `total - withLocation`: matching items that can never show on the map
-   * because they have no coordinate. Surfaced so a user comparing the map's
-   * viewport pill with the list's count is told why they differ, instead of
-   * inferring a bug.
+   * `total - mappable`: matching items that will never appear as a pin at any
+   * zoom. Surfaced so a user comparing the map's viewport pill with the list's
+   * count is told that some of the gap is not about the viewport at all.
+   *
+   * Two causes, deliberately reported as one number because the user-visible
+   * consequence is identical: the item has no coordinate, or it has one but is
+   * not yet in the `item_search` geo read-model the bbox predicate reads (the
+   * indexing lag). Measured on blue_dot: 8 of 102, of which 4 had an empty
+   * `item_locations` and 4 were simply unindexed.
    */
-  withoutLocation: number;
+  notMappable: number;
   isLoading: boolean;
 }
 
@@ -111,21 +128,23 @@ export function useBrowseTotals(
           enabled: satisfiable,
         },
         {
-          queryKey: queryKeys.browseTotals(network!.id, domain.id, { ...keyBase, kind: 'located' }),
+          queryKey: queryKeys.browseTotals(network!.id, domain.id, { ...keyBase, kind: 'mappable' }),
           queryFn: async ({ signal }: { signal: AbortSignal }) =>
             fetchNetworkMarkers(
               {
                 item_network: network!.id,
                 item_domain: domain.id,
                 item_type: itemType,
-                // No bbox and no radius: every located item, so the difference
-                // from the discover total is exactly "has no coordinate".
+                // A GLOBAL bbox, not "no bbox": the spatial predicate has to
+                // actually run, or this counts every matching item regardless
+                // of coordinates and the difference is always zero.
+                ...GLOBAL_BBOX,
                 limit: 1,
                 ...(q ? { q } : {}),
                 ...(Object.keys(domainFilters).length > 0 ? { item_state: domainFilters } : {}),
               },
               signal,
-            ).then((r) => ({ kind: 'located' as const, total: r.meta.total })),
+            ).then((r) => ({ kind: 'mappable' as const, total: r.meta.total })),
           staleTime: TOTALS_STALE_TIME_MS,
           enabled: satisfiable,
         },
@@ -137,18 +156,18 @@ export function useBrowseTotals(
 
   return React.useMemo(() => {
     let total = 0;
-    let withLocation = 0;
+    let mappable = 0;
     for (const r of results) {
       if (!r.data) continue;
       if (r.data.kind === 'all') total += r.data.total;
-      else withLocation += r.data.total;
+      else mappable += r.data.total;
     }
     return {
       total,
-      withLocation,
+      mappable,
       // Clamped: the two counts come from separate requests, so a write
       // landing between them could otherwise show a negative "missing".
-      withoutLocation: Math.max(0, total - withLocation),
+      notMappable: Math.max(0, total - mappable),
       isLoading: results.some((r) => r.isLoading),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signature captures the results' data identity

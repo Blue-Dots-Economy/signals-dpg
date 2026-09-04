@@ -2097,9 +2097,10 @@ export function HomePage() {
           <BrowseToolbar
             viewMode={viewMode}
             count={contentLoading ? undefined : contentCount}
-            // Map only: names the items that can never be pins, so the gap
-            // between this count and the map's viewport pill is stated.
-            withoutLocation={viewMode === 'map' ? browseTotals.withoutLocation : undefined}
+            // Map only: names the items that can never be pins at any zoom, so
+            // the part of the gap with the map's viewport pill that zooming
+            // out will never close is stated rather than inferred.
+            notMappable={viewMode === 'map' ? browseTotals.notMappable : undefined}
             sort={sort}
             sortApplied={listSortApplied}
             // `nearest` needs a centre to order around.

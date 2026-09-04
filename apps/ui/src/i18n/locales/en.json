@@ -690,7 +690,7 @@
   "browse.area_radius_unavailable": "Needs your location to limit by area",
   "browse.no_filters": "No filters applied",
   "browse.count_listings": "{{count}} listings",
-  "browse.count_without_location": "· {{count}} without a location, so not on the map",
+  "browse.count_not_mappable": "· {{count}} not on the map",
   "browse.domain_unavailable": "You can't connect with {{domain}}",
   "card.metric_km": "{{km}} km",
   "card.metric_m": "{{m}} m",

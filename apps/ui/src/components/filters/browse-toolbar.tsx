@@ -11,12 +11,12 @@ export interface BrowseToolbarProps {
   /** Server-reported total for the active feed; omitted while loading. */
   count?: number;
   /**
-   * Map view only: how many matching items have no coordinate and therefore
-   * cannot appear as a pin. Explains the gap between this count (all matches)
-   * and the map's own viewport pill. Omitted when zero — a "0 without a
-   * location" note is noise.
+   * Map view only: how many matching items the map cannot plot at ANY zoom —
+   * no coordinate, or not yet in the geo read-model. Explains the part of the
+   * gap between this count (all matches) and the map's viewport pill that
+   * zooming out will never close. Omitted when zero.
    */
-  withoutLocation?: number;
+  notMappable?: number;
   sort: BrowseSort;
   /** `meta.sort_applied` — what the server actually did. */
   sortApplied?: BrowseSort;
@@ -140,9 +140,9 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             <span className="font-semibold text-muted-foreground">
               {t('browse.count_listings', { count: props.count })}
             </span>
-            {props.withoutLocation !== undefined && props.withoutLocation > 0 && (
-              <span data-testid="without-location-note" className="text-muted-foreground/80">
-                {t('browse.count_without_location', { count: props.withoutLocation })}
+            {props.notMappable !== undefined && props.notMappable > 0 && (
+              <span data-testid="not-mappable-note" className="text-muted-foreground/80">
+                {t('browse.count_not_mappable', { count: props.notMappable })}
               </span>
             )}
           </span>

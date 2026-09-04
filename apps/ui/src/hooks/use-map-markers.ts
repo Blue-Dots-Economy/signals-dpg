@@ -4,7 +4,7 @@ import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
 import type { Marker } from '@/lib/network-api';
 import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
-import { snapViewportForKey, padBbox, shouldRefetch, zoomBand, clampBbox } from '@/lib/map-viewport-snap';
+import { snapViewportForKey, padBbox, shouldRefetch, zoomBand, clampBbox, bboxContains } from '@/lib/map-viewport-snap';
 import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
 import { capForZoom } from '@/lib/map-caps';
 import { resolveFacetFieldLabels } from '@/lib/facet-fields';
@@ -409,6 +409,24 @@ export function useMapMarkers(
     ? `${shownBbox.minLat},${shownBbox.minLng},${shownBbox.maxLat},${shownBbox.maxLng}`
     : null;
 
+  // Recounting from the returned markers is only sound when the fetch covered
+  // AT LEAST the area on screen. The displayed viewport can be WIDER than
+  // `effectiveBbox` for a render or two — the bbox is snapped and held, and a
+  // zoom-out has to wait for the next fetch to land — and in that window the
+  // marker set knows nothing about items outside the fetched box. Counting it
+  // then under-reports: a fully zoomed-out map read "94" while 8 items simply
+  // had not been fetched yet. `meta.total` is the honest answer until the
+  // wider fetch settles.
+  const canRecount =
+    shownBbox !== null &&
+    effectiveBbox !== null &&
+    bboxContains(effectiveBbox, {
+      minLat: shownBbox.minLat,
+      minLng: shownBbox.minLng,
+      maxLat: shownBbox.maxLat,
+      maxLng: shownBbox.maxLng,
+    });
+
   const aggregated = React.useMemo(() => {
     const markers: Marker[] = [];
     let total = 0;
@@ -439,14 +457,14 @@ export function useMapMarkers(
         // set, and the caller renders an "N+ in this area" pill from
         // `truncated` anyway, so the server total remains the right input.
         total +=
-          shownBbox && !domainTruncated
+          canRecount && shownBbox && !domainTruncated
             ? result.data.markers.filter((m) => markerInBbox(m, shownBbox)).length
             : serverTotal;
       }
     }
     return { markers, total, partial, truncated };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap and shownBboxSignature are cheap derived primitives listed explicitly
-  }, [dataSignature, cap, shownBboxSignature]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap, shownBboxSignature and canRecount are cheap derived primitives listed explicitly
+  }, [dataSignature, cap, shownBboxSignature, canRecount]);
 
   // Update the held refetch state (Task 5) once every active domain's query
   // for `effectiveBbox` has settled — in an effect, not during render, so
