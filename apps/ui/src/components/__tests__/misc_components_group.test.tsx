@@ -122,9 +122,11 @@ function makeQueryClient(): QueryClient {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// auth-context — the app's only React Context. It owns the bearer token that
-// api-client's request interceptor reads out of `auth-token`'s localStorage
-// slot, so the token store is asserted alongside the rendered session state.
+// auth-context — the app's only React Context. It no longer holds a token at
+// all (AUTH-VULN-03/04): the session is an httpOnly cookie the API sets and
+// this code cannot read, so these assert the rendered session state AND that
+// nothing is written to localStorage — the property the change exists to
+// guarantee.
 // ═══════════════════════════════════════════════════════════════════════════
 
 function AuthProbe() {
@@ -213,13 +215,13 @@ describe('AuthProvider session lifecycle', () => {
     expect(screen.getByTestId('who')).toHaveTextContent('Asha K');
   });
 
-  it('restores the signed-in user and stores the bearer token', async () => {
+  it('restores the signed-in user without writing any token to storage', async () => {
     renderAuthProbe();
 
     expect(await screen.findByText('ready')).toBeInTheDocument();
     expect(screen.getByTestId('who')).toHaveTextContent('Asha K');
     expect(screen.getByTestId('authed')).toHaveTextContent('true');
-    expect(localStorage.getItem('auth_token')).toBe('tok-restored');
+    expect(localStorage.getItem('auth_token')).toBeNull();
   });
 
   it('signs the user in without writing a token when the session carries none', async () => {
@@ -240,7 +242,7 @@ describe('AuthProvider session lifecycle', () => {
     expect(screen.getByTestId('authed')).toHaveTextContent('false');
   });
 
-  it('signs the user in from a verified OTP and stores the issued token', async () => {
+  it('signs the user in from a verified OTP without writing any token to storage', async () => {
     vi.mocked(authApi.getSession).mockRejectedValue(new Error('no session'));
     vi.mocked(authApi.verifyOtp).mockResolvedValue({
       redirect: false,
@@ -254,7 +256,7 @@ describe('AuthProvider session lifecycle', () => {
 
     expect(await screen.findByText('Asha K')).toBeInTheDocument();
     expect(screen.getByTestId('authed')).toHaveTextContent('true');
-    expect(localStorage.getItem('auth_token')).toBe('tok-from-otp');
+    expect(localStorage.getItem('auth_token')).toBeNull();
     expect(vi.mocked(authApi.verifyOtp).mock.calls[0]).toEqual([
       { email: 'asha@example.com' },
       '123456',
@@ -285,7 +287,7 @@ describe('AuthProvider session lifecycle', () => {
   it('drops the user and the stored token on sign-out', async () => {
     renderAuthProbe();
     expect(await screen.findByText('Asha K')).toBeInTheDocument();
-    expect(localStorage.getItem('auth_token')).toBe('tok-restored');
+    expect(localStorage.getItem('auth_token')).toBeNull();
 
     await userEvent.click(screen.getByRole('button', { name: 'sign out' }));
 
@@ -533,21 +535,20 @@ describe('MatchScoreContainer', () => {
   it('opens the details modal from the score badge and closes it again', async () => {
     const score: MatchScoreResult = {
       provider: 'signals_search',
-      score: 7.1,
-      confidence: 0.9,
-      reasoning: 'Both teach physics in the same city.',
-      signals: [{ name: 'Location proximity', impact: 'Strong', summary: 'Same city' }],
+      score: 71,
     };
     vi.mocked(useMatchScore).mockReturnValue(hookState({ score }));
     renderContainer();
 
     expect(screen.queryByText('Match Score Details')).toBeNull();
-    await userEvent.click(screen.getByRole('button', { name: '71%' }));
+    await userEvent.click(screen.getByRole('button', { name: /71%/ }));
 
     expect(screen.getByRole('heading', { name: 'Match Score Details' })).toBeInTheDocument();
-    expect(screen.getByText('Both teach physics in the same city.')).toBeInTheDocument();
-    expect(screen.getByText('Confidence: 90%')).toBeInTheDocument();
-    expect(screen.getByText('Same city')).toBeInTheDocument();
+    // #646 §5.5: reasoning, confidence and signal summaries are gone — the
+    // signals_search provider never populated them, so the modal advertised
+    // explanations that were always absent in practice.
+    expect(screen.queryByText('Both teach physics in the same city.')).toBeNull();
+    expect(screen.queryByText(/Confidence/)).toBeNull();
 
     await userEvent.click(footerCloseButton());
     expect(screen.queryByText('Match Score Details')).toBeNull();
@@ -556,11 +557,11 @@ describe('MatchScoreContainer', () => {
   it('recalculates from inside the modal without closing it', async () => {
     const recalculate = vi.fn(async () => {});
     vi.mocked(useMatchScore).mockReturnValue(
-      hookState({ score: { provider: 'signals_search', score: 5.5 }, recalculate }),
+      hookState({ score: { provider: 'signals_search', score: 55 }, recalculate }),
     );
     renderContainer();
 
-    await userEvent.click(screen.getByRole('button', { name: '55%' }));
+    await userEvent.click(screen.getByRole('button', { name: /55%/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Recalculate' }));
 
     expect(recalculate).toHaveBeenCalledTimes(1);
@@ -570,15 +571,15 @@ describe('MatchScoreContainer', () => {
   it('shows the proceed action only when the caller supplies one', async () => {
     const onProceed = vi.fn();
     vi.mocked(useMatchScore).mockReturnValue(
-      hookState({ score: { provider: 'signals_search', score: 9 } }),
+      hookState({ score: { provider: 'signals_search', score: 90 } }),
     );
     const { unmount } = renderContainer();
-    await userEvent.click(screen.getByRole('button', { name: '90%' }));
+    await userEvent.click(screen.getByRole('button', { name: /90%/ }));
     expect(screen.queryByRole('button', { name: /Proceed with Connect/ })).toBeNull();
     unmount();
 
     renderContainer({ onProceed });
-    await userEvent.click(screen.getByRole('button', { name: '90%' }));
+    await userEvent.click(screen.getByRole('button', { name: /90%/ }));
     await userEvent.click(screen.getByRole('button', { name: /Proceed with Connect/ }));
     expect(onProceed).toHaveBeenCalledTimes(1);
   });
@@ -601,17 +602,6 @@ function renderModal(props: Partial<React.ComponentProps<typeof MatchScoreModal>
       {...props}
     />,
   );
-}
-
-function signalRow(name: string): HTMLElement {
-  const row = screen.getByText(name).closest('div.py-3');
-  if (!row) throw new Error(`no signal row rendered for ${name}`);
-  return row as HTMLElement;
-}
-
-function signalIconMarkup(name: string): string {
-  const svg = signalRow(name).querySelector('svg');
-  return svg ? svg.outerHTML : '';
 }
 
 describe('MatchScoreModal states', () => {
@@ -646,42 +636,17 @@ describe('MatchScoreModal states', () => {
     expect(screen.getByRole('button', { name: 'Recalculate' })).toBeEnabled();
   });
 
-  it('colour-codes each matching factor by the strength of its impact', () => {
-    renderModal({
-      score: {
-        provider: 'signals_search',
-        score: 6,
-        signals: [
-          { name: 'Location proximity', impact: 'Strong', summary: 'Same city' },
-          { name: 'Subject overlap', impact: 'Moderate', summary: '2 of 3 subjects' },
-          { name: 'Availability', impact: 'Weak', summary: 'Different slots' },
-          { name: 'Expertise depth', impact: 'Partial', summary: 'Some overlap' },
-          { name: 'Vibes', impact: 'Unclear', summary: 'Nothing to compare' },
-        ],
-      },
-    });
-
-    expect(screen.getByText('Matching Factors')).toBeInTheDocument();
-    expect(screen.getByText('Strong')).toHaveClass('text-emerald-600');
-    expect(screen.getByText('Moderate')).toHaveClass('text-amber-600');
-    expect(screen.getByText('Weak')).toHaveClass('text-rose-600');
-    expect(screen.getByText('Partial')).toHaveClass('text-amber-600');
-    expect(screen.getByText('Unclear')).toHaveClass('text-slate-600');
-    expect(screen.getByText('Nothing to compare')).toBeInTheDocument();
-
-    // A recognised factor gets a topical icon; an unrecognised one falls back
-    // to the generic tick, so the two must not render the same glyph.
-    const known = signalIconMarkup('Location proximity');
-    expect(known).not.toBe('');
-    expect(known).not.toBe(signalIconMarkup('Vibes'));
-  });
-
-  it('omits the factors and reasoning panels when the score carries neither', () => {
-    renderModal({ score: { provider: 'signals_search', score: 4.2, signals: [] } });
+  // #646 §5.5: the Matching Factors and AI Reasoning panels are deleted, along
+  // with the `signals` / `reasoning` fields they rendered — the
+  // signals_search provider never populated either, so the modal advertised
+  // explanations that were always absent. The two tests that lived here
+  // asserted that dead surface; the relevance explanation panel has its own
+  // suite.
+  it('renders the score without any factors or reasoning panel', () => {
+    renderModal({ score: { provider: 'signals_search', score: 42 } });
 
     expect(screen.queryByText('Matching Factors')).toBeNull();
     expect(screen.queryByText('AI Reasoning')).toBeNull();
-    // The score itself still renders (42% of the 0-10 scale).
     expect(screen.getByText('42%')).toBeInTheDocument();
   });
 });
