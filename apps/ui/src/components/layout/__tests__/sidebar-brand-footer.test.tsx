@@ -64,15 +64,16 @@ describe('SidebarBrandFooter', () => {
   it('renders the attribution rows with labels and names (#720)', () => {
     brandMeta.value = meta({
       footerAttribution: [
-        { label: 'Owned by', name: 'Swavalambhan' },
+        { label: 'Owned by', name: 'Swavlamban' },
         { label: 'Managed by', name: 'ALIMCO', logo: '/brand/alimco-mark.png' },
       ],
     });
     render(<SidebarBrandFooter />);
     expect(screen.getByText('Owned by')).toBeInTheDocument();
-    expect(screen.getByText('Swavalambhan')).toBeInTheDocument();
     expect(screen.getByText('Managed by')).toBeInTheDocument();
-    expect(screen.getByText('ALIMCO')).toBeInTheDocument();
+    // No logo -> visible name. Has a logo -> the mark, named for a11y only.
+    expect(screen.getByText('Swavlamban')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'ALIMCO' })).toBeInTheDocument();
   });
 
   it('renders a letter tile for a party with no logo, and the mark for one with', () => {
@@ -80,15 +81,30 @@ describe('SidebarBrandFooter', () => {
     // arrived — not a loading state, and not a broken image.
     brandMeta.value = meta({
       footerAttribution: [
-        { label: 'Owned by', name: 'Swavalambhan' },
+        { label: 'Owned by', name: 'Swavlamban' },
         { label: 'Managed by', name: 'ALIMCO', logo: '/brand/alimco-mark.png' },
       ],
     });
     render(<SidebarBrandFooter />);
     expect(screen.getByText('S')).toBeInTheDocument();
-    const imgs = screen.getAllByRole('presentation', { hidden: true });
-    expect(imgs).toHaveLength(1);
-    expect(imgs[0]).toHaveAttribute('src', '/brand/alimco-mark.png');
+    expect(screen.getByRole('img', { name: 'ALIMCO' })).toHaveAttribute(
+      'src',
+      '/brand/alimco-mark.png',
+    );
+  });
+
+  it('shows the mark ALONE when a row has one — the logo carries the wordmark', () => {
+    // Both marks already spell their own name, so printing it beside them says
+    // it twice. The name survives as the image's accessible name.
+    brandMeta.value = meta({
+      footerAttribution: [
+        { label: 'Managed by', name: 'ALIMCO', logo: '/brand/alimco-mark.png' },
+      ],
+    });
+    render(<SidebarBrandFooter />);
+    expect(screen.getByRole('img', { name: 'ALIMCO' })).toBeInTheDocument();
+    expect(screen.queryByText('ALIMCO')).toBeNull();
+    expect(screen.getByText('Managed by')).toBeInTheDocument();
   });
 
   it('prefers each row\'s light logo in dark mode', () => {
@@ -99,18 +115,18 @@ describe('SidebarBrandFooter', () => {
       ],
     });
     render(<SidebarBrandFooter />);
-    expect(screen.getByRole('presentation', { hidden: true })).toHaveAttribute('src', '/a-light.png');
+    expect(screen.getByRole('img', { name: 'ALIMCO' })).toHaveAttribute('src', '/a-light.png');
   });
 
   it('renders attribution even when no footerLogo is set', () => {
     // The two are independent opt-ins; requiring both would mean a brand that
     // wants only ownership captions gets nothing.
     brandMeta.value = meta({
-      footerAttribution: [{ label: 'Owned by', name: 'Swavalambhan' }],
+      footerAttribution: [{ label: 'Owned by', name: 'Swavlamban' }],
     });
     const { container } = render(<SidebarBrandFooter />);
     expect(container).not.toBeEmptyDOMElement();
-    expect(screen.getByText('Swavalambhan')).toBeInTheDocument();
+    expect(screen.getByText('Swavlamban')).toBeInTheDocument();
   });
 
   it('uses the light variant in dark mode', () => {

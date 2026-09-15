@@ -36,36 +36,35 @@ function initialOf(name: string): string {
 }
 
 /**
- * One "Owned by <party>" row: the party's mark, or a letter tile when it has
- * no artwork yet.
+ * One "Owned by <party>" row.
  *
- * The tile is not a loading state — it is the design's own placeholder for a
- * party whose logo has not been supplied, so it must look deliberate rather
- * than broken.
+ * With a logo: the mark ALONE. Both marks here already carry their own
+ * wordmark ("ALIMCO", "Swavlamban"), so printing the name beside them says it
+ * twice. The name becomes the image's `alt`, which is what a screen reader
+ * needs anyway — so nothing is lost by dropping the visible text.
+ *
+ * Without one: a letter tile plus the name, because the initial alone
+ * identifies nobody. The tile is the design's own placeholder for artwork that
+ * has not been supplied, not a loading state, so it must look deliberate.
  */
 function AttributionRow({ row, isDark }: Readonly<{ row: BrandAttribution; isDark: boolean }>) {
   const src = pickRowLogo(row, isDark);
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
-      <div className="flex items-center gap-2.5">
-        {src ? (
-          <img
-            src={src}
-            alt=""
-            aria-hidden="true"
-            className="h-8 w-auto max-w-[7rem] shrink-0 object-contain"
-          />
-        ) : (
+      {src ? (
+        <img src={src} alt={row.name} className="h-9 w-auto max-w-[9rem] self-start object-contain" />
+      ) : (
+        <div className="flex items-center gap-2.5">
           <span
             aria-hidden="true"
             className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-sm font-semibold text-muted-foreground"
           >
             {initialOf(row.name)}
           </span>
-        )}
-        <span className="truncate text-sm font-semibold text-foreground">{row.name}</span>
-      </div>
+          <span className="truncate text-sm font-semibold text-foreground">{row.name}</span>
+        </div>
+      )}
     </div>
   );
 }
