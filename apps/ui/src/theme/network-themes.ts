@@ -86,7 +86,7 @@ const purple_dot: NetworkTheme = {
     tail: 'to find the support it deserves.',
   },
   subline:
-    'An ecosystem connecting persons with disabilities to assistive devices, health services, and rehabilitation support — every purple dot is a door to a better life.',
+    'A unified network connecting persons with disabilities to assistive devices, health services, and rehabilitation support — every purple dot is a door to a better life.',
   portalLabel: 'Services Portal',
   inviteLine: 'Invite-only · Purple Dot DPG',
   stats: [],
