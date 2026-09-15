@@ -169,12 +169,20 @@ function brandThemePlugin(): Plugin {
     '--font-sans': t.fontFamily,
   });
 
+  type BrandAttribution = {
+    label: string;
+    name: string;
+    logo?: string;
+    logoLight?: string;
+  };
+
   type BrandMeta = {
     faviconType?: 'png' | 'svg';
     logoShape?: 'square' | 'wordmark' | 'lockup';
     copy?: Record<string, string>;
     footerLogo?: string;
     footerLogoLight?: string;
+    footerAttribution?: BrandAttribution[];
   };
 
   const extractMeta = (brandJson: any): BrandMeta => {
@@ -199,6 +207,31 @@ function brandThemePlugin(): Plugin {
     }
     if (typeof brandJson?.footerLogoLight === 'string' && brandJson.footerLogoLight.length > 0) {
       meta.footerLogoLight = brandJson.footerLogoLight;
+    }
+    // Attribution rows ("Owned by …", "Managed by …"). Each entry is validated
+    // individually and bad ones are dropped rather than failing the build — a
+    // malformed brand.json must not take the whole UI down, and the footer is
+    // decorative. `label` and `name` are required; the logos are optional so a
+    // party with no artwork yet still renders as a letter tile.
+    if (Array.isArray(brandJson?.footerAttribution)) {
+      const rows = brandJson.footerAttribution
+        .filter(
+          (r: any) =>
+            r &&
+            typeof r.label === 'string' &&
+            r.label.length > 0 &&
+            typeof r.name === 'string' &&
+            r.name.length > 0,
+        )
+        .map((r: any) => ({
+          label: r.label,
+          name: r.name,
+          ...(typeof r.logo === 'string' && r.logo.length > 0 ? { logo: r.logo } : {}),
+          ...(typeof r.logoLight === 'string' && r.logoLight.length > 0
+            ? { logoLight: r.logoLight }
+            : {}),
+        }));
+      if (rows.length > 0) meta.footerAttribution = rows;
     }
     return meta;
   };

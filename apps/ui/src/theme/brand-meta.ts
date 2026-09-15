@@ -15,6 +15,29 @@ export type FaviconType = 'png' | 'svg';
  */
 export type LogoShape = 'square' | 'wordmark' | 'lockup';
 
+/**
+ * One labelled party in the sidebar footer's attribution block — "Owned by
+ * Swavalambhan", "Managed by ALIMCO" (signals-dpg#720).
+ *
+ * Separate from `footerLogo`, which is a single unlabelled "seeded by" mark:
+ * this is an ordered LIST, each entry carries its own caption, and the two
+ * cannot be expressed by one image without baking the labels into artwork.
+ *
+ * `logo` is optional on purpose. The design ships letter tiles as placeholders
+ * for parties whose artwork has not arrived, so a name alone is a valid entry
+ * and renders the initial rather than a broken image.
+ */
+export interface BrandAttribution {
+  /** Caption above the party, e.g. `Owned by`. */
+  label: string;
+  /** Display name, and the source of the fallback initial. */
+  name: string;
+  /** Optional mark. Omit to render a letter tile. */
+  logo?: string;
+  /** Optional dark-mode variant, mirroring `footerLogoLight`. */
+  logoLight?: string;
+}
+
 export interface BrandMeta {
   faviconType: FaviconType;
   logoShape: LogoShape;
@@ -26,6 +49,8 @@ export interface BrandMeta {
    */
   footerLogo: string | null;
   footerLogoLight: string | null;
+  /** Ordered attribution rows, or null when the brand declares none. */
+  footerAttribution: BrandAttribution[] | null;
 }
 
 type MetaFields = {
@@ -34,6 +59,7 @@ type MetaFields = {
   copy?: Record<string, string>;
   footerLogo?: string;
   footerLogoLight?: string;
+  footerAttribution?: BrandAttribution[];
 };
 type Entry = MetaFields & {
   brands?: Record<string, MetaFields>;
@@ -53,9 +79,20 @@ export function resolveBrandMeta(
   // footerLogo, otherwise it's hidden — even though the network sets one. Keyed
   // on whether a brand entry exists (a real brand is active) vs the plain
   // network default (no brand entry).
+  // `footerAttribution` follows the SAME no-inherit rule, and for a stronger
+  // reason: it names who owns and runs THIS deployment. Inheriting it would
+  // caption an unrelated brand's sidebar with another party's ownership.
   const footerFromBrand = brand
-    ? { footerLogo: brand.footerLogo ?? null, footerLogoLight: brand.footerLogoLight ?? null }
-    : { footerLogo: net?.footerLogo ?? null, footerLogoLight: net?.footerLogoLight ?? null };
+    ? {
+        footerLogo: brand.footerLogo ?? null,
+        footerLogoLight: brand.footerLogoLight ?? null,
+        footerAttribution: brand.footerAttribution ?? null,
+      }
+    : {
+        footerLogo: net?.footerLogo ?? null,
+        footerLogoLight: net?.footerLogoLight ?? null,
+        footerAttribution: net?.footerAttribution ?? null,
+      };
   return {
     faviconType: brand?.faviconType ?? net?.faviconType ?? 'svg',
     logoShape: brand?.logoShape ?? net?.logoShape ?? 'wordmark',
