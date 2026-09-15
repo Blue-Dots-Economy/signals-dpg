@@ -53,7 +53,7 @@ function AttributionRow({ row, isDark }: Readonly<{ row: BrandAttribution; isDar
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
       {src ? (
-        <img src={src} alt={row.name} className="h-9 w-auto max-w-[9rem] self-start object-contain" />
+        <img src={src} alt={row.name} className="h-14 w-auto max-w-[9.5rem] self-start object-contain" />
       ) : (
         <div className="flex items-center gap-2.5">
           <span
