@@ -103,7 +103,7 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
 
 | Service     | URL                   | Credentials / notes                          |
 | ----------- | --------------------- | -------------------------------------------- |
-| Signals API | http://localhost:2742 | `/reference` for Swagger; test OTP in logs   |
+| Signals API | http://localhost:2742 | `/api/reference` for Swagger; test OTP in logs   |
 | Postgres    | localhost:5432        | `postgres` / `POSTGRES_PASSWORD` from `.env` |
 | Redis       | localhost:5555        | password-protected (`REDIS_PASSWORD`)        |
 | Search API  | localhost:3100        | only with `--profile search` (§7); `POST /v1/search` needs `x-api-key` |
