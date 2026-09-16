@@ -166,7 +166,13 @@ export function useBrowseTotals(
                   : {}),
               },
               signal,
-            ).then((r) => ({ kind: 'all' as const, total: r.meta.total })),
+            ).then((r) => ({
+              kind: 'all' as const,
+              total: r.meta.total,
+              // What the SERVER did with the anchor, not what we sent — see
+              // `textWithoutAnchor`.
+              anchorApplied: r.meta.anchor_applied,
+            })),
           staleTime: TOTALS_STALE_TIME_MS,
           enabled: satisfiable,
         },
@@ -187,7 +193,11 @@ export function useBrowseTotals(
                 ...(Object.keys(domainFilters).length > 0 ? { item_state: domainFilters } : {}),
               },
               signal,
-            ).then((r) => ({ kind: 'mappable' as const, total: r.meta.total })),
+            ).then((r) => ({
+              kind: 'mappable' as const,
+              total: r.meta.total,
+              anchorApplied: false as boolean,
+            })),
           staleTime: TOTALS_STALE_TIME_MS,
           enabled: satisfiable,
         },
@@ -200,20 +210,27 @@ export function useBrowseTotals(
   /**
    * A typed query is counted by two DIFFERENT matchers for at least one domain.
    *
-   * `/discover` narrows on `q` only when an anchor accompanies it; `/markers`
-   * (the native path) always narrows, with its own substring predicate. With
-   * no anchor the pair is therefore "every candidate" against "the text
-   * matches", and their difference is not a count of anything — least of all
-   * of items the map cannot plot, which is what the label claims.
+   * `/discover` narrows on `q` only when an anchor was APPLIED; `/markers`
+   * (the native path) always narrows, with its own substring predicate. When
+   * no anchor applied, the pair is therefore "every candidate" against "the
+   * text matches", and their difference is not a count of anything — least of
+   * all of items the map cannot plot, which is what the label claims.
    *
-   * Reachable whenever nobody is signed in, the viewer has no profile, or the
-   * interaction matrix forbids the anchor for that domain, so it is a normal
-   * state rather than an edge case. `total` still stands on its own — it is
-   * what the list shows for the same query — so only the difference is
-   * withheld.
+   * Read from the RESPONSE (`meta.anchor_applied`), not from whether we sent
+   * one. Sending an anchor is no guarantee it was used: signals-search rejects
+   * an anchor it cannot compare, and the BFF then retries without it and
+   * returns 200 / `degraded: false`. Measured on the dev cluster, a profile
+   * holding only private fields (name, phone, location — no `vectorize`
+   * content, so no embedding) was rejected every time, which turned a 3-row
+   * answer into 245 and printed "242 not on the map". Guessing client-side
+   * could not see that, which is why this field exists.
+   *
+   * `total` still stands on its own — it is what the list shows for the same
+   * query — so only the difference is withheld.
    */
   const textWithoutAnchor =
-    q !== '' && routed.some(({ satisfiable, anchor }) => satisfiable && !anchor);
+    q !== '' &&
+    results.some((r) => r.data?.kind === 'all' && !r.data.anchorApplied);
 
   return React.useMemo(() => {
     let total = 0;

@@ -27,7 +27,8 @@ const provider = {
   item_schemas: { 'job_posting_1.0': { properties: { natureOfJob: { type: 'string' } } } },
 } as unknown as DotNetworkDomain;
 
-const discoverTotal = (n: number) => ({ meta: { total: n } }) as never;
+const discoverTotal = (n: number, anchorApplied = false) =>
+  ({ meta: { total: n, anchor_applied: anchorApplied } }) as never;
 const markersTotal = (n: number) => ({ meta: { total: n } }) as never;
 
 describe('useBrowseTotals', () => {
@@ -108,7 +109,7 @@ describe('useBrowseTotals', () => {
     // `/markers` always narrows. Measured against the dev cluster for
     // "Titan Retail Malleshwaram": q alone 135, q + anchor 1, markers 1.
     vi.mocked(fetchDiscover).mockImplementation(async (q) =>
-      discoverTotal(q.anchor_item_id ? 1 : 135),
+      q.anchor_item_id ? discoverTotal(1, true) : discoverTotal(135),
     );
     vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(1));
 
@@ -157,10 +158,32 @@ describe('useBrowseTotals', () => {
     expect(result.current.notMappable).toBe(0);
   });
 
+  it('withholds the shortfall when the server REJECTED the anchor we sent', async () => {
+    // The case a client-side guess cannot see, and the one that actually
+    // happened: signals-search rejects an anchor it cannot compare — a profile
+    // whose only populated fields are private has no `vectorize` content, so
+    // no embedding — and the BFF retries without it, returning 200 and
+    // `degraded: false`. `q` then stops filtering, so discover counts every
+    // candidate while markers counts the text matches.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(135, false));
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(3));
+
+    const { result } = renderHook(
+      () => useBrowseTotals(network, [seeker], {}, 'test', true, () => 'anchor-1'),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.total).toBe(135));
+    // We DID send an anchor, so the old client-side guard would have computed
+    // 135 - 3 and printed "132 not on the map".
+    expect(vi.mocked(fetchDiscover).mock.calls[0][0].anchor_item_id).toBe('anchor-1');
+    expect(result.current.notMappable).toBe(0);
+  });
+
   it('still reports the shortfall when there is no typed query', async () => {
     // The guard above must not swallow the genuine case it was built for:
     // with no `q`, both endpoints match identically and the gap is real.
-    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(102));
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(102, false));
     vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(94));
 
     const { result } = renderHook(
@@ -174,7 +197,7 @@ describe('useBrowseTotals', () => {
 
   it('refetches when the anchor changes, because it changes what matches', async () => {
     vi.mocked(fetchDiscover).mockImplementation(async (q) =>
-      discoverTotal(q.anchor_item_id === 'anchor-2' ? 3 : 1),
+      discoverTotal(q.anchor_item_id === 'anchor-2' ? 3 : 1, true),
     );
     vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(1));
 
