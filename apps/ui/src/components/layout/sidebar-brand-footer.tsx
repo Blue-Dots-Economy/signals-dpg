@@ -50,15 +50,15 @@ function initialOf(name: string): string {
 function AttributionRow({ row, isDark }: Readonly<{ row: BrandAttribution; isDark: boolean }>) {
   const src = pickRowLogo(row, isDark);
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col items-center gap-1.5 text-center">
       <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
       {src ? (
         // Fixed BOX, not a fixed height. The marks have very different aspect
         // ratios (Swavlamban ~1.26:1, ALIMCO ~1.84:1), so a shared height alone
         // left them visibly different widths and the stack read as ragged.
-        // `object-contain object-left` fits each inside identical bounds and
-        // pins the left edges, so the rows line up whatever artwork arrives.
-        <img src={src} alt={row.name} className="h-12 w-32 object-contain object-left" />
+        // `object-contain object-center` fits each inside identical bounds and
+        // centres it, so the rows line up whatever artwork arrives later.
+        <img src={src} alt={row.name} className="h-12 w-32 object-contain object-center" />
       ) : (
         <div className="flex items-center gap-2.5">
           <span
