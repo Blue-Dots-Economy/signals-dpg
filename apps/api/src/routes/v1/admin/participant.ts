@@ -4,7 +4,7 @@ import type {
   FastifyRequest,
 } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -1199,7 +1199,13 @@ async function readItemsForUser(user_id: string) {
         ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
         : eq(items.created_by, user_id),
     )
-    .orderBy(items.created_at);
+    // Newest profile first. Callers that render this list into a
+    // length-capped surface — the voice bot reads only the first N characters of
+    // the response — otherwise saw the OLDEST profile and silently dropped the
+    // one the participant just created. `item_id` is a stable, arbitrary
+    // tiebreaker so two items written in the same millisecond keep a
+    // deterministic order across calls rather than following heap order.
+    .orderBy(desc(items.created_at), desc(items.item_id));
   return rows.map((r) => {
     const { item_private_state: _drop, ...rest } = r;
     const { mergedState } = decryptItemPrivate({

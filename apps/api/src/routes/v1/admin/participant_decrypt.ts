@@ -3,7 +3,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -425,7 +425,9 @@ export const participant_decrypt_handler = async (
           ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )
-      .orderBy(items.created_at)) as DecryptableRow[];
+      // Newest profile first, matching GET/POST /admin/participant so a
+      // caller that truncates the list keeps the participant's latest profile.
+      .orderBy(desc(items.created_at), desc(items.item_id))) as DecryptableRow[];
 
     const collected = await collectProfiles(rows, opts, request.log);
     profiles = collected.profiles;

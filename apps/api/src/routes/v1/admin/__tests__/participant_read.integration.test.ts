@@ -512,6 +512,96 @@ describeIf(`GET /api/v1/admin/participant (integration)${
     expect(res.json().error).toBe('U18_NOT_ALLOWED');
   });
 
+  it('lists a multi-profile participant newest-first, on GET and on POST', async () => {
+    // A participant accumulates profiles: POST without `item_id` inserts a new
+    // one every call (see `resolve_upsert_action`), which is how a voice
+    // registration that is retried ends up with several. Callers read that list
+    // into a length-capped surface — the voice bot consumes only the first N
+    // characters — so the newest profile has to come first or it is the one that
+    // gets dropped.
+    const email = `int_order_${randomUUID().slice(0, 6)}@a.test`;
+    let lastBody: { user_id: string; items: Array<{ item_id: string }> } | null = null;
+    for (let i = 0; i < 3; i++) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/participant',
+        headers: {
+          'x-api-key': ns.raw_key,
+          'x-acting-org-id': ns.org_id,
+          'content-type': 'application/json',
+        },
+        payload: {
+          email,
+          name: `Order Profile ${i}`,
+          channel: 'voice',
+          age: 25,
+          network: primary.network,
+          domain: primary.domain,
+          item_type: primary.item_type,
+          item_state: generateMinimalItemState(primary.schema),
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      lastBody = res.json();
+    }
+    const userId = lastBody!.user_id;
+    onboarded_user_ids.push(userId);
+    const ids = lastBody!.items.map((i) => i.item_id);
+    expect(ids).toHaveLength(3);
+
+    // Stamp distinct created_at values in a scrambled order, so the assertion
+    // pins "sorted by created_at" and cannot pass on insertion order alone.
+    // Three inserts can land in the same millisecond, which would otherwise make
+    // the expected order ambiguous.
+    const stamps = [
+      new Date('2026-01-01T00:00:00.000Z'), // oldest
+      new Date('2026-03-01T00:00:00.000Z'), // newest
+      new Date('2026-02-01T00:00:00.000Z'), // middle
+    ];
+    for (const [idx, id] of ids.entries()) {
+      await db
+        .update(itemsTable)
+        .set({ created_at: stamps[idx] })
+        .where(eq(itemsTable.item_id, id));
+    }
+    const expectedOrder = [ids[1], ids[2], ids[0]];
+
+    const getRes = await app.inject({
+      method: 'GET',
+      url: `/api/v1/admin/participant?email=${encodeURIComponent(email)}`,
+      headers: { 'x-api-key': ns.raw_key, 'x-acting-org-id': ns.org_id },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const getItems = getRes.json().items as Array<{ item_id: string; created_at: string }>;
+    expect(getItems.map((i) => i.item_id)).toEqual(expectedOrder);
+    expect(getItems.map((i) => i.created_at)).toEqual(
+      [...getItems.map((i) => i.created_at)].sort().reverse(),
+    );
+
+    // The POST response reads the same list, so it must order identically —
+    // account-only mode (no item_state) returns it without writing a profile.
+    const postRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/admin/participant',
+      headers: {
+        'x-api-key': ns.raw_key,
+        'x-acting-org-id': ns.org_id,
+        'content-type': 'application/json',
+      },
+      payload: {
+        email,
+        name: 'Order Probe',
+        channel: 'voice',
+        network: primary.network,
+        domain: primary.domain,
+      },
+    });
+    expect(postRes.statusCode).toBe(200);
+    expect(
+      (postRes.json().items as Array<{ item_id: string }>).map((i) => i.item_id),
+    ).toEqual(expectedOrder);
+  });
+
   it('missing x-acting-org-id returns 403', async () => {
     const res = await app.inject({
       method: 'GET',

@@ -118,6 +118,18 @@ export const UpsertParticipantRequest = z
     path: ['email'],
   });
 
+/**
+ * Ordering contract for every participant item list this API returns.
+ *
+ * Callers commonly read only the head of the list — the voice bot renders the
+ * response into a length-capped prompt and keeps just the first N characters —
+ * and a participant accumulates profiles, because a POST without `item_id`
+ * inserts a new one every call. Oldest-first therefore meant the profile the
+ * participant had just created was the one truncated away.
+ */
+export const PARTICIPANT_ITEMS_ORDER =
+  'Ordered newest first by `created_at` (ties broken by `item_id`), so a caller that reads only the head of the list gets the participant\'s most recent profile.';
+
 export const ParticipantItemSnapshot = z.object({
   item_id: z.uuid(),
   item_network: z.string(),
@@ -141,7 +153,7 @@ export const UpsertParticipantResponse = z.object({
   user_existed: z.boolean(),
   owned_elsewhere: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
-  items: z.array(ParticipantItemSnapshot),
+  items: z.array(ParticipantItemSnapshot).describe(PARTICIPANT_ITEMS_ORDER),
   // Number of consent_record rows written this call (#309). Optional so the
   // rejected / owned-elsewhere branches can omit it.
   consent_recorded: z.number().int().optional(),
@@ -218,7 +230,7 @@ export const GetParticipantResponse = z.object({
    * `false`.
    */
   compliance: z.array(ParticipantComplianceEntry),
-  items: z.array(ParticipantItemSnapshot),
+  items: z.array(ParticipantItemSnapshot).describe(PARTICIPANT_ITEMS_ORDER),
 });
 
 export type UpsertParticipantRequest = z.infer<typeof UpsertParticipantRequest>;

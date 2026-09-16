@@ -6029,7 +6029,8 @@
                           "updated_at"
                         ],
                         "additionalProperties": false
-                      }
+                      },
+                      "description": "Ordered newest first by `created_at` (ties broken by `item_id`), so a caller that reads only the head of the list gets the participant's most recent profile."
                     },
                     "consent_recorded": {
                       "type": "integer",
@@ -6214,7 +6215,8 @@
                           "updated_at"
                         ],
                         "additionalProperties": false
-                      }
+                      },
+                      "description": "Ordered newest first by `created_at` (ties broken by `item_id`), so a caller that reads only the head of the list gets the participant's most recent profile."
                     }
                   },
                   "required": [
@@ -6454,7 +6456,8 @@
                           "updated_at"
                         ],
                         "additionalProperties": false
-                      }
+                      },
+                      "description": "In `user_id` mode, ordered newest first by `created_at` (ties broken by `item_id`), matching GET/POST /admin/participant. In `item_ids` mode the order follows the database, not the requested ids."
                     },
                     "skipped": {
                       "type": "array",

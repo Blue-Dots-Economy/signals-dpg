@@ -365,8 +365,12 @@ for validation rules, age requirements, and how a profile gets promoted to
 
 `onboarded_at` is set only when this call created a new user; null
 otherwise. `items` is scoped to the networks this Signals instance
-serves. `lifecycle_status` tells the caller whether the profile is
-usable (`live`) or still incomplete/gated (`draft`, `paused`).
+serves, and is **ordered newest first** by `created_at` (ties broken by
+`item_id`) — a participant accumulates profiles, because a POST without
+`item_id` inserts a new one every call, so a caller that reads only the
+head of the list gets their most recent one. `lifecycle_status` tells
+the caller whether the profile is usable (`live`) or still
+incomplete/gated (`draft`, `paused`).
 `consent_recorded` is the number of `consent_record` rows written by
 this call from the `compliance` array (0 when `compliance` was absent
 or every entry was `false`/unrecognised).
