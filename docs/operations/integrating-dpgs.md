@@ -368,7 +368,14 @@ otherwise. `items` is scoped to the networks this Signals instance
 serves, and is **ordered newest first** by `created_at` (ties broken by
 `item_id`) — a participant accumulates profiles, because a POST without
 `item_id` inserts a new one every call, so a caller that reads only the
-head of the list gets their most recent one. `lifecycle_status` tells
+head of the list gets their most recent one. Two limits to know before
+relying on that: it is **`created_at`, not `updated_at`**, so editing an
+old profile does not lift it to the head (`updated_at` also moves for
+writes the participant never made — lifecycle transitions, consent
+promotion, the retire scrub — which would reshuffle the list invisibly);
+and `created_at` is a millisecond-resolution default with a random-UUID
+tiebreaker, so profiles written in the *same millisecond* come back in a
+stable but arbitrary order rather than a genuinely newest-first one. `lifecycle_status` tells
 the caller whether the profile is usable (`live`) or still
 incomplete/gated (`draft`, `paused`).
 `consent_recorded` is the number of `consent_record` rows written by
@@ -444,6 +451,14 @@ or every entry was `false`/unrecognised).
 |---|---|---|---|
 | aggregator whose org declares no `metadata.domains` | 400 | `NO_DOMAINS_CONFIGURED` | **not additive.** Decrypt is now scoped to the acting org's declared domains and fails closed when there are none, matching `GET /aggregator/dashboard` and `/dashboard/export`. Affects only orgs mirrored before `domains` was sent; re-upsert with a non-empty `domains` array. The same requirement is now enforced when an org is nominated as a **default aggregator** (migration 0017), so the two cannot disagree. |
 | aggregator requesting an item outside its declared domains | 200 | — | the id lands in `skipped`, undifferentiated from not-found, so nothing leaks about its existence. |
+
+**Ordering.** In `user_id` mode `profiles` is ordered **newest first** by
+`created_at` (ties broken by `item_id`), the same ordering GET/POST
+`/admin/participant` use — the three share one `ORDER BY` in code, so they
+cannot drift. In `item_ids` mode there is **no ordering at all**: rows come back
+in whatever order Postgres produces, which is neither the requested id order nor
+`created_at`. Correlate by the `item_id` on each row rather than by position;
+every in-repo consumer already does.
 
 ### Migration from `/admin/onboard_participant`
 

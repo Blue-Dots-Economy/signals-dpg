@@ -539,6 +539,16 @@ describe('participant_read_handler — ownership disclosure', () => {
   });
 });
 
+/**
+ * The ORDER BY `ITEMS_NEWEST_FIRST` emits through the mocked `desc`. Written
+ * once so the read and decrypt assertions pin the SAME ordering — that identity
+ * is the invariant, since the two build separate queries.
+ */
+const ITEMS_NEWEST_FIRST_EMITTED = [
+  { op: 'desc', col: 'items.created_at' },
+  { op: 'desc', col: 'items.item_id' },
+];
+
 describe('participant_read_handler — item ordering', () => {
   const onboarded = [
     { id: 'u1', email: 'a@b.com', phoneNumber: null, onboardedByOrgId: 'org_agg' },
@@ -562,10 +572,7 @@ describe('participant_read_handler — item ordering', () => {
       query: { email: 'a@b.com' },
     });
 
-    expect(orderings[0]).toEqual([
-      { op: 'desc', col: 'items.created_at' },
-      { op: 'desc', col: 'items.item_id' },
-    ]);
+    expect(orderings).toContainEqual(ITEMS_NEWEST_FIRST_EMITTED);
   });
 });
 
@@ -1437,6 +1444,21 @@ describe('participant_decrypt_handler — user_id mode', () => {
     });
     expect((reply.body as { profiles: unknown[] }).profiles).toHaveLength(1);
     expect((reply.body as { skipped: string[] }).skipped).toEqual([]);
+  });
+
+  it('orders newest-first, identically to GET/POST /admin/participant', async () => {
+    // This query cannot reuse `readItemsForUser`, so nothing but this assertion
+    // stops it drifting from the sibling routes — which is the failure the
+    // shared `ITEMS_NEWEST_FIRST` exists to prevent, and it is only real if the
+    // test pins the same value the read path is pinned to.
+    rowQueue.push([itemRow({ item_id: 'i1' }), itemRow({ item_id: 'i2' })]);
+
+    await call(participant_decrypt_handler, {
+      acting_org: AGG,
+      body: { user_id: 'u1' },
+    });
+
+    expect(orderings).toContainEqual(ITEMS_NEWEST_FIRST_EMITTED);
   });
 
   it('audits user_id mode with requested_count 1 regardless of rows returned', async () => {

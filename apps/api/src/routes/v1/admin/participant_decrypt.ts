@@ -3,7 +3,7 @@ import type {
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -15,7 +15,7 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { readConfiguredDomains } from '@/utils/org_metadata';
-import { servedNetworks } from './_participant_items.js';
+import { ITEMS_NEWEST_FIRST, servedNetworks } from './_participant_items.js';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   projectItemState,
@@ -419,9 +419,11 @@ export const participant_decrypt_handler = async (
           ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )
-      // Newest profile first, matching GET/POST /admin/participant so a
-      // caller that truncates the list keeps the participant's latest profile.
-      .orderBy(desc(items.created_at), desc(items.item_id))) as DecryptableRow[];
+      // The SAME ordering object GET/POST /admin/participant use, not a
+      // restatement of it: this query cannot share `readItemsForUser` (different
+      // columns, a user join), so importing the ORDER BY is what keeps the three
+      // in step rather than a comment asserting that they are.
+      .orderBy(...ITEMS_NEWEST_FIRST)) as DecryptableRow[];
 
     const collected = await collectProfiles(rows, opts, request.log);
     profiles = collected.profiles;
