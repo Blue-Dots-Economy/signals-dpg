@@ -98,7 +98,10 @@ export function SidebarBrandFooter() {
   return (
     <SidebarFooter className="px-4 py-4">
       {rows.length > 0 && (
-        <div className="flex flex-col gap-3 rounded-lg border border-sidebar-border/60 p-3">
+        // No border or surface of its own: the marks sit directly on the
+        // sidebar. A bordered card read as a distinct panel competing with the
+        // nav above it, and the labels already group the rows well enough.
+        <div data-attribution className="flex flex-col gap-3">
           {rows.map((row) => (
             <AttributionRow key={`${row.label}-${row.name}`} row={row} isDark={isDark} />
           ))}
