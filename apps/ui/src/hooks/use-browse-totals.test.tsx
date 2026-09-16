@@ -102,6 +102,93 @@ describe('useBrowseTotals', () => {
     expect(domains).not.toContain('provider');
   });
 
+  it('sends the anchor per target domain, so a typed query actually narrows', async () => {
+    // The reported bug: `q` alone does not narrow `/discover` — signals-search
+    // treats text as a ranking signal unless an anchor accompanies it — while
+    // `/markers` always narrows. Measured against the dev cluster for
+    // "Titan Retail Malleshwaram": q alone 135, q + anchor 1, markers 1.
+    vi.mocked(fetchDiscover).mockImplementation(async (q) =>
+      discoverTotal(q.anchor_item_id ? 1 : 135),
+    );
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(1));
+
+    const anchorFor = (domain: string) => (domain === 'seeker' ? 'anchor-1' : undefined);
+    const { result } = renderHook(
+      () => useBrowseTotals(network, [seeker], {}, 'Titan Retail Malleshwaram', true, anchorFor),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.total).toBe(1));
+    expect(vi.mocked(fetchDiscover).mock.calls[0][0].anchor_item_id).toBe('anchor-1');
+    // Both counts now come from the same matching, so nothing is "missing".
+    expect(result.current.notMappable).toBe(0);
+  });
+
+  it('omits the anchor for a domain the interaction matrix forbids', async () => {
+    // `anchorFor` returns undefined there; sending it anyway would 403
+    // (INTERACTION_NOT_ALLOWED) and lose the count entirely.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(5));
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(5));
+
+    renderHook(
+      () => useBrowseTotals(network, [provider], {}, 'plumber', true, () => undefined),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(vi.mocked(fetchDiscover)).toHaveBeenCalled());
+    expect(vi.mocked(fetchDiscover).mock.calls[0][0].anchor_item_id).toBeUndefined();
+  });
+
+  it('withholds the shortfall when a typed query is counted two different ways', async () => {
+    // Signed out, no profile, or an anchor the matrix forbids: `/discover`
+    // returns every candidate and `/markers` returns the text matches, so the
+    // difference counts neither missing coordinates nor anything else. The
+    // total still stands on its own — it is what the list shows.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(135));
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(1));
+
+    const { result } = renderHook(
+      () => useBrowseTotals(network, [seeker], {}, 'Titan Retail Malleshwaram', true),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.total).toBe(135));
+    expect(result.current.mappable).toBe(1);
+    expect(result.current.notMappable).toBe(0);
+  });
+
+  it('still reports the shortfall when there is no typed query', async () => {
+    // The guard above must not swallow the genuine case it was built for:
+    // with no `q`, both endpoints match identically and the gap is real.
+    vi.mocked(fetchDiscover).mockResolvedValue(discoverTotal(102));
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(94));
+
+    const { result } = renderHook(
+      () => useBrowseTotals(network, [seeker], {}, '', true, () => undefined),
+      { wrapper },
+    );
+
+    await waitFor(() => expect(result.current.total).toBe(102));
+    expect(result.current.notMappable).toBe(8);
+  });
+
+  it('refetches when the anchor changes, because it changes what matches', async () => {
+    vi.mocked(fetchDiscover).mockImplementation(async (q) =>
+      discoverTotal(q.anchor_item_id === 'anchor-2' ? 3 : 1),
+    );
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue(markersTotal(1));
+
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) =>
+        useBrowseTotals(network, [seeker], {}, 'plumber', true, () => id),
+      { wrapper, initialProps: { id: 'anchor-1' } },
+    );
+    await waitFor(() => expect(result.current.total).toBe(1));
+
+    rerender({ id: 'anchor-2' });
+    await waitFor(() => expect(result.current.total).toBe(3));
+  });
+
   it('issues nothing at all when disabled', async () => {
     renderHook(() => useBrowseTotals(network, [seeker], {}, '', false), { wrapper });
     await new Promise((r) => setTimeout(r, 50));

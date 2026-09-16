@@ -25,6 +25,11 @@ export interface UseBrowseTotalsResult {
    * Items matching the active filters, IGNORING location entirely. This is
    * the number the list view shows, so the map's filter bar can state the same
    * figure rather than a viewport-scoped one.
+   *
+   * "The number the list view shows" is a real constraint, not a description:
+   * this call must send what the list feed sends, or the two disagree. It once
+   * omitted the ANCHOR, and a typed query then counted the whole network —
+   * see `anchorFor`.
    */
   total: number;
   /** Of those, how many the map can actually plot anywhere in the world. */
@@ -39,6 +44,10 @@ export interface UseBrowseTotalsResult {
    * not yet in the `item_search` geo read-model the bbox predicate reads (the
    * indexing lag). Measured on blue_dot: 8 of 102, of which 4 had an empty
    * `item_locations` and 4 were simply unindexed.
+   *
+   * ZERO when the two counts are not comparable — see `textWithoutAnchor`.
+   * A difference between two different matchers is not a missing coordinate,
+   * and reporting it as one is worse than reporting nothing.
    */
   notMappable: number;
   isLoading: boolean;
@@ -73,6 +82,28 @@ export function useBrowseTotals(
   filters: Record<string, unknown> = {},
   search: string = '',
   enabled: boolean = true,
+  /**
+   * Resolves the discover anchor for ONE target domain — the same
+   * `anchorFor` the list feed uses, passed as a callback rather than an id
+   * because the anchor is per target domain: signals-search enforces the
+   * network's interaction matrix and 403s when the anchor's domain has no
+   * defined interaction with the one being counted.
+   *
+   * Load-bearing for `q`, not just for ranking. With an anchor, signals-search
+   * treats the typed text as a FILTER; with none, it is only a ranking signal
+   * and the total comes back as the whole candidate set (contract §4).
+   * Measured on the dev cluster, "Titan Retail Malleshwaram":
+   *
+   *   q only ................. total 135   (every provider in the network)
+   *   anchor only ............ total 135
+   *   q + anchor ............. total 1     (the one real match)
+   *
+   * Omitting it here while the list feed sent it is what produced
+   * "245 listings · 244 not on the map" over a map showing a single pin: this
+   * count had not narrowed, the markers count had. Narrowing follows the
+   * anchor alone, not the sort, so `sort: 'newest'` below stays as it is.
+   */
+  anchorFor?: (domain: string) => string | undefined,
 ): UseBrowseTotalsResult {
   const q = search.trim();
   const active = network && enabled ? domains : [];
@@ -82,8 +113,15 @@ export function useBrowseTotals(
     return active.map((domain) => {
       const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
       const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
+      const anchor = anchorFor?.(domain.id);
       if (activeFields.length === 0) {
-        return { domain, itemType, filters: {} as Record<string, unknown>, satisfiable: true };
+        return {
+          domain,
+          itemType,
+          anchor,
+          filters: {} as Record<string, unknown>,
+          satisfiable: true,
+        };
       }
       const declared = resolveFacetFieldLabels([domain]);
       const applicable: Record<string, unknown> = {};
@@ -92,13 +130,15 @@ export function useBrowseTotals(
         if (field in declared) applicable[field] = filters[field];
         else satisfiable = false;
       }
-      return { domain, itemType, filters: applicable, satisfiable };
+      return { domain, itemType, anchor, filters: applicable, satisfiable };
     });
-  }, [active, filters]);
+  }, [active, filters, anchorFor]);
 
   const results = useQueries({
-    queries: routed.flatMap(({ domain, itemType, filters: domainFilters, satisfiable }) => {
-      const keyBase = { filters: domainFilters, q, satisfiable };
+    queries: routed.flatMap(({ domain, itemType, anchor, filters: domainFilters, satisfiable }) => {
+      // `anchor` is in the key because it changes the RESULT, not just the
+      // order: switching profiles can change what a typed query matches.
+      const keyBase = { filters: domainFilters, q, satisfiable, anchor: anchor ?? null };
       return [
         {
           queryKey: queryKeys.browseTotals(network!.id, domain.id, { ...keyBase, kind: 'all' }),
@@ -113,6 +153,9 @@ export function useBrowseTotals(
                 limit: 1,
                 offset: 0,
                 ...(q ? { q } : {}),
+                // Sent for the same reason the list feed sends it — see
+                // `anchorFor`. Absent when the interaction matrix forbids it.
+                ...(anchor ? { anchor_item_id: anchor } : {}),
                 ...(Object.keys(domainFilters).length > 0
                   ? {
                       filters: Object.entries(domainFilters).map(([field, values]) => ({
@@ -154,6 +197,24 @@ export function useBrowseTotals(
 
   const signature = results.map((r) => `${r.status}:${r.dataUpdatedAt}`).join('|');
 
+  /**
+   * A typed query is counted by two DIFFERENT matchers for at least one domain.
+   *
+   * `/discover` narrows on `q` only when an anchor accompanies it; `/markers`
+   * (the native path) always narrows, with its own substring predicate. With
+   * no anchor the pair is therefore "every candidate" against "the text
+   * matches", and their difference is not a count of anything — least of all
+   * of items the map cannot plot, which is what the label claims.
+   *
+   * Reachable whenever nobody is signed in, the viewer has no profile, or the
+   * interaction matrix forbids the anchor for that domain, so it is a normal
+   * state rather than an edge case. `total` still stands on its own — it is
+   * what the list shows for the same query — so only the difference is
+   * withheld.
+   */
+  const textWithoutAnchor =
+    q !== '' && routed.some(({ satisfiable, anchor }) => satisfiable && !anchor);
+
   return React.useMemo(() => {
     let total = 0;
     let mappable = 0;
@@ -167,9 +228,9 @@ export function useBrowseTotals(
       mappable,
       // Clamped: the two counts come from separate requests, so a write
       // landing between them could otherwise show a negative "missing".
-      notMappable: Math.max(0, total - mappable),
+      notMappable: textWithoutAnchor ? 0 : Math.max(0, total - mappable),
       isLoading: results.some((r) => r.isLoading),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- signature captures the results' data identity
-  }, [signature]);
+  }, [signature, textWithoutAnchor]);
 }
