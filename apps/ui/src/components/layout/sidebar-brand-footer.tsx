@@ -58,7 +58,7 @@ function AttributionRow({ row, isDark }: Readonly<{ row: BrandAttribution; isDar
         // left them visibly different widths and the stack read as ragged.
         // `object-contain object-center` fits each inside identical bounds and
         // centres it, so the rows line up whatever artwork arrives later.
-        <img src={src} alt={row.name} className="h-14 w-36 object-contain object-center" />
+        <img src={src} alt={row.name} className="h-16 w-36 object-contain object-center" />
       ) : (
         <div className="flex items-center gap-2.5">
           <span
