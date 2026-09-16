@@ -5284,6 +5284,9 @@
                             "newest",
                             "nearest"
                           ]
+                        },
+                        "anchor_applied": {
+                          "type": "boolean"
                         }
                       },
                       "required": [
@@ -5291,7 +5294,8 @@
                         "limit",
                         "offset",
                         "source",
-                        "degraded"
+                        "degraded",
+                        "anchor_applied"
                       ],
                       "additionalProperties": false
                     },
