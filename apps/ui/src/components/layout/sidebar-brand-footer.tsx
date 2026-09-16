@@ -53,7 +53,12 @@ function AttributionRow({ row, isDark }: Readonly<{ row: BrandAttribution; isDar
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted-foreground">{row.label}</span>
       {src ? (
-        <img src={src} alt={row.name} className="h-14 w-auto max-w-[9.5rem] self-start object-contain" />
+        // Fixed BOX, not a fixed height. The marks have very different aspect
+        // ratios (Swavlamban ~1.26:1, ALIMCO ~1.84:1), so a shared height alone
+        // left them visibly different widths and the stack read as ragged.
+        // `object-contain object-left` fits each inside identical bounds and
+        // pins the left edges, so the rows line up whatever artwork arrives.
+        <img src={src} alt={row.name} className="h-12 w-32 object-contain object-left" />
       ) : (
         <div className="flex items-center gap-2.5">
           <span
