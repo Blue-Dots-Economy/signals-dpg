@@ -15,7 +15,7 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { readConfiguredDomains } from '@/utils/org_metadata';
-import { apiConfig } from '@/config';
+import { servedNetworks } from './_participant_items.js';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   projectItemState,
@@ -55,12 +55,6 @@ export const participant_decrypt: FastifyPluginAsync = async (app) => {
     },
     handler: participant_decrypt_handler,
   });
-};
-
-const servedNetworks = (): string[] => {
-  const set = new Set<string>();
-  for (const d of apiConfig.served_domains) set.add(d.network);
-  return Array.from(set);
 };
 
 // Base columns fetched for every request. `item_locations` and the creator's

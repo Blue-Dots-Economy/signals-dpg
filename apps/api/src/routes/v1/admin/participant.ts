@@ -4,7 +4,7 @@ import type {
   FastifyRequest,
 } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { eq, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
@@ -12,7 +12,7 @@ import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { resolveDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { updateItemInternal, type DbOrTx } from '@/services/item_service';
-import { apiConfig, authConfig } from '@/config';
+import { authConfig } from '@/config';
 import {
   publishItemEvent,
   publishItemEvents,
@@ -23,8 +23,8 @@ import {
   UpsertParticipantResponse,
   type UpsertParticipantRequest as UpsertBody,
 } from '@dpg/schemas';
-import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { resolve_upsert_action } from './_resolve_upsert_action.js';
+import { readItemsForUser } from './_participant_items.js';
 import {
   recordParticipantConsent,
   promoteEligibleDraftsForUser,
@@ -1169,56 +1169,5 @@ export const participant_handler = async (
 
   return handleCreateNewUser(ctx);
 };
-
-// --- helpers ---
-
-const servedNetworks = (): string[] => {
-  const set = new Set<string>();
-  for (const d of apiConfig.served_domains) set.add(d.network);
-  return Array.from(set);
-};
-
-async function readItemsForUser(user_id: string) {
-  const networks = servedNetworks();
-  const rows = await db
-    .select({
-      item_id: items.item_id,
-      item_network: items.item_network,
-      item_domain: items.item_domain,
-      item_type: items.item_type,
-      lifecycle_status: items.lifecycle_status,
-      item_state: items.item_state,
-      item_locations: items.item_locations,
-      item_private_state: items.item_private_state,
-      created_at: items.created_at,
-      updated_at: items.updated_at,
-    })
-    .from(items)
-    .where(
-      networks.length > 0
-        ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
-        : eq(items.created_by, user_id),
-    )
-    // Newest profile first. Callers that render this list into a
-    // length-capped surface — the voice bot reads only the first N characters of
-    // the response — otherwise saw the OLDEST profile and silently dropped the
-    // one the participant just created. `item_id` is a stable, arbitrary
-    // tiebreaker so two items written in the same millisecond keep a
-    // deterministic order across calls rather than following heap order.
-    .orderBy(desc(items.created_at), desc(items.item_id));
-  return rows.map((r) => {
-    const { item_private_state: _drop, ...rest } = r;
-    const { mergedState } = decryptItemPrivate({
-      item_state: r.item_state as Record<string, unknown>,
-      item_private_state: r.item_private_state,
-    });
-    return {
-      ...rest,
-      item_state: mergedState,
-      created_at: (r.created_at as Date).toISOString(),
-      updated_at: (r.updated_at as Date).toISOString(),
-    };
-  });
-}
 
 export default participant;
