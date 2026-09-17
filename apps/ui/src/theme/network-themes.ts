@@ -51,7 +51,7 @@ const blue_dot: NetworkTheme = {
     tail: 'seekers with the right doors.',
   },
   subline:
-    'An ecosystem where aggregators, providers, and seekers move together — every blue dot is a person, an opportunity, a path forward.',
+    'A unified network where aggregators, providers, and seekers move together — every blue dot is a person, an opportunity, a path forward.',
   portalLabel: 'Seeker & Provider Portal',
   inviteLine: 'Invite-only · Blue Dots DPG',
   stats: [],
@@ -86,7 +86,7 @@ const purple_dot: NetworkTheme = {
     tail: 'to find the support it deserves.',
   },
   subline:
-    'An ecosystem connecting persons with disabilities to assistive devices, health services, and rehabilitation support — every purple dot is a door to a better life.',
+    'A unified network connecting persons with disabilities to assistive devices, health services, and rehabilitation support — every purple dot is a door to a better life.',
   portalLabel: 'Services Portal',
   inviteLine: 'Invite-only · Purple Dot DPG',
   stats: [],
@@ -156,7 +156,7 @@ const pink_dot: NetworkTheme = {
     tail: 'with the care every child deserves.',
   },
   subline:
-    'An ecosystem for early-childhood care and education — every pink dot connects a child to a carer, a parent to a resource, a community to a future.',
+    'A unified network for early-childhood care and education — every pink dot connects a child to a carer, a parent to a resource, a community to a future.',
   portalLabel: 'Care Portal',
   inviteLine: 'Invite-only · Pink Dot DPG',
   stats: [],

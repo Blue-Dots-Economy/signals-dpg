@@ -77,18 +77,23 @@ differ from the network defaults.
 The base `blue_dot` / `orange_dot` folders are the standard (brand-agnostic)
 defaults for each network.
 
-`alimco` is the ALIMCO rollout on `purple_dot`. Every variant is currently a
-byte-identical copy of the base `purple-dot/` artwork — a placeholder until the
-real ALIMCO marks are supplied, at which point files are replaced in place. The
-copies are strictly redundant (`brandLogoUrl` already falls back to the network
-path when a brand asset is absent); they exist so the folder is self-contained
-and each variant can be swapped one at a time as artwork arrives.
+`alimco` is the ALIMCO rollout on `purple_dot`. Its five lockup variants are
+**not** copies of the base `purple-dot/` artwork: they are the #720 re-render
+with the "Seeded by EkStep" strapline removed (see the vector-source section
+below). The base `purple-dot/` folder is deliberately left on the lockup every
+other purple_dot deployment already shipped — ALIMCO asked for the strapline
+dropped, no other purple_dot instance did. `brandLogoUrl` resolves
+`/brand/purple-dot/alimco/<variant>.png` first and falls back to the network
+path, so the split is per-brand and costs the network default nothing.
 
-alimco has **no `brand.json` under `examples/schemas/`**, so it deliberately
-carries no `__BRAND_REGISTRY__` entry and no
-`[data-network=purple_dot][data-brand=alimco]` CSS block: it inherits
-purple_dot's palette, `faviconType`, `logoShape` and copy. Add one there if
-alimco ever needs its own colours, favicon or title.
+`alimco` also carries the two attribution marks rendered under the sidebar:
+`swavlamban-mark.png` and `alimco-mark.png`. These are a different thing from
+the lockup variants — see `footerAttribution` below.
+
+alimco's `brand.json` under `examples/schemas/purple_dot/alimco/` declares
+**only** `footerAttribution`. It has no palette, `faviconType`, `logoShape` or
+copy of its own, so it still inherits all of those from purple_dot. Add them
+there if alimco ever needs its own colours, favicon or title.
 
 `up-gzb` and `ka-dhwd` carry the **refreshed Blue Dots lockup** (uppercase
 wordmark, solid dot, "Seeded by EkStep") supplied for the Ghaziabad and Dharwad
@@ -281,8 +286,9 @@ The purple_dot lockup is authored as SVG in Drive, folder
 | `Purple Dots Brand Guidelines-08.svg` | dark background — white + `#9955e3` |
 
 `-07`/`-08` are the **light/dark pair**, NOT with/without strapline: both ship
-the "Seeded by EkStep" lockup. #720 asked for it removed, so `logo.png` and
-`logo-light.png` here are rendered from those SVGs with two elements deleted:
+the "Seeded by EkStep" lockup. #720 asked for it removed **for ALIMCO only**, so
+the strapline-free renders live in `purple-dot/alimco/`, not in `purple-dot/`.
+They are rendered from those SVGs with two elements deleted:
 
 1. the `<g>` holding the EkStep mark — identifiable by `<circle cx="475.63">`
 2. the single `<path>` starting near `M288.9,306.98` — the "Seeded by" wordmark
