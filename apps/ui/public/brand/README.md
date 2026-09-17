@@ -269,3 +269,27 @@ logos always resolve via the `<network-kebab>/<brand-slug>/` folder convention.
 Designer assets are authored in **aggregator-dpg's `brand.json` logo set** and
 copied verbatim into this folder. Add/update them there first, then sync here
 so the two stay aligned.
+
+### purple_dot vector source (#720)
+
+The purple_dot lockup is authored as SVG in Drive, folder
+`1xBRTHDkJ4ZxSojQFFriek17LK2fe9bZS` (owner `nilanjan@outlandcircle.com`):
+
+| File | Variant |
+|---|---|
+| `Purple Dots Brand Guidelines-07.svg` | light background — navy `#242b59` + `#9955e3` |
+| `Purple Dots Brand Guidelines-08.svg` | dark background — white + `#9955e3` |
+
+`-07`/`-08` are the **light/dark pair**, NOT with/without strapline: both ship
+the "Seeded by EkStep" lockup. #720 asked for it removed, so `logo.png` and
+`logo-light.png` here are rendered from those SVGs with two elements deleted:
+
+1. the `<g>` holding the EkStep mark — identifiable by `<circle cx="475.63">`
+2. the single `<path>` starting near `M288.9,306.98` — the "Seeded by" wordmark
+
+Re-render from the SVG rather than editing the PNGs. Removing the strapline
+from the raster is not reliably possible: the "S" overlaps the sphere's halo,
+and in the dark variant the halo, the core ring and the strapline are all pure
+white at the same opacity, so no colour/alpha rule separates them.
+
+Blue Dots has the equivalent `-07`/`-08` pair in the same folder.
