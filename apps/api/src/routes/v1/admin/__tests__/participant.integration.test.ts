@@ -44,7 +44,7 @@ import {
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
 import { eq, inArray } from 'drizzle-orm';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 import {
   generateMinimalItemState,
   nonPrivateFields,
@@ -400,7 +400,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     // Fresh user so the count starts clean. Default cap = MAX_PROFILES_PER_USER (5).
     const limit = apiConfig.max_profiles_per_user;
     const capEmail = `cap-${randomUUID()}@test.local`;
-    const capPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const capPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = (n: number) =>
       app.inject({
         method: 'POST',
@@ -449,7 +449,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     // api-key-authenticated harness does not hold.
     const limit = apiConfig.max_profiles_per_user;
     const capEmail = `retirecap-${randomUUID()}@test.local`;
-    const capPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const capPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = (n: number) =>
       app.inject({
         method: 'POST',
@@ -521,7 +521,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   it('per-user cap holds under CONCURRENCY on the insert_item path (no TOCTOU over-insert)', async () => {
     const limit = apiConfig.max_profiles_per_user;
     const ccEmail = `capcc-${randomUUID()}@test.local`;
-    const ccPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const ccPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = () =>
       app.inject({
         method: 'POST',
