@@ -26,10 +26,14 @@ export function LocationAutocompleteWidget({
   readonly,
   onChange,
   rawErrors,
-  formContext,
+  registry,
   options,
 }: WidgetProps) {
-  const ctx = (formContext ?? {}) as LocationFormContext;
+  // RJSF v6 no longer spreads `formContext` onto widget props — it lives only
+  // on the registry. Reading the (always undefined) prop silently disabled
+  // every callback below, so a picked suggestion's coordinate never reached
+  // the page and `ui:options.isPrimaryLocation` was inert (#506).
+  const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);

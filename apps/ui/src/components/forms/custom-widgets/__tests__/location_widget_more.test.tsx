@@ -345,7 +345,9 @@ function renderWidget(
     disabled: false,
     readonly: false,
     required: true,
-    formContext,
+    // RJSF v6 hands widgets the form context on the registry, not as a
+    // prop — mirror that here or the harness tests a shape that never ships.
+    registry: { formContext },
     ...overrides,
   } as unknown as WidgetProps;
   const view = render(<LocationAutocompleteWidget {...props} />);
