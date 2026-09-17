@@ -28,7 +28,7 @@ name: signals-dpg
 #
 # ── Host ports ──────────────────────────────────────────────────────────────
 #   Signals UI    http://localhost:5173   (must be 5173 — API CORS allow-list)
-#   Signals API   http://localhost:2742   (Swagger at /reference)
+#   Signals API   http://localhost:2742   (Swagger at /api/reference)
 #   Postgres      localhost:5432
 #   Redis         localhost:5555          (password-protected)
 #   Keycloak      localhost:8080          (opt-in: --profile keycloak)
