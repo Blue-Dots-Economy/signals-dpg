@@ -82,7 +82,11 @@ export const DecryptedProfileSnapshot = z.object({
  * profiles.length + skipped.length === count of distinct requested item_ids.
  */
 export const DecryptParticipantResponse = z.object({
-  profiles: z.array(DecryptedProfileSnapshot),
+  profiles: z.array(DecryptedProfileSnapshot).describe(
+    'In `user_id` mode, ordered newest first by `created_at` (ties broken by ' +
+      '`item_id`), matching GET/POST /admin/participant. In `item_ids` mode the ' +
+      'order follows the database, not the requested ids.',
+  ),
   skipped: z.array(z.string()),
 });
 

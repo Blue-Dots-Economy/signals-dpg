@@ -142,12 +142,12 @@ describe('SchemaForm custom widget registry', () => {
     expect(onSubmit.mock.calls[0][0]).toEqual({ city: 'Bengaluru, Karnataka' });
   });
 
-  it('does NOT reach the formContext location callbacks — RJSF v6 drops the widget formContext prop', async () => {
-    // Documents ACTUAL behaviour, which contradicts the widget/page code:
-    // profile-form-page passes `onLocationResolved` through SchemaForm's
-    // `formContext`, and the location widgets read a `formContext` PROP — but
-    // RJSF v6 only exposes it as `registry.formContext` and no longer spreads it
-    // onto widget props, so the picked coordinate never reaches the page.
+  it('reports the picked place to the formContext location callback (#506)', async () => {
+    // The coordinate is a side channel: only the label is stored on the item,
+    // so the page learns the exact point of the chosen suggestion through
+    // `onLocationResolved`. RJSF v6 exposes formContext only as
+    // `registry.formContext`, so the widgets must read it there — reading the
+    // (always undefined) widget prop silently discarded every picked point.
     geo.suggest.mockResolvedValue([
       { label: 'Mysuru, Karnataka', lat: 12.29, lng: 76.63, components: { city: 'Mysuru' } },
     ]);
@@ -164,7 +164,41 @@ describe('SchemaForm custom widget registry', () => {
     fireEvent.mouseDown(await screen.findByRole('option', { name: 'Mysuru, Karnataka' }));
 
     await waitFor(() => expect(screen.getByLabelText('City')).toHaveValue('Mysuru, Karnataka'));
-    expect(onLocationResolved).not.toHaveBeenCalled();
+    expect(onLocationResolved).toHaveBeenCalledWith(
+      expect.objectContaining({ lat: 12.29, lng: 76.63, components: { city: 'Mysuru' } }),
+    );
+  });
+
+  it('reports picked places on the multi-location widget too (#506)', async () => {
+    geo.suggest.mockResolvedValue([
+      { label: 'Hubballi, Karnataka', lat: 15.36, lng: 75.12 },
+    ]);
+    const onLocationsResolved = vi.fn((_coords: unknown) => undefined);
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        cities: {
+          type: 'array',
+          title: 'Cities Served',
+          location: 'primary',
+          items: { type: 'string' },
+        },
+      },
+    } as unknown as RJSFSchema;
+
+    render(
+      <SchemaForm schema={schema} onSubmit={vi.fn()} formContext={{ onLocationsResolved }} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText('Search for a city…'), {
+      target: { value: 'Hubb' },
+    });
+    fireEvent.mouseDown(await screen.findByRole('option', { name: 'Hubballi, Karnataka' }));
+
+    await waitFor(() =>
+      expect(onLocationsResolved).toHaveBeenCalledWith([
+        expect.objectContaining({ lat: 15.36, lng: 75.12, label: 'Hubballi, Karnataka' }),
+      ]),
+    );
   });
 
   it('adds and removes rows on the multi-location widget', async () => {

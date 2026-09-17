@@ -159,10 +159,12 @@ export function MultiLocationAutocompleteWidget({
   onChange,
   schema,
   rawErrors,
-  formContext,
+  registry,
   options,
 }: WidgetProps) {
-  const ctx = (formContext ?? {}) as LocationFormContext;
+  // See LocationAutocompleteWidget: RJSF v6 exposes formContext only on the
+  // registry, never as a widget prop (#506).
+  const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
   // Coerce incoming value to string[]. RJSF passes `undefined` on a fresh form.

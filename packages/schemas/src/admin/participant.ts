@@ -112,11 +112,35 @@ export const UpsertParticipantRequest = z
       .describe(
         "schema-typed item_type for the item (default: 'profile_1.0').",
       ),
+    item_locations: ItemLocationsArray.optional().describe(
+      'exact coordinates the caller already resolved for this item (e.g. an ' +
+      'address the participant picked from a Places autocomplete, so the ' +
+      'lat/lng is the one the geocoder returned for that exact suggestion). ' +
+      'When present and non-empty these are stored as-is and the address text ' +
+      'in `item_state` is NOT geocoded server-side. When absent or empty, ' +
+      "Signals geocodes the item schema's primary location field from " +
+      '`item_state`, which is the historical behaviour. Privacy is unaffected ' +
+      'either way: if the primary location field is declared private, the ' +
+      'coordinate is jittered 100-250 m before storage regardless of whether ' +
+      'it was supplied here or resolved server-side.',
+    ),
   })
   .refine((b) => Boolean(b.email) || Boolean(b.phone_number), {
     message: 'either email or phone_number is required',
     path: ['email'],
   });
+
+/**
+ * Ordering contract for every participant item list this API returns.
+ *
+ * Callers commonly read only the head of the list — the voice bot renders the
+ * response into a length-capped prompt and keeps just the first N characters —
+ * and a participant accumulates profiles, because a POST without `item_id`
+ * inserts a new one every call. Oldest-first therefore meant the profile the
+ * participant had just created was the one truncated away.
+ */
+export const PARTICIPANT_ITEMS_ORDER =
+  'Ordered newest first by `created_at` (ties broken by `item_id`), so a caller that reads only the head of the list gets the participant\'s most recent profile.';
 
 export const ParticipantItemSnapshot = z.object({
   item_id: z.uuid(),
@@ -141,7 +165,7 @@ export const UpsertParticipantResponse = z.object({
   user_existed: z.boolean(),
   owned_elsewhere: z.boolean(),
   onboarded_at: z.iso.datetime().nullable(),
-  items: z.array(ParticipantItemSnapshot),
+  items: z.array(ParticipantItemSnapshot).describe(PARTICIPANT_ITEMS_ORDER),
   // Number of consent_record rows written this call (#309). Optional so the
   // rejected / owned-elsewhere branches can omit it.
   consent_recorded: z.number().int().optional(),
@@ -218,7 +242,7 @@ export const GetParticipantResponse = z.object({
    * `false`.
    */
   compliance: z.array(ParticipantComplianceEntry),
-  items: z.array(ParticipantItemSnapshot),
+  items: z.array(ParticipantItemSnapshot).describe(PARTICIPANT_ITEMS_ORDER),
 });
 
 export type UpsertParticipantRequest = z.infer<typeof UpsertParticipantRequest>;
