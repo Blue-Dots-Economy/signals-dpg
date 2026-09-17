@@ -563,8 +563,13 @@ describe('ProfileFormPage submit failures', () => {
     expect(await screen.findByText('Please sign in to continue')).toBeInTheDocument();
   });
 
-  it('a 409 explains the profile already exists', async () => {
-    createItemMock.mockRejectedValue(httpError(409, { error: 'DUPLICATE' }));
+  it('a 409 ITEM_ALREADY_EXISTS explains the profile already exists', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(409, {
+        error: 'ITEM_ALREADY_EXISTS',
+        message: 'An item with the same type and id already exists',
+      }),
+    );
 
     await renderPage();
     await submitCreate();
@@ -572,6 +577,46 @@ describe('ProfileFormPage submit failures', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent('Profile already exists');
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('a 409 PROFILE_LIMIT_REACHED surfaces the cap message, not "already exists"', async () => {
+    // Every 409 used to render the duplicate copy, so a participant at the cap
+    // was told they "already have a profile for this role" — wrong, and it hid
+    // the one instruction that works (#737).
+    createItemMock.mockRejectedValue(
+      httpError(409, {
+        error: 'PROFILE_LIMIT_REACHED',
+        message:
+          'This user already has the maximum of 5 seeker profile(s) allowed. Retire an existing profile to create a new one.',
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Retire an existing profile to create a new one.');
+    expect(alert).not.toHaveTextContent('Profile already exists');
+    expect(alert).not.toHaveTextContent('already have a profile for this role');
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('a 409 with no recognised code falls through to the server message', async () => {
+    // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are both 409s off this
+    // same call; neither is a duplicate, so neither may claim that copy.
+    createItemMock.mockRejectedValue(
+      httpError(409, {
+        error: 'ITEM_RETIRED',
+        message: 'This profile is retired and can no longer be edited',
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('This profile is retired and can no longer be edited');
+    expect(alert).not.toHaveTextContent('Profile already exists');
   });
 
   it('any other create failure shows the create-failed title with the server message', async () => {

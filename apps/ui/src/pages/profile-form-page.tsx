@@ -727,7 +727,17 @@ export function ProfileFormPage() {
           description: t('profile.toast_sign_in_desc'),
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
-      } else if (status === 409) {
+      } else if (status === 409 && error?.error === 'ITEM_ALREADY_EXISTS') {
+        // Match on the CODE, not the bare 409 (#737). Four different codes come
+        // back as 409 from this one call — PROFILE_LIMIT_REACHED,
+        // REQUIRED_FIELD_LOCKED_WHILE_LIVE, ITEM_RETIRED and this one — and
+        // only a genuine duplicate is "already exists". Branching on the status
+        // alone told a participant at the per-domain cap that they "already
+        // have a profile for this role", which is both untrue (a user may hold
+        // several) and hid the cap message naming the one action that frees a
+        // slot. Every other 409 falls through to the branch below, which
+        // surfaces the server's own sentence — the same shape the 403 above
+        // uses.
         setFormError({
           title: t('profile.error_already_exists'),
           description: t('profile.error_already_exists_desc'),
