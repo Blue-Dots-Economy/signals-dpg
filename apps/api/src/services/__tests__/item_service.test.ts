@@ -68,6 +68,7 @@ const {
 vi.mock('drizzle-orm', () => ({
   and: (...conds: any[]) => ({ op: 'and', conds }),
   eq: (col: any, val: any) => ({ op: 'eq', col, val }),
+  ne: (col: any, val: any) => ({ op: 'ne', col, val }),
   count: () => ({ op: 'count' }),
   sql: (strings: TemplateStringsArray, ...values: any[]) => ({
     op: 'sql',
@@ -754,6 +755,37 @@ describe('createItemInternal — profile cap', () => {
       statusCode: 409,
       errorCode: 'PROFILE_LIMIT_REACHED',
     });
+  });
+
+  it('does not count retired profiles towards the cap (#737)', async () => {
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ n: 1 }]);
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams());
+
+    // selectWheres[0] is the cap's count — the first SELECT a create issues
+    // (the domain claim above it goes through `execute`, not `select`).
+    const where = JSON.stringify(rec.selectWheres[0]);
+    expect(where).toContain('items.lifecycle_status');
+    expect(where).toContain('retired');
+    // The scope columns stay in the filter alongside it.
+    expect(where).toContain('items.created_by');
+    expect(where).toContain('items.item_type');
+  });
+
+  it('names retire, not delete, in the 409 message (#737)', async () => {
+    // Retire is the action that exists (per-row control in the UI, #347) and,
+    // with the count above, the one that actually frees the slot. Telling a
+    // capped participant to "delete" pointed at nothing they could do.
+    apiConfig.max_profiles_per_user = 1;
+    const { exec, queue } = makeExec();
+    queue.push([{ n: 1 }]);
+
+    const err = await createItemInternal(exec, createParams()).catch((e: Error) => e);
+
+    expect((err as Error).message).toContain('Retire an existing profile to create a new one.');
+    expect((err as Error).message).not.toContain('Delete an existing profile');
   });
 
   it("prefers the domain's max_profiles_per_user over the global default", async () => {
