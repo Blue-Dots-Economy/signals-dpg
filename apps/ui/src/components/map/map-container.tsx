@@ -375,11 +375,20 @@ export function MapView({
  * Stable hash of a string to a unit float in [0, 1) (FNV-1a, 32-bit). Used to
  * derive a marker's fan-out angle from its item id so the offset is a pure
  * function of the item — never of the surrounding group.
+ *
+ * Iterates CODE POINTS (`for…of` + `codePointAt(0)`), not UTF-16 code units.
+ * The two agree exactly for the ids this is called with — item ids are ASCII —
+ * so no marker moves; the difference only shows on a surrogate pair, where the
+ * index-based `charCodeAt` loop this replaces fed the two halves in
+ * separately. Note the fix is the ITERATION, not just the method name: swapping
+ * `charCodeAt` for `codePointAt` inside an `i < str.length` loop would read the
+ * whole code point at the high surrogate and the low half again at the next
+ * index, which is worse than what it replaced.
  */
 function hashToUnit(str: string): number {
   let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
+  for (const ch of str) {
+    h ^= ch.codePointAt(0) as number;
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0) / 4294967296;
