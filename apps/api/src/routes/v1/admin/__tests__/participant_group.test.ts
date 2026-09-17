@@ -543,6 +543,10 @@ describe('participant_read_handler — ownership disclosure', () => {
  * The ORDER BY `ITEMS_NEWEST_FIRST` emits through the mocked `desc`. Written
  * once so the read and decrypt assertions pin the SAME ordering — that identity
  * is the invariant, since the two build separate queries.
+ *
+ * Asserted with `toEqual([...])` on the whole recorded list rather than
+ * `toContainEqual`: the latter passes as long as SOME emitted ordering matches,
+ * so a handler that also emitted a second, wrong one would slip through.
  */
 const ITEMS_NEWEST_FIRST_EMITTED = [
   { op: 'desc', col: 'items.created_at' },
@@ -572,7 +576,7 @@ describe('participant_read_handler — item ordering', () => {
       query: { email: 'a@b.com' },
     });
 
-    expect(orderings).toContainEqual(ITEMS_NEWEST_FIRST_EMITTED);
+    expect(orderings).toEqual([ITEMS_NEWEST_FIRST_EMITTED]);
   });
 });
 
@@ -1458,7 +1462,7 @@ describe('participant_decrypt_handler — user_id mode', () => {
       body: { user_id: 'u1' },
     });
 
-    expect(orderings).toContainEqual(ITEMS_NEWEST_FIRST_EMITTED);
+    expect(orderings).toEqual([ITEMS_NEWEST_FIRST_EMITTED]);
   });
 
   it('audits user_id mode with requested_count 1 regardless of rows returned', async () => {
