@@ -503,7 +503,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
       .select()
       .from(itemsTable)
       .where(eq(itemsTable.created_by, capUserId as string));
-    expect(rows.length).toBe(limit + 1);
+    expect(rows).toHaveLength(limit + 1);
     expect(rows.filter((r) => r.lifecycle_status === 'retired')).toHaveLength(1);
 
     // …and the freed slot is a single slot, not an exemption: the next create
