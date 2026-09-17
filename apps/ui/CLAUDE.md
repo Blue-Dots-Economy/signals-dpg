@@ -12,6 +12,12 @@ Guidance specific to working inside `apps/ui`. Read the root `CLAUDE.md` first f
 
 `vite.config.ts` aliases `@dpg/schemas/location_fields` directly to `packages/schemas/src/location_fields.ts`, bypassing the normal `@dpg/*` → `packages/*/src` mapping (which resolves through the package's barrel `index.ts`). This exists specifically so the browser bundle doesn't pull in `@dpg/database`/`pg` transitively through the schemas barrel — `location_fields.ts` is the one export from `@dpg/schemas` the UI needs that doesn't depend on the database package. If you see an import reaching for a *different* narrow export from `@dpg/schemas`, it needs the same carve-out, not a "just import from the barrel" fix.
 
+## RJSF v6 does not spread `formContext` onto widget props — read it off `registry`
+
+A custom widget that destructures `formContext` from `WidgetProps` gets `undefined` on RJSF v6. Nothing errors: the widget renders, the field accepts typing, and every callback hanging off that context is silently dead. That is what broke the location widgets (#506) — a picked suggestion's coordinate never reached the page and `ui:options.isPrimaryLocation` was inert, for the whole time the upgrade had been in.
+
+Read `registry?.formContext` instead. When touching any widget under `components/forms/custom-widgets/`, check that first: the failure mode is a feature that looks present and does nothing, not a crash, so tests that only assert rendering will not catch it.
+
 ## Two build/dev entry points
 
 `VITE_APP=tourist` (see `package.json`'s `dev:tourist`/`build:tourist` scripts) switches to a second, login-free, read-only entry point layered on the same component tree. See `src/tourist/README.md` for the full picture — it's current and doesn't need duplicating here.
