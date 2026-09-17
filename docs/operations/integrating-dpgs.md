@@ -324,6 +324,7 @@ content-type: application/json
   "channel": "bulk",
   "item_state": { ... item-schema-validated payload ... },
   "item_id": "optional-uuid-for-update-only",
+  "item_locations": [{ "lat": 12.9251, "lng": 77.5938, "label": "Jayanagar" }],
   "network": "blue_dot",
   "domain": "seeker",
   "item_type": "profile_1.0"
@@ -331,6 +332,30 @@ content-type: application/json
 ```
 
 Identity rule: at least one of `email` or `phone_number` must be provided.
+
+**Coordinates (`item_locations`).** Optional. Send it when your own form
+already resolved the participant's address to an exact point — e.g. they picked
+a suggestion from a Places autocomplete, so you hold the lat/lng the geocoder
+returned for that exact suggestion, which is better than anything Signals can
+recover from the address text alone.
+
+- **Omitted or `[]`** — Signals geocodes the item schema's primary location
+  field out of `item_state`, exactly as it always has. This is the default and
+  nothing changes for callers that don't send the field.
+- **Non-empty** — the supplied points are stored and the address text is *not*
+  geocoded over.
+- On an update (`item_id`), supplied coordinates win over re-geocoding an
+  edited address, and may be sent **without** `item_state` to move a profile's
+  point without re-sending its fields. Echoing back the coordinates Signals
+  already stored is a no-op rather than a fresh write.
+- Privacy is unaffected by which path produced the point: if the domain
+  declares its primary location field private, the coordinate is jittered
+  100–250 m before storage either way. You can never persist an exact private
+  address by sending it here.
+
+Each entry is `{ lat, lng, label? }`; `lat` must be -90..90 and `lng`
+-180..180, both as JSON numbers (a stringified coordinate is a 400, not a
+coercion).
 
 **Consent (`compliance`).** Each entry names a consent the channel captured
 from the user; only `value: true` is recorded, into the `consent_record`
@@ -365,8 +390,19 @@ for validation rules, age requirements, and how a profile gets promoted to
 
 `onboarded_at` is set only when this call created a new user; null
 otherwise. `items` is scoped to the networks this Signals instance
-serves. `lifecycle_status` tells the caller whether the profile is
-usable (`live`) or still incomplete/gated (`draft`, `paused`).
+serves, and is **ordered newest first** by `created_at` (ties broken by
+`item_id`) — a participant accumulates profiles, because a POST without
+`item_id` inserts a new one every call, so a caller that reads only the
+head of the list gets their most recent one. Two limits to know before
+relying on that: it is **`created_at`, not `updated_at`**, so editing an
+old profile does not lift it to the head (`updated_at` also moves for
+writes the participant never made — lifecycle transitions, consent
+promotion, the retire scrub — which would reshuffle the list invisibly);
+and `created_at` is a millisecond-resolution default with a random-UUID
+tiebreaker, so profiles written in the *same millisecond* come back in a
+stable but arbitrary order rather than a genuinely newest-first one. `lifecycle_status` tells
+the caller whether the profile is usable (`live`) or still
+incomplete/gated (`draft`, `paused`).
 `consent_recorded` is the number of `consent_record` rows written by
 this call from the `compliance` array (0 when `compliance` was absent
 or every entry was `false`/unrecognised).
@@ -440,6 +476,14 @@ or every entry was `false`/unrecognised).
 |---|---|---|---|
 | aggregator whose org declares no `metadata.domains` | 400 | `NO_DOMAINS_CONFIGURED` | **not additive.** Decrypt is now scoped to the acting org's declared domains and fails closed when there are none, matching `GET /aggregator/dashboard` and `/dashboard/export`. Affects only orgs mirrored before `domains` was sent; re-upsert with a non-empty `domains` array. The same requirement is now enforced when an org is nominated as a **default aggregator** (migration 0017), so the two cannot disagree. |
 | aggregator requesting an item outside its declared domains | 200 | — | the id lands in `skipped`, undifferentiated from not-found, so nothing leaks about its existence. |
+
+**Ordering.** In `user_id` mode `profiles` is ordered **newest first** by
+`created_at` (ties broken by `item_id`), the same ordering GET/POST
+`/admin/participant` use — the three share one `ORDER BY` in code, so they
+cannot drift. In `item_ids` mode there is **no ordering at all**: rows come back
+in whatever order Postgres produces, which is neither the requested id order nor
+`created_at`. Correlate by the `item_id` on each row rather than by position;
+every in-repo consumer already does.
 
 ### Migration from `/admin/onboard_participant`
 

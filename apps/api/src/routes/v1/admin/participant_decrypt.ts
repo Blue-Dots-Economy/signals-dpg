@@ -15,7 +15,7 @@ import {
 } from '@dpg/schemas';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { readConfiguredDomains } from '@/utils/org_metadata';
-import { apiConfig } from '@/config';
+import { ITEMS_NEWEST_FIRST, servedNetworks } from './_participant_items.js';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   projectItemState,
@@ -55,12 +55,6 @@ export const participant_decrypt: FastifyPluginAsync = async (app) => {
     },
     handler: participant_decrypt_handler,
   });
-};
-
-const servedNetworks = (): string[] => {
-  const set = new Set<string>();
-  for (const d of apiConfig.served_domains) set.add(d.network);
-  return Array.from(set);
 };
 
 // Base columns fetched for every request. `item_locations` and the creator's
@@ -425,7 +419,11 @@ export const participant_decrypt_handler = async (
           ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )
-      .orderBy(items.created_at)) as DecryptableRow[];
+      // The SAME ordering object GET/POST /admin/participant use, not a
+      // restatement of it: this query cannot share `readItemsForUser` (different
+      // columns, a user join), so importing the ORDER BY is what keeps the three
+      // in step rather than a comment asserting that they are.
+      .orderBy(...ITEMS_NEWEST_FIRST)) as DecryptableRow[];
 
     const collected = await collectProfiles(rows, opts, request.log);
     profiles = collected.profiles;

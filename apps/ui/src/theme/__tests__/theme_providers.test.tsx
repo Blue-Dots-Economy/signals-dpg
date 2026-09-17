@@ -199,6 +199,7 @@ describe('applyNetworkBrand', () => {
       copy: {},
       footerLogo: null,
       footerLogoLight: null,
+      footerAttribution: null,
     });
   });
 
@@ -224,6 +225,7 @@ describe('applyNetworkBrand', () => {
       copy: { title: 'UPSDM', tagline: 'network base' },
       footerLogo: null,
       footerLogoLight: null,
+      footerAttribution: null,
     });
   });
 });

@@ -22,7 +22,7 @@ function renderWidget(overrides: Partial<WidgetProps> = {}) {
     disabled: false,
     readonly: false,
     required: true,
-    formContext: {},
+    registry: { formContext: {} },
     ...overrides,
   } as unknown as WidgetProps;
   render(<LocationAutocompleteWidget {...props} />);

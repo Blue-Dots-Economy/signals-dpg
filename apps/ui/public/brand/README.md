@@ -72,9 +72,28 @@ differ from the network defaults.
 | `blue_dot` | `up-gzb` | `public/brand/blue-dot/up-gzb/` |
 | `blue_dot` | `ka-dhwd` | `public/brand/blue-dot/ka-dhwd/` |
 | `orange_dot` | `onetac` | `public/brand/orange-dot/onetac/` |
+| `purple_dot` | `alimco` | `public/brand/purple-dot/alimco/` |
 
 The base `blue_dot` / `orange_dot` folders are the standard (brand-agnostic)
 defaults for each network.
+
+`alimco` is the ALIMCO rollout on `purple_dot`. Its five lockup variants are
+**not** copies of the base `purple-dot/` artwork: they are the #720 re-render
+with the "Seeded by EkStep" strapline removed (see the vector-source section
+below). The base `purple-dot/` folder is deliberately left on the lockup every
+other purple_dot deployment already shipped — ALIMCO asked for the strapline
+dropped, no other purple_dot instance did. `brandLogoUrl` resolves
+`/brand/purple-dot/alimco/<variant>.png` first and falls back to the network
+path, so the split is per-brand and costs the network default nothing.
+
+`alimco` also carries the two attribution marks rendered under the sidebar:
+`swavlamban-mark.png` and `alimco-mark.png`. These are a different thing from
+the lockup variants — see `footerAttribution` below.
+
+alimco's `brand.json` under `examples/schemas/purple_dot/alimco/` declares
+**only** `footerAttribution`. It has no palette, `faviconType`, `logoShape` or
+copy of its own, so it still inherits all of those from purple_dot. Add them
+there if alimco ever needs its own colours, favicon or title.
 
 `up-gzb` and `ka-dhwd` carry the **refreshed Blue Dots lockup** (uppercase
 wordmark, solid dot, "Seeded by EkStep") supplied for the Ghaziabad and Dharwad
@@ -255,3 +274,28 @@ logos always resolve via the `<network-kebab>/<brand-slug>/` folder convention.
 Designer assets are authored in **aggregator-dpg's `brand.json` logo set** and
 copied verbatim into this folder. Add/update them there first, then sync here
 so the two stay aligned.
+
+### purple_dot vector source (#720)
+
+The purple_dot lockup is authored as SVG in Drive, folder
+`1xBRTHDkJ4ZxSojQFFriek17LK2fe9bZS` (owner `nilanjan@outlandcircle.com`):
+
+| File | Variant |
+|---|---|
+| `Purple Dots Brand Guidelines-07.svg` | light background — navy `#242b59` + `#9955e3` |
+| `Purple Dots Brand Guidelines-08.svg` | dark background — white + `#9955e3` |
+
+`-07`/`-08` are the **light/dark pair**, NOT with/without strapline: both ship
+the "Seeded by EkStep" lockup. #720 asked for it removed **for ALIMCO only**, so
+the strapline-free renders live in `purple-dot/alimco/`, not in `purple-dot/`.
+They are rendered from those SVGs with two elements deleted:
+
+1. the `<g>` holding the EkStep mark — identifiable by `<circle cx="475.63">`
+2. the single `<path>` starting near `M288.9,306.98` — the "Seeded by" wordmark
+
+Re-render from the SVG rather than editing the PNGs. Removing the strapline
+from the raster is not reliably possible: the "S" overlaps the sphere's halo,
+and in the dark variant the halo, the core ring and the strapline are all pure
+white at the same opacity, so no colour/alpha rule separates them.
+
+Blue Dots has the equivalent `-07`/`-08` pair in the same folder.

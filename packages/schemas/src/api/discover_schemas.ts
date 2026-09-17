@@ -224,6 +224,31 @@ export const DiscoverResponseSchema = z.object({
     // pinned tags, so a search-only rollback or a DPG image landing first
     // opens this window.
     sort_applied: DiscoverSortSchema.optional(),
+    /**
+     * Whether the request's `anchor_item_id` was actually USED for this
+     * result.
+     *
+     * Required and always known, unlike `sort_applied` — this is DPG's own
+     * answer about its own behaviour, so there is no version skew to model.
+     * False when no anchor was sent, when the native fallback served the
+     * request, and — the case that matters — when signals-search rejected the
+     * anchor and the retry below dropped it.
+     *
+     * That retry is otherwise INVISIBLE: it returns 200 with
+     * `source: 'signals_search'` and `degraded: false`. Since the §4 contract
+     * amendment it is no longer only a ranking difference: a typed `q` FILTERS
+     * only when an anchor accompanies it, and merely RANKS otherwise. So the
+     * same request, with and without a usable anchor, returns 1 row or every
+     * row — and nothing in the response distinguished the two. The browse bar
+     * then subtracted a text-matched map count from an unfiltered total and
+     * reported the remainder as items it could not plot.
+     *
+     * An anchor is rejected for ordinary reasons, not exotic ones: a profile
+     * whose only populated fields are private (name/phone/location) has no
+     * `vectorize` content, so it has no embedding and cannot be compared.
+     * That is what a half-filled profile looks like.
+     */
+    anchor_applied: z.boolean(),
   }),
   items: DiscoverResponseItemSchema.array(),
 });
