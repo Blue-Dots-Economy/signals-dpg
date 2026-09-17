@@ -211,6 +211,80 @@ describe('UpsertParticipantRequest — consent, channel and attribution', () => 
   });
 });
 
+describe('UpsertParticipantRequest — caller-supplied item_locations', () => {
+  const withEmail = { ...base, email: 'a@b.com' };
+
+  it('accepts coordinates the caller resolved itself', () => {
+    const result = UpsertParticipantRequest.safeParse({
+      ...withEmail,
+      item_state: { address: '4th Block, Jayanagar, Bengaluru' },
+      item_locations: [{ lat: 12.9251, lng: 77.5938, label: 'Jayanagar' }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.item_locations).toEqual([
+        { lat: 12.9251, lng: 77.5938, label: 'Jayanagar' },
+      ]);
+    }
+  });
+
+  it('accepts a point without a label', () => {
+    const result = UpsertParticipantRequest.safeParse({
+      ...withEmail,
+      item_locations: [{ lat: 12.9251, lng: 77.5938 }],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('leaves item_locations undefined when omitted, so the server geocodes as before', () => {
+    const result = UpsertParticipantRequest.safeParse(withEmail);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.item_locations).toBeUndefined();
+    }
+  });
+
+  it('accepts an empty array (treated downstream as "no coordinates supplied")', () => {
+    expect(
+      UpsertParticipantRequest.safeParse({ ...withEmail, item_locations: [] }).success,
+    ).toBe(true);
+  });
+
+  it.each([
+    ['lat above 90', { lat: 91, lng: 77 }],
+    ['lat below -90', { lat: -91, lng: 77 }],
+    ['lng above 180', { lat: 12, lng: 181 }],
+    ['lng below -180', { lat: 12, lng: -181 }],
+  ])('rejects %s', (_case, point) => {
+    expect(
+      UpsertParticipantRequest.safeParse({ ...withEmail, item_locations: [point] }).success,
+    ).toBe(false);
+  });
+
+  it('rejects a point missing lng', () => {
+    const result = UpsertParticipantRequest.safeParse({
+      ...withEmail,
+      item_locations: [{ lat: 12.9251 }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects stringified coordinates rather than coercing them', () => {
+    // A caller reading lat/lng out of a DOM input can easily send strings; a
+    // coerced "1e9" would be stored as a real coordinate, so this must 400.
+    const result = UpsertParticipantRequest.safeParse({
+      ...withEmail,
+      item_locations: [{ lat: '12.9251', lng: '77.5938' }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+});
+
 describe('UpsertParticipantRequest — item targeting', () => {
   const withEmail = { ...base, email: 'a@b.com' };
 

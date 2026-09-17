@@ -324,6 +324,7 @@ content-type: application/json
   "channel": "bulk",
   "item_state": { ... item-schema-validated payload ... },
   "item_id": "optional-uuid-for-update-only",
+  "item_locations": [{ "lat": 12.9251, "lng": 77.5938, "label": "Jayanagar" }],
   "network": "blue_dot",
   "domain": "seeker",
   "item_type": "profile_1.0"
@@ -331,6 +332,30 @@ content-type: application/json
 ```
 
 Identity rule: at least one of `email` or `phone_number` must be provided.
+
+**Coordinates (`item_locations`).** Optional. Send it when your own form
+already resolved the participant's address to an exact point — e.g. they picked
+a suggestion from a Places autocomplete, so you hold the lat/lng the geocoder
+returned for that exact suggestion, which is better than anything Signals can
+recover from the address text alone.
+
+- **Omitted or `[]`** — Signals geocodes the item schema's primary location
+  field out of `item_state`, exactly as it always has. This is the default and
+  nothing changes for callers that don't send the field.
+- **Non-empty** — the supplied points are stored and the address text is *not*
+  geocoded over.
+- On an update (`item_id`), supplied coordinates win over re-geocoding an
+  edited address, and may be sent **without** `item_state` to move a profile's
+  point without re-sending its fields. Echoing back the coordinates Signals
+  already stored is a no-op rather than a fresh write.
+- Privacy is unaffected by which path produced the point: if the domain
+  declares its primary location field private, the coordinate is jittered
+  100–250 m before storage either way. You can never persist an exact private
+  address by sending it here.
+
+Each entry is `{ lat, lng, label? }`; `lat` must be -90..90 and `lng`
+-180..180, both as JSON numbers (a stringified coordinate is a 400, not a
+coercion).
 
 **Consent (`compliance`).** Each entry names a consent the channel captured
 from the user; only `value: true` is recorded, into the `consent_record`

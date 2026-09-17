@@ -854,18 +854,28 @@ async function handleUpdateItem(
   const hasItemState = Boolean(
     body.item_state && Object.keys(body.item_state).length > 0,
   );
+  // Coordinates the caller resolved itself. Empty is treated as absent, to
+  // match `resolveLocationUpdate`, which only lets a NON-empty array win over
+  // re-geocoding the address text.
+  const hasItemLocations = Boolean(body.item_locations?.length);
   // Either of these means the named item changed and search must hear about it.
   let itemWritten = false;
   let itemPromoted = false;
   try {
     await db.transaction(async (tx) => {
-      if (hasItemState) {
+      // Coordinates alone are a valid update: a caller re-sending a profile's
+      // exact point (e.g. the address was re-picked from an autocomplete) need
+      // not re-send the whole item_state to have it stored.
+      if (hasItemState || hasItemLocations) {
         await updateItemInternal(
           tx,
           item_id,
           existing.id,
           true, // isAdmin — ownership already verified above
-          { item_state: body.item_state ?? {} },
+          {
+            ...(hasItemState ? { item_state: body.item_state } : {}),
+            ...(hasItemLocations ? { item_locations: body.item_locations } : {}),
+          },
         );
         itemWritten = true;
       }
@@ -955,6 +965,7 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
         domain,
         item_type,
         payload: body.item_state ?? {},
+        item_locations: body.item_locations,
       });
       insertedItemId = item_id;
       const consent = await recordParticipantConsent(tx, {
@@ -1041,6 +1052,7 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
         domain,
         item_type,
         payload: body.item_state ?? {},
+        item_locations: body.item_locations,
       });
       onboarded_item_id = item_id;
 

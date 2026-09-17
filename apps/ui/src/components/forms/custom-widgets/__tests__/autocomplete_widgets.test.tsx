@@ -100,7 +100,8 @@ function renderMultiLocation(overrides: Partial<WidgetProps> = {}) {
     disabled: false,
     readonly: false,
     required: false,
-    formContext: { onLocationsResolved },
+    // RJSF v6 exposes formContext only on the registry (see #506).
+    registry: { formContext: { onLocationsResolved } },
     ...overrides,
   } as unknown as WidgetProps;
   const utils = render(<MultiLocationAutocompleteWidget {...props} />);
