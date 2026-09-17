@@ -300,6 +300,21 @@ export interface DiscoverResponse {
     // asked for": a `?? requestedSort` here is exactly the claim this field
     // exists to prevent.
     sort_applied?: DiscoverSortMode;
+    /**
+     * Whether the `anchor_item_id` this request sent was actually USED.
+     *
+     * Not optional and not a guess: the BFF knows, because it is the thing
+     * that drops the anchor. False also when none was sent.
+     *
+     * Load-bearing beyond ranking. Since the §4 contract amendment a typed
+     * `q` FILTERS only alongside an anchor and merely RANKS without one, so a
+     * rejected anchor silently turns a one-row answer into an every-row one.
+     * An anchor is rejected for an ordinary reason — a profile whose only
+     * populated fields are private has no `vectorize` content to embed, which
+     * is what a half-filled profile looks like — so this is a normal state to
+     * render for, not an edge case.
+     */
+    anchor_applied: boolean;
   };
 }
 

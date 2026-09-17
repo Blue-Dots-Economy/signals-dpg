@@ -542,6 +542,11 @@ const discover_items_handler = async (
           offset: nativeResult.meta.offset,
           source: 'native_fallback' as const,
           degraded: true,
+          // The native path has no anchor concept, so the anchor — if one was
+          // sent — did not survive. Text filtering DOES still apply here
+          // (`buildWhereClause` narrows on `q` unconditionally), but the
+          // caller cannot know that from `source` alone.
+          anchor_applied: false,
           distance_meters: effectiveDistanceMeters,
           // The native path does no ranking, so a relevance request genuinely
           // got recency. Report that rather than claiming an order we did not
@@ -582,6 +587,9 @@ const discover_items_handler = async (
           source: 'signals_search' as const,
           degraded: false,
           distance_meters: effectiveDistanceMeters,
+          // Reached only when signals-search did NOT reject the anchor, so an
+          // anchor that was sent was also used.
+          anchor_applied: body.anchor_item_id !== undefined,
           // signals-search is the authority on what it actually did, and
           // absent means UNKNOWN — never our own guess. A version predating
           // its sort support ignores `intent.sort` entirely rather than just
@@ -647,6 +655,11 @@ const discover_items_handler = async (
               source: 'signals_search' as const,
               degraded: false,
               distance_meters: effectiveDistanceMeters,
+              // The whole reason this field exists. An anchor was sent,
+              // signals-search rejected it, and this retry dropped it — which
+              // since §4 also stops `q` from filtering. Saying so is the only
+              // way the caller can tell this page apart from a narrowed one.
+              anchor_applied: false,
               // Same rule as the primary path: absent means UNKNOWN.
               //
               // This used to re-resolve without the anchor, which is the right

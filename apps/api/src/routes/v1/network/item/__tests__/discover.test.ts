@@ -198,6 +198,8 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
       offset: 0,
       source: 'signals_search',
       degraded: false,
+      // Never sent, or sent and dropped — no assertion here relies on one.
+      anchor_applied: false,
       // #644: every 200 reports the order actually applied.
       sort_applied: 'newest',
     });
@@ -258,6 +260,8 @@ describe('POST /api/v1/network/item/discover — direct map (revised, no hydrate
         offset: 0,
         source: 'signals_search',
         degraded: false,
+        // Never sent, or sent and dropped — no assertion here relies on one.
+        anchor_applied: false,
         sort_applied: 'newest',
       },
       items: [],
@@ -326,10 +330,59 @@ describe('POST /api/v1/network/item/discover — profile anchor relevance (#394)
       offset: 0,
       source: 'signals_search',
       degraded: false,
+      // Never sent, or sent and dropped — no assertion here relies on one.
+      anchor_applied: false,
       // #644: every 200 reports the order actually applied.
       sort_applied: 'newest',
     });
     expect(body.items[0]).toMatchObject({ item_id: FULL_ITEM_A.item_id });
+  });
+
+  it('reports anchor_applied TRUE when the anchor was sent and honoured', async () => {
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [FULL_ITEM_A],
+      meta: { total: 1, limit: 20, offset: 0, sort_applied: 'relevance' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect((res.json() as { meta: { anchor_applied: boolean } }).meta.anchor_applied).toBe(true);
+  });
+
+  it('reports anchor_applied FALSE when the retry dropped the anchor — the only outward sign', async () => {
+    // The retry returns 200, `source: 'signals_search'` and `degraded: false`,
+    // so nothing else in the response distinguishes it from a normal page.
+    // Since the §4 amendment that matters beyond ranking: `q` FILTERS only
+    // alongside an anchor and merely RANKS without one, so the same request
+    // answers with one row or every row. An anchor is rejected for an ordinary
+    // reason — a profile whose only populated fields are private has no
+    // `vectorize` content to embed — so this is a state to report, not an edge.
+    const notFoundErr = new SignalsSearchError('anchor not found');
+    notFoundErr.status = 404;
+    notFoundErr.code = 'ANCHOR_NOT_FOUND';
+    searchSignalsMock.mockRejectedValueOnce(notFoundErr);
+    searchSignalsMock.mockResolvedValueOnce({
+      items: [FULL_ITEM_A],
+      meta: { total: 135, limit: 20, offset: 0, sort_applied: 'newest' },
+    });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/discover',
+      payload: baseBody({ anchor_item_id: ANCHOR_ITEM_ID, q: 'test' }),
+    });
+
+    const meta = (res.json() as { meta: { anchor_applied: boolean; source: string; degraded: boolean } }).meta;
+    expect(meta.anchor_applied).toBe(false);
+    // Everything else still looks like an ordinary success — which is why the
+    // flag has to exist.
+    expect(meta.source).toBe('signals_search');
+    expect(meta.degraded).toBe(false);
   });
 
   it('retries WITHOUT the anchor on INTERACTION_NOT_ALLOWED (403) — e.g. seeker→seeker — returning source:signals_search / degraded:false', async () => {
@@ -479,6 +532,8 @@ describe('POST /api/v1/network/item/discover — native fallback (#203 List PR, 
       offset: 0,
       source: 'native_fallback',
       degraded: true,
+      // Never sent, or sent and dropped — no assertion here relies on one.
+      anchor_applied: false,
       // #644: every 200 reports the order actually applied.
       sort_applied: 'newest',
     });

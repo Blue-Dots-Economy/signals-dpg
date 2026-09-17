@@ -369,6 +369,7 @@ describe('DiscoverResponseSchema', () => {
     offset: 0,
     source: 'signals_search' as const,
     degraded: false,
+    anchor_applied: false,
     // #644: every 200 response now reports the order actually applied, so the
     // UI labels from what happened rather than from what it requested.
     sort_applied: 'newest' as const,
@@ -527,7 +528,24 @@ describe('DiscoverResponseSchema — sort_applied (#644 contract §6)', () => {
     offset: 0,
     source: 'signals_search' as const,
     degraded: false,
+    anchor_applied: false,
   };
+
+  it('REQUIRES anchor_applied, unlike sort_applied — the BFF always knows', () => {
+    // The asymmetry is deliberate. `sort_applied` is optional because it is
+    // signals-search's answer and an older build omits it, so absence carries
+    // meaning. `anchor_applied` is the BFF's answer about its OWN behaviour —
+    // it is the thing that drops the anchor on the retry — so there is no
+    // version skew to model and no honest reason for it to be missing.
+    const { anchor_applied: _dropped, ...withoutIt } = meta;
+    expect(DiscoverResponseSchema.safeParse({ meta: withoutIt, items: [] }).success).toBe(false);
+    expect(
+      DiscoverResponseSchema.safeParse({
+        meta: { ...meta, anchor_applied: true },
+        items: [],
+      }).success
+    ).toBe(true);
+  });
 
   it('allows sort_applied to be ABSENT, because absence means "unknown"', () => {
     // It used to be required. Review of #665: a signals-search predating the

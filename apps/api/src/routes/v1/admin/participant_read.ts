@@ -5,7 +5,6 @@ import type {
 } from 'fastify';
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
-import { items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
 import { consent_record } from '@api/db/postgres/schema';
 import z, {
@@ -14,8 +13,7 @@ import z, {
   type GetParticipantRequest as GetParticipantQueryType,
   type ParticipantComplianceKey,
 } from '@dpg/schemas';
-import { decryptItemPrivate } from '@/utils/item_decrypt';
-import { apiConfig } from '@/config';
+import { readItemsForUser, servedNetworks } from './_participant_items.js';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { isMinor } from '@/services/minor';
 
@@ -278,50 +276,6 @@ function resolveReadableActingOrg(
 function isMinorBlockedForCaller(age: number | null, orgType: string): boolean {
   if (orgType === 'aggregator') return false;
   return age != null && isMinor(age);
-}
-
-const servedNetworks = (): string[] => {
-  const set = new Set<string>();
-  for (const d of apiConfig.served_domains) set.add(d.network);
-  return Array.from(set);
-};
-
-async function readItemsForUser(user_id: string) {
-  const networks = servedNetworks();
-  const rows = await db
-    .select({
-      item_id: items.item_id,
-      item_network: items.item_network,
-      item_domain: items.item_domain,
-      item_type: items.item_type,
-      lifecycle_status: items.lifecycle_status,
-      item_state: items.item_state,
-      item_locations: items.item_locations,
-      item_private_state: items.item_private_state,
-      created_at: items.created_at,
-      updated_at: items.updated_at,
-    })
-    .from(items)
-    .where(
-      networks.length > 0
-        ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
-        : eq(items.created_by, user_id),
-    )
-    .orderBy(items.created_at);
-
-  return rows.map((r) => {
-    const { item_private_state: _drop, ...rest } = r;
-    const { mergedState } = decryptItemPrivate({
-      item_state: r.item_state as Record<string, unknown>,
-      item_private_state: r.item_private_state,
-    });
-    return {
-      ...rest,
-      item_state: mergedState,
-      created_at: (r.created_at as Date).toISOString(),
-      updated_at: (r.updated_at as Date).toISOString(),
-    };
-  });
 }
 
 /**
