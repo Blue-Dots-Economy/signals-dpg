@@ -422,6 +422,7 @@ vi.mock('@/hooks/use-infinite-browse-items', () => ({
       fetchNextPage: () => {},
       partial: false,
       degraded: false,
+      anchor_applied: false,
       distanceMeters: undefined,
     };
   },

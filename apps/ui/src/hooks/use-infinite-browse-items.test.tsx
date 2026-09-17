@@ -127,7 +127,7 @@ describe('useInfiniteBrowseItems', () => {
   it('routes to fetchDiscover when q is set, and resets paging when q changes', async () => {
     vi.mocked(fetchDiscover).mockImplementation(async (q) => ({
       items: q.q === 'foo' ? [item('x')] : [item('y')],
-      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     }));
     const { result, rerender } = renderHook(
       ({ q }: { q: string }) => useInfiniteBrowseItems(network, domain, null, { q }),
@@ -151,7 +151,7 @@ describe('useInfiniteBrowseItems', () => {
   it('routes to fetchDiscover when facet filters are set, even without q', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('z')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () =>
@@ -171,7 +171,7 @@ describe('useInfiniteBrowseItems', () => {
   it('routes to fetchDiscover when relevance is forced, even with no q/filters', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('r')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () => useInfiniteBrowseItems(network, domain, null, { relevance: true }),
@@ -185,7 +185,7 @@ describe('useInfiniteBrowseItems', () => {
   it('surfaces source and degraded from the discover response (native_fallback case)', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('a')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'native_fallback', degraded: true, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'native_fallback', degraded: true, anchor_applied: false, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () => useInfiniteBrowseItems(network, domain, null, { q: 'x' }),
@@ -205,8 +205,8 @@ describe('useInfiniteBrowseItems', () => {
     vi.mocked(fetchDiscover).mockImplementation(async (q) => {
       const offset = q.offset ?? 0;
       return offset === 0
-        ? { items: [item('a'), item('b')], meta: { total: 3, limit: 2, offset, source: 'native_fallback' as const, degraded: true, sort_applied: 'relevance' } }
-        : { items: [item('c')], meta: { total: 3, limit: 2, offset, source: 'signals_search' as const, degraded: false, sort_applied: 'relevance' } };
+        ? { items: [item('a'), item('b')], meta: { total: 3, limit: 2, offset, source: 'native_fallback' as const, degraded: true, anchor_applied: false, sort_applied: 'relevance' } }
+        : { items: [item('c')], meta: { total: 3, limit: 2, offset, source: 'signals_search' as const, degraded: false, anchor_applied: false, sort_applied: 'relevance' } };
     });
     const { result } = renderHook(
       () => useInfiniteBrowseItems(network, domain, null, { q: 'x' }),
@@ -237,7 +237,7 @@ describe('useInfiniteBrowseItems', () => {
   it('passes anchor_item_id to fetchDiscover in discover mode', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('a')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () =>
@@ -257,7 +257,7 @@ describe('useInfiniteBrowseItems', () => {
   it('resets paging and refetches with the new anchor when anchorItemId changes in discover mode', async () => {
     vi.mocked(fetchDiscover).mockImplementation(async (q) => ({
       items: q.anchor_item_id === 'profile-a' ? [item('x')] : [item('y')],
-      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: q.offset ?? 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     }));
     const { result, rerender } = renderHook(
       ({ anchorItemId }: { anchorItemId: string }) =>
@@ -284,7 +284,7 @@ describe('useInfiniteBrowseItems', () => {
   it('surfaces distanceMeters from the discover response meta.distance_meters', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('a')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, distance_meters: 30000, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, anchor_applied: false, distance_meters: 30000, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () => useInfiniteBrowseItems(network, domain, { lat: 19, lng: 72 }, { relevance: true }),
@@ -297,7 +297,7 @@ describe('useInfiniteBrowseItems', () => {
   it('leaves distanceMeters undefined when the discover response omits it (no location sent)', async () => {
     vi.mocked(fetchDiscover).mockResolvedValue({
       items: [item('a')],
-      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, sort_applied: 'relevance' },
+      meta: { total: 1, limit: 2, offset: 0, source: 'signals_search', degraded: false, anchor_applied: false, sort_applied: 'relevance' },
     });
     const { result } = renderHook(
       () => useInfiniteBrowseItems(network, domain, null, { relevance: true }),
@@ -358,6 +358,7 @@ const discoverPage = (sortApplied: 'relevance' | 'newest' | 'nearest' = 'relevan
     offset: 0,
     source: 'signals_search' as const,
     degraded: false,
+    anchor_applied: false,
     sort_applied: sortApplied,
   },
 });

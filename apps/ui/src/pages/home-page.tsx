@@ -1160,6 +1160,24 @@ export function HomePage() {
   // matching the control's own semantics.
   const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
+  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
+  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
+  // consults the schema's interaction matrix (`network.actions[].interactions`)
+  // to decide whether that domain may anchor discover calls for `targetDomain`.
+  //
+  // Declared here, above the map's totals, rather than beside the list feed it
+  // was written for: both feeds need it, and this is the first consumer.
+  const anchorFor = React.useCallback(
+    (targetDomain: string): string | undefined =>
+      anchorItemIdForTarget({
+        activeProfileId,
+        activeProfileDomain: myItem?.item_domain ?? null,
+        targetDomain,
+        actions: network?.actions ?? {},
+      }),
+    [activeProfileId, myItem, network],
+  );
+
   // Filter-scoped totals for the MAP's filter bar (N5). The list already has
   // this number from the feed it renders, so the extra count requests are
   // enabled on the map only.
@@ -1169,6 +1187,10 @@ export function HomePage() {
     activeFieldFilters,
     search,
     viewMode === 'map',
+    // The same per-target-domain anchor the list feed uses. Without it a typed
+    // query does not narrow this count, and the bar reported the whole network
+    // as matching while the map drew one pin.
+    anchorFor,
   );
 
 
@@ -1274,21 +1296,6 @@ export function HomePage() {
   // relevance) — the server has already applied text + facet filtering, so the
   // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
   const listDiscover = isDiscoverActive(browseParams);
-
-  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
-  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
-  // consults the schema's interaction matrix (`network.actions[].interactions`)
-  // to decide whether that domain may anchor discover calls for `targetDomain`.
-  const anchorFor = React.useCallback(
-    (targetDomain: string): string | undefined =>
-      anchorItemIdForTarget({
-        activeProfileId,
-        activeProfileDomain: myItem?.item_domain ?? null,
-        targetDomain,
-        actions: network?.actions ?? {},
-      }),
-    [activeProfileId, myItem, network],
-  );
 
   // Single-domain paged fetch. Enabled only while a specific domain tab is
   // selected; disabled (and thus inert) on the "All" tab.
