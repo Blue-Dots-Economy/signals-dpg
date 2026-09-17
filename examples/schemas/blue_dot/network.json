@@ -1332,6 +1332,357 @@
           { "field": "avg_actions_per_user", "label": "Avg Actions per User" }
         ]
       }
+    },
+    {
+      "description": "Organisations delivering support services around the job-seeking process, such as training, counselling, assessment or placement assistance.",
+      "minimum_cache_ttl_seconds": 300,
+      "status_rules": [
+        {
+          "status": "new",
+          "label": "New",
+          "description": "Joined within the last 7 days",
+          "when": {
+            "item_age_days": {
+              "lte": 7
+            }
+          }
+        },
+        {
+          "status": "active",
+          "label": "Active",
+          "description": "Responded to a service request in the last 30 days",
+          "when": {
+            "days_since_last": {
+              "buckets": [
+                "create",
+                "accept"
+              ],
+              "lte": 30
+            }
+          }
+        },
+        {
+          "status": "at_risk",
+          "label": "At Risk",
+          "description": "No service activity for 30-90 days",
+          "when": {
+            "days_since_last": {
+              "buckets": [
+                "create",
+                "accept",
+                "reject"
+              ],
+              "between": [
+                31,
+                90
+              ]
+            }
+          }
+        },
+        {
+          "status": "inactive",
+          "label": "Inactive",
+          "description": "No activity 90+ days",
+          "when": "default"
+        }
+      ],
+      "item_schemas": {
+        "profile_1.0": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "title": "Service Provider Profile 1.0",
+          "type": "object",
+          "additionalProperties": false,
+          "x-form-layout": {
+            "sections": [
+              {
+                "title": "Organisation Details",
+                "fields": [
+                  "serviceProviderName",
+                  "organisationType",
+                  "location",
+                  "contactPersonName",
+                  "contactPhoneNumber",
+                  "contactEmail"
+                ]
+              },
+              {
+                "title": "Services Offered",
+                "fields": [
+                  "participantTypesServed",
+                  "needsAddressed",
+                  "servicesOffered",
+                  "serviceMode",
+                  "costModel"
+                ]
+              },
+              {
+                "title": "Reach & Capacity",
+                "fields": [
+                  "coverageArea",
+                  "capacityPerMonth",
+                  "accreditation",
+                  "languagesSupported"
+                ]
+              }
+            ],
+            "twoColumn": [
+              "organisationType",
+              "contactPhoneNumber",
+              "contactEmail",
+              "serviceMode",
+              "costModel",
+              "capacityPerMonth"
+            ]
+          },
+          "required": [
+            "serviceProviderName",
+            "location",
+            "contactPersonName",
+            "contactPhoneNumber",
+            "servicesOffered"
+          ],
+          "properties": {
+            "serviceProviderName": {
+              "type": "string",
+              "title": "Organisation Name",
+              "minLength": 1
+            },
+            "organisationType": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Type of Organisation",
+              "enum": [
+                "ITI / Training Institute",
+                "College",
+                "NGO",
+                "Placement / Staffing Agency",
+                "Assessment Body",
+                "Counselling Centre",
+                "Government Department",
+                "Industry Association",
+                "Financial Institution",
+                "Other"
+              ]
+            },
+            "location": {
+              "type": "string",
+              "title": "Location",
+              "location": "primary",
+              "private": true
+            },
+            "contactPersonName": {
+              "type": "string",
+              "title": "Contact Person",
+              "minLength": 1,
+              "private": true
+            },
+            "contactPhoneNumber": {
+              "type": "string",
+              "title": "Contact Mobile Number",
+              "minimum": 10,
+              "private": true
+            },
+            "contactEmail": {
+              "type": "string",
+              "title": "Contact Email",
+              "format": "email",
+              "private": true
+            },
+            "participantTypesServed": {
+              "type": "array",
+              "title": "Who You Serve",
+              "description": "Select the participant types this service is for",
+              "placeholder": "Select who you serve",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Job Seeker",
+                  "Job Provider"
+                ]
+              }
+            },
+            "needsAddressed": {
+              "vectorize": true,
+              "type": "array",
+              "title": "Needs Addressed",
+              "description": "Select all the needs this service helps with",
+              "placeholder": "Select all the needs this service helps with",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Skilling",
+                  "Counselling",
+                  "Assessment & Certification",
+                  "Proof of Skill",
+                  "Placement & Staffing",
+                  "Interview Preparation",
+                  "Internship & Apprenticeship",
+                  "Capital & Financial Services",
+                  "Market Access",
+                  "Government Schemes",
+                  "Higher Education",
+                  "Gig Work",
+                  "Other"
+                ]
+              }
+            },
+            "servicesOffered": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Services Offered",
+              "description": "Describe the services you deliver",
+              "minLength": 1
+            },
+            "serviceMode": {
+              "type": "string",
+              "title": "Mode of Delivery",
+              "enum": [
+                "In-person",
+                "Online",
+                "Hybrid"
+              ]
+            },
+            "coverageArea": {
+              "vectorize": true,
+              "type": "string",
+              "title": "Areas Covered",
+              "description": "Districts, blocks or areas where this service is available"
+            },
+            "capacityPerMonth": {
+              "type": "integer",
+              "title": "Capacity per Month",
+              "description": "Approximate number of participants that can be served each month",
+              "minimum": 0
+            },
+            "costModel": {
+              "type": "string",
+              "title": "Cost to the Participant",
+              "enum": [
+                "Free",
+                "Subsidised",
+                "Paid",
+                "Government-funded"
+              ]
+            },
+            "accreditation": {
+              "type": "string",
+              "title": "Accreditation / Affiliation",
+              "description": "Recognising body, registration number or affiliation, if any"
+            },
+            "languagesSupported": {
+              "type": "array",
+              "title": "Languages Supported",
+              "description": "Languages in which the service is delivered",
+              "placeholder": "Select all the languages the service is delivered in",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Assamese",
+                  "Bengali",
+                  "Bodo",
+                  "Dogri",
+                  "English",
+                  "Gujarati",
+                  "Hindi",
+                  "Kannada",
+                  "Kashmiri",
+                  "Konkani",
+                  "Maithili",
+                  "Malayalam",
+                  "Manipuri",
+                  "Marathi",
+                  "Mizo",
+                  "Nepali",
+                  "Odia",
+                  "Punjabi",
+                  "Sanskrit",
+                  "Santali",
+                  "Sindhi",
+                  "Tamil",
+                  "Telugu",
+                  "Urdu"
+                ],
+                "enumNames": [
+                  "Assamese (অসমীয়া)",
+                  "Bengali (বাংলা)",
+                  "Bodo (बड़ो)",
+                  "Dogri (डोगरी)",
+                  "English",
+                  "Gujarati (ગુજરાતી)",
+                  "Hindi (हिन्दी)",
+                  "Kannada (ಕನ್ನಡ)",
+                  "Kashmiri (कॉशुर)",
+                  "Konkani (कोंकणी)",
+                  "Maithili (मैथिली)",
+                  "Malayalam (മലയാളം)",
+                  "Manipuri (মৈতৈলোন্)",
+                  "Marathi (मराठी)",
+                  "Mizo (Mizo ṭawng)",
+                  "Nepali (नेपाली)",
+                  "Odia (ଓଡ଼ିଆ)",
+                  "Punjabi (ਪੰਜਾਬੀ)",
+                  "Sanskrit (संस्कृतम्)",
+                  "Santali (ᱥᱟᱱᱛᱟᱲᱤ)",
+                  "Sindhi (سنڌي)",
+                  "Tamil (தமிழ்)",
+                  "Telugu (తెలుగు)",
+                  "Urdu (اردو)"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "id": "service_provider",
+      "my_items_label": "My Services",
+      "guardian_consent_required": false,
+      "profile_completion_prompt": {
+        "heading": "Complete your service profile to get discovered",
+        "body": "Job seekers and employers can find and connect with your service only once your profile is live. Fill in the details below to start receiving requests."
+      },
+      "card": {
+        "title_field": "serviceProviderName",
+        "avatar_from": "serviceProviderName",
+        "default_fields": [
+          "location",
+          "organisationType",
+          "needsAddressed",
+          "serviceMode"
+        ]
+      },
+      "dashboard_tiles": {
+        "profile": [
+          {
+            "field": "total_items",
+            "label": "Services Registered"
+          },
+          {
+            "field": "complete_profiles",
+            "label": "Services Complete"
+          },
+          {
+            "field": "has_applications",
+            "label": "Received Requests"
+          }
+        ],
+        "user": [
+          {
+            "field": "total_users",
+            "label": "Total Service Providers"
+          },
+          {
+            "field": "avg_items_per_user",
+            "label": "Avg Services per User"
+          },
+          {
+            "field": "avg_actions_per_user",
+            "label": "Avg Actions per User"
+          }
+        ]
+      }
     }
   ],
   "instances": [
@@ -1346,9 +1697,154 @@
       "instance_url": "http://localhost:2742",
       "custom_item_schema_urls": {},
       "domain_id": "provider"
+    },
+    {
+      "instance_name": "Blue Dot Service Provider Local",
+      "instance_url": "http://localhost:2742",
+      "custom_item_schema_urls": {},
+      "domain_id": "service_provider"
     }
   ],
   "actions": {
+    "service_request": {
+      "description": "Lets a seeker or a provider request a support service - skilling, counselling, assessment, placement assistance - from a service provider.",
+      "interactions": [
+        {
+          "from_network": "blue_dot",
+          "from_domain": "seeker",
+          "to_network": "blue_dot",
+          "to_domain": "service_provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Seeker Service Request Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "need"
+            ],
+            "properties": {
+              "need": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message_to_provider": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Seeker Service Request Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "submitted",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": [
+              "created",
+              "submitted"
+            ],
+            "accept": [
+              "accepted"
+            ],
+            "reject": [
+              "rejected"
+            ],
+            "cancel": [
+              "cancelled"
+            ]
+          },
+          "reveals_pii_on_status": [
+            "accepted"
+          ]
+        },
+        {
+          "from_network": "blue_dot",
+          "from_domain": "provider",
+          "to_network": "blue_dot",
+          "to_domain": "service_provider",
+          "requirement_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider Service Request Requirement",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "need"
+            ],
+            "properties": {
+              "need": {
+                "type": "string",
+                "minLength": 1
+              },
+              "message_to_provider": {
+                "type": "string"
+              }
+            }
+          },
+          "event_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "title": "Provider Service Request Event",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "status",
+              "remark"
+            ],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "submitted",
+                  "accepted",
+                  "rejected",
+                  "cancelled"
+                ]
+              },
+              "remark": {
+                "type": "string"
+              }
+            }
+          },
+          "metric_categories": {
+            "create": [
+              "created",
+              "submitted"
+            ],
+            "accept": [
+              "accepted"
+            ],
+            "reject": [
+              "rejected"
+            ],
+            "cancel": [
+              "cancelled"
+            ]
+          },
+          "reveals_pii_on_status": [
+            "accepted"
+          ]
+        }
+      ]
+    },
     "apply": {
       "description": "Lets a seeker and provider to invite each other.",
       "interactions": [
