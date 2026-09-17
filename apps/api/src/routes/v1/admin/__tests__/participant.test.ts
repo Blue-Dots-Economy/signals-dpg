@@ -1835,6 +1835,185 @@ describe('POST /admin/participant', () => {
  * the same row without better-auth's artifacts, and that the failure handling
  * survives the restructure.
  */
+describe('POST /admin/participant — caller-supplied item_locations', () => {
+  beforeEach(resetDbState);
+
+  const COORDS = [{ lat: 12.9251, lng: 77.5938, label: 'Jayanagar' }];
+
+  const existingOwnUser = (user_id: string) => {
+    dbState.existingUserRows = [
+      {
+        id: user_id,
+        email: VALID_EMAIL,
+        phoneNumber: null,
+        onboardedByOrgId: 'org_agg_1',
+      },
+    ];
+    lastQueriedUserId = user_id;
+  };
+
+  const withExistingItem = (user_id: string) => {
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedItemId = VALID_UUID_A;
+  };
+
+  it('create_new_user: forwards the coordinates to create_profile_item', async () => {
+    const { create_profile_item } = await import('@/lib/profile_item');
+    vi.mocked(create_profile_item).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_locations: COORDS }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(create_profile_item)).toHaveBeenCalledWith(
+      expect.objectContaining({ item_locations: COORDS }),
+    );
+  });
+
+  it('insert_item (existing user, new profile): forwards the coordinates to create_profile_item', async () => {
+    existingOwnUser('usr_coords_insert');
+    const { create_profile_item } = await import('@/lib/profile_item');
+    vi.mocked(create_profile_item).mockClear();
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_locations: COORDS }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(create_profile_item)).toHaveBeenCalledWith(
+      expect.objectContaining({ item_locations: COORDS }),
+    );
+  });
+
+  it('update_item: forwards the coordinates alongside item_state', async () => {
+    const user_id = 'usr_coords_update';
+    existingOwnUser(user_id);
+    withExistingItem(user_id);
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: { v: 2 },
+        item_locations: COORDS,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledWith(
+      expect.anything(),
+      VALID_UUID_A,
+      user_id,
+      true,
+      { item_state: { v: 2 }, item_locations: COORDS },
+    );
+  });
+
+  it('update_item: coordinates WITHOUT item_state still write the item', async () => {
+    // A caller re-sending only a re-picked exact point must not have to echo
+    // the whole profile back for the coordinate to land.
+    const user_id = 'usr_coords_only_update';
+    existingOwnUser(user_id);
+    withExistingItem(user_id);
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: {},
+        item_locations: COORDS,
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(updateItemInternal)).toHaveBeenCalledWith(
+      expect.anything(),
+      VALID_UUID_A,
+      user_id,
+      true,
+      { item_locations: COORDS },
+    );
+  });
+
+  it('update_item: an EMPTY coordinate array with no item_state leaves the item untouched', async () => {
+    // Empty means "I resolved nothing", which must read as absent — otherwise
+    // a consent-only activation would start writing item rows.
+    const user_id = 'usr_coords_empty_update';
+    existingOwnUser(user_id);
+    withExistingItem(user_id);
+    const { updateItemInternal } = await import('@/services/item_service');
+    vi.mocked(updateItemInternal).mockClear();
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({
+        item_id: VALID_UUID_A,
+        item_state: {},
+        item_locations: [],
+      }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(updateItemInternal)).not.toHaveBeenCalled();
+  });
+
+  it('omitting item_locations leaves create_profile_item to geocode, exactly as before', async () => {
+    const { create_profile_item } = await import('@/lib/profile_item');
+    vi.mocked(create_profile_item).mockClear();
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(vi.mocked(create_profile_item).mock.calls[0][0].item_locations).toBeUndefined();
+  });
+
+  it('400s on an out-of-range coordinate rather than storing it', async () => {
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_locations: [{ lat: 91, lng: 77.5938 }] }),
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+});
+
 describe('POST /admin/participant — direct write under AUTH_PROVIDER=keycloak', () => {
   beforeEach(() => {
     resetDbState();

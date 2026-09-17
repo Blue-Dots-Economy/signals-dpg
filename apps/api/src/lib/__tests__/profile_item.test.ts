@@ -50,7 +50,28 @@ describe('create_profile_item', () => {
       item_domain: 'seeker',
       item_type: 'profile_1.0',
       item_state: input.payload,
+      provided: undefined,
     });
+  });
+
+  it('forwards caller-supplied coordinates as `provided`, so the address text is not geocoded over', async () => {
+    const item_locations = [{ lat: 12.9251, lng: 77.5938, label: 'Jayanagar' }];
+
+    await create_profile_item({ ...input, item_locations });
+
+    expect(resolveLocationsForCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ provided: item_locations }),
+    );
+  });
+
+  it('still geocodes when the caller supplies an empty coordinate array', async () => {
+    // Empty must behave exactly like absent: resolveLocationsForCreate only
+    // short-circuits on a NON-empty `provided`.
+    await create_profile_item({ ...input, item_locations: [] });
+
+    expect(resolveLocationsForCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ provided: [], item_state: input.payload }),
+    );
   });
 
   it('passes the resolved locations through to the item-create service', async () => {

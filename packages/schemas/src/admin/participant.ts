@@ -112,6 +112,18 @@ export const UpsertParticipantRequest = z
       .describe(
         "schema-typed item_type for the item (default: 'profile_1.0').",
       ),
+    item_locations: ItemLocationsArray.optional().describe(
+      'exact coordinates the caller already resolved for this item (e.g. an ' +
+      'address the participant picked from a Places autocomplete, so the ' +
+      'lat/lng is the one the geocoder returned for that exact suggestion). ' +
+      'When present and non-empty these are stored as-is and the address text ' +
+      'in `item_state` is NOT geocoded server-side. When absent or empty, ' +
+      "Signals geocodes the item schema's primary location field from " +
+      '`item_state`, which is the historical behaviour. Privacy is unaffected ' +
+      'either way: if the primary location field is declared private, the ' +
+      'coordinate is jittered 100-250 m before storage regardless of whether ' +
+      'it was supplied here or resolved server-side.',
+    ),
   })
   .refine((b) => Boolean(b.email) || Boolean(b.phone_number), {
     message: 'either email or phone_number is required',
