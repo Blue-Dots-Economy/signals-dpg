@@ -24,6 +24,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const {
   rowQueue,
   queries,
+  orderings,
   dbState,
   configState,
   decryptImpl,
@@ -34,6 +35,10 @@ const {
     rowQueue: [] as unknown[][],
     // Every `.where(...)` call, in order, so tests can assert the predicate.
     queries: [] as { table: string; where: unknown; joined: string[] }[],
+    // Every `.orderBy(...)` call's arguments, in order. The item lists these
+    // routes return are read head-first by length-capped callers, so the sort
+    // direction is part of the contract, not an incidental detail.
+    orderings: [] as unknown[][],
     // Resettable failure switch — never monkey-patch the shared row queue, an
     // override there would leak into every later test in the file.
     dbState: { failWith: null as Error | null },
@@ -73,7 +78,10 @@ function thenable() {
     then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
       nextRows().then(res, rej),
     limit: () => nextRows(),
-    orderBy: () => thenable(),
+    orderBy: (...cols: unknown[]) => {
+      orderings.push(cols);
+      return thenable();
+    },
   };
 }
 
@@ -108,6 +116,7 @@ vi.mock('drizzle-orm', () => ({
   or: (...args: unknown[]) => ({ op: 'or', args }),
   eq: (a: unknown, b: unknown) => ({ op: 'eq', a, b }),
   inArray: (a: unknown, b: unknown) => ({ op: 'inArray', a, b }),
+  desc: (col: unknown) => ({ op: 'desc', col }),
 }));
 
 vi.mock('@dpg/database', () => ({
@@ -346,6 +355,7 @@ function itemRow(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   rowQueue.length = 0;
   queries.length = 0;
+  orderings.length = 0;
   dbState.failWith = null;
   configState.served_domains = [{ network: 'blue_dot', domain: 'seeker' }];
   // Reset, or a version set by one test silently drives the next.
@@ -526,6 +536,47 @@ describe('participant_read_handler — ownership disclosure', () => {
     expect(body.user_id).toBe('u1');
     expect(body.items.map((i) => i.item_id)).toEqual(['i1']);
     expect(body.compliance).toEqual(compliance(true, true, true));
+  });
+});
+
+/**
+ * The ORDER BY `ITEMS_NEWEST_FIRST` emits through the mocked `desc`. Written
+ * once so the read and decrypt assertions pin the SAME ordering — that identity
+ * is the invariant, since the two build separate queries.
+ *
+ * Asserted with `toEqual([...])` on the whole recorded list rather than
+ * `toContainEqual`: the latter passes as long as SOME emitted ordering matches,
+ * so a handler that also emitted a second, wrong one would slip through.
+ */
+const ITEMS_NEWEST_FIRST_EMITTED = [
+  { op: 'desc', col: 'items.created_at' },
+  { op: 'desc', col: 'items.item_id' },
+];
+
+describe('participant_read_handler — item ordering', () => {
+  const onboarded = [
+    { id: 'u1', email: 'a@b.com', phoneNumber: null, onboardedByOrgId: 'org_agg' },
+  ];
+
+  it('reads the item list newest-first, with a deterministic tiebreaker', async () => {
+    // Asserted on the emitted ORDER BY rather than on row order, because the
+    // sort happens in Postgres and the fake db returns the queue verbatim. The
+    // direction is contractual: a caller that reads only the head of the list
+    // (the voice bot truncates the response to N characters) must get the
+    // participant's most recent profile, and a participant accumulates profiles
+    // because a POST without `item_id` inserts a new one every call.
+    rowQueue.push(onboarded);
+    rowQueue.push([{ age: 30 }]);
+    rowQueue.push([itemRow({ item_id: 'i1' }), itemRow({ item_id: 'i2' })]);
+    rowQueue.push([]);
+    rowQueue.push([]);
+
+    await call(participant_read_handler, {
+      acting_org: AGG,
+      query: { email: 'a@b.com' },
+    });
+
+    expect(orderings).toEqual([ITEMS_NEWEST_FIRST_EMITTED]);
   });
 });
 
@@ -1397,6 +1448,21 @@ describe('participant_decrypt_handler — user_id mode', () => {
     });
     expect((reply.body as { profiles: unknown[] }).profiles).toHaveLength(1);
     expect((reply.body as { skipped: string[] }).skipped).toEqual([]);
+  });
+
+  it('orders newest-first, identically to GET/POST /admin/participant', async () => {
+    // This query cannot reuse `readItemsForUser`, so nothing but this assertion
+    // stops it drifting from the sibling routes — which is the failure the
+    // shared `ITEMS_NEWEST_FIRST` exists to prevent, and it is only real if the
+    // test pins the same value the read path is pinned to.
+    rowQueue.push([itemRow({ item_id: 'i1' }), itemRow({ item_id: 'i2' })]);
+
+    await call(participant_decrypt_handler, {
+      acting_org: AGG,
+      body: { user_id: 'u1' },
+    });
+
+    expect(orderings).toEqual([ITEMS_NEWEST_FIRST_EMITTED]);
   });
 
   it('audits user_id mode with requested_count 1 regardless of rows returned', async () => {
