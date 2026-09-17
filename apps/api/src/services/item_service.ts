@@ -1,4 +1,4 @@
-import { and, count, eq, sql } from 'drizzle-orm';
+import { and, count, eq, ne, sql } from 'drizzle-orm';
 import {
   getDomainItemSchema,
   getDomainItemTypes,
@@ -292,6 +292,35 @@ async function resolveProfileLimit(
  * the (user, network, domain, item_type) scope serializes concurrent creates so
  * two racing inserts can't both pass a `count < limit` check. Throws 409
  * PROFILE_LIMIT_REACHED when the user is already at the cap.
+ *
+ * ## Retired rows do not hold a slot (#737)
+ *
+ * The count excludes `retired`, so retiring a profile frees a slot and the cap
+ * measures live/draft/paused only. Three reasons this is the right shape:
+ *
+ *   - It is the only remedy a capped participant actually has. The 409 message
+ *     names retire, and retire is what the UI offers (the per-row trash icon in
+ *     `profile-row-actions.tsx`, #347). Counting retired rows made that button
+ *     a no-op against the very error that recommends it.
+ *   - It is what the owner already sees. The sidebar's `useMyItems` fetch
+ *     EXCLUDES retired (see the note in `lib/login-profiles.ts`), so counting
+ *     them meant "you have 5" while the screen listed 4.
+ *   - It cannot be gamed. `retired` is terminal — `classify_item` hard-returns
+ *     it and `POST /item/lifecycle` refuses every transition out with
+ *     ALREADY_RETIRED — so there is no retire-create-unretire path back over
+ *     the cap. That terminality is the whole safety argument; if retire ever
+ *     becomes reversible, this exclusion must be revisited with it.
+ *
+ * Deliberately a denylist (`!= 'retired'`) rather than an allowlist over
+ * live/draft/paused: a lifecycle state added later should keep consuming a slot
+ * until someone decides otherwise, not silently become free. Safe against NULLs
+ * because `items.lifecycle_status` is NOT NULL DEFAULT 'draft'.
+ *
+ * NOT changed here: the single-domain lock's own `NOT EXISTS items` guard
+ * (`services/items/single_domain_lock.ts`) has no lifecycle filter either, and
+ * that one is intended. It protects `user.onboarded_by_org_id` — a per-ACCOUNT,
+ * write-once tenancy key that retire does not reset — so retiring every profile
+ * in a domain still leaves the account locked to that domain, by design.
  */
 async function assertProfileLimit(
   exec: DbOrTx,
@@ -315,6 +344,7 @@ async function assertProfileLimit(
         eq(items.item_network, params.item_network),
         eq(items.item_domain, params.item_domain),
         eq(items.item_type, params.item_type),
+        ne(items.lifecycle_status, 'retired'),
       ),
     );
 
@@ -322,7 +352,7 @@ async function assertProfileLimit(
     throw new ItemServiceError(
       409,
       'PROFILE_LIMIT_REACHED',
-      `This user already has the maximum of ${limit} ${params.item_domain} profile(s) allowed. Delete an existing profile to create a new one.`,
+      `This user already has the maximum of ${limit} ${params.item_domain} profile(s) allowed. Retire an existing profile to create a new one.`,
     );
   }
 }

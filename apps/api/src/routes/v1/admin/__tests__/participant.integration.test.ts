@@ -440,6 +440,84 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     }
   });
 
+  it('per-user profile cap: retiring a profile frees a slot (#737)', async () => {
+    // The 409 tells a capped participant to retire a profile. Before #737 the
+    // count had no lifecycle filter, so doing exactly that changed nothing and
+    // the next create was refused again. Retire is set on the row directly:
+    // what the cap reads is `lifecycle_status`, and driving the real
+    // POST /item/lifecycle would need the owner's session, which this
+    // api-key-authenticated harness does not hold.
+    const limit = apiConfig.max_profiles_per_user;
+    const capEmail = `retirecap-${randomUUID()}@test.local`;
+    const capPhone = `+9199${Math.floor(randomBytes(4).readUInt32BE(0) % 1e8).toString().padStart(8, '0')}`;
+    const mk = (n: number) =>
+      app.inject({
+        method: 'POST',
+        url: '/api/v1/admin/participant',
+        headers: {
+          'x-api-key': ns.raw_key,
+          'x-acting-org-id': ns.org_id,
+          'content-type': 'application/json',
+        },
+        payload: {
+          email: capEmail,
+          phone_number: capPhone,
+          name: `Retire Cap User ${n}`,
+          channel: 'bulk',
+          network: primary.network,
+          domain: primary.domain,
+          item_type: primary.item_type,
+          item_state: generateMinimalItemState(primary.schema),
+        },
+      });
+
+    let capUserId: string | undefined;
+    let firstItemId: string | undefined;
+    for (let i = 0; i < limit; i++) {
+      const ok = await mk(i);
+      expect(ok.statusCode).toBe(200);
+      capUserId = ok.json().user_id;
+      firstItemId ??= ok.json().items[0].item_id as string;
+    }
+
+    // At the cap.
+    const blocked = await mk(limit);
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error).toBe('PROFILE_LIMIT_REACHED');
+    // …and the message names the action that now works.
+    expect(blocked.json().message).toContain('Retire an existing profile');
+
+    // Retire one. The row stays — retire is not a delete — so this only passes
+    // if the count itself excludes it.
+    await db
+      .update(itemsTable)
+      .set({ lifecycle_status: 'retired' })
+      .where(eq(itemsTable.item_id, firstItemId as string));
+
+    const afterRetire = await mk(limit);
+    expect(afterRetire.statusCode).toBe(200);
+
+    // The retired row was not removed, and the account now holds limit + 1 rows
+    // of which `limit` are countable.
+    const rows = await db
+      .select()
+      .from(itemsTable)
+      .where(eq(itemsTable.created_by, capUserId as string));
+    expect(rows.length).toBe(limit + 1);
+    expect(rows.filter((r) => r.lifecycle_status === 'retired')).toHaveLength(1);
+
+    // …and the freed slot is a single slot, not an exemption: the next create
+    // is refused again.
+    const blockedAgain = await mk(limit + 1);
+    expect(blockedAgain.statusCode).toBe(409);
+    expect(blockedAgain.json().error).toBe('PROFILE_LIMIT_REACHED');
+
+    // cleanup — only this test user's rows.
+    if (capUserId) {
+      await db.delete(itemsTable).where(eq(itemsTable.created_by, capUserId));
+    }
+  });
+
   it('per-user cap holds under CONCURRENCY on the insert_item path (no TOCTOU over-insert)', async () => {
     const limit = apiConfig.max_profiles_per_user;
     const ccEmail = `capcc-${randomUUID()}@test.local`;
