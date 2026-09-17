@@ -39,7 +39,7 @@ cp .env.search.example .env.search    # mint the apikey per §7.4 first
 docker compose --profile search up -d
 ```
 
-UI → http://localhost:5173 · API → http://localhost:2742 (`/reference` for Swagger)
+UI → http://localhost:5173 · API → http://localhost:2742 (`/api/reference` for Swagger)
 
 ## Contents
 
