@@ -90,6 +90,25 @@ path, so the split is per-brand and costs the network default nothing.
 `swavlamban-mark.png` and `alimco-mark.png`. These are a different thing from
 the lockup variants — see `footerAttribution` below.
 
+**A note on the Swavlamban mark, because it will look wrong to you at some
+point.** Gold is a high-luminance ink, so it does not carry the same weight on
+both backgrounds. Measured against the two page backgrounds:
+
+| Ink | on `#f7f8fb` (light) | on `#0b1020` (dark) |
+|---|---|---|
+| `rgb(240,192,48)` | 1.61:1 | 11.08:1 |
+| `rgb(240,224,0)` | 1.29:1 | 13.85:1 |
+
+That is why the mark looks rich in dark theme and washed out in light. It is
+the official artwork and it ships unmodified in both themes, as a deliberate
+choice: the alternatives are recolouring a ministry logo, or seating it on a
+dark chip in light theme. Both were tried and neither was adopted.
+
+So `logo` alone is set, with no `logoLight`. If the light-theme weight ever
+needs addressing, prefer the dark chip — it leaves the official colours intact.
+
+ALIMCO needs nothing here: deep purple is low-luminance and reads on both.
+
 alimco's `brand.json` under `examples/schemas/purple_dot/alimco/` declares
 **only** `footerAttribution`. It has no palette, `faviconType`, `logoShape` or
 copy of its own, so it still inherits all of those from purple_dot. Add them
