@@ -7,6 +7,7 @@ import { items } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type DeleteItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;
@@ -43,14 +44,9 @@ export const delete_item_handler = async (
   reply: FastifyReply
 ) => {
   const { itemId } = request.params;
-  const callerId = request.user?.id;
+  const callerId = requireAuthedUser(request, reply, 'Authenticated user is required to delete an item');
 
-  if (!callerId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to delete an item',
-    });
-  }
+  if (!callerId) return reply;
 
   try {
     const result = await db

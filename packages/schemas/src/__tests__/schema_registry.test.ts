@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { FetchSchema, SchemaFetchError, fetchSchema } from '../schema_registry';
+import { SchemaFetchError, fetchSchema } from '../schema_registry';
 
 const ROOT = 'https://schemas.test/registry/root.json';
 
@@ -141,10 +141,6 @@ describe('fetchSchema — plain documents', () => {
 
     expect(resolved.properties.a).toEqual({ $ref: '#/$defs/A' });
     expect(calls).toEqual([ROOT]);
-  });
-
-  it('FetchSchema is an alias of fetchSchema', () => {
-    expect(FetchSchema).toBe(fetchSchema);
   });
 
   it('falls back to globalThis.fetch when no fetchFn is supplied', async () => {

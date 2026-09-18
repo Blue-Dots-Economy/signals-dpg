@@ -11,6 +11,7 @@ import {
 } from '@/utils/served_domain_guard';
 import { fetchLocalItems } from '@/utils/item_fetch_runtime';
 import { getCachedLocalItemFetch } from '@/utils/item_fetch_cache';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type FetchItemsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchItemsQuerySchema>;
@@ -45,7 +46,9 @@ const fetch_items_handler = async (
   request: FetchItemsRequest,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
+  const userId = requireAuthedUser(request, reply, 'Authenticated user is required to fetch items');
+  if (!userId) return reply;
+
   const {
     item_id,
     item_network,
@@ -61,13 +64,6 @@ const fetch_items_handler = async (
     offset,
     include_retired,
   } = request.query;
-
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to fetch items',
-    });
-  }
 
   if (!isServedDomainBinding(item_network, item_domain)) {
     return await replyForUnservedDomain(reply, item_network, item_domain);

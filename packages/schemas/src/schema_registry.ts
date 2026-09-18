@@ -262,5 +262,3 @@ export class fetchSchema {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 }
-
-export const FetchSchema = fetchSchema;

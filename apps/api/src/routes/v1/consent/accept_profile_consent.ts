@@ -14,6 +14,7 @@ import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
 import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
 
@@ -39,13 +40,8 @@ export const accept_profile_consent_handler = async (
   request: Req,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const body = request.body;
 

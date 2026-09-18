@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { geocodingConfig } from '@/config';
 import { getCachedCoordinates } from './geo_cache';
 
@@ -65,9 +66,6 @@ async function resolveFromProvider(q: string): Promise<Coordinates | null> {
   return resolveWithPhoton(q, geocodingConfig.photon_url);
 }
 
-const delay = (ms: number): Promise<void> =>
-  ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
-
 /**
  * One-shot (configurable) retry around a provider resolve. A provider THROWS
  * only on a TRANSIENT failure — an HTTP/network error or a soft rate-limit
@@ -91,7 +89,11 @@ async function resolveFromProviderWithRetry(q: string): Promise<Coordinates | nu
       return await resolveFromProvider(q);
     } catch (err) {
       lastErr = err;
-      if (attempt < attempts) await delay(geocodingConfig.retry_backoff_ms);
+      // `ms > 0` is load-bearing: `sleep(0)` still yields a macrotask, and the
+      // cache test configures `retry_backoff_ms: 0` to mean "no delay at all".
+      if (attempt < attempts && geocodingConfig.retry_backoff_ms > 0) {
+        await sleep(geocodingConfig.retry_backoff_ms);
+      }
     }
   }
   // Still transient after the last attempt: propagate so the cache layer treats

@@ -8,6 +8,7 @@ import {
   SUPPORT_ALLOWED_CONTENT_TYPES,
   SUPPORT_ALLOWED_EXTENSIONS,
 } from '@/support/attachments';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 /**
  * `GET /api/v1/support/config` (#551) — what the support form is allowed to
@@ -44,9 +45,7 @@ export const support_config: FastifyPluginAsyncZod = async (fastify) => {
 };
 
 export const support_config_handler = async (request: FastifyRequest, reply: FastifyReply) => {
-  if (!request.user?.id) {
-    return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
-  }
+  if (!requireAuthedUser(request, reply)) return reply;
 
   // Mirrors the submit route's 503 condition exactly, so `enabled: false` and a
   // SUPPORT_NOT_CONFIGURED reply can never disagree.

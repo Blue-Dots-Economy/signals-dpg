@@ -21,6 +21,7 @@ import {
 import { isItemOwnedBy, upsertGuardianProfileConsentAndPromote } from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 /**
  * After-commit side effects of a guardian promotion (#557). Both the verify and
@@ -131,8 +132,8 @@ const precreate_issue_handler = async (
   request: FastifyRequest<{ Body: U18ProfilePrecreateBody }>,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
@@ -165,8 +166,8 @@ const precreate_verify_handler = async (
   request: FastifyRequest<{ Body: U18ProfilePrecreateVerifyBody }>,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
@@ -197,8 +198,8 @@ const finalize_handler = async (
   request: FastifyRequest<{ Body: U18ProfileFinalizeBody }>,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
@@ -242,8 +243,8 @@ const finalize_handler = async (
 };
 
 const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
@@ -274,8 +275,8 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
 };
 
 const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });

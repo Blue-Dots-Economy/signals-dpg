@@ -18,7 +18,7 @@ export type LoadedConsentConfig = {
 };
 
 export type LoadConsentConfigOptions = {
-  source: 'local' | 'remote';
+  source: 'local';
   networkLocalFile: string;
   networks: string[];
   /**
@@ -62,20 +62,18 @@ async function listSubdirectories(dir: string): Promise<string[]> {
 }
 
 /**
- * Local mode: the network default consent.json sits beside network.json; brand
- * overrides live in immediate sub-folders named for the brand id.
- * Local mode is single-network (mirrors network_config_loader).
+ * The network default consent.json sits beside network.json; brand overrides
+ * live in immediate sub-folders named for the brand id. Local mode is
+ * single-network (mirrors network_config_loader).
  *
- * Remote mode: remote consent delivery is a follow-up; returns [] for now.
+ * `source` has only one value. It used to also accept 'remote', which returned
+ * [] — an unimplemented stub that silently emptied consent config for every
+ * network if an operator set the documented value. Remote delivery, if it is
+ * ever built, should land as a real branch rather than a reachable no-op.
  */
 export async function loadConsentConfigs(
   opts: LoadConsentConfigOptions
 ): Promise<LoadedConsentConfig[]> {
-  if (opts.source !== 'local') {
-    // Remote consent delivery is a follow-up; returns [] for now.
-    return [];
-  }
-
   // Local mode represents exactly one network — use only the first entry.
   if (opts.networks.length === 0) return [];
   const network = opts.networks[0];

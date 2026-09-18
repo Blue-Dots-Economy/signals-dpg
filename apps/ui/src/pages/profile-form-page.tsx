@@ -37,7 +37,7 @@ import { useEditItem } from '@/hooks/use-edit-item';
 import { queryKeys } from '@/lib/query-keys';
 import { getStoredSignupDomain, clearStoredSignupDomain } from '@/lib/signup-domain';
 import { getUserDomains } from '@/lib/user-api';
-import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { axiosErrorParts, isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useProfileConsentAccept } from '@/hooks/use-profile-consent-accept';
@@ -47,7 +47,6 @@ import {
   verifyProfilePrecreateOtp,
   finalizeProfileConsent,
 } from '@/lib/consent-api';
-import axios from 'axios';
 
 import {
   createItem,
@@ -371,10 +370,7 @@ export function ProfileFormPage() {
       const { otpSent } = await issueProfilePrecreateOtp(precreateRef());
       if (otpSent) setGuardianOtpOpen(true);
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { error?: string } | undefined)?.error
-        : undefined;
+      const { status, code } = axiosErrorParts(err);
       if (status === 409 && code === 'GUARDIAN_REQUIRED') {
         setGuardianSetupOpen(true);
       } else if (status === 429) {

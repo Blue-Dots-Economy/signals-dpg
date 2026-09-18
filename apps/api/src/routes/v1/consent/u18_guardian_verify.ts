@@ -12,6 +12,7 @@ import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 import { setGuardianVerified } from '@/services/minor_guardian_repo';
 import { assertVerifyAttemptAllowed, verifyGuardianOtp, guardianOtpErrorReply } from '@/services/guardian_otp';
 import { guardianOtpScope } from '@/routes/v1/consent/u18_guardian';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type Req = FastifyRequest<{ Body: U18GuardianVerifyBody }>;
 const GUARDIAN_USER_DOCS = ['terms', 'privacy'] as const;
@@ -27,8 +28,8 @@ export const u18_guardian_verify: FastifyPluginAsyncZod = async (fastify) => {
 };
 
 export const u18_guardian_verify_handler = async (request: Req, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const body = request.body;
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {

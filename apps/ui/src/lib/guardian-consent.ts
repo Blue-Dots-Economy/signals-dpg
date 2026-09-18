@@ -4,6 +4,27 @@ import type { TFunction } from 'i18next';
 import type { DotNetworkSchema } from '@/engine/types';
 
 /**
+ * The HTTP status and machine `error` code from a thrown axios error, or
+ * `undefined` for each when the throw was not an axios error.
+ *
+ * Every consent/guardian catch block branches on `status` first and the code
+ * second, and each was hand-rolling the same two ternaries. Note this is NOT
+ * `guardianOtpErrorFromThrown` (`lib/action-api.ts`), which narrows to the five
+ * guardian-OTP codes and returns null for anything else — these call sites need
+ * the raw code (`GUARDIAN_REQUIRED`, `SAME_CONTACT_NOT_ALLOWED`) and the status.
+ */
+export function axiosErrorParts(err: unknown): {
+  status: number | undefined;
+  code: string | undefined;
+} {
+  if (!axios.isAxiosError(err)) return { status: undefined, code: undefined };
+  return {
+    status: err.response?.status,
+    code: (err.response?.data as { error?: string } | undefined)?.error,
+  };
+}
+
+/**
  * Whether a served domain routes minors through the U18 guardian consent flow
  * (Phase 6). Mirrors the server-side check in apps/api/src/services/minor.ts —
  * the server remains authoritative; this only decides which UI to render.

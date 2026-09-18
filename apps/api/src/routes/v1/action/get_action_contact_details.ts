@@ -14,6 +14,7 @@ import { getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { fetchLocalItems } from '@/utils/item_fetch_runtime';
 import { fetchLocalItemSnapshot } from '@/utils/action_event_runtime';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type Params = z.infer<typeof ActionContactDetailsParamsSchema>;
 
@@ -39,13 +40,8 @@ export const get_action_contact_details_handler = async (
   request: Req,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const { action_id } = request.params;
 

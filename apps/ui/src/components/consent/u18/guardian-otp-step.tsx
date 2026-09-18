@@ -1,12 +1,11 @@
 import * as React from 'react';
-import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2, OctagonX } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { verifyGuardian, type VerifyGuardianResponse } from '@/lib/consent-api';
-import { toastGuardianSendError } from '@/lib/guardian-consent';
+import { axiosErrorParts, toastGuardianSendError } from '@/lib/guardian-consent';
 import { useResendCountdown } from '@/hooks/use-resend-countdown';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
@@ -50,10 +49,7 @@ export function GuardianOtpStep({
       const result = await verify(otp);
       if (result.verified) onVerified();
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { error?: string } | undefined)?.error
-        : undefined;
+      const { status, code } = axiosErrorParts(err);
 
       if (status === 429) {
         setInlineError({

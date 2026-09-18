@@ -133,7 +133,7 @@ SIGNALS_PII_KEY='<replace-me>'
 ```
 
 Consent documents are loaded from a `consent.json` beside the active
-`network.json` (`CONSENT_CONFIG_SOURCE=local` by default).
+`network.json` (`CONSENT_CONFIG_SOURCE=local`, the only accepted value).
 
 A few more envs govern signup, inter-instance trust, PII, and support. All have
 safe defaults **except `INSTANCE_SHARED_SECRET`, which is required** (min 32
@@ -360,7 +360,7 @@ server-to-server `/admin/participant` API rejects under-18 onboarding outright
 
 Consent copy lives in a `consent.json` beside each network's `network.json`
 (brand overrides in a brand-named sub-folder), is loaded via
-`CONSENT_CONFIG_SOURCE` (`local` by default) and cached alongside network
+`CONSENT_CONFIG_SOURCE` (`local`, the only accepted value) and cached alongside network
 schemas. The **document version recorded in the ledger is always resolved
 server-side** from the loaded config for the `(network, brand, category[,
 actionType, stage])` tuple — the client cannot record acceptance of a version it

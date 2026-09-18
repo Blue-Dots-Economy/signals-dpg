@@ -47,6 +47,7 @@ import { tagUserForDomain } from '@/services/aggregator/default_aggregator';
 import { actingOrgGrant, grantIsWildcard } from '@/utils/keycloak_token';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 import { randomUUID } from 'node:crypto';
+import { isUniqueConstraintViolation } from '@/utils/pg_errors';
 
 /** The shape the auth middleware puts on `request.user`. Unchanged contract. */
 export interface ProvisionedUser {
@@ -99,14 +100,6 @@ function orgIdFromGrant(claims: KeycloakClaims): string | null {
   const grant = actingOrgGrant(claims);
   if (grant?.length !== 1 || grantIsWildcard(grant)) return null;
   return grant[0];
-}
-
-/** Postgres unique-violation. Provisioning races surface as this. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function pgErrorCode(err: unknown): string | undefined {
-  const e = err as { code?: string; cause?: { code?: string } } | null;
-  return e?.code ?? e?.cause?.code;
 }
 
 /** Keycloak sends email/phone as claims; normalise the way signals stores them. */
@@ -297,7 +290,7 @@ async function refreshMirror(
     updates.updatedAt = new Date();
     await db.update(userTable).set(updates).where(eq(userTable.id, existing.id));
   } catch (err) {
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+    if (isUniqueConstraintViolation(err)) {
       // Keycloak moved this subject onto an email/phone another local user
       // already holds. Refusing is the only safe move — merging two users
       // would repoint domain data, which this design exists to avoid (§2.3).

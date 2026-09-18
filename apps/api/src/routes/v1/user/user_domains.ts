@@ -12,6 +12,7 @@ import {
   domainLockedMessage,
   readLockedDomains,
 } from '@/services/items/single_domain_lock';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 // `.max(1)`: the column is an array for a future multi-role case, but one
 // account may declare exactly ONE domain. Two in a single call would mint the
@@ -68,15 +69,15 @@ export const user_domains: FastifyPluginAsyncZod = async (fastify) => {
 };
 
 const get_domains_handler = async (request: FastifyRequest, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
   const [row] = await db.select({ domains: user.domains }).from(user).where(eq(user.id, userId)).limit(1);
   return reply.code(200).send({ domains: row?.domains ?? [] });
 };
 
 const set_domains_handler = async (request: SetReq, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   // Only real served domains may be stored — reject arbitrary strings, which
   // would otherwise poison the profile-form picker (empty → creation lockout).

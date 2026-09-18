@@ -296,10 +296,11 @@ describe('NetworkRuntimeSecretsSchema', () => {
     expect(() =>
       NetworkRuntimeSecretsSchema.parse({ ...base, CONSENT_CONFIG_SOURCE: 'hybrid' })
     ).toThrow();
-    expect(
+    // 'remote' used to parse and then silently empty consent config for every
+    // network. It is no longer an accepted value.
+    expect(() =>
       NetworkRuntimeSecretsSchema.parse({ ...base, CONSENT_CONFIG_SOURCE: 'remote' })
-        .CONSENT_CONFIG_SOURCE
-    ).toBe('remote');
+    ).toThrow();
   });
 
   it('rejects a blank CONSENT_SUPPORT_EMAIL rather than falling back to the default', () => {
