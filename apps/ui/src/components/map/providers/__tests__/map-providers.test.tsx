@@ -4,6 +4,7 @@ import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { DivIcon, Point } from 'leaflet';
 import type { LucideIcon } from 'lucide-react';
+import { toast } from 'sonner';
 import type { MapMarker, MapViewport } from '@/engine/types';
 
 /**
@@ -68,6 +69,11 @@ vi.mock('@/theme/mode-provider', () => {
     }),
   };
 });
+
+// Partial stub: only the one method the providers call. `test/setup.ts` guards
+// its between-test dismissal on `toast.getToasts` existing, so a partial mock
+// here is expected and safe.
+vi.mock('sonner', () => ({ toast: { info: vi.fn() } }));
 
 vi.mock('@/hooks/use-mobile', () => {
   const host = () => (globalThis as unknown as BridgeHost).__dpgMapTestBridge;
@@ -482,6 +488,10 @@ beforeEach(() => {
   host.google = { maps: { marker: { AdvancedMarkerElement: FakeAdvancedMarkerElement } } };
 
   setRuntimeConfig(undefined);
+  // The dark-basemap notice is once-per-session; without this reset the first
+  // test to render in dark mode would silence every later one.
+  sessionStorage.clear();
+  vi.mocked(toast.info).mockClear();
 });
 
 afterEach(() => {
@@ -593,7 +603,10 @@ describe('LeafletMapProvider', () => {
     expect(tiles.getAttribute('data-attribution')).not.toContain('carto.com');
   });
 
-  it('swaps to the CARTO dark basemap (and its attribution) in dark mode', () => {
+  // CARTO's `dark_all` is API-key-gated now: a keyless tile still returns 200
+  // but arrives watermarked, so dark mode showed a defaced basemap with no
+  // failing request to catch it. One light basemap in every theme instead.
+  it('keeps the light OSM basemap in dark mode', () => {
     bridge().themeMode = 'dark';
     bridge().map = createFakeLeafletMap();
     render(leafletElement());
@@ -601,9 +614,40 @@ describe('LeafletMapProvider', () => {
     const tiles = screen.getByTestId('tile-layer');
     expect(tiles).toHaveAttribute(
       'data-url',
-      'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
     );
-    expect(tiles.getAttribute('data-attribution')).toContain('carto.com');
+    expect(tiles.getAttribute('data-attribution')).not.toContain('carto.com');
+  });
+
+  it('explains the light basemap once when the app is in dark mode', () => {
+    bridge().themeMode = 'dark';
+    bridge().map = createFakeLeafletMap();
+    render(leafletElement());
+
+    expect(toast.info).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(toast.info).mock.calls[0][0]).toContain('OpenStreetMap');
+    expect(vi.mocked(toast.info).mock.calls[0][1]).toMatchObject({
+      id: 'map-dark-basemap',
+    });
+  });
+
+  it('stays silent in light mode', () => {
+    bridge().map = createFakeLeafletMap();
+    render(leafletElement());
+
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  // The map remounts on route changes and on the maximize toggle; re-toasting
+  // there would nag.
+  it('does not repeat the notice on a later mount in the same session', () => {
+    bridge().themeMode = 'dark';
+    bridge().map = createFakeLeafletMap();
+    const first = render(leafletElement());
+    first.unmount();
+    render(leafletElement());
+
+    expect(toast.info).toHaveBeenCalledTimes(1);
   });
 
   it('builds a teardrop divIcon anchored on the geo point with the domain glyph inside', () => {
@@ -928,6 +972,8 @@ describe('GoogleMapProvider', () => {
     render(googleElement());
 
     expect(lastProps('GMap').colorScheme).toBe('DARK');
+    // Google has a real dark basemap, so the Leaflet-only notice must not fire.
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('collapses the Map/Satellite control into a dropdown on mobile', () => {

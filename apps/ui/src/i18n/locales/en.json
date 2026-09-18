@@ -311,6 +311,7 @@
   "map.minimize": "Exit maximized map",
   "map.you_are_here_short": "You",
   "map.no_results": "No items match the current filters.",
+  "map.dark_basemap_notice": "Dark mode is off for the map — OpenStreetMap has no dark basemap. The rest of the app stays dark.",
   "map.precision.exact": "Exact location",
   "map.precision.full_address": "From full address",
   "map.precision.unknown": "Unknown precision",
