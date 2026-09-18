@@ -251,6 +251,10 @@ export const NotificationSecretsSchema = z.object({
   NOTIFICATION_SERVICE_KEY_ID: z.string().optional(),
   NOTIFICATION_SERVICE_SECRET: z.string().optional(),
   SMS_TEMPLATE_ID: z.string().optional(),
+  // Instance-wide override for the SMS template registry, mirroring
+  // EMAIL_MESSAGES_PATH: a mounted sms.properties read at boot. Layered under
+  // the network/brand files, over the bundled defaults.
+  SMS_MESSAGES_PATH: z.string().optional(),
   // Action-notification config (Phase 1 event notifications).
   // From address for action emails. Under Gmail SMTP the notification-service
   // forces the authenticated account as sender, so this is mainly the SES/prod

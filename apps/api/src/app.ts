@@ -34,6 +34,7 @@ import {
   refreshConsumedSchemas,
 } from '@/network_schema_cache';
 import { getEmailMessages } from '@/notifications/email/messages';
+import { getSmsTemplates } from '@/notifications/sms/templates';
 import { registerRawBodyCapture } from '@/plugins/raw_body';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
@@ -190,6 +191,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   // in NETWORK_CONFIG_SOURCE=remote mode and in the OpenAPI dump, where
   // SCHEMA_CACHE_WARMUP_ENABLED=false only gates the DB-backed warmup.
   await getEmailMessages();
+
+  // SMS templates load on the same boot pass so a bad registry shows up in
+  // deploy logs immediately, not on the first send. Unlike the copy above this
+  // never throws — SMS is best-effort, and an unconfigured template just means
+  // dispatchSms skips it.
+  await getSmsTemplates();
 
   const networkConfigs = await getNetworkConfigs();
 
