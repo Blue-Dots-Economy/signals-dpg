@@ -33,6 +33,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { createParticipantKeycloakIdentity } from '@/services/auth/participant_identity';
 import { insertLocalUser } from '@/services/auth/user_writer';
+import { isUniqueConstraintViolation } from '@/utils/pg_errors';
 
 /**
  * POST /api/v1/admin/participant
@@ -200,18 +201,6 @@ type SignUpResult =
   | { ok: true; user_id: string }
   | { ok: false; statusCode: number; error: string; message: string };
 
-/** Shape both branches share for classifying a write failure. */
-function isUniqueViolation(err: unknown): boolean {
-  const e = err as { code?: string; cause?: { code?: string }; message?: string } | null;
-  const pg_code = e?.code ?? e?.cause?.code;
-  const message = String(e?.message ?? '');
-  return (
-    pg_code === '23505' ||
-    message.includes('duplicate key value') ||
-    message.includes('unique constraint')
-  );
-}
-
 async function signUpAndOnboardUser(params: {
   /**
    * The participant's real email, or null for a phone-only participant.
@@ -351,7 +340,7 @@ async function signUpViaBetterAuth(
     });
     return { ok: true, user_id: signed_up.user.id };
   } catch (signupErr: unknown) {
-    if (isUniqueViolation(signupErr)) {
+    if (isUniqueConstraintViolation(signupErr)) {
       log.warn({ err: signupErr }, 'signUp race; user exists now');
       return {
         ok: false,
@@ -412,7 +401,7 @@ function classifyOnboardFailure(
     };
   }
 
-  if (isUniqueViolation(updateErr)) {
+  if (isUniqueConstraintViolation(updateErr)) {
     return {
       ok: false,
       statusCode: 409,

@@ -20,14 +20,7 @@ import { eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { user as userTable } from '@api/db/postgres/schema/auth';
-
-/** Postgres unique-violation. Concurrent creates surface as this. */
-const PG_UNIQUE_VIOLATION = '23505';
-
-function pgErrorCode(err: unknown): string | undefined {
-  const e = err as { code?: string; cause?: { code?: string } } | null;
-  return e?.code ?? e?.cause?.code;
-}
+import { isUniqueConstraintViolation } from '@/utils/pg_errors';
 
 /**
  * Just the query surface this module uses, so a caller can hand in either the
@@ -130,7 +123,7 @@ export async function insertLocalUser(
       ...input.extra,
     });
   } catch (err) {
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+    if (isUniqueConstraintViolation(err)) {
       log.warn({ user_id: input.id }, 'user_writer: concurrent create, re-reading');
       const [row] = await exec
         .select()
