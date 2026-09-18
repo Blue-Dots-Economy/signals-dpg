@@ -8,6 +8,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type FetchOwnedEventsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchOwnedEventsQuerySchema>;
@@ -42,14 +43,9 @@ const fetch_events_handler = async (
   request: FetchOwnedEventsRequest,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
+  const userId = requireAuthedUser(request, reply, 'Authenticated user is required to fetch events');
 
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to fetch events',
-    });
-  }
+  if (!userId) return reply;
 
   const {
     action_id,

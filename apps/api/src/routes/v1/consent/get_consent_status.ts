@@ -8,6 +8,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type Req = FastifyRequest<{ Querystring: { network: string } }>;
 
@@ -31,13 +32,8 @@ export const get_consent_status_handler = async (
   request: Req,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const { network } = request.query;
 

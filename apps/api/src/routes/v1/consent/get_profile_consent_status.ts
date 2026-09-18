@@ -7,6 +7,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { getWardAge } from '@/services/minor_guardian_repo';
 import { isMinor } from '@/services/minor';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 const ProfileStatusQuerySchema = z.object({ network: z.string().min(1) });
 
@@ -32,13 +33,8 @@ export const get_profile_consent_status_handler = async (
   request: Req,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const { network } = request.query;
 

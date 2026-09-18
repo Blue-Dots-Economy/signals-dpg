@@ -21,6 +21,7 @@ import { resolveLocationsForCreate } from '@/services/geocoding/resolve_location
 import { getWardAge } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
 import { getNetworkConfigById } from '@/network_configs';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type CreateItemRequest = FastifyRequest<{
   Body: z.infer<typeof CreateItemBodySchema>;
@@ -148,16 +149,11 @@ export const create_item_handler = async (
   request: CreateItemRequest,
   reply: FastifyReply
 ) => {
-  const callerId = request.user?.id;
+  const callerId = requireAuthedUser(request, reply, 'Authenticated user is required to create an item');
+  if (!callerId) return reply;
+
   const callerRole = request.user?.role;
   const body = request.body;
-
-  if (!callerId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to create an item',
-    });
-  }
 
   // The "admin acting on behalf of another user" flow is reserved for
   // server-to-server callers identified by an api-key. UI sessions — even

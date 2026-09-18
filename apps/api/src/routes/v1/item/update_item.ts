@@ -13,6 +13,7 @@ import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { updateItemInternal, ItemServiceError } from '@/services/item_service';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type UpdateItemRequest = FastifyRequest<{
   Params: z.infer<typeof UpdateItemParamsSchema>;
@@ -42,17 +43,12 @@ export const update_item_handler = async (
   request: UpdateItemRequest,
   reply: FastifyReply
 ) => {
+  const callerId = requireAuthedUser(request, reply, 'Authenticated user is required to update an item');
+  if (!callerId) return reply;
+
   const { itemId } = request.params;
   const body = request.body;
-  const callerId = request.user?.id;
   const isAdmin = request.user?.role === 'admin';
-
-  if (!callerId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to update an item',
-    });
-  }
 
   try {
     const { row: updated } = await updateItemInternal(db, itemId, callerId, isAdmin, {

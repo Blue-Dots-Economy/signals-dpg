@@ -15,6 +15,7 @@ import { resolve_display_name } from '@/services/metrics/resolve_display_name';
 import { resolveAllowedFacetFilters, type FacetSelection } from '@/utils/facet_guard';
 import { nearestDistanceMeters } from '@/utils/geo_distance';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type FetchOwnedActionsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchOwnedActionsQuerySchema>;
@@ -62,14 +63,9 @@ const fetch_actions_handler = async (
   request: FetchOwnedActionsRequest,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
+  const userId = requireAuthedUser(request, reply, 'Authenticated user is required to fetch actions');
 
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required to fetch actions',
-    });
-  }
+  if (!userId) return reply;
 
   const {
     action_id,

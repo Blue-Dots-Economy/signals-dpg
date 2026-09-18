@@ -9,6 +9,7 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { isMinor } from '@/services/minor';
 import { getMinorGuardian, getWardAge } from '@/services/minor_guardian_repo';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type Req = FastifyRequest<{ Querystring: U18StatusQuery }>;
 
@@ -36,10 +37,8 @@ export const u18_status: FastifyPluginAsyncZod = async (fastify) => {
 };
 
 export const u18_status_handler = async (request: Req, reply: FastifyReply) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const { network } = request.query;
   if (!apiConfig.served_domains.some((b) => b.network === network)) {

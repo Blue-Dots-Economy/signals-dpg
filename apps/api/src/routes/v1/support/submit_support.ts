@@ -17,6 +17,7 @@ import {
   validateSupportAttachments,
 } from '@/support/attachments';
 import { incrWithinWindow } from '@/utils/rate_window';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 const SubmitSupportBody = z.object({
   name: z.string().trim().min(1).max(200),
@@ -68,10 +69,8 @@ export const submit_support_handler = async (
   request: FastifyRequest<{ Body: Body }>,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({ error: 'UNAUTHORIZED', message: 'Authenticated user is required' });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const { name, email, phone, type, details } = request.body;
 

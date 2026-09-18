@@ -17,6 +17,7 @@ import { cancelItemConnections } from '@/services/items/retire_connections';
 import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
 import { dispatchRetireCancelNotifications } from '@/notifications/notify_retire';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type ItemLifecycleRequest = FastifyRequest<{
   Body: z.infer<typeof ItemLifecycleBody>;
@@ -51,14 +52,9 @@ const item_lifecycle_handler = async (
   request: ItemLifecycleRequest,
   reply: FastifyReply,
 ) => {
-  const callerId = request.user?.id;
+  const callerId = requireAuthedUser(request, reply);
 
-  if (!callerId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  if (!callerId) return reply;
 
   const isNetworkService = request.acting_org?.org_type === 'network_service';
   const { item_id, action } = request.body;

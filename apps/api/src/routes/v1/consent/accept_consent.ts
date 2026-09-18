@@ -10,6 +10,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
+import { requireAuthedUser } from '@/utils/authed_user_guard';
 
 type Req = FastifyRequest<{ Body: ConsentAcceptBody }>;
 
@@ -33,13 +34,8 @@ export const accept_consent_handler = async (
   request: Req,
   reply: FastifyReply,
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
-    return reply.code(401).send({
-      error: 'UNAUTHORIZED',
-      message: 'Authenticated user is required',
-    });
-  }
+  const userId = requireAuthedUser(request, reply);
+  if (!userId) return reply;
 
   const body = request.body;
   const validNetworks = apiConfig.served_domains.map((b) => b.network);
