@@ -7,7 +7,7 @@ import {
   getGuardianNamePlaintext,
 } from '@/services/minor_guardian_repo';
 import { isMinor, guardianConsentRequired } from '@/services/minor';
-import { resolveProviderServiceName } from '@/notifications/resolve_owner';
+import { resolveProviderOffering, resolveProviderServiceName } from '@/notifications/resolve_owner';
 import {
   issueGuardianOtp,
   verifyGuardianOtp,
@@ -81,9 +81,14 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
       }
       // Parent-facing template vars (#294) — best-effort; the OTP is dispatched
       // regardless if either lookup returns null (template renders without them).
-      const [parentName, providerOrgName] = await Promise.all([
+      const [parentName, providerOrgName, providerOffering] = await Promise.all([
         getGuardianNamePlaintext(input.wardUserId),
         resolveProviderServiceName(input.targetItemId, input.network),
+        // "They offer …" in the guardian consent email — a guardian deciding
+        // whether to release their ward's PII should see what the org actually
+        // does, not just its name. Null on a network that declares no
+        // `offering_field`; the copy falls back.
+        resolveProviderOffering(input.targetItemId, input.network),
       ]);
       await issueGuardianOtp({
         scope,
@@ -95,6 +100,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
         variables: {
           ...(parentName ? { parentName } : {}),
           ...(providerOrgName ? { providerOrgName } : {}),
+          ...(providerOffering ? { providerOffering } : {}),
         },
       });
       return { status: 'challenge_issued' };

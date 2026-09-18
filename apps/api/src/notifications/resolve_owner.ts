@@ -2,6 +2,8 @@ import { and, eq } from 'drizzle-orm';
 
 import { db } from '@api/db/postgres/drizzle_config';
 import { organization, user } from '@api/db/postgres/schema/auth';
+import { getNetworkConfigById } from '@/network_configs';
+import { resolveNameFallbackField, type DomainConfigForName } from '@/utils/contact_fields';
 import { items } from '@dpg/database';
 
 /**
@@ -77,24 +79,110 @@ export async function resolveOrgName(orgId: string): Promise<string | null> {
   return typeof name === 'string' && name.trim() ? name : null;
 }
 
+/** One item's public state plus the partition keys needed to find its schema. */
+interface ProviderItemRow {
+  state: Record<string, unknown>;
+  domain: string;
+  type: string;
+}
+
 /**
- * Resolves a provider item's public service name (`jobProviderName`) by item id.
- * Used to substitute `{name}` in seeker-facing action emails. Returns null when
- * unknown. The field is public (not a masked PII field).
+ * Loads a provider item's public state and its domain/type partition keys.
  *
  * `network` is the item's partition key — filtering on it lets the planner
  * prune to the right partition instead of scanning every network's items.
+ */
+async function loadProviderItem(itemId: string, network: string): Promise<ProviderItemRow | null> {
+  const rows = await db
+    .select({ state: items.item_state, domain: items.item_domain, type: items.item_type })
+    .from(items)
+    .where(and(eq(items.item_network, network), eq(items.item_id, itemId)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    state: (row.state ?? {}) as Record<string, unknown>,
+    domain: row.domain,
+    type: row.type,
+  };
+}
+
+/**
+ * The item_state field a network declares for a concept, read off the item's own
+ * domain/item-type config. `pick` selects the key (`display_name_field` for the
+ * public name, `offering_field` for what the org offers). Null when the network
+ * config can't be loaded — callers fall back rather than fail a notification.
+ */
+async function declaredField(
+  network: string,
+  row: ProviderItemRow,
+  pick: (domainCfg: DomainConfigForName | undefined, itemType: string) => string | undefined,
+): Promise<string | null> {
+  try {
+    const cfg = await getNetworkConfigById(network);
+    const domainCfg = cfg.domains.find((d) => d.id === row.domain) as
+      | DomainConfigForName
+      | undefined;
+    return pick(domainCfg, row.type) ?? null;
+  } catch {
+    // Config lookup is best-effort here: a refetch blip must not turn a
+    // notification into an error. The caller's fallback copy still reads.
+    return null;
+  }
+}
+
+/** Trimmed string, or null for anything else (absent, blank, non-string). */
+function cleanString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
+ * Resolves a provider item's public service name by item id. Used to substitute
+ * `{name}` in seeker-facing action emails and `{org}` in the guardian consent
+ * email. Returns null when unknown. The field is public (not a masked PII field).
+ *
+ * The field name comes from the network's own schema (`display_name_field`,
+ * else the domain's `card.title_field`) rather than a hardcoded key, so every
+ * network resolves a real name: blue_dot `jobProviderName`, purple_dot
+ * `organisation_name`, orange_dot `product_name`, yellow_dot `Full Name`.
+ * `jobProviderName` stays the last-resort fallback for an unconfigured domain.
  */
 export async function resolveProviderServiceName(
   itemId: string,
   network: string,
 ): Promise<string | null> {
-  const rows = await db
-    .select({ state: items.item_state })
-    .from(items)
-    .where(and(eq(items.item_network, network), eq(items.item_id, itemId)))
-    .limit(1);
-  const state = rows[0]?.state as Record<string, unknown> | undefined;
-  const name = state?.jobProviderName;
-  return typeof name === 'string' && name.trim() ? name : null;
+  const row = await loadProviderItem(itemId, network);
+  if (!row) return null;
+  const field = await declaredField(network, row, resolveNameFallbackField);
+  return cleanString(row.state[field ?? 'jobProviderName']) ?? cleanString(row.state.jobProviderName);
+}
+
+/**
+ * Resolves what a provider org offers, as a human-readable phrase, for the
+ * guardian consent email ("They offer …"). The source field is declared per
+ * item schema as `offering_field` (purple_dot: `services_offered`); a network
+ * that declares none has no offering to show and returns null.
+ *
+ * Array values (multi-select enums) are joined; a plain string passes through.
+ * Returns null when the field is absent or empty so the caller can fall back —
+ * the copy file has no conditionals.
+ */
+export async function resolveProviderOffering(
+  itemId: string,
+  network: string,
+): Promise<string | null> {
+  const row = await loadProviderItem(itemId, network);
+  if (!row) return null;
+  const field = await declaredField(network, row, (domainCfg, itemType) => {
+    const declared = domainCfg?.item_schemas?.[itemType]?.offering_field;
+    return typeof declared === 'string' ? declared : undefined;
+  });
+  if (!field) return null;
+
+  const value = row.state[field];
+  if (Array.isArray(value)) {
+    const parts = value.map(cleanString).filter((v): v is string => v !== null);
+    return parts.length ? parts.join(', ') : null;
+  }
+  return cleanString(value);
 }

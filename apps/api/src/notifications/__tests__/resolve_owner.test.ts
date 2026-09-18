@@ -27,15 +27,44 @@ vi.mock('@dpg/database', () => ({
     item_state: 'items.item_state',
     item_network: 'items.item_network',
     item_id: 'items.item_id',
+    item_domain: 'items.item_domain',
+    item_type: 'items.item_type',
   },
 }));
+
+// The provider resolvers read the item's own network config to find which
+// item_state field holds the public name / the offering. Mocked here so the
+// test stays a pure unit (the real module loads the whole schema stack).
+const { networkConfig } = vi.hoisted(() => ({
+  networkConfig: { value: null as unknown, throws: false },
+}));
+
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(() => {
+    if (networkConfig.throws) return Promise.reject(new Error('config unavailable'));
+    return Promise.resolve(networkConfig.value);
+  }),
+}));
+
+/** Config for one provider domain declaring the given schema field names. */
+function configWith(fields: { display_name_field?: string; offering_field?: string }) {
+  return {
+    domains: [{ id: 'provider', item_schemas: { 'profile_1.0': { ...fields } } }],
+  };
+}
 
 import {
   resolveOwnerEmail,
   resolveOwnerNameEmail,
   resolveOrgName,
+  resolveProviderOffering,
   resolveProviderServiceName,
 } from '../resolve_owner';
+
+/** Every provider-item row the resolvers read carries the partition keys. */
+function providerRow(state: Record<string, unknown> | undefined) {
+  return { state, domain: 'provider', type: 'profile_1.0' };
+}
 
 describe('resolveOwnerNameEmail', () => {
   beforeEach(() => {
@@ -120,53 +149,122 @@ describe('resolveOwnerEmail', () => {
 describe('resolveProviderServiceName', () => {
   beforeEach(() => {
     rowQueue.length = 0;
+    networkConfig.value = configWith({ display_name_field: 'jobProviderName' });
+    networkConfig.throws = false;
   });
 
-  it('returns jobProviderName from the item state', async () => {
-    rowQueue.push([{ state: { jobProviderName: 'Acme Corp' } }]);
+  it('returns the schema-declared display field from the item state', async () => {
+    rowQueue.push([providerRow({ jobProviderName: 'Acme Corp' })]);
 
-    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBe(
-      'Acme Corp',
-    );
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBe('Acme Corp');
+  });
+
+  it('honours a network that declares a different display field', async () => {
+    // purple_dot: the provider's public name is `organisation_name`, not the
+    // blue_dot `jobProviderName` this resolver used to hardcode.
+    networkConfig.value = configWith({ display_name_field: 'organisation_name' });
+    rowQueue.push([providerRow({ organisation_name: 'ALIMCO Kanpur' })]);
+
+    await expect(resolveProviderServiceName('i1', 'purple_dot')).resolves.toBe('ALIMCO Kanpur');
+  });
+
+  it('falls back to the domain card title field when no display field is declared', async () => {
+    networkConfig.value = {
+      domains: [{ id: 'provider', item_schemas: { 'profile_1.0': {} }, card: { title_field: 'organisation_name' } }],
+    };
+    rowQueue.push([providerRow({ organisation_name: 'ALIMCO Kanpur' })]);
+
+    await expect(resolveProviderServiceName('i1', 'purple_dot')).resolves.toBe('ALIMCO Kanpur');
+  });
+
+  it('falls back to jobProviderName when the config lookup fails', async () => {
+    networkConfig.throws = true;
+    rowQueue.push([providerRow({ jobProviderName: 'Acme Corp' })]);
+
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBe('Acme Corp');
   });
 
   it('returns null when the item is unknown', async () => {
     rowQueue.push([]);
 
-    await expect(
-      resolveProviderServiceName('missing', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('missing', 'blue_dot')).resolves.toBeNull();
   });
 
-  it('returns null when item_state has no jobProviderName', async () => {
-    rowQueue.push([{ state: { somethingElse: 'x' } }]);
+  it('returns null when item_state has no such field', async () => {
+    rowQueue.push([providerRow({ somethingElse: 'x' })]);
 
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
   it('treats a whitespace-only name as absent', async () => {
-    rowQueue.push([{ state: { jobProviderName: '   ' } }]);
+    rowQueue.push([providerRow({ jobProviderName: '   ' })]);
 
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
-  it('ignores a non-string jobProviderName', async () => {
-    rowQueue.push([{ state: { jobProviderName: 42 } }]);
+  it('ignores a non-string name', async () => {
+    rowQueue.push([providerRow({ jobProviderName: 42 })]);
 
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
   it('returns null when item_state itself is missing', async () => {
-    rowQueue.push([{ state: undefined }]);
+    rowQueue.push([providerRow(undefined)]);
 
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
+  });
+});
+
+describe('resolveProviderOffering', () => {
+  beforeEach(() => {
+    rowQueue.length = 0;
+    networkConfig.value = configWith({ offering_field: 'services_offered' });
+    networkConfig.throws = false;
+  });
+
+  it('joins a multi-select array into a readable phrase', async () => {
+    rowQueue.push([providerRow({ services_offered: ['Assistive Devices', 'Counselling & Mentorship'] })]);
+
+    await expect(resolveProviderOffering('i1', 'purple_dot')).resolves.toBe(
+      'Assistive Devices, Counselling & Mentorship',
+    );
+  });
+
+  it('passes a plain string field through', async () => {
+    rowQueue.push([providerRow({ services_offered: 'Assistive Devices' })]);
+
+    await expect(resolveProviderOffering('i1', 'purple_dot')).resolves.toBe('Assistive Devices');
+  });
+
+  it('drops blank and non-string entries from the array', async () => {
+    rowQueue.push([providerRow({ services_offered: ['Education', '  ', 7, null] })]);
+
+    await expect(resolveProviderOffering('i1', 'purple_dot')).resolves.toBe('Education');
+  });
+
+  it('returns null for an array with nothing usable in it', async () => {
+    rowQueue.push([providerRow({ services_offered: ['  ', null] })]);
+
+    await expect(resolveProviderOffering('i1', 'purple_dot')).resolves.toBeNull();
+  });
+
+  it('returns null when the network declares no offering field', async () => {
+    networkConfig.value = configWith({ display_name_field: 'jobProviderName' });
+    rowQueue.push([providerRow({ services_offered: ['Assistive Devices'] })]);
+
+    await expect(resolveProviderOffering('i1', 'blue_dot')).resolves.toBeNull();
+  });
+
+  it('returns null when the config lookup fails', async () => {
+    networkConfig.throws = true;
+    rowQueue.push([providerRow({ services_offered: ['Assistive Devices'] })]);
+
+    await expect(resolveProviderOffering('i1', 'purple_dot')).resolves.toBeNull();
+  });
+
+  it('returns null when the item is unknown', async () => {
+    rowQueue.push([]);
+
+    await expect(resolveProviderOffering('missing', 'purple_dot')).resolves.toBeNull();
   });
 });

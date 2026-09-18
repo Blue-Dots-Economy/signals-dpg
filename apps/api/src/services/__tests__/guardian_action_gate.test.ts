@@ -18,8 +18,10 @@ vi.mock('@/services/minor_guardian_repo', () => ({
 }));
 
 const resolveProviderServiceName = vi.fn();
+const resolveProviderOffering = vi.fn();
 vi.mock('@/notifications/resolve_owner', () => ({
   resolveProviderServiceName: (...args: unknown[]) => resolveProviderServiceName(...args),
+  resolveProviderOffering: (...args: unknown[]) => resolveProviderOffering(...args),
 }));
 
 // Codes the primitive raises; mirrors the real class shape so `instanceof`
@@ -72,6 +74,7 @@ beforeEach(() => {
   getNetworkConfigById.mockResolvedValue(gatedCfg);
   getGuardianNamePlaintext.mockResolvedValue('Parent P');
   resolveProviderServiceName.mockResolvedValue('Acme Services');
+  resolveProviderOffering.mockResolvedValue('Assistive Devices');
 });
 
 describe('guardianActionGate', () => {
@@ -107,7 +110,11 @@ describe('guardianActionGate', () => {
       contact: '+911234',
       contactType: 'phone',
       scenario: { kind: 'action', actionType: 'apply', stage: 'initiate' },
-      variables: { parentName: 'Parent P', providerOrgName: 'Acme Services' },
+      variables: {
+        parentName: 'Parent P',
+        providerOrgName: 'Acme Services',
+        providerOffering: 'Assistive Devices',
+      },
     });
   });
 

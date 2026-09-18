@@ -213,6 +213,10 @@ export function buildGuardianEmailDispatch(args: {
     parentName: variables.parentName || 'there',
     domain: variables.domain || teamName,
     org: variables.providerOrgName || 'the organisation',
+    // "They offer {{offering}}." — the copy has no conditionals, so a network
+    // that declares no `offering_field` (or an item that left it blank) still
+    // gets a sentence that reads.
+    offering: variables.providerOffering || 'services and support',
     teamName,
   };
   if (scenario.kind === 'action_bulk') {

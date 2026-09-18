@@ -24,8 +24,10 @@ vi.mock('@/services/minor_guardian_repo', () => ({
 }));
 
 const resolveProviderServiceName = vi.fn();
+const resolveProviderOffering = vi.fn();
 vi.mock('@/notifications/resolve_owner', () => ({
   resolveProviderServiceName: (...args: unknown[]) => resolveProviderServiceName(...args),
+  resolveProviderOffering: (...args: unknown[]) => resolveProviderOffering(...args),
 }));
 
 // Mirrors the real error class so the gate's `instanceof` checks hold against
@@ -138,6 +140,7 @@ beforeEach(() => {
   getNetworkConfigById.mockImplementation((id: string) => Promise.resolve(gatedCfgFor(id)));
   getGuardianNamePlaintext.mockResolvedValue('Parent P');
   resolveProviderServiceName.mockResolvedValue('Acme Services');
+  resolveProviderOffering.mockResolvedValue('Assistive Devices');
   getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
 });
 
@@ -169,10 +172,11 @@ describe('guardianActionGate — error propagation (fail-closed, never silently 
 });
 
 describe('guardianActionGate — template variables and the u18 boundary', () => {
-  it('omits parentName/providerOrgName entirely when both lookups return null', async () => {
+  it('omits every template var entirely when all lookups return null', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianNamePlaintext.mockResolvedValue(null);
     resolveProviderServiceName.mockResolvedValue(null);
+    resolveProviderOffering.mockResolvedValue(null);
     issueGuardianOtp.mockResolvedValue(undefined);
 
     const result = await guardianActionGate(baseInput);
@@ -181,15 +185,31 @@ describe('guardianActionGate — template variables and the u18 boundary', () =>
     expect(issueGuardianOtp.mock.calls[0][0].variables).toEqual({});
   });
 
-  it('still issues an OTP when only one of the two template lookups resolves', async () => {
+  it('still issues an OTP when only some of the template lookups resolve', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianNamePlaintext.mockResolvedValue(null);
     resolveProviderServiceName.mockResolvedValue('Globex');
+    resolveProviderOffering.mockResolvedValue(null);
     issueGuardianOtp.mockResolvedValue(undefined);
 
     await guardianActionGate(baseInput);
 
     expect(issueGuardianOtp.mock.calls[0][0].variables).toEqual({ providerOrgName: 'Globex' });
+  });
+
+  it('passes the provider offering through for the "They offer …" copy', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianNamePlaintext.mockResolvedValue(null);
+    resolveProviderServiceName.mockResolvedValue('Globex');
+    resolveProviderOffering.mockResolvedValue('Assistive Devices, Education');
+    issueGuardianOtp.mockResolvedValue(undefined);
+
+    await guardianActionGate(baseInput);
+
+    expect(issueGuardianOtp.mock.calls[0][0].variables).toEqual({
+      providerOrgName: 'Globex',
+      providerOffering: 'Assistive Devices, Education',
+    });
   });
 
   it('treats age 18 as a minor (whole boundary year is gated) and 19 as an adult', async () => {

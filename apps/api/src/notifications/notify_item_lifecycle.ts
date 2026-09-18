@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 
 import { resolveRecipientRole } from './action_copy';
+import { getEmailCase } from './email/email_cases';
 import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions';
 import { resolveOwnerNameEmail } from './resolve_owner';
 
@@ -130,7 +131,11 @@ export async function dispatchItemLifecycleNotification(
     const itemSegment = event.itemId ? `:${event.itemId}` : '';
     const dedupeId = `item_lifecycle:${caseId}:${event.ownerId}${itemSegment}`;
 
-    const variables: Record<string, string> = { name: name || 'there' };
+    // `teamName` is only declared by the plain-shell retire cases, which sign
+    // off in the copy because their shell doesn't. Declaring it on every send is
+    // harmless (dispatch_email projects onto the case's own token list) and
+    // keeps the branch off the hot path.
+    const variables: Record<string, string> = { name: name || 'there', teamName: brandName };
     if (caseId.startsWith('account.aggregator_init')) {
       // <Aggregator Name> — who onboarded them; <Dot Network> — the network brand.
       variables.aggregatorOrg = event.aggregatorOrgName || brandName;
@@ -147,8 +152,13 @@ export async function dispatchItemLifecycleNotification(
     // different hosts (#569). `dispatch_email` renders `args.ctaUrl ?? ''` into
     // the shell, so an unresolved URL would ship `<a href="">`; send nothing
     // rather than a mail whose only call to action is broken.
+    //
+    // Plain-shell cases (retire) have no button at all, so a missing CTA url is
+    // not a broken email there — gate the skip on the case's shell rather than
+    // dropping a perfectly renderable retire confirmation.
+    const needsCta = getEmailCase(caseId).shell === 'cta';
     const ctaUrl = config.resolveCtaUrl(event.domain);
-    if (!ctaUrl) {
+    if (needsCta && !ctaUrl) {
       log.warn(
         { caseId, op: event.op, network: event.network, domain: event.domain },
         'item-lifecycle email skipped: no CTA url for the item domain',
@@ -161,7 +171,7 @@ export async function dispatchItemLifecycleNotification(
       to: email,
       fromName: brandName,
       network: event.network,
-      ctaUrl,
+      ...(needsCta ? { ctaUrl: ctaUrl as string } : {}),
       variables,
       dedupeId,
       log: (message, meta) =>

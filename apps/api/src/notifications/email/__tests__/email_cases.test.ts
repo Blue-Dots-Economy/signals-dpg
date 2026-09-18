@@ -83,9 +83,12 @@ describe('email case registry', () => {
 
   it('requiredMessageKeys covers subject+body(+cta) for every case', () => {
     const keys = requiredMessageKeys();
-    // 29 cta-shell cases × 3 keys + 10 plain cases × 2 keys = 107
-    // (2 added: profile/offer.create_incomplete — the draft-create nudge, #1 review)
-    expect(keys).toHaveLength(107);
+    // 27 cta-shell cases × 3 keys + 12 plain cases × 2 keys = 105
+    // (2 added: profile/offer.create_incomplete — the draft-create nudge, #1 review;
+    // profile/offer.retire moved cta → plain, dropping their 2 `.cta` keys)
+    expect(keys).toHaveLength(105);
+    expect(keys).not.toContain('profile.retire.cta');
+    expect(keys).not.toContain('offer.retire.cta');
     expect(keys).toContain('retire.cancel.cta');
     expect(keys).toContain('welcome.body');
   });

@@ -60,9 +60,18 @@ function mappedField(ctx: DomainContactContext, f: CanonicalContact): string | u
   return undefined; // phone/email have no default — mapping is required
 }
 
-/** Minimal domain-config shape needed to resolve the `name` fallback field. */
+/**
+ * Minimal domain-config shape needed to resolve the `name` fallback field.
+ * `offering_field` rides along on the same item-schema shape — it is the
+ * guardian consent email's "what they offer" source (see
+ * `notifications/resolve_owner.ts`), declared per item schema like
+ * `display_name_field` and read by the same config lookup.
+ */
 export interface DomainConfigForName {
-  item_schemas?: Record<string, { display_name_field?: unknown } | undefined>;
+  item_schemas?: Record<
+    string,
+    { display_name_field?: unknown; offering_field?: unknown } | undefined
+  >;
   card?: { title_field?: unknown };
 }
 

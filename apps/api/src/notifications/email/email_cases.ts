@@ -101,13 +101,23 @@ CASES.set(
 );
 CASES.set('profile.pause', ctaCase('profile.pause', ITEM_TOKENS));
 CASES.set('offer.pause', ctaCase('offer.pause', ITEM_TOKENS));
-CASES.set('profile.retire', ctaCase('profile.retire', ITEM_TOKENS));
-CASES.set('offer.retire', ctaCase('offer.retire', ITEM_TOKENS));
+// Retire is terminal: the item is gone, so there is nothing to click through
+// to. Plain shell (no CTA button, no "Or open this link") — the copy is a bare
+// confirmation. The plain shell supplies no sign-off either, so unlike the
+// other lifecycle cases these carry `teamName` and sign off in the copy.
+const RETIRE_TOKENS: TokenTypes = { ...ITEM_TOKENS, teamName: 'text' };
+CASES.set('profile.retire', plainCase('profile.retire', RETIRE_TOKENS, 'best_effort', 'other'));
+CASES.set('offer.retire', plainCase('offer.retire', RETIRE_TOKENS, 'best_effort', 'other'));
 
 const GUARDIAN_TOKENS: TokenTypes = {
   parentName: 'text',
   domain: 'text',
   org: 'text',
+  // What the provider org offers, read from the item's schema-declared
+  // `offering_field` (e.g. purple_dot `services_offered`). Always supplied —
+  // `buildGuardianEmailDispatch` falls back when the item doesn't carry it,
+  // because the copy file has no conditionals.
+  offering: 'text',
   otp: 'text',
   otpBox: 'html',
   teamName: 'text',

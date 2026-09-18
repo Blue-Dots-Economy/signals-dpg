@@ -77,7 +77,9 @@ describe('dispatchItemLifecycleNotification', () => {
       fromName: 'Blue Dot',
       network: 'blue_dot',
       ctaUrl: 'https://seeker.example.org/auth/login',
-      variables: { name: 'Asha' },
+      // `teamName` rides on every send; only the plain-shell retire cases
+      // declare it, and dispatch_email projects onto the case's own tokens.
+      variables: { name: 'Asha', teamName: 'Blue Dot' },
       // No itemId on this event → dedupe key omits the item segment.
       dedupeId: 'item_lifecycle:profile.create:u1',
       log: expect.any(Function),
@@ -142,7 +144,7 @@ describe('dispatchItemLifecycleNotification', () => {
       { op: 'retire', ownerId: 'u1', domain: 'seeker', network: 'blue_dot' },
       log,
     );
-    expect(dispatchEmail.mock.calls[0]![0].variables).toEqual({ name: 'there' });
+    expect(dispatchEmail.mock.calls[0]![0].variables).toEqual({ name: 'there', teamName: 'Blue Dot' });
   });
 
   it('never throws — swallows a dependency error and logs', async () => {

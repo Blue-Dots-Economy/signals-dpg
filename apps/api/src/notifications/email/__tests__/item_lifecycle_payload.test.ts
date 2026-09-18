@@ -50,8 +50,10 @@ const CASES: Array<{ caseId: string; vars: Record<string, string> }> = [
   { caseId: 'account.aggregator_init.provider', vars: { aggregatorOrg: 'SkillBridge Network', networkName: 'Blue Dot' } },
   { caseId: 'profile.pause', vars: { name: 'Asha' } },
   { caseId: 'offer.pause', vars: { name: 'Acme Services' } },
-  { caseId: 'profile.retire', vars: { name: 'Asha' } },
-  { caseId: 'offer.retire', vars: { name: 'Acme Services' } },
+  // Retire is plain-shell: no CTA button, and the sign-off comes from the copy
+  // via `teamName` rather than from the shell.
+  { caseId: 'profile.retire', vars: { name: 'Asha', teamName: 'EkStep' } },
+  { caseId: 'offer.retire', vars: { name: 'Acme Services', teamName: 'EkStep' } },
 ];
 
 describe('item-lifecycle email payload (pre-notification-service)', () => {
@@ -86,9 +88,14 @@ describe('item-lifecycle email payload (pre-notification-service)', () => {
       expect((req as { channel: string }).channel).toBe('email');
       expect((req as { template_id: string }).template_id).toBe('basic_email');
       expect(v.subject.length).toBeGreaterThan(0);
-      expect(v.html).toContain('EkStep'); // per-INSTANCE_NAME sign-off in the shell
-      // CTA is wired on every case (guards a case→shell mis-wire).
-      expect(v.html).toContain('https://app.bluedots.example');
+      // Sign-off: from the shell on cta cases, from the copy's {{teamName}} on
+      // the plain-shell retire cases. Either way every email is signed.
+      expect(v.html).toContain('EkStep');
+      // CTA is wired on every cta-shell case (guards a case→shell mis-wire).
+      // Retire is deliberately plain: a retired item has nothing to link to.
+      const isRetire = CASES[i]!.caseId.endsWith('.retire');
+      if (isRetire) expect(v.html).not.toContain('https://app.bluedots.example');
+      else expect(v.html).toContain('https://app.bluedots.example');
     });
 
     // Spot-check substitution + copy on a couple of cases.
