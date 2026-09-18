@@ -265,6 +265,7 @@
   "map.minimize": "बड़े मैप से बाहर निकलें",
   "map.you_are_here_short": "आप",
   "map.no_results": "वर्तमान फ़िल्टर से कोई आइटम मेल नहीं खाता।",
+  "map.dark_basemap_notice": "मानचित्र के लिए डार्क मोड बंद है — OpenStreetMap में डार्क बेसमैप नहीं है। बाकी ऐप डार्क ही रहेगा।",
   "map.precision.exact": "सटीक स्थान",
   "map.precision.full_address": "पूरे पते से",
   "map.precision.unknown": "अज्ञात सटीकता",
