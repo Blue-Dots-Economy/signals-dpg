@@ -331,7 +331,7 @@ export const NetworkRuntimeSecretsSchema = z.object({
     '../../examples/schemas/yellow_dot/network.json'
   ),
   NETWORK_CONFIG_URLS: z.string().optional(),
-  CONSENT_CONFIG_SOURCE: z.enum(['local', 'remote']).default('local'),
+  CONSENT_CONFIG_SOURCE: z.enum(['local']).default('local'),
   // Support/grievance email rendered into consent copy in place of the
   // `__SUPPORT_EMAIL__` placeholder canonical consent files ship, so the email
   // is configurable without editing consent content.

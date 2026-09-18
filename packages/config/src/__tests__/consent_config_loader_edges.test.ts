@@ -42,20 +42,6 @@ async function makeNetworkDir(): Promise<{ dir: string; networkFile: string }> {
 }
 
 describe('loadConsentConfigs guard clauses', () => {
-  it('returns [] for the remote source (remote delivery is still a stub)', async () => {
-    const { dir, networkFile } = await makeNetworkDir();
-    // A perfectly good local consent.json is present and still ignored.
-    await writeFile(join(dir, 'consent.json'), JSON.stringify(fullConsentConfig()), 'utf8');
-
-    await expect(
-      loadConsentConfigs({
-        source: 'remote',
-        networkLocalFile: networkFile,
-        networks: ['yellow_dot'],
-      })
-    ).resolves.toEqual([]);
-  });
-
   it('returns [] when no networks are supplied', async () => {
     const { dir, networkFile } = await makeNetworkDir();
     await writeFile(join(dir, 'consent.json'), JSON.stringify(fullConsentConfig()), 'utf8');
