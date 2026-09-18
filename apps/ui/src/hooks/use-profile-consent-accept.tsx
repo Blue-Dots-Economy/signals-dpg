@@ -1,5 +1,4 @@
 import * as React from 'react';
-import axios from 'axios';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,7 +9,7 @@ import {
   verifyProfileConsentOtp,
   type ProfileConsentOtpItemRef,
 } from '@/lib/consent-api';
-import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { axiosErrorParts, isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { useAuth } from '@/contexts/auth-context';
@@ -124,10 +123,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
           );
         }
       } catch (err) {
-        const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-        const code = axios.isAxiosError(err)
-          ? (err.response?.data as { error?: string } | undefined)?.error
-          : undefined;
+        const { status, code } = axiosErrorParts(err);
         if (status === 409 && code === 'GUARDIAN_REQUIRED') {
           setGuardianSetup(pending);
         } else if (status === 429) {

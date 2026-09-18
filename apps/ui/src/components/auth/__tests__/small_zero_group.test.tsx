@@ -394,6 +394,48 @@ describe('guardian consent helpers', () => {
     expect(isMinorFromAge(18)).toBe(true);
     expect(isMinorFromAge(19)).toBe(false);
   });
+
+  it('pulls status and error code off a thrown axios error', async () => {
+    const { axiosErrorParts } = await import('@/lib/guardian-consent');
+    const axios = (await import('axios')).default;
+
+    const err = new axios.AxiosError('conflict');
+    err.response = {
+      status: 409,
+      data: { error: 'GUARDIAN_REQUIRED' },
+      statusText: 'Conflict',
+      headers: {},
+      config: { headers: {} as never },
+    } as never;
+
+    expect(axiosErrorParts(err)).toEqual({ status: 409, code: 'GUARDIAN_REQUIRED' });
+  });
+
+  it('yields both parts undefined for a non-axios throw, and for an axios error with no response', async () => {
+    const { axiosErrorParts } = await import('@/lib/guardian-consent');
+    const axios = (await import('axios')).default;
+
+    expect(axiosErrorParts(new Error('boom'))).toEqual({
+      status: undefined,
+      code: undefined,
+    });
+    expect(axiosErrorParts(null)).toEqual({ status: undefined, code: undefined });
+    // A network error is an axios error with no response at all.
+    expect(axiosErrorParts(new axios.AxiosError('offline'))).toEqual({
+      status: undefined,
+      code: undefined,
+    });
+  });
+
+  it('yields a status with no code when the body carries no `error` field', async () => {
+    const { axiosErrorParts } = await import('@/lib/guardian-consent');
+    const axios = (await import('axios')).default;
+
+    const err = new axios.AxiosError('rate limited');
+    err.response = { status: 429, data: {}, statusText: '', headers: {}, config: { headers: {} as never } } as never;
+
+    expect(axiosErrorParts(err)).toEqual({ status: 429, code: undefined });
+  });
 });
 
 describe('toastGuardianSendError', () => {

@@ -1,5 +1,4 @@
 import * as React from 'react';
-import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
@@ -9,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { useAuth } from '@/contexts/auth-context';
 import { useConsentConfig } from '@/hooks/use-consent-config';
-import { toastGuardianSendError } from '@/lib/guardian-consent';
+import { axiosErrorParts, toastGuardianSendError } from '@/lib/guardian-consent';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import {
   submitGuardian,
@@ -141,10 +140,7 @@ export function GuardianFormStep({
       const result = await submit(body);
       if (result.otpSent) onSubmitted(body);
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { error?: string } | undefined)?.error
-        : undefined;
+      const { status, code } = axiosErrorParts(err);
 
       if (status === 409 && code === 'SAME_CONTACT_NOT_ALLOWED') {
         setServerFlaggedSameContact(true);
