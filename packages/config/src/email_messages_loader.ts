@@ -1,5 +1,9 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+
+import {
+  listBrandDirectories,
+  readOptionalPropertiesFile,
+} from './properties_file_io.js';
 
 export type LoadedEmailMessagesFile = {
   network: string;
@@ -13,26 +17,6 @@ export type LoadEmailMessagesFilesOptions = {
   networkLocalFile: string;
   networks: string[];
 };
-
-async function readMessagesText(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw err;
-  }
-}
-
-async function listSubdirectories(dir: string): Promise<string[]> {
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
-    throw err;
-  }
-}
 
 /**
  * Local mode: the network default messages.properties sits beside network.json;
@@ -59,7 +43,7 @@ export async function loadEmailMessagesFiles(
   const baseDir = dirname(resolve(process.cwd(), opts.networkLocalFile));
   const results: LoadedEmailMessagesFile[] = [];
 
-  const defaultText = await readMessagesText(join(baseDir, 'messages.properties'));
+  const defaultText = await readOptionalPropertiesFile(join(baseDir, 'messages.properties'));
   if (defaultText !== null) {
     results.push({ network, brand: null, text: defaultText });
   }
@@ -69,8 +53,8 @@ export async function loadEmailMessagesFiles(
   // apps/api's messages.ts merges a brand-only file straight over the
   // instance base when no network file exists. So brand subdirectories must
   // still be scanned even when the network-level file is absent.
-  for (const brand of await listSubdirectories(baseDir)) {
-    const brandText = await readMessagesText(join(baseDir, brand, 'messages.properties'));
+  for (const brand of await listBrandDirectories(baseDir)) {
+    const brandText = await readOptionalPropertiesFile(join(baseDir, brand, 'messages.properties'));
     if (brandText === null) continue;
     results.push({ network, brand, text: brandText });
   }

@@ -1,5 +1,9 @@
-import { readFile, readdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+
+import {
+  listBrandDirectories,
+  readOptionalPropertiesFile,
+} from './properties_file_io.js';
 
 /**
  * Discovery for the per-network/brand SMS template files (#595 Phase 2).
@@ -38,28 +42,6 @@ export type LoadSmsTemplatesFilesOptions = {
   networks: string[];
 };
 
-async function readTemplatesText(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf8');
-  } catch (err) {
-    // The file is optional; anything else (permissions, a directory where a
-    // file belongs) is a real misconfiguration and must not be swallowed.
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw err;
-  }
-}
-
-async function listSubdirectories(dir: string): Promise<string[]> {
-  try {
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
-    throw err;
-  }
-}
-
 /**
  * Local mode: the network default `sms.properties` sits beside `network.json`;
  * brand overrides live in immediate sub-folders named for the brand id. Local
@@ -83,7 +65,7 @@ export async function loadSmsTemplatesFiles(
   const baseDir = dirname(resolve(process.cwd(), opts.networkLocalFile));
   const results: LoadedSmsTemplatesFile[] = [];
 
-  const defaultText = await readTemplatesText(join(baseDir, 'sms.properties'));
+  const defaultText = await readOptionalPropertiesFile(join(baseDir, 'sms.properties'));
   if (defaultText !== null) {
     results.push({ network, brand: null, text: defaultText });
   }
@@ -91,8 +73,8 @@ export async function loadSmsTemplatesFiles(
   // Brand sub-folders are scanned even when the network-level file is absent:
   // the bundled defaults are always the base layer, so a brand-only file is
   // valid on its own and must not be skipped for want of a network file.
-  for (const brand of await listSubdirectories(baseDir)) {
-    const brandText = await readTemplatesText(join(baseDir, brand, 'sms.properties'));
+  for (const brand of await listBrandDirectories(baseDir)) {
+    const brandText = await readOptionalPropertiesFile(join(baseDir, brand, 'sms.properties'));
     if (brandText === null) continue;
     results.push({ network, brand, text: brandText });
   }

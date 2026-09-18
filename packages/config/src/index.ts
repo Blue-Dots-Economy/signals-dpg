@@ -6,6 +6,7 @@ export * from './email_messages_loader';
 export * from './login_channels';
 export * from './network_config_loader';
 export * from './network_runtime';
+export * from './properties_file_io';
 export * from './secrets';
 export * from './sms_templates_loader';
 export * from './ui_host_bindings';
