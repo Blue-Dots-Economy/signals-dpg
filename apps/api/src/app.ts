@@ -9,7 +9,6 @@ import {
 import {
   apiConfig,
   apiReferenceEnabled,
-  authConfig,
   getCurrentApiBaseUrl,
   instance,
   uiHostBindings,

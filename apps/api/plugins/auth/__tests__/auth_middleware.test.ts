@@ -257,15 +257,23 @@ describe('auth_middleware — api-key path', () => {
     expect(limitArgs).toEqual([1]);
   });
 
-  it('never falls back to the session when the key is present', async () => {
+  it('wins over a cookie presented alongside it — neither later channel is consulted', async () => {
+    // Precedence when BOTH credentials are present, which the no-cookie case
+    // above cannot show. A service caller that also happens to carry a cookie
+    // must still be identified by its key, or a stale browser session could
+    // silently re-attribute a partner's writes to a human.
     verifyApiKey.mockResolvedValue({ valid: true, userId: 'u1' });
     rowQueue.push([{ id: 'u1', email: 'a@b.com', name: 'Ada', role: 'user' }]);
+    const request = makeRequest({
+      headers: { 'x-api-key': 'k-live', cookie: 'session=xyz' },
+    });
 
-    await run(
-      auth_middleware,
-      makeRequest({ headers: { 'x-api-key': 'k-live', cookie: 'session=xyz' } }),
-    );
+    const reply = await run(auth_middleware, request);
 
+    expect(reply.sendCount).toBe(0);
+    expect(request.user).toMatchObject({ id: 'u1', email: 'a@b.com' });
+    expect(resolveBrowserSession).not.toHaveBeenCalled();
+    expect(resolveKeycloakSession).not.toHaveBeenCalled();
   });
 
 

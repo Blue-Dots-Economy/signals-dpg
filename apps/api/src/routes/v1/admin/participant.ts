@@ -11,7 +11,6 @@ import { user } from '../../../../db/postgres/schema/auth.js';
 import { create_profile_item } from '@/lib/profile_item';
 import { resolveDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { updateItemInternal, type DbOrTx } from '@/services/item_service';
-import { authConfig } from '@/config';
 import {
   publishItemEvent,
   publishItemEvents,
