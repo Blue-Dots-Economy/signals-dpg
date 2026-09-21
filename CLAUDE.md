@@ -16,7 +16,7 @@ Other load-bearing docs:
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
 - `docs/operations/digilocker-integration.md` — what the DigiLocker wallet import does (pre-fills a profile form; not a login, not verification), the external "agent" service it depends on, and its current security caveats
 - `docs/operations/email-copy-overrides.md` — how every email the API sends gets its copy from an overridable messages file (`EMAIL_MESSAGES_PATH`, plus per-network/brand layering); the single-sender pipeline lives at `apps/api/src/notifications/email/` (see `apps/api/CLAUDE.md`)
-- `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md` — the Keycloak IAM migration; the code ships **dormant** behind `AUTH_PROVIDER=betterauth` (default) and is a hard prerequisite of consent convergence
+- `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md` — the Keycloak IAM migration. **Point-in-time:** that plan describes the dormant-behind-`AUTH_PROVIDER=betterauth` rollout; #517 has since removed better-auth entirely and `keycloak` is the only provider
 
 **Historical design docs.** `docs/superpowers/plans/` and `docs/superpowers/specs/` hold dated, per-feature plan/spec pairs (consent v1, metrics redesign, PII encryption, self-signup gating, etc.) — the "why" behind a subsystem when the current code doesn't make it obvious. `docs/design/*.md` covers UI-specific design (localization, network theming, bulk actions, map enhancements). Treat all of these as **point-in-time records, not living documentation** — a plan from three months ago may describe an approach the code has since moved past; when a plan and the code disagree, the code wins.
 
@@ -28,7 +28,7 @@ Other load-bearing docs:
 - `.claude/rules/database-conventions.md` — migration editing rule, partition pruning, `user.tags`, PII location jitter. Triggers on routes/services/utils, `packages/database`, `apps/api/db`.
 - `.claude/rules/env-vars.md` — the two-places-must-change-together rule for new env vars. Triggers on `packages/config/src/secrets.ts` and `turbo.json`.
 
-**Nested docs.** Auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (better-auth wiring, OTP flow, and the dormant Keycloak provider / `AUTH_PROVIDER` switch), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
+**Nested docs.** Auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (**no longer auth** — PII crypto only, since #517), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
 
 ## Core mental model
 
@@ -58,7 +58,7 @@ Enforced in code and easy to miss from the schema alone:
 
 pnpm + Turborepo monorepo. Workspace alias is `@dpg/*` → `packages/*/src` (note: package directory names like `auth`/`database`/`schemas` are imported as `@dpg/auth` etc.; some test configs alias additionally to plain workspace names — see `apps/api/vitest.config.ts`).
 
-- `apps/api` — Fastify + Zod (`fastify-type-provider-zod`) + Drizzle ORM + better-auth + Redis. Entry: `src/server.ts`.
+- `apps/api` — Fastify + Zod (`fastify-type-provider-zod`) + Drizzle ORM + Keycloak (OIDC) + Redis. Entry: `src/server.ts`.
 - `apps/ui` — React 19 + Vite, schema-driven (renders forms/cards from network + item schemas).
 - `packages/config` — Zod env schemas (`secrets.ts`), allowed-origins lists, network-config loader, consent-config loader. **All env vars must be added here**, not parsed ad-hoc.
 - `packages/database` — Drizzle setup, partition-aware query helpers.

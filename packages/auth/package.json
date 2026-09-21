@@ -21,8 +21,6 @@
     "@vitest/coverage-v8": "^4.1.11"
   },
   "dependencies": {
-    "@better-auth/api-key": "~1.6.29",
-    "better-auth": "~1.6.29",
     "notification": "workspace:*",
     "schemas": "workspace:*"
   }

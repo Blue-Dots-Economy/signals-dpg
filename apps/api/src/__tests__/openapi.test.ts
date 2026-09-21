@@ -18,7 +18,11 @@ describe('buildApp wiring', () => {
   // deletion of the single `registerRawBodyCapture(app)` line in app.ts — and
   // the guard silently falls back to re-serializing `request.body`, which is
   // the bug this whole mechanism exists to avoid.
-  it('registers the raw-body capture, so peer requests hash the bytes as sent', async () => {
+  // 15s, not the default 5s: this is the one test that builds the WHOLE app
+  // (~2.4s on its own), and under the full 162-file parallel run it tips past
+  // 5s on contention alone. The assertion itself is unaffected — raising the
+  // budget beats making the suite's result depend on machine load.
+  it('registers the raw-body capture, so peer requests hash the bytes as sent', { timeout: 15_000 }, async () => {
     process.env.API_REFERENCE_ENABLED = 'true';
     vi.resetModules();
     const { buildApp } = await import('../app.js');

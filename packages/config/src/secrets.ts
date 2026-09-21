@@ -42,22 +42,21 @@ export const AuthSecretsSchema = z.object({
   // Allowed login identifier channels, comma-separated (email / phone).
   // Parsed by parseLoginChannels(). Default: both.
   LOGIN_CHANNELS: z.string().default('phone,email'),
-  // Identity provider. Single rollback lever:
-  //   'betterauth' — better-auth only; every Keycloak path stays dormant.
-  //   'keycloak'   — Keycloak only; better-auth is not involved in any step.
-  // Default 'betterauth'.
+  // Identity provider. Keycloak is the only one.
   //
-  // `dual` was removed: it existed so Keycloak tokens could be accepted
-  // alongside better-auth sessions during cutover, and it was the only thing
-  // that kept `backfillKeycloakShell` alive (the JIT straggler safety net, which
-  // only fired on a better-auth *login*). With it gone, running
-  // `scripts/migrate_users_to_keycloak.ts --apply` to completion is a hard
-  // prerequisite for flipping an instance to `keycloak` — see
+  // Two values have been removed. `dual` went first: it accepted Keycloak
+  // tokens alongside better-auth sessions during cutover, and was the only mode
+  // that kept `backfillKeycloakShell` alive (the JIT straggler net, which fired
+  // on a better-auth *login*). `betterauth` followed in #517 with the library.
+  // Either way, running `scripts/migrate_users_to_keycloak.ts --apply` to
+  // completion is a hard prerequisite — see
   // docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md §2.1.
-  // Rollback is still per-instance: better-auth's code remains, and its
-  // passwordless OTP login needs no `account` row, so a Keycloak-created user can
-  // sign in again after a flip back.
-  AUTH_PROVIDER: z.enum(['betterauth', 'keycloak']).default('betterauth'),
+  //
+  // This is a single-value enum now: there is no
+  // rollback provider to flip back to. It is kept as an enum rather than deleted
+  // so `assertAuthProviderSupported` can keep giving a stale 'betterauth' an
+  // actionable error instead of a bare "Invalid input".
+  AUTH_PROVIDER: z.enum(['keycloak']).default('keycloak'),
   // Where the acting-org authorisation comes from (§5.1 of the Keycloak
   // migration design). The `x-acting-org-id` header is unchanged in every mode —
   // this only controls whether the asserted value has to be inside a grant the
@@ -157,17 +156,36 @@ export const KeycloakSecretsSchema = z.object({
  * Pure, so it is directly unit-testable.
  */
 export function assertAuthProviderSupported(rawAuthProvider: string | undefined): void {
-  if (rawAuthProvider !== 'dual') return;
-  throw new ConfigError(
-    "AUTH_PROVIDER='dual' has been removed. Use 'betterauth' or 'keycloak'.\n" +
-      'dual existed so Keycloak tokens could be accepted alongside better-auth ' +
-      'sessions during cutover, and it was the only mode in which the ' +
-      'just-in-time Keycloak shell backfill ran.\n' +
-      'Before setting AUTH_PROVIDER=keycloak, migrate every existing user into ' +
-      'the realm — `pnpm keycloak:migrate:users --apply` then `--reconcile` until ' +
-      'it reports 1:1. Without that, any user with no Keycloak identity is locked ' +
-      'out at the flip, because nothing creates one for them on the fly any more.'
-  );
+  if (rawAuthProvider === 'dual') {
+    throw new ConfigError(
+      "AUTH_PROVIDER='dual' has been removed. Keycloak is now the only provider.\n" +
+        'dual existed so Keycloak tokens could be accepted alongside better-auth ' +
+        'sessions during cutover, and it was the only mode in which the ' +
+        'just-in-time Keycloak shell backfill ran.\n' +
+        'Before setting AUTH_PROVIDER=keycloak, migrate every existing user into ' +
+        'the realm — `pnpm keycloak:migrate:users --apply` then `--reconcile` until ' +
+        'it reports 1:1. Without that, any user with no Keycloak identity is locked ' +
+        'out at the flip, because nothing creates one for them on the fly any more.'
+    );
+  }
+
+  // #517 retired better-auth. Failing loudly here rather than letting Zod
+  // default a stale `betterauth` back to `keycloak` is deliberate: a silent
+  // coercion would flip an instance's identity provider during a routine
+  // upgrade, and every user without a Keycloak identity would be locked out
+  // with no startup signal saying why.
+  if (rawAuthProvider === 'betterauth') {
+    throw new ConfigError(
+      "AUTH_PROVIDER='betterauth' has been removed — Keycloak is the only provider.\n" +
+        'The better-auth library, its /api/auth/* mount and its OTP login flow are ' +
+        'gone; only the `apikey` table it used to own remains, and `x-api-key` auth ' +
+        'is unaffected (it is verified in-process now).\n' +
+        'Before setting AUTH_PROVIDER=keycloak, migrate every existing user into ' +
+        'the realm — `pnpm keycloak:migrate:users --apply` then `--reconcile` until ' +
+        'it reports 1:1. There is no longer any fallback login path for a user who ' +
+        'has no Keycloak identity.'
+    );
+  }
 }
 
 /**
@@ -178,16 +196,13 @@ export function assertAuthProviderSupported(rawAuthProvider: string | undefined)
  * apps/api/src/config.ts at module load, next to assertCreateTestOtpSafe.
  */
 export function assertKeycloakConfigured(
-  authProvider: 'betterauth' | 'keycloak',
+  authProvider: 'keycloak',
   keycloak: { KEYCLOAK_BASE_URL?: string; KEYCLOAK_ACCEPTED_CLIENT_IDS: string }
 ): void {
-  if (authProvider === 'betterauth') return;
-
   if (!keycloak.KEYCLOAK_BASE_URL) {
     throw new ConfigError(
       `AUTH_PROVIDER=${authProvider} requires KEYCLOAK_BASE_URL (the ` +
-        "browser-facing Keycloak base URL, e.g. 'http://localhost:8080/auth'). " +
-        "Set it, or set AUTH_PROVIDER=betterauth to stay on the old provider."
+        "browser-facing Keycloak base URL, e.g. 'http://localhost:8080/auth')."
     );
   }
 

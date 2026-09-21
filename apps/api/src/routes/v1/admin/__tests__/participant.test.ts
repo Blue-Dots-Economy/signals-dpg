@@ -16,9 +16,9 @@ import {
  * the right side effects on the mocked DB / item helpers.
  */
 
-// Flipped per test. Declared before the factory so the mock closes over it —
-// `keycloak_enabled` decides whether the row is written directly or via
-// better-auth's signUpEmail.
+// Declared before the factory so the mock closes over it. `keycloak_enabled` is
+// a constant `true` since #517 retired better-auth; the mock is kept because the
+// route module reads authConfig at import time.
 // `vi.hoisted` because `vi.mock` factories are hoisted above ordinary consts,
 // and this one is dereferenced when the factory runs rather than lazily.
 const mockAuthConfig = vi.hoisted(() => ({
@@ -26,7 +26,7 @@ const mockAuthConfig = vi.hoisted(() => ({
   middleware_enabled: false,
   url: 'http://source.local/api/auth',
   create_test_otp: false,
-  keycloak_enabled: false,
+  keycloak_enabled: true,
 }));
 
 // --- mock @/config so loadEnv() never runs ---
@@ -55,26 +55,6 @@ vi.mock('@/config', () => ({
   networkRuntime: {},
   schemaRegistry: {},
 }));
-
-// --- neutralize the auth chain ---
-vi.mock('@/routes/auth/create_auth', () => {
-  return {
-    authInstance: {
-      api: {
-        signUpEmail: vi.fn(async () => {
-          if (dbState.signUpMode === 'unique_violation') {
-            const err: Error & { code?: string } = new Error(
-              'duplicate key value violates unique constraint',
-            );
-            err.code = '23505';
-            throw err;
-          }
-          return { user: { id: dbState.signUpUserId } };
-        }),
-      },
-    },
-  };
-});
 
 // The realm-identity step. Mocked so no admin client is constructed, and so a
 // failure can be simulated to prove the compensating delete still runs.
@@ -335,6 +315,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     values: vi.fn((values: Record<string, unknown>) => {
       if (dbState.userInsertError) return Promise.reject(dbState.userInsertError);
       dbState.userInserts.push(values);
+      // Read-back consistency: the route mints the user id itself now (it becomes
+      // the Keycloak `sub`), so a test can no longer pin it in advance the way it
+      // could when better-auth's signUpEmail returned one. Point the select fake
+      // at whatever was just written, so the fake db behaves like a real one.
+      if (typeof values.id === 'string') lastQueriedUserId = values.id;
       return Promise.resolve();
     }),
   }));
@@ -457,7 +442,6 @@ vi.mock('@/services/item_service', () => {
 import { participant } from '../participant.js';
 import { publishItemEvent } from '@/utils/publish_item_event';
 import { recordParticipantConsent } from '@/services/participant_consent';
-import { authInstance } from '@/routes/auth/create_auth';
 
 const VALID_EMAIL = 'demo@example.com';
 const VALID_PHONE = '+919876543210';
@@ -515,7 +499,6 @@ const resetDbState = () => {
     dbState.userInsertError = null;
     dbState.userDeletes = 0;
     dbState.defaultAggregatorRows = [];
-    mockAuthConfig.keycloak_enabled = false;
     lastQueriedUserId = null;
     lastQueriedItemId = null;
     vi.mocked(publishItemEvent).mockClear();
@@ -526,7 +509,6 @@ const resetDbState = () => {
       recorded: 0,
       promoted: false,
     });
-  vi.mocked(authInstance.api.signUpEmail).mockClear();
 };
 
 describe('POST /admin/participant', () => {
@@ -585,7 +567,7 @@ describe('POST /admin/participant', () => {
     const body = res.json();
     expect(body.user_existed).toBe(false);
     expect(body.owned_elsewhere).toBe(false);
-    expect(body.user_id).toBe('usr_new_agg');
+    expect(body.user_id).toBe(dbState.userInserts[0].id);
     expect(body.onboarded_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(body.items).toHaveLength(1);
     expect(dbState.inserts).toHaveLength(1);
@@ -610,8 +592,8 @@ describe('POST /admin/participant', () => {
     expect(body.items).toHaveLength(0);
     expect(dbState.inserts).toHaveLength(0);
     // Assert that the onboarding-field update fired and set the expected fields.
-    expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0].set).toMatchObject({
+    expect(dbState.userInserts).toHaveLength(1);
+    expect(dbState.userInserts[0]).toMatchObject({
       onboardedByOrgId: 'org_agg_1',
       onboardedVia: 'bulk',
       // This API never wrote `user.domains`, which left every participant it
@@ -621,8 +603,8 @@ describe('POST /admin/participant', () => {
       // caller states the domain.
       domains: ['seeker'],
     });
-    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
-    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
+    expect(dbState.userInserts[0]).not.toHaveProperty('termsAccepted');
+    expect(dbState.userInserts[0]).not.toHaveProperty('privacyAccepted');
   });
 
   it('omits domains entirely when an aggregator caller sends no domain', async () => {
@@ -642,7 +624,7 @@ describe('POST /admin/participant', () => {
       }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.updates[0].set).not.toHaveProperty('domains');
+    expect(dbState.userInserts[0]).not.toHaveProperty('domains');
   });
 
   it('accepts a request with no consent flags at all → 200', async () => {
@@ -935,7 +917,7 @@ describe('POST /admin/participant', () => {
     const body = res.json();
     expect(body.user_existed).toBe(false);
     expect(body.owned_elsewhere).toBe(false);
-    expect(body.user_id).toBe('usr_new_ns');
+    expect(body.user_id).toBe(dbState.userInserts[0].id);
     expect(body.items).toHaveLength(1);
     expect(dbState.inserts).toHaveLength(1);
   });
@@ -966,14 +948,14 @@ describe('POST /admin/participant', () => {
     // entrant has an owner" on paper while leaving a verification queue nobody
     // would open. No default is nominated in this test (the launch state), so
     // the participant is left unowned.
-    expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0].set).toMatchObject({
+    expect(dbState.userInserts).toHaveLength(1);
+    expect(dbState.userInserts[0]).toMatchObject({
       onboardedByOrgId: null,
       onboardedByDefault: false,
       onboardedVia: 'bulk',
     });
-    expect(dbState.updates[0].set).not.toHaveProperty('termsAccepted');
-    expect(dbState.updates[0].set).not.toHaveProperty('privacyAccepted');
+    expect(dbState.userInserts[0]).not.toHaveProperty('termsAccepted');
+    expect(dbState.userInserts[0]).not.toHaveProperty('privacyAccepted');
   });
 
   it('a non-aggregator caller tags to the default aggregator when one is configured (SS-3)', async () => {
@@ -1018,7 +1000,7 @@ describe('POST /admin/participant', () => {
       payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.updates[0].set).toMatchObject({
+    expect(dbState.userInserts[0]).toMatchObject({
       onboardedByOrgId: 'org_default_agg',
       onboardedByDefault: true,
     });
@@ -1074,8 +1056,8 @@ describe('POST /admin/participant', () => {
       payload: baseBody({ phone_number: VALID_PHONE, email: undefined, item_state: undefined }),
     });
     expect(res.statusCode).toBe(200);
-    expect(dbState.updates).toHaveLength(1);
-    expect(dbState.updates[0].set).toMatchObject({
+    expect(dbState.userInserts).toHaveLength(1);
+    expect(dbState.userInserts[0]).toMatchObject({
       onboardedByOrgId: 'org_agg_1',
       onboardedByDefault: false,
       onboardedVia: 'bulk',
@@ -2017,15 +1999,12 @@ describe('POST /admin/participant — caller-supplied item_locations', () => {
 describe('POST /admin/participant — direct write under AUTH_PROVIDER=keycloak', () => {
   beforeEach(() => {
     resetDbState();
-    mockAuthConfig.keycloak_enabled = true;
   });
 
   const newUserBody = (over: Record<string, unknown> = {}) =>
     baseBody({ item_state: undefined, ...over });
 
-  it('writes the row itself and never calls better-auth', async () => {
-    // The regression that matters most: a change that quietly kept using
-    // signUpEmail would otherwise still pass every other assertion here.
+  it('writes the row itself in a single insert', async () => {
     const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
 
     const res = await app.inject({
@@ -2035,7 +2014,6 @@ describe('POST /admin/participant — direct write under AUTH_PROVIDER=keycloak'
     });
 
     expect(res.statusCode).toBe(200);
-    expect(vi.mocked(authInstance.api.signUpEmail)).not.toHaveBeenCalled();
     expect(dbState.userInserts).toHaveLength(1);
   });
 
