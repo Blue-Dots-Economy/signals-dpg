@@ -42,7 +42,6 @@ export type MigrationClient = Pick<
 export interface MigrationData {
   fetchHumanUsers(limit?: number): Promise<SignalsUserRow[]>;
   countServiceUsers(): Promise<number>;
-  fetchPasswordAccountRows(): Promise<Array<{ providerId: string; n: number }>>;
 }
 
 export interface MigrationOptions {
@@ -175,33 +174,7 @@ export async function runProbe(
   return { code: 1, verdict };
 }
 
-export interface PasswordAuditResult {
-  code: number;
-  total: number;
-}
 
-/** Risk R6: the "no credentials to migrate" assumption only holds if nobody
- * has a real password. */
-export async function runPasswordAudit(
-  data: MigrationData,
-  logger: Logger = consoleLogger
-): Promise<PasswordAuditResult> {
-  const rows = await data.fetchPasswordAccountRows();
-  const total = rows.reduce((sum, r) => sum + r.n, 0);
-
-  logger.log(`password-bearing rows in \`account\`: ${total}`);
-  for (const row of rows) logger.log(`  provider=${row.providerId}: ${row.n}`);
-  logger.log('');
-
-  if (total === 0) {
-    logger.log('RESULT: no password accounts. The OTP-only migration holds (R6 clear).');
-    return { code: 0, total };
-  }
-  logger.log('RESULT: password accounts EXIST.');
-  logger.log('  These users have no OTP-only path and will not be able to sign in');
-  logger.log('  after cutover. Plan a reset flow before R4.');
-  return { code: 1, total };
-}
 
 /**
  * Refuse to run if `phoneNumber` writes would be silently discarded (Keycloak 26
