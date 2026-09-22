@@ -421,7 +421,7 @@ export function LeafletMapProvider({
        * watermark, so dark mode rendered a defaced map with nothing to catch it
        * (no failed request, no console error, no broken image). OSM needs no
        * key, so the map stays light while the rest of the app follows the
-       * theme. The user is told once per session — see DarkBasemapNotice below.
+       * theme. The user is told once per session by the notice effect above.
        */}
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'

@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'sonner';
 import { createQueryClient } from '@/lib/query-client';
 import { purgeLegacyAuthStorage } from '@/lib/purge-legacy-auth-storage';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -37,6 +38,20 @@ const queryClient = createQueryClient();
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeModeProvider>
+      {/*
+       * Same <Toaster> configuration as app.tsx. The tourist app opens straight
+       * onto the map and has no theme toggle, so a visitor on a dark-mode phone
+       * gets the light basemap with no way to switch — this is where the
+       * one-per-session basemap notice matters most, and without a mounted
+       * Toaster sonner would drop it silently.
+       */}
+      <Toaster
+        position="top-center"
+        richColors
+        closeButton
+        offset={20}
+        toastOptions={{ duration: 5000 }}
+      />
       <TooltipProvider>
         <QueryClientProvider client={queryClient}>
           <TouristApp />
