@@ -342,9 +342,9 @@ export async function buildApp(): Promise<FastifyInstance> {
                 'Opaque browser-session cookie issued by the BFF after sign-in, used by the web UI ' +
                 '(apps/api/plugins/auth/resolve_browser_session.ts). httpOnly, so script cannot ' +
                 'read it; the access and refresh tokens live server-side in Redis and never reach ' +
-                'the browser. Checked when x-api-key is absent, before the bearer path. Under ' +
-                'AUTH_PROVIDER=betterauth this channel is dormant and the session cookie is ' +
-                "better-auth's own `better-auth.session_token` instead. **Every unsafe method " +
+                'the browser. Checked when x-api-key is absent, before the bearer path. This is ' +
+                'the only session channel a browser has — #517 removed the better-auth cookie ' +
+                'that used to sit alongside it. **Every unsafe method ' +
                 '(anything but GET/HEAD/OPTIONS) additionally requires the `x-csrf-token` header ' +
                 'echoing the value from `GET /api/v1/auth/session`; without it the request is ' +
                 'refused with 403 CSRF_TOKEN_INVALID.**',

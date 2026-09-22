@@ -16,8 +16,14 @@ const AuthConfigResponse = z.object({
   /**
    * The instance's identity provider, so the UI can pick a login screen at
    * RUNTIME instead of having it compiled into the bundle. See the note below.
+   *
+   * Single-valued since #517 retired better-auth. Kept as an enum rather than
+   * dropped, because it is the field the UI switches on and a published
+   * contract that still *permitted* `betterauth` was what kept the UI's
+   * `betterauth` branch formally reachable — nobody can delete a branch as dead
+   * while the API says the value is possible.
    */
-  authProvider: z.enum(['betterauth', 'keycloak']),
+  authProvider: z.enum(['keycloak']),
   /**
    * OIDC connection details, or null when this instance isn't running Keycloak.
    * All three values are public by nature for a public OIDC client (the realm's

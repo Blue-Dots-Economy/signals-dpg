@@ -97,7 +97,7 @@ docker compose ps        # dpg-db and dpg-redis should be (healthy)
 Run from the repo root, in order:
 
 ```bash
-pnpm db:push:api           # apply better-auth + Drizzle schema
+pnpm db:push:api           # apply the Drizzle schema
 pnpm db:init:api           # apply partitioned items / actions / events tables
 pnpm db:seed:services:api  # create the service user + apikey
 ```

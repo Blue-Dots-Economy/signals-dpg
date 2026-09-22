@@ -85,11 +85,15 @@ services:
       timeout: 3s
       retries: 20
 
-  # Keycloak — OPT-IN, behind the `keycloak` profile, so the default
-  # `docker compose up -d` is unchanged. Signals runs on better-auth until
-  # AUTH_PROVIDER is moved off 'betterauth', at which point you want this:
+  # Keycloak — behind the `keycloak` profile, and REQUIRED since #517 retired
+  # better-auth. AUTH_PROVIDER has one value now, so a plain
+  # `docker compose up -d` brings up an API with no identity provider to talk to
+  # and every login fails. Bring the profile up:
   #
   #     docker compose --profile keycloak up -d
+  #
+  # (It stays a profile rather than becoming a default service so the db/redis-only
+  # workflow — migrations, seeds, unit tests — does not have to pay for it.)
   #
   # Imports infra/keycloak/realms/bluedots-realm.json and mounts the custom
   # email/phone OTP authenticator SPI from infra/keycloak/providers/, so this is
@@ -306,10 +310,10 @@ services:
       #   openssl rand -hex 32
       INSTANCE_SHARED_SECRET: ${INSTANCE_SHARED_SECRET:?INSTANCE_SHARED_SECRET must be set (min 32 chars; openssl rand -hex 32)}
       PEER_AUTH_MODE: ${PEER_AUTH_MODE:-permissive}
-      # Keycloak migration flag. 'betterauth' (the default) keeps every
-      # Keycloak path dormant; the KEYCLOAK_* values below are inert until it
-      # moves to 'dual'/'keycloak', which also requires the `keycloak` profile.
-      AUTH_PROVIDER: ${AUTH_PROVIDER:-betterauth}
+      # Keycloak is the only provider (#517 removed better-auth). The KEYCLOAK_*
+      # values below are load-bearing, not inert, and the `keycloak` profile must
+      # be up. A stale 'betterauth' here kills the API at boot by design.
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-keycloak}
       # Acting-org authorisation source (§5.1). 'header' = today's behaviour;
       # 'claim_preferred' enforces the token's signals_acting_orgs grant when
       # present; 'claim_required' refuses a grantless token. Inert by default.
