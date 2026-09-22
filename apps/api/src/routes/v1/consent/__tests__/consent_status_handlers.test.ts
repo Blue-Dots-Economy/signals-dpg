@@ -125,6 +125,11 @@ beforeEach(() => {
   rlState.count = 1;
   rlState.throw = false;
   vi.clearAllMocks();
+  // `clearAllMocks` clears calls, NOT implementations — without an explicit
+  // default the `mockRejectedValue` in the guardian tests leaks into every
+  // later test in the file.
+  getWardAge.mockReset();
+  getWardAge.mockResolvedValue(null);
 });
 
 describe('get_consent_status_handler', () => {
@@ -150,7 +155,7 @@ describe('get_consent_status_handler', () => {
     });
 
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ statuses: { terms: [1], privacy: [2] } });
+    expect(reply.body).toEqual({ variant: 'adult', statuses: { terms: [1], privacy: [2] } });
   });
 
   it('returns empty version lists when nothing is accepted', async () => {
@@ -161,7 +166,7 @@ describe('get_consent_status_handler', () => {
       query: { network: 'blue_dot' },
     });
 
-    expect(reply.body).toEqual({ statuses: { terms: [], privacy: [] } });
+    expect(reply.body).toEqual({ variant: 'adult', statuses: { terms: [], privacy: [] } });
   });
 
   it('de-duplicates and sorts versions ascending (append-only ledger)', async () => {
@@ -192,7 +197,7 @@ describe('get_consent_status_handler', () => {
       query: { network: 'blue_dot' },
     });
 
-    expect(reply.body).toEqual({ statuses: { terms: [1], privacy: [] } });
+    expect(reply.body).toEqual({ variant: 'adult', statuses: { terms: [1], privacy: [] } });
   });
 
   it('500 CONSENT_READ_FAILED when the read throws', async () => {
@@ -347,6 +352,26 @@ describe('get_consent_status_by_identifier_handler', () => {
     });
 
     expect(reply.body).toEqual({ statuses: { terms: [1], privacy: [] } });
+  });
+
+  it('never reports the variant, even for a known minor, and never reads the age', async () => {
+    // Deliberate (#626): this endpoint is unauthenticated, so returning the
+    // variant would tell anyone holding a phone number that it belongs to a
+    // minor. The U18 copy is served post-auth by the guardian flow (#453)
+    // instead, and `accept_consent` re-derives the variant server-side, so the
+    // ledger stays correct without disclosing anything here.
+    getWardAge.mockResolvedValue(15);
+    rowQueue.push([{ id: 'u1' }]);
+    rowQueue.push([{ consentCategory: 'terms', documentVersion: 1 }]);
+
+    const reply = await call(get_consent_status_by_identifier_handler, {
+      query: { network: 'blue_dot', phone: '9990001111' },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ statuses: { terms: [1], privacy: [] } });
+    expect(reply.body).not.toHaveProperty('variant');
+    expect(getWardAge).not.toHaveBeenCalled();
   });
 
   it('500 CONSENT_READ_FAILED when the lookup throws', async () => {

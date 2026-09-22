@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
 import type { ConsentConfigDocument } from '@dpg/schemas';
 import { getConsentStatus } from '@/lib/consent-api';
+import {
+  currentGateVersions,
+  outstandingGateCategories,
+  type ConsentVariant,
+} from '@/lib/consent-gate';
 import { useConsentConfig } from './use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 
@@ -15,6 +20,12 @@ interface UseConsentGateResult {
   needed: ConsentCategory[];
   config: ConsentConfigDocument | null;
   currentVersions: CurrentVersions | null;
+  /**
+   * Which document set applies (#626). Comes from the status endpoint, which
+   * derives it server-side from the user's recorded age — the client has no
+   * access to the age and must not decide this for itself.
+   */
+  variant: ConsentVariant;
   isLoading: boolean;
   refetch: () => void;
 }
@@ -41,22 +52,19 @@ export function useConsentGate(): UseConsentGateResult {
       needed: [],
       config,
       currentVersions: null,
+      variant: 'adult',
       isLoading,
       refetch,
     };
   }
 
-  const currentVersions: CurrentVersions = {
-    terms: config.documents.terms.current_version,
-    privacy: config.documents.privacy.current_version,
-  };
-
-  const needed = (['terms', 'privacy'] as const).filter(
-    (c) => !status.statuses[c].includes(currentVersions[c]),
-  );
+  const variant: ConsentVariant = status.variant ?? 'adult';
+  const currentVersions: CurrentVersions = currentGateVersions(config, variant);
+  const needed: ConsentCategory[] = outstandingGateCategories(config, variant, status.statuses);
 
   return {
     needed,
+    variant,
     config,
     currentVersions,
     isLoading,

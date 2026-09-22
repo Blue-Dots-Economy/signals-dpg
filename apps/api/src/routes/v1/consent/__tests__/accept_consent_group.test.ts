@@ -9,6 +9,7 @@ const {
   insertCalls,
   txInsertCalls,
   resolveConsentVersion,
+  resolveUserConsentVariant,
   hasAcceptedTermsAndPrivacy,
   isItemOwnedBy,
   promoteItemOnProfileConsent,
@@ -27,6 +28,7 @@ const {
   insertCalls: [] as unknown[],
   txInsertCalls: [] as unknown[],
   resolveConsentVersion: vi.fn(),
+  resolveUserConsentVariant: vi.fn(),
   hasAcceptedTermsAndPrivacy: vi.fn(),
   isItemOwnedBy: vi.fn(),
   promoteItemOnProfileConsent: vi.fn(),
@@ -124,6 +126,13 @@ vi.mock('@/services/consent_version', () => ({
   resolveConsentVersion: (...a: unknown[]) => resolveConsentVersion(...a),
 }));
 
+// Mocked at the service boundary rather than at `getWardAge`: the real module
+// reaches `@dpg/auth` through the repo, and this file stubs `@dpg/schemas`, so
+// importing it for real blows up on zod before a single test runs.
+vi.mock('@/services/consent_variant', () => ({
+  resolveUserConsentVariant: (...a: unknown[]) => resolveUserConsentVariant(...a),
+}));
+
 vi.mock('@/services/consent_acceptance', () => ({
   hasAcceptedTermsAndPrivacy: (...a: unknown[]) =>
     hasAcceptedTermsAndPrivacy(...a),
@@ -206,6 +215,7 @@ beforeEach(() => {
   isItemOwnedBy.mockResolvedValue(true);
   hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
   resolveConsentVersion.mockResolvedValue(2);
+  resolveUserConsentVariant.mockResolvedValue('adult');
   promoteItemOnProfileConsent.mockResolvedValue(false);
   invalidateItemFetchCache.mockResolvedValue(undefined);
 });
@@ -553,7 +563,55 @@ describe('accept_consent_handler', () => {
       network: 'blue_dot',
       brand: 'acme',
       category: 'terms',
+      variant: 'adult',
     });
+  });
+
+  it('resolves a minor against the U18 document set and stamps the row with it (#626)', async () => {
+    resolveUserConsentVariant.mockResolvedValue('u18');
+    resolveConsentVersion.mockResolvedValue(9);
+
+    const reply = await call(accept_consent_handler, {
+      user: { id: 'u1' },
+      body: acceptBody(),
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(resolveConsentVersion).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ variant: 'u18' }),
+    );
+    // Versions alone cannot say WHICH set a row belongs to — the two sets are
+    // in lockstep on every shipped config — so the ledger records the variant.
+    expect(insertedRows()[0]).toMatchObject({ documentVersion: 9, metadata: { variant: 'u18' } });
+  });
+
+  it('falls back to the adult set for a minor on a network with no U18 documents', async () => {
+    // 4 of 9 shipped configs have no `u18_documents`. Without this fallback
+    // `resolveConsentVersion` returns null and the handler 400s — a minor on
+    // those networks could not log in at all, which is worse than the bug.
+    resolveUserConsentVariant.mockResolvedValue('u18');
+    resolveConsentVersion.mockReset();
+    resolveConsentVersion
+      .mockResolvedValueOnce(null) // u18 terms: unconfigured
+      .mockResolvedValueOnce(5) // adult terms
+      .mockResolvedValueOnce(null) // u18 privacy: unconfigured
+      .mockResolvedValueOnce(6); // adult privacy
+
+    const reply = await call(accept_consent_handler, {
+      user: { id: 'u1' },
+      body: acceptBody(),
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(resolveConsentVersion).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ variant: 'adult' }),
+    );
+    const rows = insertedRows();
+    // Stamped 'adult' — what was actually served, not what was intended.
+    expect(rows[0]).toMatchObject({ documentVersion: 5, metadata: { variant: 'adult' } });
+    expect(rows[1]).toMatchObject({ documentVersion: 6, metadata: { variant: 'adult' } });
   });
 
   it('stamps every row with the same acceptedAt and nulls an absent brand', async () => {

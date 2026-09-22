@@ -21,6 +21,7 @@ import {
   type LoginChannel,
 } from '@/lib/auth-api';
 import { fetchConsentConfigs, getConsentStatusByIdentifier } from '@/lib/consent-api';
+import { buildOutstandingConsent, type OutstandingConsent } from '@/lib/consent-gate';
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import {
@@ -39,7 +40,6 @@ import { getServedScope } from '@/lib/served-binding';
 import type { DotNetworkDomain } from '@/engine/types';
 import { formatDomainLabel } from '@/lib/domain-icons';
 import { SessionExpiredNotice } from './session-expired-notice';
-import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 
 /**
  * Same shape as `local@rest` with an inner dot in `rest` — the check the OTP
@@ -123,11 +123,9 @@ export function KeycloakLoginPanel() {
   } | null>(null);
   // Set when terms/privacy need accepting before the account is created —
   // mirrors the OTP screen's gate (`runConsentThenOtp` in login-page.tsx).
-  const [consentGate, setConsentGate] = useState<{
-    config: ConsentConfigDocument;
-    pendingConsent: ConsentAcceptBody;
-    identifier: AuthIdentifier;
-  } | null>(null);
+  const [consentGate, setConsentGate] = useState<
+    (OutstandingConsent & { identifier: AuthIdentifier }) | null
+  >(null);
 
   // Same contract as the OTP login: RequireAuth sends the intended path here
   // as ?redirect=, and it must survive the round-trip through Keycloak.
@@ -410,24 +408,19 @@ export function KeycloakLoginPanel() {
         brand && brand !== 'standard' ? configEntries.find((e) => e.brand === brand) : undefined;
       const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
 
-      const needed = (['terms', 'privacy'] as const).filter(
-        (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
-      );
-      if (needed.length === 0) return false;
-
-      setConsentGate({
+      const outstanding = buildOutstandingConsent({
         config: mergedConfig,
-        identifier,
-        pendingConsent: {
-          network: themeId,
-          brand: brand !== 'standard' ? brand : null,
-          source: 'signup',
-          items: needed.map((c) => ({
-            category: c,
-            version: mergedConfig.documents[c].current_version,
-          })),
-        },
+        network: themeId,
+        brand,
+        source: 'signup',
+        accepted: consentStatus.statuses,
+        // No variant: `status-by-identifier` is unauthenticated and does not
+        // report one, so this gate is always the adult set. A minor gets the
+        // U18 documents post-auth from the guardian flow (#453/#626).
       });
+      if (!outstanding) return false;
+
+      setConsentGate({ ...outstanding, identifier });
       return true;
     } catch {
       // Fail open — same posture as the OTP flow's pre-check.
@@ -688,6 +681,7 @@ export function KeycloakLoginPanel() {
           mode="gate"
           initialTab="privacy"
           config={consentGate.config}
+          variant={consentGate.variant}
           onAccept={() => {
             void handleConsentAccept();
           }}

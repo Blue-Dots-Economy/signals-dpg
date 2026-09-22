@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { endBffSession } from '@/lib/bff-session';
 import { takePendingConsent } from '@/lib/pending-consent';
+import { buildOutstandingConsent, type OutstandingConsent } from '@/lib/consent-gate';
 import { takePendingSignupExtras } from '@/lib/pending-signup-extras';
 import {
   acceptConsent,
@@ -30,7 +31,6 @@ import { fetchNetworkConfig } from '@/lib/network-api';
 import { setStoredSignupDomain } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
 import { resolvePostLoginLanding } from '@/lib/post-login-landing';
-import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
 
 /** How long to wait for the consent write before landing the user anyway. */
 const CONSENT_WRITE_TIMEOUT_MS = 8000;
@@ -203,11 +203,9 @@ export function OidcCallbackPage() {
    * be used. Without it a migrated user, or anyone who signed up before a
    * version bump, is never re-prompted.
    */
-  const [consentGate, setConsentGate] = useState<{
-    config: ConsentConfigDocument;
-    pendingConsent: ConsentAcceptBody;
-    returnTo: string;
-  } | null>(null);
+  const [consentGate, setConsentGate] = useState<
+    (OutstandingConsent & { returnTo: string }) | null
+  >(null);
   /**
    * A gated minor held on a blocking guardian flow AFTER login (ownership
    * proven by Keycloak) and BEFORE landing — never home-first. The OTP flow
@@ -406,6 +404,7 @@ export function OidcCallbackPage() {
           mode="gate"
           initialTab="privacy"
           config={consentGate.config}
+          variant={consentGate.variant}
           onAccept={() => {
             void handleConsentAccept();
           }}
@@ -567,7 +566,7 @@ function extractMessage(err: unknown): string | null {
 async function resolveOutstandingConsent(
   network: string,
   brand: string,
-): Promise<{ config: ConsentConfigDocument; pendingConsent: ConsentAcceptBody } | null> {
+): Promise<OutstandingConsent | null> {
   try {
     const [status, configEntries] = await Promise.all([
       getConsentStatus(network),
@@ -581,24 +580,15 @@ async function resolveOutstandingConsent(
       brand && brand !== 'standard' ? configEntries.find((e) => e.brand === brand) : undefined;
     const config = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
 
-    const needed = (['terms', 'privacy'] as const).filter(
-      (c) => !status.statuses[c].includes(config.documents[c].current_version),
-    );
-    if (needed.length === 0) return null;
-
-    return {
+    return buildOutstandingConsent({
       config,
-      pendingConsent: {
-        network,
-        brand: brand !== 'standard' ? brand : null,
-        // 'login', not 'signup' — this is a returning user, or a version bump.
-        source: 'login',
-        items: needed.map((c) => ({
-          category: c,
-          version: config.documents[c].current_version,
-        })),
-      },
-    };
+      network,
+      brand,
+      // 'login', not 'signup' — this is a returning user, or a version bump.
+      source: 'login',
+      accepted: status.statuses,
+      variant: status.variant,
+    });
   } catch {
     return null;
   }

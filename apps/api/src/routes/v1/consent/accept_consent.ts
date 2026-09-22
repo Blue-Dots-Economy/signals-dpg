@@ -10,6 +10,7 @@ import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
+import { resolveUserConsentVariant } from '@/services/consent_variant';
 
 type Req = FastifyRequest<{ Body: ConsentAcceptBody }>;
 
@@ -51,6 +52,11 @@ export const accept_consent_handler = async (
     });
   }
 
+  // Which document set this acceptance is against (#626). Derived here, not
+  // read from the body, for the same reason the version is: a client that
+  // chose its own variant would be choosing which terms it is bound by.
+  const variant = await resolveUserConsentVariant(userId);
+
   const acceptedAt = new Date();
   // Versions are derived server-side from the loaded consent config, never
   // trusted from the client (the ledger stores only category + version).
@@ -63,13 +69,29 @@ export const accept_consent_handler = async (
     documentVersion: number;
     source: typeof body.source;
     acceptedAt: Date;
+    metadata: { variant: 'adult' | 'u18' };
   }> = [];
   for (const item of body.items) {
-    const version = await resolveConsentVersion({
+    let version = await resolveConsentVersion({
       network: body.network,
       brand: body.brand,
       category: item.category,
+      variant,
     });
+    // Most networks ship no `u18_documents` at all. Without this fall-back a
+    // minor on one of them resolves to null and is refused below — locking
+    // them out of login entirely, which is a far worse outcome than recording
+    // against the adult set the deployment actually publishes.
+    let effectiveVariant = variant;
+    if (version === null && variant === 'u18') {
+      version = await resolveConsentVersion({
+        network: body.network,
+        brand: body.brand,
+        category: item.category,
+        variant: 'adult',
+      });
+      effectiveVariant = 'adult';
+    }
     if (version === null) {
       return reply.code(400).send({
         error: 'CONSENT_VERSION_UNCONFIGURED',
@@ -85,6 +107,11 @@ export const accept_consent_handler = async (
       documentVersion: version,
       source: body.source,
       acceptedAt,
+      // Recorded so the ledger says WHICH set the version belongs to. The two
+      // sets are in lockstep today, so the integer alone cannot distinguish
+      // them — and `effectiveVariant` reflects the fall-back above, not the
+      // intent, so an audit sees what was actually served.
+      metadata: { variant: effectiveVariant },
     });
   }
 
