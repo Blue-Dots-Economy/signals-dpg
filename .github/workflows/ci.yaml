@@ -3,18 +3,17 @@ name: CI
 on:
   pull_request:
     branches: [develop, main, feature]
-  # feature: validate the merged integration state too — PRs into feature
-  # already run CI, but the post-merge result was unchecked. publish-images
-  # stays develop-only via its own `if` gate.
-  #
   # main: required for SonarCloud. The organization's plan analyses the MAIN
   # branch only (branch/PR analysis is a paid feature), so without a push
   # trigger here the default branch is never scanned and the dashboard reports
   # `"main" branch has not been analyzed yet` no matter how many PRs land.
-  # publish-images is gated to develop by its own `if`, so main pushes only
-  # run the checks + the sonar scan.
+  #
+  # feature is deliberately absent (#756). It was here to validate the merged
+  # integration state, but PRs into feature already run CI against the merge
+  # commit, and this workflow no longer publishes anything, so the second
+  # post-merge run duplicated the PR run without gating a release.
   push:
-    branches: [develop, feature, main]
+    branches: [develop, main]
   workflow_dispatch:
 
 concurrency:
@@ -414,98 +413,3 @@ jobs:
           pnpm --filter api spec:dump
           git diff --exit-code openapi.json || {
             echo "::error::openapi.json is stale — run 'pnpm --filter api spec:dump' and commit"; exit 1; }
-
-  # Publish the :develop images (api, ui) ONLY after the blocking CI jobs pass,
-  # and only on a develop push. Previously build-images.yaml triggered directly
-  # on push to develop, so red tests still shipped :develop images. Gating this
-  # inside the CI run (needs the checks below) closes that gap with no
-  # default-branch/workflow_run caveat. Release images (main, v* tags) and
-  # manual runs stay in build-images.yaml. dep-cruise is continue-on-error, so
-  # it is intentionally not a gate here.
-  publish-images:
-    needs: [typecheck-api, typecheck-ui, test, schema-parity]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-      security-events: write   # Trivy image scan uploads SARIF to code-scanning
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - name: api
-            context: .
-            dockerfile: apps/api/Dockerfile
-          - name: ui
-            context: .
-            dockerfile: apps/ui/Dockerfile
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Verify Dockerfile exists
-        run: |
-          if [ ! -f "${{ matrix.service.dockerfile }}" ]; then
-            echo "Dockerfile not found at ${{ matrix.service.dockerfile }} — skipping ${{ matrix.service.name }}"
-            exit 0
-          fi
-      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
-      # Mirrors build-images.yaml: the DHI base layers come from dhi.io, which
-      # requires auth even for the free catalog. Both publish paths build the
-      # same Dockerfiles, so both need this login, and it now applies to every
-      # matrix entry — api and ui are both on DHI bases.
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: dhi.io
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        id: meta
-        with:
-          images: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}
-          tags: |
-            type=ref,event=branch
-            type=sha,format=short
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        id: build
-        with:
-          context: ${{ matrix.service.context }}
-          file: ${{ matrix.service.dockerfile }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.service.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
-
-      # Image scanning (Sec-Audit A2 — Blue-Dots-Economy/signals-dpg#300).
-      # Mirrors build-images.yaml. Both publish paths need this: build-images.yaml
-      # covers main + v* tags, this covers the gated :develop publish — the stream
-      # that ships most often, so scanning only the release path would leave the
-      # busiest artifact unscanned.
-      #
-      # Scanned by digest: buildx pushes to the registry without loading into the
-      # local docker image store, so `imageid` is not resolvable by Trivy here.
-      - name: Trivy image scan
-        if: steps.build.outputs.digest != ''
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: image
-          image-ref: ghcr.io/blue-dots-economy/signals-dpg/${{ matrix.service.name }}@${{ steps.build.outputs.digest }}
-          format: sarif
-          output: trivy-image.sarif
-          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
-          exit-code: "0"   # Phase A: report-only, never blocks the :develop publish
-
-      - name: Upload Trivy image SARIF
-        if: always() && steps.build.outputs.digest != ''
-        uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
-        with:
-          sarif_file: trivy-image.sarif
-          # One category per image so api and ui alerts don't overwrite each other.
-          category: trivy-image-${{ matrix.service.name }}
