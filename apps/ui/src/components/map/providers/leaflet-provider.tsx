@@ -10,6 +10,7 @@ import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useThemeMode } from '@/theme/mode-provider';
@@ -23,6 +24,28 @@ import { useViewportReportEmitter } from './use-viewport-report';
 import 'leaflet/dist/leaflet.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
 import 'react-leaflet-cluster/dist/assets/MarkerCluster.Default.css';
+
+/**
+ * Session-scoped sentinel for the "dark mode is off for the map" notice, so it
+ * appears once rather than on every remount: the map remounts on route changes
+ * and on the maximize toggle, and re-toasting there would nag. `sessionStorage`
+ * rather than `localStorage` so a new tab says it again — the notice explains a
+ * visible oddity, and someone who never saw it deserves to.
+ */
+const DARK_BASEMAP_NOTICE_KEY = 'dpg-map-dark-basemap-notice';
+
+/** True the first time it's called in a session; false every time after. */
+function claimDarkBasemapNotice(): boolean {
+  try {
+    if (sessionStorage.getItem(DARK_BASEMAP_NOTICE_KEY)) return false;
+    sessionStorage.setItem(DARK_BASEMAP_NOTICE_KEY, '1');
+    return true;
+  } catch {
+    // sessionStorage may be disabled (private mode). Show the notice rather
+    // than swallow it; the stable toast `id` still prevents a visible stack.
+    return true;
+  }
+}
 
 /**
  * Module-level WeakMap: L.Marker instance → domain string.
@@ -363,6 +386,27 @@ export function LeafletMapProvider({
   const { t } = useTranslation();
   const { resolved: themeMode } = useThemeMode();
   const isDark = themeMode === 'dark';
+
+  /*
+   * Dark theme + Leaflet is the only combination where the map deliberately
+   * disagrees with the app's theme (see the TileLayer note below), so say so —
+   * once. Living inside this provider is what scopes it: the Google provider
+   * has a real dark style and never reaches here, and light mode returns
+   * before anything is shown.
+   */
+  React.useEffect(() => {
+    if (!isDark) return;
+    if (!claimDarkBasemapNotice()) return;
+    toast.info(t('map.dark_basemap_notice'), {
+      // Stable id: a second call updates the existing toast instead of stacking
+      // a duplicate, even if two maps mount at once. Auto-dismisses — the app's
+      // <Toaster> sets a global duration; this one runs slightly longer because
+      // it's an explanation, not a confirmation.
+      id: 'map-dark-basemap',
+      duration: 6000,
+    });
+  }, [isDark, t]);
+
   return (
     <MapContainer
       center={center}
@@ -370,20 +414,18 @@ export function LeafletMapProvider({
       className="h-full w-full rounded-lg"
       scrollWheelZoom
     >
-      {/* Dark basemap (CARTO dark_all) in dark mode, light OSM otherwise. `key`
-          forces a clean tile-layer swap on theme change. */}
+      {/*
+       * ONE basemap in every theme: light OSM. The dark basemap used to be
+       * CARTO `dark_all`, which is now API-key-gated — a keyless request still
+       * returns HTTP 200, but the PNG itself carries an "API KEY REQUIRED"
+       * watermark, so dark mode rendered a defaced map with nothing to catch it
+       * (no failed request, no console error, no broken image). OSM needs no
+       * key, so the map stays light while the rest of the app follows the
+       * theme. The user is told once per session by the notice effect above.
+       */}
       <TileLayer
-        key={isDark ? 'dark' : 'light'}
-        attribution={
-          isDark
-            ? '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-            : '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        }
-        url={
-          isDark
-            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-            : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-        }
+        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {/*
        * In viewport-markers mode (onViewportChange provided) the query itself
