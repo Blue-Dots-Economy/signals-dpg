@@ -1,12 +1,14 @@
-name: build-images
-# Release + manual image builds. The gated :develop publish moved into ci.yaml
-# (`publish-images`, needs the CI checks) so a red build never ships :develop.
-# `main` and `v*` tag builds are the release path (CI does not run on those
-# refs); `workflow_dispatch` is the manual escape hatch.
+name: Build and Push images (ui and api)
+# Release + manual image builds. This is now the ONLY path that publishes api/ui
+# images, and it publishes on a release tag or a manual run — never on a branch
+# push (#756). The `:main` tag this used to produce was mutable: it moved under
+# anyone who pulled it, and nothing consumed it (deployments pin a release tag or
+# an immutable sha- tag in bluedots-automation's global-images.yaml). The gated
+# :develop publish that used to live in ci.yaml (`publish-images`) is gone with
+# it. `workflow_dispatch` is the manual escape hatch.
 on:
   push:
-    branches: [main]
-    # Release tags. Two schemes, both additive to the branch/dispatch paths above:
+    # Release tags. Two schemes, both additive to the dispatch path above:
     #   v*.*.*      semver releases   e.g. v1.2.0
     #   20*-s*-rc*  sprint release    e.g. 202608-s1-rc1
     #               <YYYYMM>-s<sprint>-rc<candidate>. A fix for an issue found
