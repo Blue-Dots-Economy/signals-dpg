@@ -1,4 +1,4 @@
-name: build-images
+name: Build and Push images (ui and api)
 # Release + manual image builds. This is now the ONLY path that publishes api/ui
 # images, and it publishes on a release tag or a manual run — never on a branch
 # push (#756). The `:main` tag this used to produce was mutable: it moved under
