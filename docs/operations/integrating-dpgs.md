@@ -107,7 +107,7 @@ Two env vars gate this (both in `packages/config/src/secrets.ts`):
 
 | Var | Meaning |
 |---|---|
-| `AUTH_PROVIDER` | Must be `keycloak` for bearer tokens to be considered at all (`dual` has been removed). Default `betterauth` — bearer service auth is inert. |
+| `AUTH_PROVIDER` | `keycloak` is the only value (`dual` and `betterauth` have both been removed — #517). Bearer service auth is therefore **unconditionally live**; it is no longer gated behind a provider flip. |
 | `KEYCLOAK_SERVICE_CLIENT_IDS` | Comma-separated client ids allowed on the service path, e.g. `aggregator-dpg,voice-dpg`. **Empty by default**, so no client can use service auth until an operator names it. |
 
 `KEYCLOAK_SERVICE_CLIENT_IDS` is deliberately separate from
@@ -230,7 +230,7 @@ targets. Individual routes can narrow further — e.g.
 
 ```bash
 docker compose up -d db redis
-pnpm db:push:api          # apply better-auth + Drizzle schema to Postgres
+pnpm db:push:api          # apply the Drizzle schema to Postgres
 pnpm db:init:api          # apply the non-Drizzle SQL bootstrap (items / actions / events)
 pnpm db:seed:services:api # create the integrating-DPG service user and apikey
 ```

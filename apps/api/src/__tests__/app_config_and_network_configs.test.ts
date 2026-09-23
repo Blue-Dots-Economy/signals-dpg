@@ -1,12 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 /**
- * Unit tests for three small boot-time modules that no other test file drives
+ * Unit tests for two small boot-time modules that no other test file drives
  * end to end:
  *
- *   - `src/routes/auth/index.ts`  — the better-auth catch-all proxy route
- *     (`/api/auth/*`). Registered as a plugin against a fake fastify so the
- *     captured handler can be invoked directly.
  *   - `src/network_configs.ts`    — the singleton-promise network-config cache
  *     (see apps/api/CLAUDE.md, "Two config-cache patterns") plus its refresh
  *     and by-id lookup paths.
@@ -22,11 +19,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // --- mocks (hoisted) -------------------------------------------------------
 
-const { authHandler, loadNetworkConfigsMock, parseDocMock, assertPrimaryMock } =
+const { loadNetworkConfigsMock, parseDocMock, assertPrimaryMock } =
   vi.hoisted(() => ({
-    authHandler: vi.fn(
-      async (_req: Request): Promise<Response> => new Response(null, { status: 204 }),
-    ),
     loadNetworkConfigsMock: vi.fn(
       async (_options: Record<string, unknown>): Promise<unknown[]> => [],
     ),
@@ -37,10 +31,6 @@ const { authHandler, loadNetworkConfigsMock, parseDocMock, assertPrimaryMock } =
       (_schema: Record<string, unknown>, _context: string): void => {},
     ),
   }));
-
-vi.mock('@/routes/auth/create_auth', () => ({
-  authInstance: { handler: (req: Request) => authHandler(req) },
-}));
 
 // Partial mocks: `config.ts` needs the REAL parseServedDomains /
 // parseLoginChannels / assertCreateTestOtpSafe, so only the loader is faked.
@@ -111,7 +101,6 @@ beforeEach(() => {
   }
   vi.clearAllMocks();
   // clearAllMocks drops the declared default implementations too.
-  authHandler.mockImplementation(async () => new Response(null, { status: 204 }));
   loadNetworkConfigsMock.mockImplementation(async () => []);
   parseDocMock.mockImplementation((doc: Record<string, unknown>) => doc);
   assertPrimaryMock.mockImplementation(() => {});
@@ -180,144 +169,6 @@ function makeReply(): { reply: FakeReply; state: ReplyState } {
   };
   return { reply, state };
 }
-
-async function registerAuthRoutes(): Promise<{
-  route: CapturedRoute;
-  logError: ReturnType<typeof vi.fn>;
-}> {
-  const mod = await import('@/routes/auth/index');
-  const routes: CapturedRoute[] = [];
-  const logError = vi.fn((_err: unknown) => {});
-  const fakeFastify = {
-    route: (opts: CapturedRoute) => {
-      routes.push(opts);
-    },
-    log: { error: logError },
-  };
-  const plugin = mod.default as unknown as (
-    fastify: unknown,
-    opts: unknown,
-  ) => Promise<void>;
-  await plugin(fakeFastify, {});
-  expect(routes).toHaveLength(1);
-  return { route: routes[0], logError };
-}
-
-// --- routes/auth/index.ts -------------------------------------------------
-
-describe('routes/auth/index.ts (better-auth catch-all proxy)', () => {
-  it('registers a hidden, rate-limited GET/POST/OPTIONS catch-all on /api/auth/*', async () => {
-    const { route } = await registerAuthRoutes();
-
-    expect(route.url).toBe('/api/auth/*');
-    expect(route.method).toEqual(['GET', 'POST', 'OPTIONS']);
-    expect(route.schema.hide).toBe(true);
-    expect(route.config.rateLimit).toEqual({ max: 10, timeWindow: '10 seconds' });
-  });
-
-  it('short-circuits OPTIONS preflight with 204 and never calls better-auth', async () => {
-    const { route } = await registerAuthRoutes();
-    const { reply, state } = makeReply();
-
-    await route.handler(
-      { method: 'OPTIONS', url: '/api/auth/sign-in', headers: {} },
-      reply,
-    );
-
-    expect(state.statusCode).toBe(204);
-    expect(state.sendCount).toBe(1);
-    expect(authHandler).not.toHaveBeenCalled();
-  });
-
-  it('forwards a GET as an absolute Request built from the host header, skipping undefined headers, and copies response headers/status/text back', async () => {
-    authHandler.mockResolvedValueOnce(
-      new Response('{"session":null}', {
-        status: 201,
-        headers: { 'set-cookie': 'session=abc', 'x-echo': 'yes' },
-      }),
-    );
-    const { route } = await registerAuthRoutes();
-    const { reply, state } = makeReply();
-
-    await route.handler(
-      {
-        method: 'GET',
-        url: '/api/auth/get-session?a=1',
-        headers: { host: 'auth.test', 'x-keep': 'kept', 'x-drop': undefined },
-        body: { ignored: true },
-      },
-      reply,
-    );
-
-    const forwarded = authHandler.mock.calls[0][0];
-    expect(forwarded.url).toBe('http://auth.test/api/auth/get-session?a=1');
-    expect(forwarded.method).toBe('GET');
-    expect(forwarded.headers.get('x-keep')).toBe('kept');
-    expect(forwarded.headers.get('x-drop')).toBeNull();
-    // GET never forwards a body even when fastify parsed one.
-    expect(forwarded.body).toBeNull();
-
-    expect(state.statusCode).toBe(201);
-    expect(state.headers['set-cookie']).toBe('session=abc');
-    expect(state.headers['x-echo']).toBe('yes');
-    expect(state.body).toBe('{"session":null}');
-  });
-
-  it('JSON-stringifies a POST body, and sends null when the auth response has no body', async () => {
-    authHandler.mockResolvedValueOnce(new Response(null, { status: 302 }));
-    const { route } = await registerAuthRoutes();
-    const { reply, state } = makeReply();
-
-    await route.handler(
-      {
-        method: 'POST',
-        url: '/api/auth/sign-in/email',
-        headers: { host: 'auth.test' },
-        body: { email: 'a@b.co' },
-      },
-      reply,
-    );
-
-    const forwarded = authHandler.mock.calls[0][0];
-    expect(forwarded.method).toBe('POST');
-    expect(await forwarded.text()).toBe('{"email":"a@b.co"}');
-
-    expect(state.statusCode).toBe(302);
-    expect(state.body).toBeNull();
-  });
-
-  it('sends no body for a POST with no parsed body', async () => {
-    const { route } = await registerAuthRoutes();
-
-    await route.handler(
-      { method: 'POST', url: '/api/auth/sign-out', headers: { host: 'auth.test' } },
-      makeReply().reply,
-    );
-
-    expect(authHandler.mock.calls[0][0].body).toBeNull();
-  });
-
-  it('logs and returns 500 AUTH_FAILURE when better-auth throws', async () => {
-    const boom = new Error('better-auth exploded');
-    authHandler.mockRejectedValueOnce(boom);
-    const { route, logError } = await registerAuthRoutes();
-    const { reply, state } = makeReply();
-
-    await route.handler(
-      { method: 'GET', url: '/api/auth/get-session', headers: { host: 'auth.test' } },
-      reply,
-    );
-
-    expect(logError).toHaveBeenCalledWith(boom);
-    expect(state.statusCode).toBe(500);
-    // NB: this route predates the repo-wide `{ error, message }` envelope — it
-    // sends a human string under `error` and the machine code under `code`.
-    expect(state.body).toEqual({
-      error: 'Internal authentication error',
-      code: 'AUTH_FAILURE',
-    });
-  });
-});
 
 // --- network_configs.ts ---------------------------------------------------
 

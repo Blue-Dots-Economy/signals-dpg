@@ -47,11 +47,13 @@ export async function resolveBrowserSession(
 ): Promise<SessionResolution> {
   /**
    * Dormant unless Keycloak is the provider, mirroring
-   * `resolveKeycloakSession`. Without this the channel stays live under
-   * `AUTH_PROVIDER=betterauth` — the stated rollback path — and a `sid` row
-   * surviving the flip resolves all the way through Keycloak provisioning on an
-   * instance that is supposed to have every Keycloak path switched off. It also
-   * keeps this off Redis entirely on a betterauth instance.
+   * `resolveKeycloakSession`. It guarded against a `sid` row surviving a flip to
+   * `AUTH_PROVIDER=betterauth` and resolving through Keycloak provisioning on an
+   * instance meant to have every Keycloak path switched off.
+   *
+   * **Dead since #517** — there is no `betterauth` to flip back to and
+   * `keycloak_enabled` is a constant `true`, so this can never return here. Kept
+   * for the same reason as its twin in `resolve_session.ts`; tracked in #759.
    */
   if (!authConfig.keycloak_enabled) return { ok: false, fallthrough: true };
 

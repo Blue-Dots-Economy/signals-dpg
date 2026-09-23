@@ -6,11 +6,9 @@ import {
   serializerCompiler,
   validatorCompiler,
 } from 'fastify-type-provider-zod';
-import AuthRoutes from '@/routes/auth';
 import {
   apiConfig,
   apiReferenceEnabled,
-  authConfig,
   getCurrentApiBaseUrl,
   instance,
   uiHostBindings,
@@ -344,9 +342,9 @@ export async function buildApp(): Promise<FastifyInstance> {
                 'Opaque browser-session cookie issued by the BFF after sign-in, used by the web UI ' +
                 '(apps/api/plugins/auth/resolve_browser_session.ts). httpOnly, so script cannot ' +
                 'read it; the access and refresh tokens live server-side in Redis and never reach ' +
-                'the browser. Checked when x-api-key is absent, before the bearer path. Under ' +
-                'AUTH_PROVIDER=betterauth this channel is dormant and the session cookie is ' +
-                "better-auth's own `better-auth.session_token` instead. **Every unsafe method " +
+                'the browser. Checked when x-api-key is absent, before the bearer path. This is ' +
+                'the only session channel a browser has — #517 removed the better-auth cookie ' +
+                'that used to sit alongside it. **Every unsafe method ' +
                 '(anything but GET/HEAD/OPTIONS) additionally requires the `x-csrf-token` header ' +
                 'echoing the value from `GET /api/v1/auth/session`; without it the request is ' +
                 'refused with 403 CSRF_TOKEN_INVALID.**',
@@ -397,28 +395,11 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
   app.register(health_routes);
 
-  /**
-   * better-auth's own HTTP surface (`/api/auth/*`) — mounted only when
-   * better-auth is the provider.
-   *
-   * Under `AUTH_PROVIDER=keycloak` this used to stay mounted, which meant
-   * `unified_otp`'s `verifyOtp` was still reachable and **still created users**
-   * (`packages/auth/plugins/unified_otp.ts`). Those users got a signals row with
-   * no Keycloak identity, landing them in the `user_not_found` /
-   * `already_registered` deadlock `services/auth/participant_identity.ts`
-   * documents. Nothing legitimate calls this mount under Keycloak: the UI uses it
-   * only for the OTP flow, sign-out and get-session (all replaced by the OIDC
-   * screen), api keys are minted by `scripts/seed_service_users.ts` writing
-   * directly, and `verifyApiKey` is an in-process call rather than a route — so
-   * `x-api-key` auth is unaffected.
-   *
-   * Not mounting beats guarding inside the handler: an absent route cannot be
-   * reached by a code path we failed to think of, whereas an in-handler check has
-   * to be correct for every one of better-auth's endpoints.
-   */
-  if (authConfig.betterauth_enabled) {
-    app.register(AuthRoutes);
-  }
+  // better-auth's own HTTP surface (`/api/auth/*`) was registered here under
+  // `AUTH_PROVIDER=betterauth`. It is gone with the library (#517) — the UI used
+  // it only for the OTP flow, sign-out and get-session, all replaced by the OIDC
+  // screen. `x-api-key` auth never went through it: verification is an
+  // in-process call (`plugins/auth/verify_api_key.ts`), not a route.
 
   app.register(v1_routes, { prefix: '/api/v1' });
 

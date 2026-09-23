@@ -14,9 +14,10 @@ deploy runner:
    `apps/api/db/postgres/schema/` (`auth.ts`, `metrics.ts`,
    `pii_reveal_audit.ts`, `consent_record.ts`; re-exported from `index.ts`).
    `apps/api/drizzle.config.ts` points `out` at `./drizzle`, `schema` at
-   `./db/postgres/schema`. Tables: the better-auth set (`user`, `account`,
-   `verification`, `apikey`, `organization`, `member`, `invitation`, `team`,
-   `team_member`) plus `item_metrics`, `pii_reveal_audit`, `consent_record`.
+   `./db/postgres/schema`. Tables: `user`, `apikey`, `organization`, `member`
+   (the four that outlived better-auth — `account`, `verification`,
+   `invitation`, `team` and `team_member` were dropped by `0018`, #517) plus
+   `item_metrics`, `pii_reveal_audit`, `consent_record`.
    Migrations are **generated and committed** under `apps/api/drizzle/`
    (`pnpm db:generate:api`) and applied at deploy by `drizzle-orm`'s runtime
    `migrate()` — **not** `drizzle-kit` (a devDependency, absent from the prod

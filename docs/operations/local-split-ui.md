@@ -217,27 +217,11 @@ yopmail-reachable credentials:
 | 4 | Seeker retires their profile | Cancelled provider counterparty's mail → `:5175` |
 | 5 | Brand-new signup on `:5175` | Welcome mail link → `:5175/auth/login` |
 
-**Row 5 (welcome mail) is NOT testable on this local stack** — and the reason
-is not the one an earlier draft of this runbook gave. Two things are in play:
+**Row 5 (welcome mail) became testable with #517.** Earlier drafts of this runbook said it was not, because the stack ran `AUTH_PROVIDER=betterauth`: the better-auth signup path called `sendWelcomeNotifications` with no domain and its OTP request body had no `domain` field, so the welcome link always fell back to `FRONTEND_BASE_URL` and there was nothing to observe.
 
-1. **This instance runs `AUTH_PROVIDER=betterauth`** (check with
-   `curl -s localhost:2742/api/v1/auth/config`). The welcome-mail fix threads the
-   signup domain through the **Keycloak** provisioning path
-   (`services/auth/provisioning.ts`), which is what deployed instances run. The
-   better-auth path calls `sendWelcomeNotifications` with no domain
-   (`routes/auth/create_auth.ts:96`), and better-auth's OTP request body has no
-   `domain` field at all — so here the welcome link correctly falls back to
-   `FRONTEND_BASE_URL` and there is nothing to observe. Verified: a real signup
-   on this stack produced a welcome mail linking to `http://localhost:9999`.
-2. `SELF_SIGNUP_MODE` ships as `gated` (the default in `packages/config/src/secrets.ts`
-   and in `.env.example`); set it to `allowed` to let a self-service signup
-   through at all. That does NOT make row 5 pass — it only gets you as far as
-   the fallback link above.
+That path no longer exists. `keycloak` is the only provider, so signup always goes through `POST /api/v1/auth/signup` → `services/auth/provisioning.ts`, which carries the domain and parks it for `applySignupExtras` to apply at first login — the behaviour deployed instances have always had.
 
-To exercise row 5, run against Keycloak (`AUTH_PROVIDER=keycloak`), where signup
-goes through `POST /api/v1/auth/signup`, which carries the domain and parks it
-for `applySignupExtras` to apply at first login. **Rows 1-4 are unaffected by
-any of this and were verified on this stack.**
+One prerequisite remains: `SELF_SIGNUP_MODE` ships as `gated` (the default in `packages/config/src/secrets.ts`); set it to `allowed` to let a self-service signup through at all. **Rows 1-4 are unaffected by any of this.**
 
 Nothing may link to `http://localhost:9999` — that is the stand-in for the
 blocked front-door.

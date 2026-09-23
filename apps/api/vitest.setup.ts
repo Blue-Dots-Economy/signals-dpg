@@ -27,3 +27,11 @@ process.env.POSTGRES_DB ??= 'test';
 process.env.REDIS_PASSWORD ??= 'test-password';
 process.env.SERVED_DOMAINS ??= 'yellow_dot/student';
 process.env.INSTANCE_SHARED_SECRET ??= 'test-instance-shared-secret-32-bytes-min';
+
+// Keycloak is the only auth provider since #517, so `assertKeycloakConfigured`
+// runs unconditionally at `src/config.ts` import — it used to return early under
+// the default `AUTH_PROVIDER=betterauth`. Without these, every test that reaches
+// the config chain fails to *import*, not to assert. Set here rather than in the
+// ~15 affected test files so there is one place to change.
+process.env.KEYCLOAK_BASE_URL ??= 'http://localhost:8080/auth';
+process.env.KEYCLOAK_ACCEPTED_CLIENT_IDS ??= 'signals-ui';

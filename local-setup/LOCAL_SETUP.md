@@ -48,9 +48,9 @@ sibling repos, no aggregator, no Keycloak. Run everything from **`local-setup/`*
 > `docker login dhi.io` using a Docker Hub account. Track B needs no login: it
 > builds no app images. The same applies to `pnpm docker:api`.
 
-No external services are needed: signals uses **better-auth** with a test OTP
-(`CREATE_TEST_OTP=true`, codes print to the API logs), so there's no Keycloak,
-no SMTP, and no SMS gateway for local dev.
+**Keycloak and Mailpit are required** since #517 retired better-auth — `keycloak` is the only `AUTH_PROVIDER`, so bring them up with `docker compose --profile keycloak up -d`. No SMS gateway is needed: the login OTP is emailed and lands in Mailpit at http://localhost:8025.
+
+⚠️ **The login OTP is NOT `000000`.** Keycloak's own OTP SPI mints it, so `CREATE_TEST_OTP` — a Signals-API flag — has no bearing on it. Read the real code from Mailpit. (The **guardian/U18** OTP *is* still `000000`; that one is issued by the Signals API.)
 
 ---
 
@@ -127,8 +127,7 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
    In Track B, seed from source on the host instead.
 ```
 
-> Login uses better-auth with `CREATE_TEST_OTP=true`, so the OTP is written to
-> the API container logs rather than sent by SMS/email.
+> Login goes through Keycloak, which emails the OTP to Mailpit (http://localhost:8025) — it is a random 6-digit code, not `000000`, and it does not appear in the API logs.
 
 > **Discover results come back in recency order here, not by relevance**, and
 > match scores are unavailable — signals-search is not running. That is expected

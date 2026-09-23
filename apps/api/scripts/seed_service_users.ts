@@ -123,11 +123,15 @@ const ensure_apikey = async (
     return { minted: false, raw_key: null };
   }
   const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
-  // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
-  // and compares the hash at verify time. We must insert the hash, not the
-  // raw key. See node_modules/@better-auth/api-key/dist/index.mjs
-  // `defaultKeyHasher`. Node's `digest('base64url')` is unpadded by default,
-  // matching better-auth's `base64Url.encode(..., { padding: false })`.
+  // The `apikey` table stores SHA-256(key) base64url-encoded (no padding) and
+  // the hash is compared at verify time, so we insert the hash, never the raw
+  // key. Node's `digest('base64url')` is unpadded and uses the `-_` alphabet,
+  // which is exactly the scheme. Three places must agree on it and none of them
+  // share code: this script, `plugins/auth/verify_api_key.ts`, and the
+  // automation's `provision_service_users.sql` (raw Postgres `digest()`).
+  // signals-search is a fourth, in another repo (#516). Originally inherited
+  // from `@better-auth/api-key`'s `defaultKeyHasher`; #517 removed that library
+  // but deliberately kept the scheme so no partner had to rotate a key.
   const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
   const now = new Date();
   await db.insert(apikey).values({

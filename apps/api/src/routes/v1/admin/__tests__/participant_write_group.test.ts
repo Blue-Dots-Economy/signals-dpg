@@ -7,7 +7,6 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  * `participant_group.test.ts` covers participant_read / participant_decrypt.
  * This file targets the branches neither exercises:
  *
- *  - signUpAndOnboardUser: signUpEmail 23505 (direct + `cause.code`) → 409,
  *    generic signUp failure → 500, updateExecutor failure → orphan cleanup
  *    (incl. cleanup-of-cleanup failure), typed-service-error propagation, and
  *    unique-constraint-by-message → 409.
@@ -40,7 +39,6 @@ const { state } = vi.hoisted(() => ({
     itemOwner: null as string | null,
     /** Captured where-expression from the readItemsForUser select. */
     itemsWhere: null as unknown,
-    signUpFail: null as unknown,
     signUpUserId: 'usr_new_1',
     partitionFail: null as unknown,
     profileItemFail: null as unknown,
@@ -48,6 +46,8 @@ const { state } = vi.hoisted(() => ({
     consentFail: null as unknown,
     /** Thrown after the transaction callback resolves (commit failure). */
     txCommitFail: null as unknown,
+    userInsertFail: null as unknown,
+    userInserts: [] as Array<Record<string, unknown>>,
     deleteFail: null as unknown,
     deletes: 0,
     updates: [] as Array<Record<string, unknown>>,
@@ -91,17 +91,6 @@ vi.mock('@/config', () => ({
 vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: async () => {},
   auth_middleware: async () => {},
-}));
-
-vi.mock('@/routes/auth/create_auth', () => ({
-  authInstance: {
-    api: {
-      signUpEmail: vi.fn(async (_args: unknown) => {
-        if (state.signUpFail) throw state.signUpFail;
-        return { user: { id: state.signUpUserId } };
-      }),
-    },
-  },
 }));
 
 vi.mock('@dpg/database', async (importOriginal) => {
@@ -174,9 +163,20 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     }),
   }));
 
+  // insertLocalUser writes the user row INSIDE the transaction since #517, so the
+  // tx executor needs a working insert chain. `insert: vi.fn()` used to be enough
+  // only because better-auth's signUpEmail wrote the row outside the tx.
+  const txInsert = vi.fn((_t: unknown) => ({
+    values: vi.fn((values: Record<string, unknown>) => {
+      if (state.userInsertFail) return Promise.reject(state.userInsertFail);
+      state.userInserts.push(values);
+      return Promise.resolve();
+    }),
+  }));
+
   const transaction = vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => {
     state.txCalls += 1;
-    const result = await cb({ select, update, insert: vi.fn() });
+    const result = await cb({ select, update, insert: txInsert });
     if (state.txCommitFail) throw state.txCommitFail;
     return result;
   });
@@ -260,7 +260,6 @@ vi.mock('@/services/minor', () => ({
 // Imported after the mocks.
 import { participant_handler } from '../participant.js';
 import { ensureItemPartition } from '@dpg/database';
-import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { updateItemInternal } from '@/services/item_service';
 import {
@@ -369,13 +368,14 @@ describe('POST /admin/participant — write/failure paths', () => {
     state.itemsRows = [];
     state.itemOwner = null;
     state.itemsWhere = null;
-    state.signUpFail = null;
     state.signUpUserId = 'usr_new_1';
     state.partitionFail = null;
     state.profileItemFail = null;
     state.updateItemFail = null;
     state.consentFail = null;
     state.txCommitFail = null;
+    state.userInsertFail = null;
+    state.userInserts = [];
     state.deleteFail = null;
     state.deletes = 0;
     state.updates = [];
@@ -386,57 +386,11 @@ describe('POST /admin/participant — write/failure paths', () => {
     log.warn.mockClear();
     log.error.mockClear();
     vi.mocked(ensureItemPartition).mockClear();
-    vi.mocked(authInstance.api.signUpEmail).mockClear();
     vi.mocked(create_profile_item).mockClear();
     vi.mocked(updateItemInternal).mockClear();
     vi.mocked(recordParticipantConsent).mockClear();
     vi.mocked(promoteEligibleDraftsForUser).mockClear();
     vi.mocked(publishItemEvent).mockClear();
-  });
-
-  // --- signUpAndOnboardUser: signUpEmail failures -------------------------
-
-  it('create_new_user: signUpEmail rejecting with pg 23505 → 409 USER_ALREADY_EXISTS with a retry hint', async () => {
-    const err: Error & { code?: string } = new Error('insert blew up');
-    err.code = '23505';
-    state.signUpFail = err;
-
-    const res = await run({ body: { email: 'a@b.com', item_state: { x: 1 } } });
-
-    expect(res.statusCode).toBe(409);
-    expect(res.body.error).toBe('USER_ALREADY_EXISTS');
-    expect(res.body.message).toContain('retry the request');
-    // Nothing was written and no orphan cleanup was needed.
-    expect(state.txCalls).toBe(0);
-    expect(state.deletes).toBe(0);
-  });
-
-  it('create_new_user: signUpEmail rejecting with cause.code 23505 → 409 (nested pg code is read)', async () => {
-    state.signUpFail = Object.assign(new Error('wrapped'), {
-      cause: { code: '23505' },
-    });
-
-    const res = await run({
-      body: { phone_number: '+919876543210', item_state: { x: 1 } },
-    });
-
-    expect(res.statusCode).toBe(409);
-    expect(res.body.error).toBe('USER_ALREADY_EXISTS');
-    expect(log.warn).toHaveBeenCalled();
-  });
-
-  it('create_new_user: generic signUpEmail failure → 500 ONBOARD_FAILED, no orphan cleanup attempted', async () => {
-    state.signUpFail = new Error('auth service unreachable');
-
-    const res = await run({ body: { email: 'a@b.com', item_state: { x: 1 } } });
-
-    expect(res.statusCode).toBe(500);
-    expect(res.body).toEqual({
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
-    });
-    expect(state.deletes).toBe(0);
-    expect(log.error).toHaveBeenCalled();
   });
 
   // --- signUpAndOnboardUser: updateExecutor failures ----------------------
@@ -455,12 +409,13 @@ describe('POST /admin/participant — write/failure paths', () => {
       error: 'PROFILE_LIMIT_REACHED',
       message: 'maximum profiles per user reached',
     });
-    // Orphan cleanup ran for the just-created user.
-    expect(state.deletes).toBe(1);
+    // No orphan to clean up: the user row was written inside the transaction
+    // that just rolled back (#517 removed the out-of-band signUpEmail write).
+    expect(state.deletes).toBe(0);
     expect(vi.mocked(publishItemEvent)).not.toHaveBeenCalled();
   });
 
-  it('create_new_user: commit failing with a unique-constraint message → 409 USER_ALREADY_EXISTS (no retry hint) + orphan cleanup', async () => {
+  it('create_new_user: commit failing with a unique-constraint message → 409 USER_ALREADY_EXISTS (no retry hint)', async () => {
     state.txCommitFail = new Error(
       'duplicate key value violates unique constraint "user_phone_number_unique"',
     );
@@ -474,27 +429,30 @@ describe('POST /admin/participant — write/failure paths', () => {
       error: 'USER_ALREADY_EXISTS',
       message: 'email or phone already in use (race)',
     });
-    expect(state.deletes).toBe(1);
+    expect(state.deletes).toBe(0);
   });
 
-  it('create_new_user: transaction failure AND failing orphan cleanup → still 500 ONBOARD_FAILED, cleanup failure logged', async () => {
+  it('create_new_user: transaction failure → 500 ONBOARD_FAILED, logged, and nothing to clean up', async () => {
     state.txCommitFail = new Error('deadlock detected');
+    // Deliberately armed to fail: if any cleanup were still attempted here it
+    // would reject and surface, rather than passing silently.
     state.deleteFail = new Error('connection terminated');
 
     const res = await run({ body: { email: 'a@b.com', item_state: { x: 1 } } });
 
     expect(res.statusCode).toBe(500);
     expect(res.body.error).toBe('ONBOARD_FAILED');
+    // The user row went down with the transaction, so no compensating delete is
+    // issued at all — the better-auth path that could orphan one is gone (#517).
     expect(state.deletes).toBe(0);
-    // Both the cleanup failure and the onboard failure are logged at error.
     const messages = log.error.mock.calls.map((c) => c[1]);
-    expect(messages).toContain(
+    expect(messages).toContain('participant onboard failed');
+    expect(messages).not.toContain(
       'failed to clean up orphan user — manual cleanup needed',
     );
-    expect(messages).toContain('participant onboard failed');
   });
 
-  it('account_only new user: consent write failing inside the transaction → 500 ONBOARD_FAILED and the orphan user is cleaned up', async () => {
+  it('account_only new user: consent write failing inside the transaction → 500 ONBOARD_FAILED, whole write rolled back', async () => {
     state.consentFail = new Error('consent ledger write failed');
 
     const res = await run({
@@ -506,7 +464,8 @@ describe('POST /admin/participant — write/failure paths', () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.body.error).toBe('ONBOARD_FAILED');
-    expect(state.deletes).toBe(1);
+    // Rolled back with the transaction rather than compensated after it.
+    expect(state.deletes).toBe(0);
     // No item is ever created on the account_only path.
     expect(vi.mocked(create_profile_item)).not.toHaveBeenCalled();
   });
@@ -523,7 +482,6 @@ describe('POST /admin/participant — write/failure paths', () => {
       error: 'PARTITION_SETUP_FAILED',
       message: 'failed to prepare storage for item type',
     });
-    expect(vi.mocked(authInstance.api.signUpEmail)).not.toHaveBeenCalled();
   });
 
   it('insert_item: ensureItemPartition failing → 500 PARTITION_SETUP_FAILED and no transaction opened', async () => {
@@ -671,7 +629,6 @@ describe('POST /admin/participant — write/failure paths', () => {
       error: 'AGE_REQUIRED',
       message: 'age is required with consent on this domain',
     });
-    expect(vi.mocked(authInstance.api.signUpEmail)).not.toHaveBeenCalled();
   });
 
   it('network-config load failure during the age gate → treated as NOT gated, the request proceeds', async () => {

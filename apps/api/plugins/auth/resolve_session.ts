@@ -245,12 +245,16 @@ export type SessionResolution =
 
 /**
  * Try to resolve the request against Keycloak, populating `request.user` from
- * the local mirror on success.
+ * the local mirror on success. This either resolves the request or fails it:
+ * there is no second provider to defer to, so a request with no usable Keycloak
+ * token is unauthenticated rather than passed on.
  *
- * Returns `fallthrough` only under `AUTH_PROVIDER=betterauth`, meaning the caller
- * should hand the request to better-auth. Under `keycloak` this either resolves
- * the request or fails it — there is no second provider to defer to, so a request
- * with no usable Keycloak token is unauthenticated rather than passed on.
+ * **The `fallthrough` guard below is dead** — it meant "AUTH_PROVIDER=betterauth,
+ * hand this to better-auth", and #517 made `keycloak_enabled` a constant `true`.
+ * It is kept because removing the third `SessionResolution` variant would ripple
+ * through every caller for no behavioural gain, and it is dead in the safe
+ * direction. Do NOT read it as live behaviour — collapsing it (and the variant)
+ * is tracked in #759.
  */
 export async function resolveKeycloakSession(
   request: FastifyRequest

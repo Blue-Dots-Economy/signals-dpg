@@ -8,11 +8,9 @@ import { eq, or } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { ensureItemPartition, items } from '@dpg/database';
 import { user } from '../../../../db/postgres/schema/auth.js';
-import { authInstance } from '@/routes/auth/create_auth';
 import { create_profile_item } from '@/lib/profile_item';
 import { resolveDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { updateItemInternal, type DbOrTx } from '@/services/item_service';
-import { authConfig } from '@/config';
 import {
   publishItemEvent,
   publishItemEvents,
@@ -178,16 +176,13 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
 // runs whatever else the caller needs in the same transaction, and finally mints
 // the Keycloak identity.
 //
-// Two ways the row gets created, chosen by AUTH_PROVIDER:
+// `insertLocalUser` writes the row directly, INSIDE the transaction that also
+// carries the onboarding columns and the caller's work. So a failure anywhere
+// rolls the whole thing back and there is no orphan to clean up.
 //
-//   keycloak    `insertLocalUser` writes it directly, INSIDE the transaction that
-//               also carries the onboarding columns and the caller's work. So a
-//               failure anywhere rolls the whole thing back and there is no
-//               orphan to clean up.
-//   betterauth  `signUpEmail` writes it first and outside any transaction (that
-//               is better-auth's own API), so the row is already committed when
-//               the transaction starts — and an orphan IS possible, hence the
-//               compensating delete below.
+// (Until #517 there was a second path here: under `AUTH_PROVIDER=betterauth`,
+// `signUpEmail` wrote the row first and outside any transaction, which could
+// orphan it. That path went with the library.)
 //
 // Used by two branches: `account_only` (no item) and `create_new_user` (which
 // also creates the profile item). Both supply `withinTx`; neither owns a
@@ -233,67 +228,50 @@ async function signUpAndOnboardUser(params: {
   withinTx: (tx: DbOrTx, user_id: string) => Promise<void>;
 }): Promise<SignUpResult> {
   const { email_norm, name, fields, log, withinTx } = params;
-  const keycloak = authConfig.keycloak_enabled;
 
-  // Under Keycloak signals owns the id, and it must be a bare UUID because it
-  // becomes the Keycloak `sub` (enforced by insertLocalUser).
-  let user_id: string = randomUUID();
-  /** Only ever true on the better-auth path — see the header note. */
-  let rowCommittedOutsideTx = false;
-
-  if (!keycloak) {
-    const signedUp = await signUpViaBetterAuth(email_norm, name, log);
-    if (!signedUp.ok) return signedUp;
-    user_id = signedUp.user_id;
-    rowCommittedOutsideTx = true;
-  }
+  // Signals owns the id, and it must be a bare UUID because it becomes the
+  // Keycloak `sub` (enforced by insertLocalUser).
+  const user_id: string = randomUUID();
 
   try {
     await db.transaction(async (tx) => {
-      if (keycloak) {
-        // The row and its onboarding columns in one insert — there is no
-        // separate update to sequence, and nothing to orphan if the rest of the
-        // transaction fails. Consent booleans are deliberately not written here;
-        // consent lives in the ledger (#309), which `withinTx` records.
-        const written = await insertLocalUser(
-          {
-            id: user_id,
-            name,
-            email: email_norm,
-            // Onboarding by an aggregator proves nothing about the identifier;
-            // the OTP login is what verifies it.
-            emailVerified: false,
-            phoneNumber: fields.phone_norm,
-            phoneNumberVerified: false,
-            extra: buildOnboardingSet(fields),
-          },
-          log,
-          tx
-        );
+      // The row and its onboarding columns in one insert — there is no separate
+      // update to sequence, and nothing to orphan if the rest of the transaction
+      // fails. Consent booleans are deliberately not written here; consent lives
+      // in the ledger (#309), which `withinTx` records.
+      const written = await insertLocalUser(
+        {
+          id: user_id,
+          name,
+          email: email_norm,
+          // Onboarding by an aggregator proves nothing about the identifier;
+          // the OTP login is what verifies it.
+          emailVerified: false,
+          phoneNumber: fields.phone_norm,
+          phoneNumberVerified: false,
+          extra: buildOnboardingSet(fields),
+        },
+        log,
+        tx
+      );
 
-        if (!written.ok) {
-          // Thrown so the transaction rolls back; classified by the catch below.
-          throw Object.assign(new Error(written.message), {
-            statusCode: written.code === 'IDENTITY_CONFLICT' ? 409 : 500,
-            errorCode:
-              written.code === 'IDENTITY_CONFLICT' ? 'USER_ALREADY_EXISTS' : 'ONBOARD_FAILED',
-          });
-        }
-      } else {
-        await tx.update(user).set(buildOnboardingSet(fields)).where(eq(user.id, user_id));
+      if (!written.ok) {
+        // Thrown so the transaction rolls back; classified by the catch below.
+        throw Object.assign(new Error(written.message), {
+          statusCode: written.code === 'IDENTITY_CONFLICT' ? 409 : 500,
+          errorCode:
+            written.code === 'IDENTITY_CONFLICT' ? 'USER_ALREADY_EXISTS' : 'ONBOARD_FAILED',
+        });
       }
 
       await withinTx(tx, user_id);
     });
   } catch (updateErr: unknown) {
-    // Orphan cleanup, better-auth path only. Under Keycloak the row was written
-    // inside the transaction that just rolled back, so deleting here would at
-    // best be a no-op and at worst remove a *different* row that happened to
-    // reuse the id.
-    if (rowCommittedOutsideTx) {
-      await deleteOrphanUser(user_id, log, {}, 'cleaned up orphan user after update/tx failed');
-    }
-
+    // No orphan cleanup here: the row was written inside the transaction that
+    // just rolled back, so deleting would at best be a no-op and at worst remove
+    // a *different* row that happened to reuse the id. (The better-auth path,
+    // which committed its row outside the transaction and so could orphan one,
+    // is gone with the library — #517.)
     return classifyOnboardFailure(updateErr, log);
   }
 
@@ -332,42 +310,6 @@ async function signUpAndOnboardUser(params: {
   }
 
   return { ok: true, user_id };
-}
-
-/** better-auth signup (writes the user row itself, outside any transaction). */
-async function signUpViaBetterAuth(
-  email_norm: string | null,
-  name: string,
-  log: FastifyRequest['log'],
-): Promise<SignUpResult> {
-  const email_for_signup = email_norm ?? `${randomUUID()}@no-email.local`;
-  try {
-    const signed_up = await authInstance.api.signUpEmail({
-      body: {
-        email: email_for_signup,
-        password: randomUUID(),
-        name,
-      },
-    });
-    return { ok: true, user_id: signed_up.user.id };
-  } catch (signupErr: unknown) {
-    if (isUniqueViolation(signupErr)) {
-      log.warn({ err: signupErr }, 'signUp race; user exists now');
-      return {
-        ok: false,
-        statusCode: 409,
-        error: 'USER_ALREADY_EXISTS',
-        message: 'email or phone already in use (race) — retry the request',
-      };
-    }
-    log.error({ err: signupErr }, 'signUp failed during onboarding');
-    return {
-      ok: false,
-      statusCode: 500,
-      error: 'ONBOARD_FAILED',
-      message: 'could not onboard participant',
-    };
-  }
 }
 
 /** Best-effort orphan removal; a failed delete is logged for manual cleanup. */
