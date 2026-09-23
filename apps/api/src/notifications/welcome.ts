@@ -27,17 +27,15 @@ import { createCtaUrlResolver } from './brand';
 import { getDefaultEmailSender } from './email/dispatch_email';
 import { resolveRecipientRole } from './action_copy';
 
-/**
- * The WhatsApp template this uses is a pre-approved Twilio content template;
- * `contentVariables['1']` is the recipient's name. Carried over verbatim from
- * the better-auth hook so both providers send an identical message.
- */
-const WELCOME_WHATSAPP_CONTENT_SID = 'HX3f2a5d7e4a18e5664124592a12a154eb';
-
 /** Just enough of the user to address them. */
 export interface WelcomeRecipient {
   name: string;
   email: string | null;
+  /**
+   * Carried for callers' convenience but not used today: the welcome is
+   * email-only. There is no phone channel (WhatsApp is planned, not supported),
+   * so a phone-only user gets no welcome message.
+   */
   phoneNumber: string | null;
 }
 
@@ -51,11 +49,10 @@ export interface WelcomeLog {
 }
 
 /**
- * Send the welcome email and/or WhatsApp message for a newly-created user.
+ * Send the welcome email for a newly-created user.
  *
- * Each channel is attempted independently and its failure swallowed, so one
- * dead channel cannot suppress the other. A user with neither identifier, or an
- * instance with no notification client configured, is a silent no-op.
+ * A failed send is swallowed. A user with no email, or an instance with no
+ * notification client configured, is a silent no-op.
  *
  * Awaited by both callers rather than fire-and-forget: better-auth awaited it,
  * so awaiting keeps first-login latency identical rather than quietly changing
@@ -75,8 +72,7 @@ export async function sendWelcomeNotifications(
    */
   domain?: string | null
 ): Promise<void> {
-  const nc = getNotificationClient();
-  if (!nc) return;
+  if (!getNotificationClient()) return;
 
   const appName = instance.INSTANCE_NAME ?? 'DPG';
 
@@ -115,25 +111,6 @@ export async function sendWelcomeNotifications(
       });
     } catch (err) {
       log.error({ err }, 'welcome: could not send the welcome email');
-    }
-  }
-
-  if (recipient.phoneNumber) {
-    try {
-      await nc.notify({
-        channel: 'whatsapp',
-        template_id: 'other',
-        to: recipient.phoneNumber,
-        priority: 'realtime',
-        variables: {
-          contentSid: WELCOME_WHATSAPP_CONTENT_SID,
-          contentVariables: {
-            '1': recipient.name,
-          },
-        },
-      });
-    } catch (err) {
-      log.error({ err }, 'welcome: could not send the welcome WhatsApp message');
     }
   }
 }

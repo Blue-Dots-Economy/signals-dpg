@@ -72,7 +72,7 @@ vi.mock('@/config', () => ({ authConfig: mockAuthConfig }));
 const materializeSignupGuardian = vi.fn(async () => {});
 vi.mock('@/services/signup_guardian', () => ({ materializeSignupGuardian }));
 
-// Welcome email/WhatsApp for a genuinely-new user (G1). Mocked at the module
+// Welcome email for a genuinely-new user (G1). Mocked at the module
 // seam rather than by widening the `@/config` fake, because the real one reaches
 // for notification-service credentials this suite has no business knowing about.
 const sendWelcomeNotifications = vi.fn(async () => {});

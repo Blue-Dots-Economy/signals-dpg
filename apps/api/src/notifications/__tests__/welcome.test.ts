@@ -44,9 +44,10 @@ vi.mock('@/config', () => ({
 
 /**
  * The welcome EMAIL goes through the central dispatcher (#529) so its copy comes
- * from the messages file; WhatsApp still uses the raw client (a pre-approved
- * content template, not email copy). Both are mocked so this file keeps testing
- * channel selection and failure isolation, not rendering.
+ * from the messages file. It is the only channel: there is no WhatsApp (planned,
+ * not supported) or other phone welcome. The raw client's `notify` stays mocked
+ * so these tests can assert it is never called directly. This file tests channel
+ * selection and failure isolation, not rendering.
  */
 const dispatchEmail = vi.fn(async (_args: Record<string, unknown>) => ({ ok: true }));
 
@@ -60,7 +61,7 @@ const makeLog = () => ({ error: vi.fn() });
 
 const BOTH = { name: 'Asha', email: 'asha@example.org', phoneNumber: '+911234567890' };
 
-/** Channels actually attempted, in order — email via dispatcher, WhatsApp via notify. */
+/** Channels actually attempted, in order — email via dispatcher, anything else via notify. */
 const attempted = () => [
   ...dispatchEmail.mock.calls.map(() => 'email'),
   ...notify.mock.calls.map(([p]) => p.channel),
@@ -77,23 +78,21 @@ beforeEach(() => {
 });
 
 describe('channel selection', () => {
-  it('sends email and WhatsApp when the user has both identifiers', async () => {
+  it('sends only the email when the user has both identifiers', async () => {
     await sendWelcomeNotifications(BOTH, makeLog());
 
-    expect(attempted()).toEqual(['email', 'whatsapp']);
+    expect(attempted()).toEqual(['email']);
   });
 
-  it('sends only WhatsApp for a phone-only user', async () => {
-    // The case that matters after the write-path change: admin-onboarded
-    // participants legitimately have email === null.
+  it('sends nothing for a phone-only user (no phone welcome channel)', async () => {
+    // Admin-onboarded participants legitimately have email === null. WhatsApp
+    // is planned, not supported, so they get no welcome message.
     await sendWelcomeNotifications(
       { name: 'Asha', email: null, phoneNumber: '+911234567890' },
       makeLog()
     );
 
-    expect(dispatchEmail).not.toHaveBeenCalled();
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
+    expect(attempted()).toEqual([]);
   });
 
   it('sends only email for an email-only user', async () => {
@@ -144,24 +143,12 @@ describe('per-domain welcome copy', () => {
 });
 
 describe('failure isolation', () => {
-  it('still sends WhatsApp when the email send rejects', async () => {
-    dispatchEmail.mockRejectedValueOnce(new Error('smtp down'));
-    const log = makeLog();
-
-    await sendWelcomeNotifications(BOTH, log);
-
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
-    expect(log.error).toHaveBeenCalledTimes(1);
-  });
-
-  it('never throws when every channel rejects', async () => {
+  it('never throws and logs once when the email send rejects', async () => {
     dispatchEmail.mockRejectedValue(new Error('notification service down'));
-    notify.mockRejectedValue(new Error('notification service down'));
     const log = makeLog();
 
     await expect(sendWelcomeNotifications(BOTH, log)).resolves.toBeUndefined();
-    expect(log.error).toHaveBeenCalledTimes(2);
+    expect(log.error).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -182,17 +169,6 @@ describe('message content', () => {
         teamName: 'Blue Dots',
       },
     });
-
-    // WhatsApp is a pre-approved content template; the name is variable "1".
-    // It's the only `notify` call now that email goes via the dispatcher.
-    const wa = notify.mock.calls[0][0];
-    const waVars = wa.variables as {
-      contentSid: string;
-      contentVariables: Record<string, string>;
-    };
-    expect(wa.to).toBe('+911234567890');
-    expect(waVars.contentSid).toBe('HX3f2a5d7e4a18e5664124592a12a154eb');
-    expect(waVars.contentVariables['1']).toBe('Asha');
   });
 });
 
