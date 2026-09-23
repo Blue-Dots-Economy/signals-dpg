@@ -637,7 +637,7 @@ describe('afterUserCreate', () => {
     await expect(otpOptions.afterUserCreate(payload)).resolves.toBe(payload);
   });
 
-  // The inline welcome email + WhatsApp were moved out of this hook to
+  // The inline welcome email was moved out of this hook to
   // apps/api's `sendWelcomeNotifications` (invoked via the caller hook below) so
   // both the better-auth and Keycloak signup paths send the same welcome — see
   // apps/api/src/notifications/welcome.ts + welcome.test.ts for that coverage.

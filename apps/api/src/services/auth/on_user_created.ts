@@ -17,7 +17,7 @@ export interface CreatedUser {
  * parked-guardian materialisation or a welcome message must never fail signup:
  *
  *  1. Materialize a verified pre-auth signup-guardian capture onto the new id.
- *  2. Send the welcome email/WhatsApp, with role-correct copy resolved from the
+ *  2. Send the welcome email, with role-correct copy resolved from the
  *     parked signup domain (seeker vs provider).
  */
 export async function runAfterUserCreate(user: CreatedUser): Promise<void> {

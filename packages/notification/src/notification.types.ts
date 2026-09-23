@@ -11,7 +11,7 @@ export type NotificationPriority = 'realtime' | 'other';
  */
 export interface NotifyRequest<TVariables extends Record<string, unknown>> {
   /**
-   * Notification channel/provider (e.g. email, sms, whatsapp).
+   * Notification channel/provider (e.g. email, sms).
    *
    * ⚠️ Do NOT hardcode allowed values.
    */
@@ -25,7 +25,7 @@ export interface NotifyRequest<TVariables extends Record<string, unknown>> {
 
   /**
    * Recipient identifier.
-   * (email, phone number, whatsapp id, etc.)
+   * (email address, phone number, etc.)
    */
   to: string;
 
