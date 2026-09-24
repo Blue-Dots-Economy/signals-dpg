@@ -163,6 +163,10 @@ export const SsoSecretsSchema = z.object({
   SSO_OIDC_SIGNING_KEY: z.string().optional(),
   // The client Keycloak's `signals-sso` identity provider authenticates as.
   SSO_OIDC_CLIENT_ID: z.string().default('signals-sso'),
+  // Alias of that identity provider in the Keycloak realm — the `kc_idp_hint`
+  // value and part of the broker redirect URI. Must equal the init script's
+  // SSO_OIDC_IDP_ALIAS (infra/keycloak/init/apply-sso-idp.sh).
+  SSO_OIDC_IDP_ALIAS: z.string().min(1).default('signals-sso'),
   SSO_OIDC_CLIENT_SECRET: z.string().optional(),
   // NCS partner integration. Client ID + secret are issued by NCS per partner.
   SSO_NCS_BASE_URL: z.string().optional(),

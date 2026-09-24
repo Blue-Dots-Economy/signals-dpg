@@ -177,7 +177,7 @@ export const ssoConfig = {
     client_id: sso.SSO_OIDC_CLIENT_ID,
     client_secret: sso.SSO_OIDC_CLIENT_SECRET ?? '',
     /** Keycloak identity-provider alias; also the `kc_idp_hint` value. */
-    kc_alias: 'signals-sso',
+    kc_alias: sso.SSO_OIDC_IDP_ALIAS,
   },
   ncs: {
     base_url: (sso.SSO_NCS_BASE_URL ?? '').replace(/\/$/, ''),

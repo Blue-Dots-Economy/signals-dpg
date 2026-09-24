@@ -1,5 +1,7 @@
 # NCS demo portal
 
+> Enabling SSO on your local Signals first? See `../NCS_SSO_SETUP.md`.
+
 A local stand-in for the National Career Service portal, for testing Bluedots
 partner SSO (`docs/operations/partner-sso.md`) without access to NCS. It is
 both halves of NCS:

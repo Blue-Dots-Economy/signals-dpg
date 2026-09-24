@@ -249,6 +249,8 @@ services:
       # the API's; Keycloak calls /token and /jwks on the host, not its own localhost.
       SSO_API_INTERNAL_BASE_URL: ${SSO_API_INTERNAL_BASE_URL:-http://host.docker.internal:2742}
       SSO_OIDC_CLIENT_SECRET: ${SSO_OIDC_CLIENT_SECRET:-sso-not-configured}
+      SSO_OIDC_CLIENT_ID: ${SSO_OIDC_CLIENT_ID:-signals-sso}
+      SSO_OIDC_IDP_ALIAS: ${SSO_OIDC_IDP_ALIAS:-signals-sso}
       KC_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
@@ -336,6 +338,21 @@ services:
       # by default: service auth stays on x-api-key until named here. Each id
       # must match the organization.slug seeded by db:seed:services.
       KEYCLOAK_SERVICE_CLIENT_IDS: ${KEYCLOAK_SERVICE_CLIENT_IDS:-}
+      # ── Partner-portal SSO (NCS) — docs/operations/partner-sso.md ───────
+      # Off while SSO_PROVIDERS is empty (every /sso route answers 404). Needs
+      # AUTH_PROVIDER=keycloak and the `keycloak` profile. Defaults are safe
+      # values, not blanks: an empty SSO_NCS_TIMEOUT_MS or SSO_NCS_MAPPING
+      # would fail the API's config validation even with SSO off.
+      SSO_PROVIDERS: ${SSO_PROVIDERS:-}
+      SSO_OIDC_CLIENT_ID: ${SSO_OIDC_CLIENT_ID:-signals-sso}
+      SSO_OIDC_IDP_ALIAS: ${SSO_OIDC_IDP_ALIAS:-signals-sso}
+      SSO_OIDC_CLIENT_SECRET: ${SSO_OIDC_CLIENT_SECRET:-}
+      SSO_OIDC_SIGNING_KEY: ${SSO_OIDC_SIGNING_KEY:-}
+      SSO_NCS_BASE_URL: ${SSO_NCS_BASE_URL:-}
+      SSO_NCS_CLIENT_ID: ${SSO_NCS_CLIENT_ID:-}
+      SSO_NCS_CLIENT_SECRET: ${SSO_NCS_CLIENT_SECRET:-}
+      SSO_NCS_TIMEOUT_MS: ${SSO_NCS_TIMEOUT_MS:-5000}
+      SSO_NCS_MAPPING: ${SSO_NCS_MAPPING:-{}}
     depends_on:
       postgres:
         condition: service_healthy

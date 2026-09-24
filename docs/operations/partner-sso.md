@@ -18,6 +18,8 @@ id_token for the verified user, creates or links its own user, and finishes an
 ordinary Keycloak login into `/session/callback`. The callback creates the local
 user (even on a gated instance) and the draft profile.
 
+**Running it locally on an existing Signals setup:** `local-setup/NCS_SSO_SETUP.md`.
+
 ## What NCS gets from us
 
 - Redirect URL, per instance: `https://<signals-api-host>/api/v1/auth/sso/login`
@@ -39,6 +41,7 @@ provider is missing a secret.
 | `SSO_PROVIDERS` | `ncs` |
 | `SSO_OIDC_SIGNING_KEY` | EC P-256 private key, PKCS#8 PEM. **Whoever holds it can log in as any SSO user** — secret store only. `openssl ecparam -name prime256v1 -genkey -noout \| openssl pkcs8 -topk8 -nocrypt` |
 | `SSO_OIDC_CLIENT_ID` | `signals-sso` (default) |
+| `SSO_OIDC_IDP_ALIAS` | `signals-sso` (default) — the Keycloak identity-provider alias; must equal the init script's |
 | `SSO_OIDC_CLIENT_SECRET` | ≥ 32 chars; must equal the Keycloak identity provider's client secret. `openssl rand -hex 32` |
 | `SSO_NCS_BASE_URL` | staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod `https://betacloud.ncs.gov.in` |
 | `SSO_NCS_CLIENT_ID` / `SSO_NCS_CLIENT_SECRET` | issued by NCS |
@@ -82,6 +85,7 @@ internal API base), its five mappers, the no-screens first-login flow, and puts
 | `API_BASE_URL` | browser-facing API base — the provider's issuer and authorize URL |
 | `SSO_API_INTERNAL_BASE_URL` | where Keycloak itself reaches the API for `/token` and `/jwks` (cluster-internal) |
 | `SSO_OIDC_CLIENT_SECRET` | same value as the API's |
+| `SSO_OIDC_CLIENT_ID` / `SSO_OIDC_IDP_ALIAS` | defaults `signals-sso`; must match the API's |
 
 **Ingress:** `/api/v1/auth/sso/oidc/token` is only ever called by Keycloak.
 Block it from the public internet and let Keycloak use the internal URL.

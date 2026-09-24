@@ -31,7 +31,7 @@ ADMIN_PASS="${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
 : "${SSO_OIDC_CLIENT_SECRET:=sso-not-configured}"
 : "${SSO_OIDC_CLIENT_ID:=signals-sso}"
 
-ALIAS="signals-sso"
+ALIAS="${SSO_OIDC_IDP_ALIAS:-signals-sso}"   # = the API's SSO_OIDC_IDP_ALIAS
 BROWSER_FLOW="${BROWSER_FLOW:-bluedots-otp-browser}"
 A="${KC_URL}/admin/realms/${REALM}"
 
