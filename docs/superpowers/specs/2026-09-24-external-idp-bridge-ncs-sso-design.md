@@ -111,6 +111,62 @@ Base URLs: staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod
 
 The user sees none of steps 3–13.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User (browser)
+    participant N as NCS portal
+    participant E as Signals API<br/>external/:provider/login
+    participant R as Redis
+    participant K as Keycloak
+    participant B as Signals API<br/>bridge (OIDC)
+    participant NA as NCS API<br/>validate-token
+    participant C as Signals API<br/>session/callback
+    participant DB as Postgres
+    participant UI as Signals UI
+
+    U->>N: Log in on NCS
+    U->>N: Click "Bluedots"
+    N-->>U: 302 ?userName=JWT&sig&expiry&featureKey
+    U->>E: GET /api/v1/auth/external/ncs/login
+    E->>E: parseEntry (shape only, no trust)
+    E->>R: SET extentry:<handle> (TTL 60s)
+    E->>R: SET oidcflow:<state> {PKCE, nonce, external.handle}
+    E-->>U: 302 Keycloak /auth?kc_idp_hint=signals-bridge<br/>Set-Cookie ext_h, oidc_flow
+    U->>K: GET /auth
+    K-->>U: 302 bridge /authorize?state&nonce
+    U->>B: GET /bridge/authorize (cookie ext_h)
+    B->>R: GETDEL extentry:<handle>
+    B->>B: verify JWT HS256 (Client Secret), decrypt sig, expiry
+    B->>R: SET NX replay:<sha256(JWT)>
+    B->>NA: POST validate-token {token, HMAC, clientId}
+    NA-->>B: userId, fullName, mobileNumber, email, role, status
+    B->>K: Admin REST: find user by phone (+91…)
+    K-->>B: existing user? / federated links
+    alt refused (inactive, unverified phone, link conflict, NCS down)
+        B-->>U: 302 UI /auth/external-error?reason=…
+    else ok
+        B->>R: SET bridgecode:<code> {claims, nonce} (TTL 60s)
+        B->>R: SET extid:<handle> {NCS identity} (TTL 5m)
+        B-->>U: 302 Keycloak broker endpoint?code&state
+        U->>K: GET broker endpoint
+        K->>B: POST /bridge/token (client secret)
+        B-->>K: id_token {sub: ncs:<id>, preferred_username, phone…}
+        K->>B: GET /bridge/jwks
+        K->>K: first-broker-login: create or auto-link user
+        K-->>U: 302 /session/callback?code&state
+        U->>C: GET /session/callback (cookie oidc_flow)
+        C->>K: exchange code (PKCE)
+        K-->>C: access / refresh / id tokens
+        C->>DB: provisioning (gated-signup bypass for bridge logins)
+        C->>R: GETDEL extid:<handle>
+        C->>DB: profile bootstrap → draft profile (skip if exists)
+        C->>R: SET session:<sid>
+        C-->>U: 302 UI (route from featureKey)<br/>Set-Cookie sid
+        U->>UI: Logged in → My Profiles shows NCS draft
+    end
+```
+
 ## 5. Bridge id_token claims
 
 | Claim | Value |
