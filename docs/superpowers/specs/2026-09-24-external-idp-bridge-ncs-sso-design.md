@@ -111,6 +111,38 @@ Base URLs: staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod
 
 The user sees none of steps 3–13.
 
+### 4.1 Overview
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant N as NCS
+    participant S as Signals SSO API
+    participant K as Keycloak (config only)
+    participant UI as Signals UI
+
+    U->>N: Login + click Bluedots
+    N-->>U: redirect with userName, sig, expiry
+    U->>S: /external/ncs/login
+    S-->>U: redirect to Keycloak (kc_idp_hint=signals-bridge)
+    U->>K: /auth
+    K-->>U: redirect to Signals bridge /authorize
+    U->>S: /bridge/authorize
+    S->>N: validate-token (HMAC)
+    N-->>S: user details
+    S-->>U: redirect to Keycloak with code
+    U->>K: broker endpoint
+    K->>S: /bridge/token → id_token
+    K->>K: create/link user
+    K-->>U: redirect to /session/callback
+    U->>S: /session/callback
+    S->>S: provision user + draft profile
+    S-->>U: set sid cookie → redirect
+    U->>UI: logged in, My Profiles
+```
+
+### 4.2 Detailed
+
 ```mermaid
 sequenceDiagram
     autonumber
