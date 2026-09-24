@@ -1,6 +1,9 @@
 import {
   assertCreateTestOtpSafe,
   assertKeycloakConfigured,
+  assertSsoConfigured,
+  parseSsoNcsMapping,
+  parseSsoProviders,
   parseKeycloakAcceptedClientIds,
   parseServedDomains,
   parseLoginChannels,
@@ -20,6 +23,7 @@ export const {
   schemaRegistry,
   geocoding,
   signalsSearch,
+  sso,
 } = loadEnv();
 
 // Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
@@ -27,6 +31,9 @@ assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
 
 // Startup guard: don't boot into a Keycloak mode we aren't configured for.
 assertKeycloakConfigured(auth.AUTH_PROVIDER, keycloak);
+
+// Startup guard: an enabled SSO provider must have its secrets and Keycloak.
+assertSsoConfigured(auth.AUTH_PROVIDER, sso);
 
 export const apiConfig = {
   domain: api.API_DOMAIN,
@@ -151,6 +158,35 @@ export const keycloakConfig = {
   ),
   jwks_cache_max_age_ms: keycloak.KEYCLOAK_JWKS_CACHE_MAX_AGE_MS,
   clock_tolerance_seconds: keycloak.KEYCLOAK_CLOCK_TOLERANCE_SECONDS,
+};
+
+const ssoProviders = parseSsoProviders(sso.SSO_PROVIDERS);
+
+/**
+ * Partner-portal SSO (docs/superpowers/specs/2026-09-24-external-idp-bridge-ncs-sso-design.md).
+ * `enabled` false ⇒ every /api/v1/auth/sso route answers 404.
+ * assertSsoConfigured above has already rejected an enabled provider with
+ * missing secrets, so the non-null assertions below hold whenever it is on.
+ */
+export const ssoConfig = {
+  enabled: ssoProviders.length > 0,
+  providers: ssoProviders,
+  oidc: {
+    signing_key_pem: sso.SSO_OIDC_SIGNING_KEY ?? '',
+    client_id: sso.SSO_OIDC_CLIENT_ID,
+    client_secret: sso.SSO_OIDC_CLIENT_SECRET ?? '',
+    /** Keycloak identity-provider alias; also the `kc_idp_hint` value. */
+    kc_alias: 'signals-sso',
+  },
+  ncs: {
+    base_url: (sso.SSO_NCS_BASE_URL ?? '').replace(/\/$/, ''),
+    client_id: sso.SSO_NCS_CLIENT_ID ?? '',
+    client_secret: sso.SSO_NCS_CLIENT_SECRET ?? '',
+    timeout_ms: sso.SSO_NCS_TIMEOUT_MS,
+    mapping: ssoProviders.includes('ncs')
+      ? parseSsoNcsMapping(sso.SSO_NCS_MAPPING)
+      : parseSsoNcsMapping('{}'),
+  },
 };
 
 /**
