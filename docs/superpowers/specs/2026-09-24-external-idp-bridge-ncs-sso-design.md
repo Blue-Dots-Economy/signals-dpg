@@ -179,7 +179,7 @@ microseconds and never reaches NCS or Keycloak.
  4.   SET sso:entry:<sha256(handle)> = verified identity + claims (TTL 5 min)
  5.   start the normal login flow (state, PKCE, nonce; flow state carries the
       handle); clear any existing sid; set httpOnly cookies sso_h + oidc_flow
-      → 302 Keycloak /auth?client_id=signals-ui&kc_idp_hint=signals-sso&prompt=login
+      → 302 Keycloak /auth?client_id=signals-ui&kc_idp_hint=signals-sso
  6. Keycloak → 302 /api/v1/auth/sso/oidc/authorize?client_id&redirect_uri&state&nonce
  7. /sso/oidc/authorize: client_id + exact redirect_uri check; read sso_h cookie;
       GET sso:entry:<hash>; SET sso:code:<sha256(code)> → handle + nonce (TTL 60s)
@@ -259,7 +259,7 @@ sequenceDiagram
     else verified
         S->>R: SET sso:entry:<handle> (identity, TTL 5m)
         S->>R: SET oidcflow:<state> {PKCE, nonce, sso handle}
-        S-->>U: 302 Keycloak /auth?kc_idp_hint=signals-sso&prompt=login<br/>Set-Cookie sso_h, oidc_flow
+        S-->>U: 302 Keycloak /auth?kc_idp_hint=signals-sso<br/>Set-Cookie sso_h, oidc_flow
         U->>K: GET /auth
         K-->>U: 302 /sso/oidc/authorize
         U->>S: GET /sso/oidc/authorize (cookie sso_h)
@@ -345,19 +345,25 @@ Rules, evaluated by the bridge in order:
 
 ## 7. Keycloak realm (one-time)
 
-- Identity provider `signals-sso` (OIDC): authorization/token/JWKS URLs on
-  the API; client auth `client_secret_post`; `trustEmail=false`;
-  `syncMode=IMPORT`; `hideOnLoginPage=true`.
-- Mappers: `sso_provider`, `ext_role`, `ext_email`, `phone_number`,
-  `phone_number_verified`, `name` → user attributes; `sso_provider` also mapped
-  into access/id tokens for Signals.
-- First-broker-login flow `signals-sso-first-login`: *Detect existing
-  broker user* → *Automatically set existing user*; review-profile **off**; no
-  email-verification or "confirm link" screens.
-- Brokered users get realm role `signals_participant` (hardcoded-role mapper),
-  required by `KEYCLOAK_REQUIRED_REALM_ROLES`.
-- Declare the new attributes in the realm user profile (unmanaged attributes
-  are dropped).
+Shipped in `infra/keycloak/realms/bluedots-realm.json` and, for realms that
+already exist, `infra/keycloak/init/apply-sso-idp.sh` (idempotent):
+
+- Identity provider `signals-sso` (OIDC): issuer + authorize URL on the public
+  API base, token + JWKS URLs on the internal base; `client_secret_post`;
+  `trustEmail=false`; `syncMode=IMPORT`; `disableUserInfo=true`; hidden on the
+  login page.
+- Mappers: `oidc-username-idp-mapper` (`${CLAIM.preferred_username}`),
+  `oidc-user-attribute-idp-mapper` for `phoneNumber`, `phoneNumberVerified`,
+  `sso_provider`, and `oidc-hardcoded-role-idp-mapper` → `signals_participant`
+  (required by `KEYCLOAK_REQUIRED_REALM_ROLES`).
+- First-broker-login flow `signals-sso-first-login`: *Create User If Unique*
+  and *Automatically Set Existing User*, both ALTERNATIVE — Keycloak's
+  documented auto-link shape. **No** *Detect Existing Broker User* step: it
+  returns `attempted` once create-if-unique has recorded the existing account,
+  which fails a REQUIRED step (found in local testing).
+- `identity-provider-redirector` is the **first** step of `bluedots-otp-browser`,
+  before `auth-cookie`, so a leftover SSO session in the browser can never log
+  in its previous owner instead of the partner user.
 
 ## 8. Signals API changes
 
@@ -429,7 +435,7 @@ NCS), so protection is verification of the link plus limiting abuse.
 | Flooding us or NCS | cheapest checks first (length → JWT → sig) before any Redis write or NCS call; `public_rate_limit` per IP; concurrency cap + short circuit-breaker on NCS |
 | Token leaking | never logged; ingress logs this path without query string; `Referrer-Policy: no-referrer`, `Cache-Control: no-store`; token never forwarded — only an opaque handle in an httpOnly `Secure` `SameSite=Lax` cookie |
 | Open redirect | `featureKey` → allowlisted route map; app origin from config; `/sso/oidc/authorize` requires exact `redirect_uri` (else 400, no redirect) |
-| Wrong account | existing `sid` cleared, `prompt=login`; link only on verified phone; never on email |
+| Wrong account | existing `sid` and its Keycloak session ended server-side; redirector before `auth-cookie`; callback refuses a session whose `preferred_username` differs from the one the SSO API vouched for; link only on verified phone; never on email |
 | Forged id_tokens | `/sso/oidc/token` reachable only by Keycloak (internal URL, blocked at ingress), client secret compared in constant time, one-time 60 s codes bound to `redirect_uri`; signing key in the secret store with `kid` rotation |
 
 Fail closed everywhere: NCS down / timeout / FAILURE / `status != ACTIVE` →

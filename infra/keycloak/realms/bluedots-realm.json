@@ -91,7 +91,7 @@
     },
     {
       "alias": "signals-sso-first-login",
-      "description": "Partner SSO first login: create the user, or auto-link to the account the Signals SSO API named in preferred_username. No screens.",
+      "description": "Partner SSO first login: create the user, or link to the existing account whose username the Signals SSO API asserted. No screens.",
       "providerId": "basic-flow",
       "topLevel": true,
       "builtIn": false,
@@ -103,30 +103,9 @@
           "priority": 10
         },
         {
-          "authenticatorFlow": true,
-          "requirement": "ALTERNATIVE",
-          "priority": 20,
-          "flowAlias": "signals-sso-auto-link"
-        }
-      ]
-    },
-    {
-      "alias": "signals-sso-auto-link",
-      "description": "Link to the existing account whose username the SSO API asserted.",
-      "providerId": "basic-flow",
-      "topLevel": false,
-      "builtIn": false,
-      "authenticationExecutions": [
-        {
-          "authenticator": "idp-detect-existing-broker-user",
-          "authenticatorFlow": false,
-          "requirement": "REQUIRED",
-          "priority": 10
-        },
-        {
           "authenticator": "idp-auto-link",
           "authenticatorFlow": false,
-          "requirement": "REQUIRED",
+          "requirement": "ALTERNATIVE",
           "priority": 20
         }
       ]
@@ -450,7 +429,7 @@
     {
       "name": "signals_participant role",
       "identityProviderAlias": "signals-sso",
-      "identityProviderMapper": "hardcoded-role-idp-mapper",
+      "identityProviderMapper": "oidc-hardcoded-role-idp-mapper",
       "config": {
         "syncMode": "INHERIT",
         "role": "signals_participant"

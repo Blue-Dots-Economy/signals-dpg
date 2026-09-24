@@ -8,7 +8,7 @@
 # boot, and it re-syncs the provider's URLs and secret each time.
 #
 # What it sets up (see docs/superpowers/specs/2026-09-24-external-idp-bridge-ncs-sso-design.md §7):
-#   1. flow `signals-sso-first-login`: create the user, or auto-link to the
+#   1. flow `signals-sso-first-login`: create the user, or link to the
 #      account the Signals SSO API named in `preferred_username` — no screens
 #   2. `identity-provider-redirector` as the FIRST step of the browser flow, so
 #      `kc_idp_hint=signals-sso` goes straight to the SSO API. First, not after
@@ -64,20 +64,32 @@ set_requirement() { # set_requirement FLOW PROVIDER_OR_DISPLAY REQUIREMENT
 }
 
 # ── 1. first-login flow ─────────────────────────────────────────────────────
+# Keycloak's documented auto-link shape: "Create User If Unique" and
+# "Automatically Set Existing User", both ALTERNATIVE. No "Detect Existing
+# Broker User" step: once create-if-unique has recorded the existing account it
+# returns `attempted`, which fails a REQUIRED step and the whole login.
 if [ "$(status /authentication/flows/signals-sso-first-login/executions)" = "404" ]; then
-  api POST /authentication/flows '{"alias":"signals-sso-first-login","providerId":"basic-flow","topLevel":true,"builtIn":false,"description":"Partner SSO first login: create the user, or auto-link to the account the Signals SSO API named. No screens."}' >/dev/null
-  api POST /authentication/flows/signals-sso-first-login/executions/execution '{"provider":"idp-create-user-if-unique"}' >/dev/null
-  api POST /authentication/flows/signals-sso-first-login/executions/flow '{"alias":"signals-sso-auto-link","type":"basic-flow","provider":"registration-page-form","description":"Link to the existing account the SSO API asserted."}' >/dev/null
-  api POST /authentication/flows/signals-sso-auto-link/executions/execution '{"provider":"idp-detect-existing-broker-user"}' >/dev/null
-  api POST /authentication/flows/signals-sso-auto-link/executions/execution '{"provider":"idp-auto-link"}' >/dev/null
+  api POST /authentication/flows '{"alias":"signals-sso-first-login","providerId":"basic-flow","topLevel":true,"builtIn":false,"description":"Partner SSO first login: create the user, or link to the existing account whose username the Signals SSO API asserted. No screens."}' >/dev/null
   echo "[kc-sso] created flow signals-sso-first-login"
 else
   echo "[kc-sso] flow signals-sso-first-login already present"
 fi
-set_requirement signals-sso-first-login idp-create-user-if-unique ALTERNATIVE
-set_requirement signals-sso-first-login signals-sso-auto-link ALTERNATIVE
-set_requirement signals-sso-auto-link idp-detect-existing-broker-user REQUIRED
-set_requirement signals-sso-auto-link idp-auto-link REQUIRED
+# Migrate the earlier shape (a detect + auto-link sub-flow) if it is there.
+old_sub=$(api GET /authentication/flows/signals-sso-first-login/executions \
+  | jq -r '.[] | select(.displayName == "signals-sso-auto-link" and .level == 0) | .id')
+if [ -n "$old_sub" ]; then
+  api DELETE "/authentication/executions/${old_sub}" >/dev/null
+  echo "[kc-sso] removed the old signals-sso-auto-link sub-flow"
+fi
+for provider in idp-create-user-if-unique idp-auto-link; do
+  present=$(api GET /authentication/flows/signals-sso-first-login/executions \
+    | jq --arg p "$provider" '[.[] | select(.providerId == $p and .level == 0)] | length')
+  if [ "$present" -eq 0 ]; then
+    api POST /authentication/flows/signals-sso-first-login/executions/execution \
+      "{\"provider\":\"${provider}\"}" >/dev/null
+  fi
+  set_requirement signals-sso-first-login "$provider" ALTERNATIVE
+done
 
 # ── 2. redirector first in the browser flow ─────────────────────────────────
 has_redirector=$(api GET "/authentication/flows/${BROWSER_FLOW}/executions" \
@@ -134,9 +146,16 @@ fi
 # ── 4. mappers ──────────────────────────────────────────────────────────────
 ensure_mapper() { # ensure_mapper NAME TYPE CONFIG_JSON
   name="$1"; type="$2"; config="$3"
-  count=$(api GET "/identity-provider/instances/${ALIAS}/mappers" \
-    | jq --arg n "$name" '[.[] | select(.name == $n)] | length')
-  if [ "$count" -gt 0 ]; then return 0; fi
+  existing=$(api GET "/identity-provider/instances/${ALIAS}/mappers" \
+    | jq -c --arg n "$name" '[.[] | select(.name == $n)][0]')
+  if [ "$existing" != "null" ]; then
+    # Same name but a different mapper type is a broken mapper (Keycloak fails
+    # every broker login with a NullPointerException on an unknown type), so
+    # replace it rather than skipping it.
+    [ "$(printf '%s' "$existing" | jq -r '.identityProviderMapper')" = "$type" ] && return 0
+    api DELETE "/identity-provider/instances/${ALIAS}/mappers/$(printf '%s' "$existing" | jq -r '.id')" >/dev/null
+    echo "[kc-sso] mapper ${name} had the wrong type — replacing"
+  fi
   api POST "/identity-provider/instances/${ALIAS}/mappers" "$(jq -n \
     --arg n "$name" --arg t "$type" --arg a "$ALIAS" --argjson c "$config" \
     '{name: $n, identityProviderAlias: $a, identityProviderMapper: $t, config: $c}')" >/dev/null
@@ -151,7 +170,7 @@ ensure_mapper phoneNumberVerified oidc-user-attribute-idp-mapper \
   '{"syncMode":"IMPORT","claim":"phone_number_verified","user.attribute":"phoneNumberVerified"}'
 ensure_mapper sso_provider oidc-user-attribute-idp-mapper \
   '{"syncMode":"IMPORT","claim":"sso_provider","user.attribute":"sso_provider"}'
-ensure_mapper "signals_participant role" hardcoded-role-idp-mapper \
+ensure_mapper "signals_participant role" oidc-hardcoded-role-idp-mapper \
   '{"syncMode":"INHERIT","role":"signals_participant"}'
 
 echo "[kc-sso] signals-sso identity provider ready."
