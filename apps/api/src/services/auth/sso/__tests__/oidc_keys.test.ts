@@ -44,4 +44,17 @@ describe('createOidcKeys', () => {
   it('rejects something that is not a private key', () => {
     expect(() => createOidcKeys('not a pem')).toThrow();
   });
+
+  it('accepts a PEM whose line breaks arrived as literal \\n', async () => {
+    const escaped = pem('P-256').trim().replaceAll('\n', '\\n');
+    expect(escaped).not.toContain('\n');
+    const keys = createOidcKeys(escaped);
+    expect((await keys.jwks()).keys).toHaveLength(1);
+  });
+
+  it('rejects an unreadable key with a message naming the variable, not the key', () => {
+    expect(() => createOidcKeys('-----BEGIN PRIVATE KEY-----\nnot-a-key\n-----END PRIVATE KEY-----')).toThrow(
+      /SSO_OIDC_SIGNING_KEY is not a readable private key/
+    );
+  });
 });

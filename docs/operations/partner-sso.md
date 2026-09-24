@@ -21,7 +21,10 @@ user (even on a gated instance) and the draft profile.
 ## What NCS gets from us
 
 - Redirect URL, per instance: `https://<signals-api-host>/api/v1/auth/sso/login`
-  (the URL names no partner — the instance's `SSO_PROVIDERS` decides).
+  (the URL names no partner — the instance's `SSO_PROVIDERS` decides). Use the
+  `API_BASE_URL` host. A link that reaches the API under another hostname is
+  redirected there first (the one-time `sso_h` cookie must be on the host
+  Keycloak sends the browser back to), so it still works, at one extra hop.
 - Platform name and description.
 
 ## Signals API configuration
@@ -81,9 +84,20 @@ internal API base), its five mappers, the no-screens first-login flow, and puts
 | `SSO_OIDC_CLIENT_SECRET` | same value as the API's |
 
 **Ingress:** `/api/v1/auth/sso/oidc/token` is only ever called by Keycloak.
-Block it from the public internet and let Keycloak use the internal URL. Also
-log `/api/v1/auth/sso/login` **without its query string** — it carries the
-partner token.
+Block it from the public internet and let Keycloak use the internal URL.
+
+**Logs:** the API's request log drops the query string of every
+`/api/v1/auth/*` route (`utils/log_redaction.ts`) — the partner token, OIDC
+`code` and `state` never reach it. An ingress or proxy that writes its own
+access log must do the same for `/api/v1/auth/sso/login`.
+
+**Signing key:** parsed at boot; a malformed `SSO_OIDC_SIGNING_KEY` (wrong
+curve, broken PEM) stops the API from starting. A PEM whose line breaks arrive
+as literal `\n` is accepted.
+
+**Rate limit:** `/sso/login` allows 120 requests per minute per IP (partner
+users often share an IP). Over it, the browser lands on the error page with
+`provider-unavailable`, not a JSON 429.
 
 ## Failure reasons
 
@@ -94,11 +108,15 @@ the same code (never the token):
 |---|---|
 | `link-invalid` | malformed, bad signature, or NCS said no |
 | `link-expired` | past the 5-minute lifetime |
-| `link-reused` | this exact link was already used |
-| `provider-unavailable` | NCS (or Keycloak Admin) down / slow — retryable |
+| `link-reused` | this exact link was already used. A link is only marked used once account linking succeeded, so an NCS or Keycloak outage never burns it |
+| `provider-unavailable` | NCS (or Keycloak Admin) down / slow, or rate-limited — retryable with the same link |
 | `account-inactive` | NCS account not `ACTIVE` |
-| `phone-unverified` | an existing Bluedots account holds the number, NCS hasn't verified it |
+| `phone-unverified` | NCS hasn't verified the number — no account is created on it or linked to it |
 | `link-conflict` | the number belongs to another NCS user, or to several accounts |
+
+**Account linking order:** an account already linked to this NCS user (the
+Keycloak `signals-sso` link) always wins, so a returning user whose NCS number
+changed keeps their account. Only then is the phone number looked up.
 | `session-expired` | the login was interrupted, or Keycloak logged in the wrong account |
 
 ## Testing locally (what was verified on 2026-09-24)

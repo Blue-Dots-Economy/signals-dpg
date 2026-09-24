@@ -194,6 +194,18 @@ describe('POST /token', () => {
     expect(res.statusCode).toBe(200);
   });
 
+  it('answers a malformed Basic header with 401 invalid_client, not a 500', async () => {
+    const basic = Buffer.from('signals-sso:%zz').toString('base64');
+    const req = tokenRequest({ client_id: '', client_secret: '' });
+    const res = await inject({
+      ...req,
+      headers: { ...req.headers, authorization: `Basic ${basic}` },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe('invalid_client');
+    expect(takeCode).not.toHaveBeenCalled();
+  });
+
   it('refuses a wrong client secret before touching the code', async () => {
     const res = await inject(tokenRequest({ client_secret: 'wrong' }));
     expect(res.statusCode).toBe(401);

@@ -6,8 +6,14 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 vi.mock('@api/db/secondary/redis', () => ({ redis: {} }));
 vi.mock('@/utils/keycloak_token', () => ({ verifyKeycloakToken: vi.fn() }));
 vi.mock('@api/plugins/auth/resolve_session', () => ({ resolveHumanSession: vi.fn() }));
+// Captures the onLimited handler /sso/login registers, so a test can drive it.
+const rateLimit = vi.hoisted(() => ({ onLimited: undefined as unknown, max: 0 }));
 vi.mock('@/middleware/public_rate_limit', () => ({
-  public_rate_limit: () => async () => undefined,
+  public_rate_limit: (_name: string, max: number, _win: number, onLimited: unknown) => {
+    rateLimit.max = max;
+    rateLimit.onLimited = onLimited;
+    return async () => undefined;
+  },
 }));
 
 const mockSso = { enabled: true, oidc: { kc_alias: 'signals-sso' } };
@@ -26,6 +32,7 @@ vi.mock('@/services/auth/oidc_flow_state', async (orig) => ({
 }));
 
 const verify = vi.fn();
+const claim = vi.fn();
 const provider = { id: 'ncs', appOrigin: 'https://app.example.org', verify };
 const getActiveSsoProvider = vi.fn(() => provider as unknown);
 vi.mock('@/services/auth/sso/registry', () => ({
@@ -62,7 +69,11 @@ async function inject(opts: InjectOptions) {
   app.setSerializerCompiler(serializerCompiler);
   await app.register(cookie);
   await app.register(auth_sso_login, { prefix: '/api/v1/auth/sso' });
-  const res = await app.inject(opts);
+  // Default to the canonical API host; a test that wants another host sets it.
+  const res = await app.inject({
+    ...opts,
+    headers: { host: 'api.example.org', ...(opts.headers ?? {}) },
+  });
   await app.close();
   return res;
 }
@@ -73,9 +84,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockSso.enabled = true;
   mockAuth.keycloak_enabled = true;
+  claim.mockResolvedValue(true);
   verify.mockResolvedValue({
     ok: true,
-    value: { identity: IDENTITY, returnTo: '/discover', appOrigin: 'https://app.example.org' },
+    value: {
+      identity: IDENTITY,
+      returnTo: '/discover',
+      appOrigin: 'https://app.example.org',
+      claim,
+    },
   });
   resolveAccountLink.mockResolvedValue({ ok: true, value: { preferredUsername: '+919730862967' } });
 });
@@ -143,6 +160,55 @@ describe('GET /api/v1/auth/sso/login', () => {
   it('leaves a browser with no session alone', async () => {
     await inject({ method: 'GET', url: LOGIN });
     expect(endBrowserSessionEverywhere).not.toHaveBeenCalled();
+  });
+
+  it('claims the link only after the account link succeeded', async () => {
+    await inject({ method: 'GET', url: LOGIN });
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(resolveAccountLink.mock.invocationCallOrder[0]).toBeLessThan(
+      claim.mock.invocationCallOrder[0] as number
+    );
+  });
+
+  it('does not burn the link when the account lookup fails (retryable)', async () => {
+    resolveAccountLink.mockResolvedValue({ ok: false, reason: 'provider-unavailable' });
+    const res = await inject({ method: 'GET', url: LOGIN });
+    expect(res.headers.location).toBe(
+      'https://app.example.org/auth/sso/error?reason=provider-unavailable'
+    );
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it('refuses a reused link after linking, before any session work', async () => {
+    claim.mockResolvedValue(false);
+    const res = await inject({ method: 'GET', url: LOGIN, headers: { cookie: 'sid=old-session' } });
+    expect(res.headers.location).toBe('https://app.example.org/auth/sso/error?reason=link-reused');
+    expect(saveEntry).not.toHaveBeenCalled();
+    expect(endBrowserSessionEverywhere).not.toHaveBeenCalled();
+  });
+
+  it('moves a link that arrived on another host to the canonical API host, query intact', async () => {
+    const res = await inject({ method: 'GET', url: LOGIN, headers: { host: 'portal.example.org' } });
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe(`https://api.example.org${LOGIN}`);
+    expect(verify).not.toHaveBeenCalled();
+    expect(saveEntry).not.toHaveBeenCalled();
+  });
+
+  it('sends a rate-limited browser to the error page, not a JSON 429', async () => {
+    await inject({ method: 'GET', url: LOGIN }); // registers the route
+    expect(rateLimit.max).toBeGreaterThanOrEqual(100);
+    const onLimited = rateLimit.onLimited as (req: unknown, reply: unknown) => unknown;
+    const reply = {
+      header: vi.fn().mockReturnThis(),
+      redirect: vi.fn((url: string) => url),
+    };
+    const out = onLimited(
+      { protocol: 'https', host: 'api.example.org', headers: {} },
+      reply
+    );
+    expect(out).toBe('https://app.example.org/auth/sso/error?reason=provider-unavailable');
+    expect(reply.header).toHaveBeenCalledWith('Cache-Control', 'no-store');
   });
 
   it('404s when SSO is off or the instance is not on Keycloak', async () => {

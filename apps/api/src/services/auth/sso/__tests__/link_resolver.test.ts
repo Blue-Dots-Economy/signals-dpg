@@ -16,6 +16,7 @@ const IDENTITY: SsoIdentity = {
 };
 
 const admin = {
+  findByIdpLink: vi.fn(),
   findByPhone: vi.fn(),
   federatedIdentities: vi.fn(),
 };
@@ -25,6 +26,7 @@ const resolve = (identity: SsoIdentity = IDENTITY) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  admin.findByIdpLink.mockResolvedValue([]);
   admin.findByPhone.mockResolvedValue([]);
   admin.federatedIdentities.mockResolvedValue([]);
 });
@@ -49,13 +51,45 @@ describe('resolveAccountLink', () => {
   });
 
   it('lets a returning user in even if the number is now unverified', async () => {
-    admin.findByPhone.mockResolvedValue([{ id: 'kc-1', username: 'ameya@x.org' }]);
-    admin.federatedIdentities.mockResolvedValue([
-      { identityProvider: 'signals-sso', userId: 'ncs:u-1' },
-    ]);
+    admin.findByIdpLink.mockResolvedValue([{ id: 'kc-1', username: 'ameya@x.org' }]);
     expect(await resolve({ ...IDENTITY, phoneVerified: false })).toEqual({
       ok: true,
       value: { preferredUsername: 'ameya@x.org' },
+    });
+    expect(admin.findByIdpLink).toHaveBeenCalledWith('signals-sso', 'ncs:u-1');
+    expect(admin.findByPhone).not.toHaveBeenCalled();
+  });
+
+  it('keeps a returning user on their linked account after their partner number changed', async () => {
+    // Linked account still carries the old number; the new number is free.
+    admin.findByIdpLink.mockResolvedValue([{ id: 'kc-1', username: '+919000000001' }]);
+    expect(await resolve({ ...IDENTITY, phone: '+919000000002' })).toEqual({
+      ok: true,
+      value: { preferredUsername: '+919000000001' },
+    });
+  });
+
+  it('keeps a returning user on their linked account even if the new number belongs to another account', async () => {
+    admin.findByIdpLink.mockResolvedValue([{ id: 'kc-1', username: '+919000000001' }]);
+    admin.findByPhone.mockResolvedValue([{ id: 'kc-9', username: 'someone@x.org' }]);
+    expect(await resolve({ ...IDENTITY, phone: '+919000000002' })).toEqual({
+      ok: true,
+      value: { preferredUsername: '+919000000001' },
+    });
+  });
+
+  it('refuses when the partner user is linked to more than one account', async () => {
+    admin.findByIdpLink.mockResolvedValue([
+      { id: 'kc-1', username: 'a' },
+      { id: 'kc-2', username: 'b' },
+    ]);
+    expect(await resolve()).toMatchObject({ ok: false, reason: 'link-conflict' });
+  });
+
+  it('never creates an account on an unverified number', async () => {
+    expect(await resolve({ ...IDENTITY, phoneVerified: false })).toMatchObject({
+      ok: false,
+      reason: 'phone-unverified',
     });
   });
 
@@ -83,6 +117,9 @@ describe('resolveAccountLink', () => {
 
 
   it('fails closed when Keycloak cannot be asked', async () => {
+    admin.findByIdpLink.mockRejectedValue(new Error('down'));
+    expect(await resolve()).toMatchObject({ ok: false, reason: 'provider-unavailable' });
+    admin.findByIdpLink.mockResolvedValue([]);
     admin.findByPhone.mockRejectedValue(new Error('down'));
     expect(await resolve()).toMatchObject({ ok: false, reason: 'provider-unavailable' });
     expect(

@@ -28,8 +28,29 @@ export interface OidcKeys {
   jwks(): Promise<{ keys: JWK[] }>;
 }
 
+/**
+ * Parse the configured private key. Accepts a PEM whose line breaks arrived as
+ * literal `\n` (how a multi-line value usually survives an env var or a secret
+ * store). Throws a message naming the variable, never the key material.
+ */
+function parsePrivateKey(raw: string): KeyObject {
+  const pem = raw.includes('\\n') ? raw.replaceAll('\\n', '\n') : raw;
+  try {
+    return createPrivateKey(pem.trim());
+  } catch {
+    throw new Error(
+      'SSO_OIDC_SIGNING_KEY is not a readable private key (expected an EC P-256 PKCS#8 PEM).'
+    );
+  }
+}
+
+/**
+ * Build the signing keys. Called once at boot when SSO is enabled
+ * (`config.ts`), so a bad key stops the API from starting instead of failing
+ * every SSO login later.
+ */
 export function createOidcKeys(privateKeyPem: string): OidcKeys {
-  const privateKey: KeyObject = createPrivateKey(privateKeyPem);
+  const privateKey: KeyObject = parsePrivateKey(privateKeyPem);
   if (
     privateKey.asymmetricKeyType !== 'ec' ||
     privateKey.asymmetricKeyDetails?.namedCurve !== 'prime256v1'

@@ -10,6 +10,7 @@ import {
   parseUiHostBindings,
 } from '@dpg/config';
 import { loadEnv } from '@/env';
+import { createOidcKeys } from '@/services/auth/sso/oidc_keys';
 
 export const {
   instance,
@@ -188,6 +189,11 @@ export const ssoConfig = {
       : parseSsoNcsMapping('{}'),
   },
 };
+
+// Parse the id_token signing key now, so a malformed SSO_OIDC_SIGNING_KEY
+// (wrong curve, broken PEM) stops the API at boot rather than turning every
+// SSO login into a 500 later. assertSsoConfigured only checks it is present.
+if (ssoConfig.enabled) createOidcKeys(ssoConfig.oidc.signing_key_pem);
 
 /**
  * Normalize a comma-separated email list: split on commas, trim, drop empties

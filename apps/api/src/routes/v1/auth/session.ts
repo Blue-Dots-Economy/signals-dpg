@@ -5,6 +5,7 @@ import { authConfig, instance } from '@/config';
 import {
   buildEndSessionUrl,
   exchangeCode,
+  idTokenClaim,
   idTokenNonce,
   OidcExchangeError,
 } from '@/services/auth/oidc_exchange';
@@ -253,6 +254,11 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         // Keycloak logged in someone other than the partner vouched for (e.g.
         // an SSO session left over in this browser): open no session at all.
         if (outcome === 'wrong-account') {
+          // End the Keycloak session this login just created, too: left alive,
+          // the next partner link in this browser lands in the same wrong
+          // account and is refused again, every time.
+          const { endKeycloakSession } = await import('@/services/auth/end_browser_session');
+          await endKeycloakSession(idTokenClaim(tokens.idToken, 'sid'), request.log);
           clearFlowCookie(reply);
           return reply.redirect(`${flow.appOrigin}/auth/sso/error?reason=session-expired`);
         }

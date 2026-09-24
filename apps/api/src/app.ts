@@ -36,6 +36,7 @@ import {
 import { getEmailMessages } from '@/notifications/email/messages';
 import { getSmsTemplates } from '@/notifications/sms/templates';
 import { registerRawBodyCapture } from '@/plugins/raw_body';
+import { reqLogSerializer } from '@/utils/log_redaction';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -145,7 +146,9 @@ const documentAuthTransform: typeof baseJsonSchemaTransform = (data) => {
  */
 export async function buildApp(): Promise<FastifyInstance> {
   const app = fastify({
-    logger: true,
+    // Default logger, except the request URL: auth-route query strings carry
+    // credentials (partner SSO links, OIDC codes) and must not reach the logs.
+    logger: { serializers: { req: reqLogSerializer } },
     trustProxy: true,
     // Correlation id: honour + length-cap an inbound `x-request-id`, mint one
     // when absent, log it as `reqId` (see @/request_id).

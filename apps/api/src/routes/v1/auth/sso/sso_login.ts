@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
+import type { FastifyRequest } from 'fastify';
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { ssoConfig } from '@/config';
+import { getCurrentApiBaseUrl, ssoConfig } from '@/config';
 import { public_rate_limit } from '@/middleware/public_rate_limit';
 import { startLoginFlow } from '@/routes/v1/auth/login_flow';
 import {
@@ -42,15 +43,57 @@ import {
  *      identity provider — which is this API's /sso/oidc endpoints
  *
  * Every refusal lands on the UI's `/auth/sso/error?reason=…`. Nothing from the
- * request is echoed, and the partner token is never logged.
+ * request is echoed, and the partner token is never logged (the request log
+ * drops auth query strings — `utils/log_redaction`).
+ *
+ * Runs on the canonical API host only. The `sso_h` cookie set here is read
+ * by /sso/oidc/authorize, which Keycloak always calls on API_BASE_URL, so a
+ * link that reached this API under another hostname is first redirected
+ * there, query string intact.
  */
+
+/**
+ * Well above one person clicking a link, low enough to blunt a flood. Many
+ * partner users share an IP (carrier-grade NAT, service centres), so this is
+ * sized for a crowd behind one address, not for one browser.
+ */
+const SSO_LOGIN_PER_IP_PER_MINUTE = 120;
+
+const SSO_LOGIN_PATH = '/api/v1/auth/sso/login';
+
+/**
+ * This request's URL on the canonical API host, or null when it already
+ * arrived there. Compares the host only: the scheme behind a proxy that sets no
+ * X-Forwarded-Proto reads as `http`, and comparing it would redirect forever.
+ * The target is always the configured API_BASE_URL, never the request's Host.
+ */
+function canonicalRedirect(request: FastifyRequest): string | null {
+  const canonical = new URL(getCurrentApiBaseUrl());
+  if (request.host === canonical.host) return null;
+  // Fixed path + the query string only: nothing from the request's path can
+  // steer the target (a `//host` path would, through URL resolution).
+  const q = request.url.indexOf('?');
+  return `${canonical.origin}${SSO_LOGIN_PATH}${q >= 0 ? request.url.slice(q) : ''}`;
+}
 export const auth_sso_login: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
     url: '/login',
     method: 'GET',
-    // Each call can reach the partner API, so the budget is tighter than
-    // /session/login's. Still far above what a human clicking a link needs.
-    preHandler: public_rate_limit('auth_sso_login', 20),
+    // A browser navigation, so a limited request gets the error page (retry
+    // later), not a JSON 429.
+    preHandler: public_rate_limit(
+      'auth_sso_login',
+      SSO_LOGIN_PER_IP_PER_MINUTE,
+      60,
+      (request, reply) => {
+        hardenResponse(reply);
+        return ssoErrorRedirect(
+          reply,
+          ssoAppOrigin(request, ssoEnabled() ? getActiveSsoProvider() : null),
+          'provider-unavailable'
+        );
+      }
+    ),
     schema: {
       tags: ['auth'],
       summary: 'Partner-portal SSO entry point',
@@ -61,6 +104,10 @@ export const auth_sso_login: FastifyPluginAsyncZod = async (fastify) => {
       hardenResponse(reply);
       const provider = ssoEnabled() ? getActiveSsoProvider() : null;
       if (!provider) return ssoNotEnabled(reply);
+
+      const canonical = canonicalRedirect(request);
+      if (canonical) return reply.redirect(canonical);
+
       const origin = ssoAppOrigin(request, provider);
 
       const verified = await provider.verify(request.query);
@@ -88,6 +135,12 @@ export const auth_sso_login: FastifyPluginAsyncZod = async (fastify) => {
           'sso: account link refused'
         );
         return ssoErrorRedirect(reply, origin, link.reason);
+      }
+
+      // Last, so a partner or Keycloak outage above never burns the link.
+      if (!(await verified.value.claim())) {
+        request.log.warn({ provider: provider.id }, 'sso: partner link reused');
+        return ssoErrorRedirect(reply, origin, 'link-reused');
       }
 
       const existingSession = request.cookies?.[SESSION_COOKIE];

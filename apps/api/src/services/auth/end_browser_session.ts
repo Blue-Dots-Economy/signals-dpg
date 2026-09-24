@@ -23,13 +23,24 @@ export async function endBrowserSessionEverywhere(
   const session = await readSession(sessionId);
   await destroySession(sessionId);
 
-  const keycloakSessionId = idTokenClaim(session?.idToken, 'sid');
+  await endKeycloakSession(idTokenClaim(session?.idToken, 'sid'), log);
+}
+
+/**
+ * End one Keycloak user session by its `sid`. Best-effort: a missing sid or
+ * admin client, or a Keycloak error, is logged and swallowed — callers are on
+ * a login path that must still answer the browser.
+ */
+export async function endKeycloakSession(
+  keycloakSessionId: string | null,
+  log: FastifyBaseLogger
+): Promise<void> {
   const admin = getKeycloakAdminClient();
   if (!keycloakSessionId || !admin) return;
 
   try {
     await admin.deleteSession(keycloakSessionId);
   } catch (err) {
-    log.warn({ err }, 'could not end the Keycloak session behind a replaced browser session');
+    log.warn({ err }, 'could not end a Keycloak session');
   }
 }

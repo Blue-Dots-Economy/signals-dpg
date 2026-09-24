@@ -26,12 +26,12 @@ import { normalizeIndianMobile } from '@/utils/phone';
  *   3. sig decrypts with the secret       (link-invalid)
  *   4. expiry param agrees with JWT exp   (link-invalid)
  *   5. NCS validate-token                 (link-invalid / provider-unavailable)
- *   6. single use                         (link-reused)
- *   7. account ACTIVE, usable mobile      (account-inactive / link-invalid)
+ *   6. account ACTIVE, usable mobile      (account-inactive / link-invalid)
  *
- * The single-use claim (6) comes after NCS confirms the link on purpose: if NCS
- * is briefly down, the user can retry the same link instead of being told it
- * was already used.
+ * Single use (link-reused) is not checked here: `verify` returns a `claim()`
+ * that /sso/login calls last, after the Keycloak account lookup too. So if NCS
+ * or Keycloak is briefly down, the user can retry the same link instead of
+ * being told it was already used.
  */
 
 export const NCS_PROVIDER_ID = 'ncs';
@@ -139,11 +139,6 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
       const validated = await deps.client.validateToken(token);
       if (!validated.ok) return validated;
 
-      const ttl = Math.max(1, jwt.value.exp - now() + CLOCK_TOLERANCE_SECONDS);
-      if (!(await claimPartnerToken(NCS_PROVIDER_ID, token, ttl))) {
-        return { ok: false, reason: 'link-reused' };
-      }
-
       const user = validated.value;
       if (user.status !== 'ACTIVE') {
         return { ok: false, reason: 'account-inactive', detail: `NCS status ${user.status}` };
@@ -161,6 +156,13 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
         identity: toIdentity(user, phone),
         returnTo: safeReturnTo(route),
         ...(deps.mapping.app_origin ? { appOrigin: deps.mapping.app_origin } : {}),
+        // Remembered until the link could no longer verify anyway.
+        claim: () =>
+          claimPartnerToken(
+            NCS_PROVIDER_ID,
+            token,
+            Math.max(1, jwt.value.exp - now() + CLOCK_TOLERANCE_SECONDS)
+          ),
       };
       return { ok: true, value: link };
     },

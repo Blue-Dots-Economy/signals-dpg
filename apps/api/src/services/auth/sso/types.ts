@@ -24,7 +24,7 @@ export type SsoFailureReason =
   | 'provider-unavailable'
   /** The partner account is not active. */
   | 'account-inactive'
-  /** An existing Bluedots account holds this number, but the partner has not verified it. */
+  /** The partner has not verified this number, so no account may be created on or linked to it. */
   | 'phone-unverified'
   /** The number is tied to a different partner account, or to several Bluedots accounts. */
   | 'link-conflict'
@@ -62,6 +62,13 @@ export interface SsoVerifiedLink {
   returnTo: string;
   /** UI origin to land on, if the provider pins one. */
   appOrigin?: string;
+  /**
+   * Mark the partner link used (single use). False when it already was.
+   * Called by /sso/login only once everything that can fail transiently —
+   * the partner API and the Keycloak account lookup — has succeeded, so a
+   * brief outage never burns a link the user could still retry.
+   */
+  claim(): Promise<boolean>;
 }
 
 export interface SsoProvider {

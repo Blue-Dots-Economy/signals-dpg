@@ -105,6 +105,7 @@ describe('NCS provider verify', () => {
         },
         returnTo: '/discover',
         appOrigin: 'https://app.example.org',
+        claim: expect.any(Function),
       },
     });
   });
@@ -170,22 +171,24 @@ describe('NCS provider verify', () => {
     });
   });
 
-  it('refuses a link already used', async () => {
-    claimPartnerToken.mockResolvedValue(false);
-    expect(await provider().verify(await link())).toMatchObject({ reason: 'link-reused' });
+  it('does not claim the link itself — the caller claims it last', async () => {
+    const result = await provider().verify(await link());
+    expect(result.ok).toBe(true);
+    expect(claimPartnerToken).not.toHaveBeenCalled();
   });
 
-  it('claims the token only after NCS confirms it, until it expires', async () => {
-    validateToken.mockResolvedValue({ ok: false, reason: 'provider-unavailable' });
-    await provider().verify(await link());
-    expect(claimPartnerToken).not.toHaveBeenCalled();
-
-    validateToken.mockResolvedValue({ ok: true, value: NCS_USER });
+  it('claim() marks the token used until it expires, and reports a reuse', async () => {
     const l = await link();
-    await provider().verify(l);
+    const result = await provider().verify(l);
+    if (!result.ok) throw new Error('expected a verified link');
+
+    expect(await result.value.claim()).toBe(true);
     expect(claimPartnerToken).toHaveBeenCalledWith('ncs', l.userName, expect.any(Number));
     const ttl = claimPartnerToken.mock.calls[0]?.[2] as number;
     expect(ttl).toBeGreaterThanOrEqual(290);
+
+    claimPartnerToken.mockResolvedValue(false);
+    expect(await result.value.claim()).toBe(false);
   });
 
   it('refuses an inactive NCS account', async () => {

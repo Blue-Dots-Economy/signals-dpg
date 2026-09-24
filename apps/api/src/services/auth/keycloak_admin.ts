@@ -229,6 +229,17 @@ export class KeycloakAdminClient {
   }
 
   /**
+   * The user linked to `idpUserId` at identity provider `idpAlias` — the link
+   * Keycloak itself logs in through, whatever the user's attributes say now.
+   */
+  async findByIdpLink(
+    idpAlias: string,
+    idpUserId: string
+  ): Promise<Array<{ id: string; username?: string }>> {
+    return this.searchUsers({ idpAlias, idpUserId, max: '5' }, 'identity-provider link');
+  }
+
+  /**
    * The identity-provider links on a user (`identityProvider` alias + the
    * remote `userId`). Empty for a user who has never logged in through one.
    */

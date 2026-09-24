@@ -65,8 +65,14 @@ function clientAuthenticated(request: FastifyRequest, body: Record<string, strin
     const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
     const sep = decoded.indexOf(':');
     if (sep > 0) {
-      clientId = decodeURIComponent(decoded.slice(0, sep));
-      clientSecret = decodeURIComponent(decoded.slice(sep + 1));
+      // RFC 6749 §2.3.1 form-encodes both parts; a malformed escape (`%zz`)
+      // is a failed authentication, not a server error.
+      try {
+        clientId = decodeURIComponent(decoded.slice(0, sep));
+        clientSecret = decodeURIComponent(decoded.slice(sep + 1));
+      } catch {
+        return false;
+      }
     }
   }
 

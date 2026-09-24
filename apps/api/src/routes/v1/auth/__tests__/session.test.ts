@@ -51,7 +51,16 @@ vi.mock('@/services/auth/oidc_exchange', () => ({
   newPkcePair: () => ({ verifier: 'the-verifier', challenge: 'the-challenge' }),
   newStateValue: () => 'the-state',
   idTokenNonce: (...a: unknown[]) => idTokenNonce(...(a as [string])),
+  idTokenClaim: (...a: unknown[]) => idTokenClaim(...(a as [string, string])),
   OidcExchangeError: class OidcExchangeError extends Error {},
+}));
+
+const idTokenClaim = vi.fn<(t: string | undefined, name: string) => string | null>(
+  (_t, name) => (name === 'sid' ? 'kc-sid' : null)
+);
+const endKeycloakSession = vi.fn();
+vi.mock('@/services/auth/end_browser_session', () => ({
+  endKeycloakSession: (...a: unknown[]) => endKeycloakSession(...a),
 }));
 
 const completeSsoLogin = vi.fn();
@@ -502,6 +511,23 @@ describe('GET /auth/session/callback', () => {
     expect(res.headers.location).toBe('https://app.example.org/auth/sso/error?reason=session-expired');
     expect(createSession).not.toHaveBeenCalled();
     expect(res.cookies.find((c) => c.name === 'sid')).toBeUndefined();
+    // …and the Keycloak session that login created is ended, so the next
+    // partner link in this browser is not refused again.
+    expect(endKeycloakSession).toHaveBeenCalledWith('kc-sid', expect.anything());
+  });
+
+  it('ends no Keycloak session on a successful SSO login', async () => {
+    consumeFlowState.mockResolvedValue({
+      verifier: 'the-verifier',
+      nonce: 'nonce',
+      returnTo: '/',
+      redirectUri: 'https://api.example.org/api/v1/auth/session/callback',
+      appOrigin: 'https://app.example.org',
+      sso: { provider: 'ncs', handle: 'the-handle' },
+    });
+    completeSsoLogin.mockResolvedValue('completed');
+    await inject({ method: 'GET', url: CALLBACK, headers: boundToThisBrowser });
+    expect(endKeycloakSession).not.toHaveBeenCalled();
   });
 
   it('does not run the SSO step for an ordinary login', async () => {
