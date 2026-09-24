@@ -243,8 +243,28 @@ export const NetworkActionInteractionSchema = z
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
+    // Bulk-export eligibility (#639 / #769). Absent ⇒ this interaction's
+    // engagements cannot be exported (fail-closed). `requester_domains` names
+    // which side(s) may export their counterparty; it never widens disclosure —
+    // the per-row reveal is still gated by `reveals_pii_on_status`.
+    export: z
+      .object({ requester_domains: z.array(z.string().min(1)).min(1) })
+      .strict()
+      .optional(),
   })
   .superRefine((interaction, ctx) => {
+    // A requester must be a party to the engagement: a domain outside the
+    // interaction can never own either side of one of its actions, so naming it
+    // is always a config mistake.
+    for (const [idx, domain] of (interaction.export?.requester_domains ?? []).entries()) {
+      if (domain === interaction.from_domain || domain === interaction.to_domain) continue;
+      ctx.addIssue({
+        code: 'custom',
+        message: `export.requester_domains value "${domain}" is not a party to this interaction (from_domain "${interaction.from_domain}", to_domain "${interaction.to_domain}")`,
+        path: ['export', 'requester_domains', idx],
+      });
+    }
+
     if (interaction.reveals_pii_on_status.length === 0) return;
 
     if (!interaction.event_schema) {
@@ -535,6 +555,69 @@ export function getInteractionPiiRevealStatuses(
 ): readonly string[] {
   const interaction = getActionInteraction(networkConfig, input);
   return interaction.reveals_pii_on_status;
+}
+
+/**
+ * Domains allowed to bulk-export the counterparty of this interaction's
+ * actions (#769). Empty when the interaction declares no `export` block.
+ *
+ * @throws Error when the network does not declare the interaction — same
+ *   contract as {@link getInteractionPiiRevealStatuses}.
+ */
+export function getInteractionExportRequesterDomains(
+  networkConfig: NetworkConfigDocument,
+  input: {
+    actionType: string;
+    fromNetwork: string;
+    fromDomain: string;
+    fromItemType?: string;
+    toNetwork: string;
+    toDomain: string;
+    toItemType?: string;
+  }
+): readonly string[] {
+  const interaction = getActionInteraction(networkConfig, input);
+  return interaction.export?.requester_domains ?? [];
+}
+
+/** A counterparty (network, domain) a requester may bulk-export. */
+export interface ExportableCounterparty {
+  network: string;
+  domain: string;
+}
+
+/**
+ * Every counterparty (network, domain) a requester in `requesterDomain` may
+ * bulk-export, across all actions of the network (#769).
+ *
+ * Drives which download controls the UI shows — none, one, or one per
+ * counterparty type — without a round-trip. Sorted by network then domain,
+ * deduplicated. A same-domain interaction (provider→provider) yields that
+ * domain as the counterparty.
+ */
+export function getExportableCounterparties(
+  networkConfig: NetworkConfigDocument,
+  requesterDomain: string
+): ExportableCounterparty[] {
+  const found = new Map<string, ExportableCounterparty>();
+  const add = (network: string, domain: string) =>
+    found.set(`${network}::${domain}`, { network, domain });
+
+  for (const action of Object.values(networkConfig.actions)) {
+    for (const interaction of action.interactions) {
+      if (!interaction.export?.requester_domains.includes(requesterDomain)) continue;
+      if (interaction.from_domain === requesterDomain) {
+        add(interaction.to_network ?? networkConfig.id, interaction.to_domain);
+      }
+      if (interaction.to_domain === requesterDomain) {
+        add(interaction.from_network ?? networkConfig.id, interaction.from_domain);
+      }
+    }
+  }
+
+  return [...found.values()].sort(
+    (a, b) => a.network.localeCompare(b.network) || a.domain.localeCompare(b.domain)
+  );
 }
 
 function matchesAllowedItemType(

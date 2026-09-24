@@ -356,6 +356,9 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
+  // Row cap for one bulk engagement export (#639 / #769). Above it the export
+  // endpoint refuses with 413 rather than streaming an unbounded decrypt.
+  EXPORT_MAX_ROWS: z.coerce.number().int().positive().default(10000),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
   // Global default cap on profiles a single user may own per (network, domain,
