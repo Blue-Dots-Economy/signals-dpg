@@ -58,6 +58,8 @@ export function buildAuthorizeUrl(input: {
   state: string;
   nonce: string;
   challenge: string;
+  /** Keycloak identity provider to skip straight to (`kc_idp_hint`). */
+  idpHint?: string;
 }): string {
   const url = new URL(`${realmUrl(keycloakConfig.base_url)}/auth`);
   url.searchParams.set('client_id', keycloakConfig.ui_client_id);
@@ -68,6 +70,7 @@ export function buildAuthorizeUrl(input: {
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.challenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.idpHint) url.searchParams.set('kc_idp_hint', input.idpHint);
   return url.toString();
 }
 

@@ -49,6 +49,13 @@ export interface OidcFlowState {
   redirectUri: string;
   /** Browser origin to hand the user back to. See `safeAppOrigin`. */
   appOrigin: string;
+  /**
+   * Present only for a partner-portal SSO login. `handle` keys the verified
+   * partner identity the callback reads back (`services/auth/sso/sso_store`),
+   * which is what lets it create the draft profile without asking Keycloak to
+   * carry partner data in its tokens.
+   */
+  sso?: { provider: string; handle: string };
 }
 
 /** `state` is a credential for this flow; the store hashes it into the key. */
