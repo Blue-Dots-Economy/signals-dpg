@@ -29,8 +29,12 @@
  */
 
 import type { FastifyBaseLogger } from 'fastify';
-import { authConfig, keycloakConfig } from '@/config';
-import { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
+import {
+  getKeycloakAdminClient,
+  resetKeycloakAdminClient,
+} from '@/services/auth/keycloak_admin_instance';
+import { authConfig } from '@/config';
+import type { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
 import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
 
 /** Why a participant's realm identity could not be created. */
@@ -67,26 +71,12 @@ export interface ParticipantIdentityInput {
   log: FastifyBaseLogger;
 }
 
-let adminClient: KeycloakAdminClient | null = null;
 
 /** Test seam: forget the memoised admin client. */
 export function resetParticipantIdentityState(): void {
-  adminClient = null;
+  resetKeycloakAdminClient();
 }
 
-function getAdminClient(): KeycloakAdminClient | null {
-  if (adminClient) return adminClient;
-  if (!keycloakConfig.internal_base_url || !keycloakConfig.api_client_secret) {
-    return null;
-  }
-  adminClient = new KeycloakAdminClient({
-    baseUrl: keycloakConfig.internal_base_url,
-    realm: keycloakConfig.realm,
-    clientId: keycloakConfig.api_client_id,
-    clientSecret: keycloakConfig.api_client_secret,
-  });
-  return adminClient;
-}
 
 /**
  * Creates the Keycloak identity for an already-written signals `user` row.
@@ -108,7 +98,7 @@ export async function createParticipantKeycloakIdentity(
   // aggregator-onboarded participant never performs.
   if (!authConfig.keycloak_enabled) return { ok: true, created: false };
 
-  const client = getAdminClient();
+  const client = getKeycloakAdminClient();
   if (!client) {
     input.log.error(
       { user_id: input.userId },
