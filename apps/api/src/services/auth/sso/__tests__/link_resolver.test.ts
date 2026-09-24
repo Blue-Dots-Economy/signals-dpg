@@ -17,7 +17,6 @@ const IDENTITY: SsoIdentity = {
 
 const admin = {
   findByPhone: vi.fn(),
-  findByUsername: vi.fn(),
   federatedIdentities: vi.fn(),
 };
 
@@ -27,7 +26,6 @@ const resolve = (identity: SsoIdentity = IDENTITY) =>
 beforeEach(() => {
   vi.clearAllMocks();
   admin.findByPhone.mockResolvedValue([]);
-  admin.findByUsername.mockResolvedValue([]);
   admin.federatedIdentities.mockResolvedValue([]);
 });
 
@@ -41,10 +39,6 @@ describe('resolveAccountLink', () => {
     expect(await resolve()).toEqual({ ok: true, value: { preferredUsername: 'ameya@x.org' } });
   });
 
-  it('also finds an account whose username is the number but whose attribute was dropped', async () => {
-    admin.findByUsername.mockResolvedValue([{ id: 'kc-1', username: '+919730862967' }]);
-    expect(await resolve()).toEqual({ ok: true, value: { preferredUsername: '+919730862967' } });
-  });
 
   it('refuses to link an existing account on an unverified number', async () => {
     admin.findByPhone.mockResolvedValue([{ id: 'kc-1', username: 'ameya@x.org' }]);
@@ -80,16 +74,13 @@ describe('resolveAccountLink', () => {
   });
 
   it('refuses when the number matches more than one account', async () => {
-    admin.findByPhone.mockResolvedValue([{ id: 'kc-1', username: 'a' }]);
-    admin.findByUsername.mockResolvedValue([{ id: 'kc-2', username: '+919730862967' }]);
+    admin.findByPhone.mockResolvedValue([
+      { id: 'kc-1', username: 'a' },
+      { id: 'kc-2', username: '+919730862967' },
+    ]);
     expect(await resolve()).toMatchObject({ ok: false, reason: 'link-conflict' });
   });
 
-  it('counts the same account found both ways once', async () => {
-    admin.findByPhone.mockResolvedValue([{ id: 'kc-1', username: '+919730862967' }]);
-    admin.findByUsername.mockResolvedValue([{ id: 'kc-1', username: '+919730862967' }]);
-    expect(await resolve()).toMatchObject({ ok: true });
-  });
 
   it('fails closed when Keycloak cannot be asked', async () => {
     admin.findByPhone.mockRejectedValue(new Error('down'));

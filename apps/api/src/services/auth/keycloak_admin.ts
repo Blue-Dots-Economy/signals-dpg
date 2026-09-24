@@ -194,11 +194,6 @@ export class KeycloakAdminClient {
     return this.searchUsers({ email, exact: 'true', max: '5' }, 'email');
   }
 
-  /** Exact-match search on the username. */
-  async findByUsername(username: string): Promise<Array<{ id: string; username?: string }>> {
-    return this.searchUsers({ username, exact: 'true', max: '5' }, 'username');
-  }
-
   /**
    * The realm roles actually assigned to a user.
    *

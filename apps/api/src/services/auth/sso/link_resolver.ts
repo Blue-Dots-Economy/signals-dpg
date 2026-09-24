@@ -17,16 +17,13 @@ import type { SsoIdentity, SsoResult } from '@/services/auth/sso/types';
  *   - one account, not linked, unverified  → phone-unverified
  *   - several accounts                     → link-conflict
  *
- * The username search matters as well as the attribute search: a realm that
- * dropped the `phoneNumber` attribute (see infra/keycloak/README.md) can still
- * hold a user whose *username* is the number, and first-login would otherwise
- * auto-link to it without the verification check.
+ * One lookup, on the `phoneNumber` attribute. That attribute is declared on
+ * every realm by `infra/keycloak/init/apply-user-profile.sh` (without it phone
+ * OTP login itself does not work), so every account holding a number carries
+ * it — including those whose username is that number.
  */
 
-type AdminLookups = Pick<
-  KeycloakAdminClient,
-  'findByPhone' | 'findByUsername' | 'federatedIdentities'
->;
+type AdminLookups = Pick<KeycloakAdminClient, 'findByPhone' | 'federatedIdentities'>;
 
 export interface LinkResolverDeps {
   admin: AdminLookups | null;
@@ -48,11 +45,7 @@ export async function resolveAccountLink(
   const admin = deps.admin;
 
   try {
-    const [byPhone, byUsername] = await Promise.all([
-      admin.findByPhone(identity.phone),
-      admin.findByUsername(identity.phone),
-    ]);
-    const candidates = [...new Map([...byPhone, ...byUsername].map((u) => [u.id, u])).values()];
+    const candidates = await admin.findByPhone(identity.phone);
 
     if (candidates.length === 0) {
       return { ok: true, value: { preferredUsername: identity.phone } };

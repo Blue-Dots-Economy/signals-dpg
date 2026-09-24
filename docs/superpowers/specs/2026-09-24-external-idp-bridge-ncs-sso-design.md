@@ -345,8 +345,9 @@ Rules, evaluated by the bridge in order:
 
 ## 7. Keycloak realm (one-time)
 
-Shipped in `infra/keycloak/realms/bluedots-realm.json` and, for realms that
-already exist, `infra/keycloak/init/apply-sso-idp.sh` (idempotent):
+Shipped only in `infra/keycloak/init/apply-sso-idp.sh` (idempotent, run after
+every boot). `realms/bluedots-realm.json` is unchanged — it is shared with
+aggregator-dpg, and one source of truth avoids drift:
 
 - Identity provider `signals-sso` (OIDC): issuer + authorize URL on the public
   API base, token + JWKS URLs on the internal base; `client_secret_post`;
@@ -371,7 +372,7 @@ already exist, `infra/keycloak/init/apply-sso-idp.sh` (idempotent):
 |---|---|
 | `routes/v1/auth/sso/sso_routes.ts` (new) | registers the SSO routes under `/api/v1/auth/sso` |
 | `routes/v1/auth/sso/sso_login.ts` (new) | `GET /api/v1/auth/sso/login`: verify, stash, start login flow |
-| `routes/v1/auth/sso/oidc_routes.ts` (new) | `.well-known/openid-configuration`, `authorize`, `token`, `jwks` under `/api/v1/auth/sso/oidc` |
+| `routes/v1/auth/sso/oidc_routes.ts` (new) | `authorize`, `token`, `jwks` under `/api/v1/auth/sso/oidc` (no discovery document — Keycloak is configured with the URLs) |
 | `services/auth/sso/types.ts` (new) | `SsoProvider`, `SsoIdentity`, `SsoFailure` |
 | `services/auth/sso/registry.ts` (new) | active provider from `SSO_PROVIDERS` |
 | `services/auth/sso/providers/ncs.ts` (new) | NCS link verification (§4 step 3) |

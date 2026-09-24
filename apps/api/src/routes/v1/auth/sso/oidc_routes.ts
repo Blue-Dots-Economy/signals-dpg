@@ -31,9 +31,12 @@ import { safeEqual } from '@/utils/secure_crypto';
  * one redirect_uri (Keycloak's broker endpoint). Anything else is refused
  * rather than redirected — this is not a general-purpose OP.
  *
- *   discovery + jwks   public keys and endpoint URLs
- *   authorize          browser → one-time code, bound to the sso_h cookie
- *   token              Keycloak, server-to-server → signed id_token
+ *   jwks        the public key Keycloak verifies our id_tokens with
+ *   authorize   browser → one-time code, bound to the sso_h cookie
+ *   token       Keycloak, server-to-server → signed id_token
+ *
+ * No discovery document: the realm's identity provider is configured with
+ * these URLs directly (infra/keycloak/init/apply-sso-idp.sh).
  */
 
 const ID_TOKEN_TTL_SECONDS = 60;
@@ -109,28 +112,6 @@ export const auth_sso_oidc: FastifyPluginAsyncZod = async (fastify) => {
       done(null, Object.fromEntries(new URLSearchParams(body as string)));
     }
   );
-
-  fastify.route({
-    url: '/.well-known/openid-configuration',
-    method: 'GET',
-    schema: { tags: ['auth'], hide: true },
-    handler: async (_request, reply) => {
-      if (!ssoEnabled()) return ssoNotEnabled(reply);
-      const issuer = ssoIssuer();
-      return reply.send({
-        issuer,
-        authorization_endpoint: `${issuer}/authorize`,
-        token_endpoint: `${issuer}/token`,
-        jwks_uri: `${issuer}/jwks`,
-        response_types_supported: ['code'],
-        grant_types_supported: ['authorization_code'],
-        subject_types_supported: ['public'],
-        id_token_signing_alg_values_supported: ['ES256'],
-        token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-        scopes_supported: ['openid'],
-      });
-    },
-  });
 
   fastify.route({
     url: '/jwks',

@@ -5,7 +5,6 @@ import { auth_sso_oidc } from '@/routes/v1/auth/sso/oidc_routes';
 /**
  * Partner-portal SSO, mounted at `/api/v1/auth/sso`:
  *   GET  /login                           partner redirect lands here
- *   GET  /oidc/.well-known/openid-configuration
  *   GET  /oidc/jwks
  *   GET  /oidc/authorize                  browser, via Keycloak
  *   POST /oidc/token                      Keycloak, server-to-server

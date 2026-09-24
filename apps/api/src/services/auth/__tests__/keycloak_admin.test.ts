@@ -404,17 +404,6 @@ describe('user searches', () => {
     return urls;
   };
 
-  it('findByUsername is an exact match', async () => {
-    const urls = capture();
-    expect(await makeClient().findByUsername('+919730862967')).toEqual([
-      { id: USER_ID, username: 'u' },
-    ]);
-    const url = new URL(urls[0] as string);
-    expect(url.pathname).toBe('/auth/admin/realms/bluedots/users');
-    expect(url.searchParams.get('username')).toBe('+919730862967');
-    expect(url.searchParams.get('exact')).toBe('true');
-  });
-
   it('findByPhone searches the phoneNumber attribute', async () => {
     const urls = capture();
     await makeClient().findByPhone('+919730862967');
@@ -426,7 +415,7 @@ describe('user searches', () => {
       if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
       return new Response('boom', { status: 500 });
     };
-    await expect(makeClient().findByUsername('x')).rejects.toThrow(/by username/);
+    await expect(makeClient().findByPhone('x')).rejects.toThrow(/by phone/);
   });
 });
 

@@ -102,19 +102,13 @@ beforeEach(() => {
   takeCode.mockResolvedValue({ handle: 'h-1', nonce: 'kc-nonce', redirectUri: BROKER });
 });
 
-describe('discovery + jwks', () => {
-  it('publishes the endpoints under the issuer', async () => {
+describe('jwks', () => {
+  it('serves no discovery document (Keycloak is configured with the URLs)', async () => {
     const res = await inject({
       method: 'GET',
       url: '/api/v1/auth/sso/oidc/.well-known/openid-configuration',
     });
-    expect(res.json()).toMatchObject({
-      issuer: ISSUER,
-      authorization_endpoint: `${ISSUER}/authorize`,
-      token_endpoint: `${ISSUER}/token`,
-      jwks_uri: `${ISSUER}/jwks`,
-      id_token_signing_alg_values_supported: ['ES256'],
-    });
+    expect(res.statusCode).toBe(404);
   });
 
   it('serves the public key', async () => {
@@ -229,11 +223,7 @@ describe('POST /token', () => {
 describe('disabled', () => {
   it('404s every route when SSO is off', async () => {
     mockSso.enabled = false;
-    for (const url of [
-      '/api/v1/auth/sso/oidc/.well-known/openid-configuration',
-      '/api/v1/auth/sso/oidc/jwks',
-      authorizeUrl(),
-    ]) {
+    for (const url of ['/api/v1/auth/sso/oidc/jwks', authorizeUrl()]) {
       expect((await inject({ method: 'GET', url })).statusCode).toBe(404);
     }
     expect((await inject(tokenRequest())).statusCode).toBe(404);

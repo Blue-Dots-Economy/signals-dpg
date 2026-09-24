@@ -1,11 +1,12 @@
 #!/bin/sh
 # Post-import init: the `signals-sso` identity provider (partner-portal SSO).
 #
-# WHY THIS EXISTS: the realm JSON is only read on FIRST import. A realm that
-# already exists in Keycloak's database never picks up the identity provider,
-# its mappers, the first-login flow or the redirector step in the browser flow.
-# This applies all four via the Admin REST API. Idempotent: safe after every
-# boot, and it re-syncs the provider's URLs and secret each time.
+# This script is the ONLY place the SSO realm config lives — it is deliberately
+# not in realms/bluedots-realm.json, so the realm file (shared with
+# aggregator-dpg) stays unchanged and there is one source of truth. It applies
+# everything via the Admin REST API, to a freshly imported realm or an existing
+# one alike. Idempotent: run it after every Keycloak boot (as
+# apply-user-profile.sh already is); it re-syncs the provider's URLs and secret.
 #
 # What it sets up (see docs/superpowers/specs/2026-09-24-external-idp-bridge-ncs-sso-design.md §7):
 #   1. flow `signals-sso-first-login`: create the user, or link to the
@@ -26,7 +27,7 @@ REALM="${KC_REALM:-bluedots}"
 ADMIN_USER="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
 ADMIN_PASS="${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
 : "${API_BASE_URL:?API_BASE_URL must be set (browser-facing signals API base URL)}"
-: "${SSO_API_INTERNAL_BASE_URL:=$API_BASE_URL}"
+: "${SSO_API_INTERNAL_BASE_URL:=$API_BASE_URL}"   # where Keycloak itself reaches /token + /jwks
 : "${SSO_OIDC_CLIENT_SECRET:=sso-not-configured}"
 : "${SSO_OIDC_CLIENT_ID:=signals-sso}"
 

@@ -66,14 +66,18 @@ UI runtime config (`/config.js`): `VITE_SSO_PARTNER_URL` and
 
 ## Keycloak
 
-New realms get everything from `infra/keycloak/realms/bluedots-realm.json`.
-**Existing realms must run `infra/keycloak/init/apply-sso-idp.sh`** (the JSON is
-only read on first import); it is idempotent and re-syncs URLs and the secret.
+All SSO realm config lives in **`infra/keycloak/init/apply-sso-idp.sh`** —
+`realms/bluedots-realm.json` is deliberately unchanged (it is shared with
+aggregator-dpg). Run the script after every Keycloak boot, next to
+`apply-user-profile.sh`; it is idempotent and re-syncs URLs and the secret.
+It creates the `signals-sso` identity provider (token + JWKS URLs on the
+internal API base), its five mappers, the no-screens first-login flow, and puts
+`identity-provider-redirector` first in the browser flow.
 
-| Variable (render + init script) | Meaning |
+| Variable (init script) | Meaning |
 |---|---|
 | `API_BASE_URL` | browser-facing API base — the provider's issuer and authorize URL |
-| `SSO_API_INTERNAL_BASE_URL` | where Keycloak itself reaches the API for token + JWKS (cluster-internal) |
+| `SSO_API_INTERNAL_BASE_URL` | where Keycloak itself reaches the API for `/token` and `/jwks` (cluster-internal) |
 | `SSO_OIDC_CLIENT_SECRET` | same value as the API's |
 
 **Ingress:** `/api/v1/auth/sso/oidc/token` is only ever called by Keycloak.

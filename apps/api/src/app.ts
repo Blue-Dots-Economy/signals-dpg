@@ -71,7 +71,6 @@ const PUBLIC_OPERATION_URLS = new Set([
   '/api/v1/auth/sso/oidc/authorize',
   '/api/v1/auth/sso/oidc/token',
   '/api/v1/auth/sso/oidc/jwks',
-  '/api/v1/auth/sso/oidc/.well-known/openid-configuration',
 ]);
 
 // Operations guarded by peer_instance_guard (inter-instance HMAC) instead of

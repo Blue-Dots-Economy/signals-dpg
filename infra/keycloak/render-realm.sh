@@ -29,15 +29,6 @@ DST_DIR="/opt/keycloak/data/import"
 # which is correct wherever the UI and API share a host.
 : "${API_BASE_URL:=$PUBLIC_BASE_URL}"
 
-# Partner-portal SSO (the `signals-sso` identity provider, which is the signals
-# API's /api/v1/auth/sso/oidc endpoints). Keycloak calls the token and JWKS
-# endpoints server-to-server, so they may use an internal address; the
-# browser-facing authorize URL and the issuer use API_BASE_URL. The secret must
-# equal the API's SSO_OIDC_CLIENT_SECRET. Unset leaves the provider in place
-# but unusable — the API answers 404 on every SSO route until SSO_PROVIDERS is set.
-: "${SSO_API_INTERNAL_BASE_URL:=$API_BASE_URL}"
-: "${SSO_OIDC_CLIENT_SECRET:=sso-not-configured}"
-
 # SMTP placeholders. Empty values are valid: when SMTP_AUTH=false, Keycloak
 # ignores SMTP_USER/SMTP_PASSWORD even if they are empty strings. Without
 # working SMTP the email OTP channel cannot deliver a code — phone still can.
@@ -63,8 +54,6 @@ escape() {
 
 PUBLIC_BASE_URL_ESC=$(escape "$PUBLIC_BASE_URL")
 API_BASE_URL_ESC=$(escape "$API_BASE_URL")
-SSO_API_INTERNAL_BASE_URL_ESC=$(escape "$SSO_API_INTERNAL_BASE_URL")
-SSO_OIDC_CLIENT_SECRET_ESC=$(escape "$SSO_OIDC_CLIENT_SECRET")
 SMTP_HOST_ESC=$(escape "$SMTP_HOST")
 SMTP_PORT_ESC=$(escape "$SMTP_PORT")
 SMTP_FROM_ESC=$(escape "$SMTP_FROM")
@@ -82,8 +71,6 @@ for src in "$SRC_DIR"/*.json; do
   sed \
     -e "s|__PUBLIC_BASE_URL__|${PUBLIC_BASE_URL_ESC}|g" \
     -e "s|__API_BASE_URL__|${API_BASE_URL_ESC}|g" \
-    -e "s|__SSO_API_INTERNAL_BASE_URL__|${SSO_API_INTERNAL_BASE_URL_ESC}|g" \
-    -e "s|__SSO_OIDC_CLIENT_SECRET__|${SSO_OIDC_CLIENT_SECRET_ESC}|g" \
     -e "s|__SMTP_HOST__|${SMTP_HOST_ESC}|g" \
     -e "s|__SMTP_PORT__|${SMTP_PORT_ESC}|g" \
     -e "s|__SMTP_FROM__|${SMTP_FROM_ESC}|g" \
