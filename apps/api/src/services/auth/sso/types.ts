@@ -26,6 +26,8 @@ export type SsoFailureReason =
   | 'account-inactive'
   /** An existing Bluedots account holds this number, but the partner has not verified it. */
   | 'phone-unverified'
+  /** The number is tied to a different partner account, or to several Bluedots accounts. */
+  | 'link-conflict'
   /** The login could not be completed (flow expired, Keycloak refused, …). */
   | 'session-expired';
 

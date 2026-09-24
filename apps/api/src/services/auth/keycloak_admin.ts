@@ -169,18 +169,34 @@ export class KeycloakAdminClient {
     return (await res.json()) as KeycloakUserSummary;
   }
 
-  /** Exact-match search. Used to detect the §6.3 spike-2 collision case. */
-  async findByEmail(email: string): Promise<Array<{ id: string; username?: string }>> {
-    const query = new URLSearchParams({ email, exact: 'true', max: '5' });
-    const res = await this.request(`/users?${query.toString()}`, { method: 'GET' });
+  /**
+   * `GET /users?<query>`, shared by every lookup below. `what` only names the
+   * lookup in the error message.
+   */
+  private async searchUsers(
+    query: Record<string, string>,
+    what: string
+  ): Promise<Array<{ id: string; username?: string }>> {
+    const params = new URLSearchParams(query);
+    const res = await this.request(`/users?${params.toString()}`, { method: 'GET' });
     if (!res.ok) {
       throw new KeycloakAdminError(
-        `Failed to search Keycloak users by email`,
+        `Failed to search Keycloak users by ${what}`,
         res.status,
         await safeText(res)
       );
     }
     return (await res.json()) as Array<{ id: string; username?: string }>;
+  }
+
+  /** Exact-match search. Used to detect the §6.3 spike-2 collision case. */
+  async findByEmail(email: string): Promise<Array<{ id: string; username?: string }>> {
+    return this.searchUsers({ email, exact: 'true', max: '5' }, 'email');
+  }
+
+  /** Exact-match search on the username. */
+  async findByUsername(username: string): Promise<Array<{ id: string; username?: string }>> {
+    return this.searchUsers({ username, exact: 'true', max: '5' }, 'username');
   }
 
   /**
@@ -214,16 +230,43 @@ export class KeycloakAdminClient {
 
   /** Search by the `phoneNumber` user attribute. */
   async findByPhone(phone: string): Promise<Array<{ id: string; username?: string }>> {
-    const query = new URLSearchParams({ q: `phoneNumber:${phone}`, max: '5' });
-    const res = await this.request(`/users?${query.toString()}`, { method: 'GET' });
+    return this.searchUsers({ q: `phoneNumber:${phone}`, max: '5' }, 'phone');
+  }
+
+  /**
+   * The identity-provider links on a user (`identityProvider` alias + the
+   * remote `userId`). Empty for a user who has never logged in through one.
+   */
+  async federatedIdentities(
+    id: string
+  ): Promise<Array<{ identityProvider: string; userId: string }>> {
+    const res = await this.request(
+      `/users/${encodeURIComponent(id)}/federated-identity`,
+      { method: 'GET' }
+    );
+    if (res.status === 404) return [];
     if (!res.ok) {
       throw new KeycloakAdminError(
-        `Failed to search Keycloak users by phone`,
+        `Failed to read federated identities for Keycloak user ${id}`,
         res.status,
         await safeText(res)
       );
     }
-    return (await res.json()) as Array<{ id: string; username?: string }>;
+    return (await res.json()) as Array<{ identityProvider: string; userId: string }>;
+  }
+
+  /** End one user session (the `sid` claim of its tokens). A 404 is fine. */
+  async deleteSession(sessionId: string): Promise<void> {
+    const res = await this.request(`/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok && res.status !== 404) {
+      throw new KeycloakAdminError(
+        `Failed to end Keycloak session ${sessionId}`,
+        res.status,
+        await safeText(res)
+      );
+    }
   }
 
   /**
