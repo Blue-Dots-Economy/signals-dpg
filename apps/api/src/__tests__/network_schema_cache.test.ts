@@ -16,7 +16,9 @@ const {
   getNetworkConfigs,
   refreshNetworkConfigs,
   refreshConsentConfigs,
+  SELF_BASE_URL,
 } = vi.hoisted(() => ({
+  SELF_BASE_URL: 'https://api.example.com',
   fsState: {
     files: new Map<string, string>(),
     mkdirCalls: [] as string[],
@@ -91,8 +93,27 @@ vi.mock('@dpg/schemas', () => {
     SchemaFetchError,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getDomainItemSchema: (...args: any[]) => getDomainItemSchemaMock(...args),
+    // Same lookup as the real helper: an instance entry keyed by domain + URL.
+    getInstanceCustomItemSchemaUrl: (
+      networkConfig: {
+        instances?: Array<{
+          domain_id: string;
+          instance_url: string;
+          custom_item_schema_urls: Record<string, string>;
+        }>;
+      },
+      input: { domain: string; instanceUrl: string; itemType: string }
+    ) =>
+      networkConfig.instances?.find(
+        (entry) =>
+          entry.domain_id === input.domain && entry.instance_url === input.instanceUrl
+      )?.custom_item_schema_urls[input.itemType] ?? null,
   };
 });
+
+vi.mock('@/config', () => ({
+  getCurrentApiBaseUrl: () => SELF_BASE_URL,
+}));
 
 vi.mock('@dpg/database', () => ({
   items: {
@@ -477,6 +498,113 @@ describe('getOrFetchSchemaByUrl', () => {
 
     expect(getDomainItemSchemaMock).not.toHaveBeenCalled();
     expect(fetchedUrls).toEqual([schemaUrl]);
+  });
+
+  describe("this instance's own /network/schema URL", () => {
+    const selfUrl = `${SELF_BASE_URL}/api/v1/network/schema/yellow_dot/student/profile_1.0`;
+
+    it('resolves from the live network config, ignoring a stale cached copy', async () => {
+      // A pod that warmed its cache mid-rollout fetched this URL from an old
+      // pod and pinned the pre-change schema. Updates must not see it.
+      seedCacheEntry(
+        { cache_key: 'stale', kind: 'item_schema_url', schema_url: selfUrl },
+        { stale: true }
+      );
+      const networkConfig = makeNetworkConfig({ source_url: undefined });
+      getNetworkConfigs.mockResolvedValue([networkConfig]);
+
+      await expect(getOrFetchSchemaByUrl({ schemaUrl: selfUrl })).resolves.toEqual({
+        resolved: 'domain-item-schema',
+      });
+      expect(getDomainItemSchemaMock).toHaveBeenCalledWith(
+        networkConfig,
+        'student',
+        'profile_1.0'
+      );
+      expect(fetchedUrls).toEqual([]);
+    });
+
+    it('never fetches or caches it on a cold cache', async () => {
+      getNetworkConfigs.mockResolvedValue([makeNetworkConfig({ source_url: undefined })]);
+
+      await getOrFetchSchemaByUrl({ schemaUrl: selfUrl });
+
+      expect(fetchedUrls).toEqual([]);
+      expect(fsState.files.has(INDEX_FILE)).toBe(false);
+    });
+
+    it('follows the instance custom schema when one is configured, as the endpoint does', async () => {
+      const customUrl = 'https://schemas.example.com/student-custom.json';
+      getNetworkConfigs.mockResolvedValue([
+        makeNetworkConfig({
+          source_url: undefined,
+          instances: [
+            {
+              domain_id: 'student',
+              instance_url: SELF_BASE_URL,
+              custom_item_schema_urls: { 'profile_1.0': customUrl },
+            },
+          ],
+        }),
+      ]);
+
+      await expect(getOrFetchSchemaByUrl({ schemaUrl: selfUrl })).resolves.toEqual({
+        fetched_from: customUrl,
+      });
+      expect(getDomainItemSchemaMock).not.toHaveBeenCalled();
+      expect(readIndexFromFakeFs().entries[0]).toMatchObject({
+        kind: 'instance_custom_item_schema',
+        schema_url: customUrl,
+      });
+    });
+
+    it('decodes URL-encoded path segments', async () => {
+      const networkConfig = makeNetworkConfig({ source_url: undefined });
+      getNetworkConfigs.mockResolvedValue([networkConfig]);
+
+      await getOrFetchSchemaByUrl({
+        schemaUrl: `${SELF_BASE_URL}/api/v1/network/schema/yellow_dot/student/profile_1.0`.replace(
+          'profile_1.0',
+          encodeURIComponent('profile_1.0')
+        ),
+      });
+
+      expect(getDomainItemSchemaMock).toHaveBeenCalledWith(
+        networkConfig,
+        'student',
+        'profile_1.0'
+      );
+    });
+
+    it('still fetches the same path on another origin (a peer instance)', async () => {
+      getNetworkConfigs.mockResolvedValue([makeNetworkConfig({ source_url: undefined })]);
+      const peerUrl = 'https://peer.example.org/api/v1/network/schema/yellow_dot/student/profile_1.0';
+
+      await expect(getOrFetchSchemaByUrl({ schemaUrl: peerUrl })).resolves.toEqual({
+        fetched_from: peerUrl,
+      });
+      expect(getDomainItemSchemaMock).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the fetch path when the network is not configured here', async () => {
+      getNetworkConfigs.mockResolvedValue([]);
+
+      await expect(getOrFetchSchemaByUrl({ schemaUrl: selfUrl })).resolves.toEqual({
+        fetched_from: selfUrl,
+      });
+    });
+
+    it('falls back to the fetch path when the domain or item type is unknown', async () => {
+      getNetworkConfigs.mockResolvedValue([makeNetworkConfig({ source_url: undefined })]);
+      getDomainItemSchemaMock.mockImplementation(() => {
+        throw new Error('Item type "profile_9.9" is not defined');
+      });
+      const unknownUrl = `${SELF_BASE_URL}/api/v1/network/schema/yellow_dot/student/profile_9.9`;
+
+      await expect(getOrFetchSchemaByUrl({ schemaUrl: unknownUrl })).resolves.toEqual({
+        fetched_from: unknownUrl,
+      });
+    });
   });
 
   it('propagates a SchemaFetchError from the registry', async () => {

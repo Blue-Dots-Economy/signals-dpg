@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import {
   fetchSchema,
   getDomainItemSchema,
+  getInstanceCustomItemSchemaUrl,
   SchemaFetchError,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
@@ -13,6 +14,7 @@ import { items } from '@dpg/database';
 import { and, eq } from 'drizzle-orm';
 import { getNetworkConfigs, refreshNetworkConfigs } from '@/network_configs';
 import { refreshConsentConfigs } from '@/consent_configs';
+import { getCurrentApiBaseUrl } from '@/config';
 
 type CachedSchemaKind =
   | 'network_config'
@@ -289,14 +291,25 @@ export async function getCachedSchemas(filters?: {
   );
 }
 
-export async function getOrFetchSchemaByUrl(input: {
+type SchemaByUrlInput = {
   schemaUrl: string;
   network?: string;
   domain?: string;
   itemType?: string;
   instanceUrl?: string;
   kind?: Extract<CachedSchemaKind, 'instance_custom_item_schema' | 'item_schema_url'>;
-}) {
+};
+
+export async function getOrFetchSchemaByUrl(input: SchemaByUrlInput) {
+  const selfSchema = await resolveSelfInstanceSchemaUrl(input.schemaUrl);
+  if (selfSchema) {
+    return selfSchema;
+  }
+
+  return getOrFetchCachedSchemaByUrl(input);
+}
+
+async function getOrFetchCachedSchemaByUrl(input: SchemaByUrlInput) {
   const index = await readIndex();
   const cachedEntry = index.entries.find((entry) => entry.schema_url === input.schemaUrl);
 
@@ -356,6 +369,76 @@ export function buildNetworkItemSchemaUrl(input: {
   ].join('/');
 
   return url.toString();
+}
+
+const SELF_SCHEMA_PATH = /^\/api\/v1\/network\/schema\/([^/]+)\/([^/]+)\/([^/]+)\/?$/;
+
+/**
+ * This instance's own `/api/v1/network/schema/:network/:domain/:itemType`
+ * endpoint is what create stamps into `items.item_schema_url` when the network
+ * config has no `source_url`. Answer it from the live network config, the same
+ * way that endpoint does, instead of HTTP-fetching it and caching the reply: a
+ * pod that warms its cache mid-rollout can fetch the URL from an old pod and
+ * pin the pre-change schema for its lifetime, so every update it serves splits
+ * the profile with stale `private` flags and stores those fields in clear.
+ *
+ * Returns null for any other URL (a peer instance, a registry, or a network /
+ * domain / item type this instance does not configure), leaving it to the
+ * cached fetch path.
+ */
+async function resolveSelfInstanceSchemaUrl(schemaUrl: string) {
+  let parsedUrl: URL;
+  let selfUrl: URL;
+  try {
+    parsedUrl = new URL(schemaUrl);
+    selfUrl = new URL(getCurrentApiBaseUrl());
+  } catch {
+    return null;
+  }
+
+  if (parsedUrl.origin !== selfUrl.origin) {
+    return null;
+  }
+
+  const selfBasePath = selfUrl.pathname.replace(/\/+$/, '');
+  if (!parsedUrl.pathname.startsWith(`${selfBasePath}/`)) {
+    return null;
+  }
+
+  const match = SELF_SCHEMA_PATH.exec(parsedUrl.pathname.slice(selfBasePath.length));
+  if (!match) {
+    return null;
+  }
+
+  const [network, domain, itemType] = match.slice(1).map((entry) => decodeURIComponent(entry));
+  const networkConfigs = await getNetworkConfigs();
+  const networkConfig = networkConfigs.find((entry) => entry.id === network);
+  if (!networkConfig) {
+    return null;
+  }
+
+  const instanceUrl = getCurrentApiBaseUrl();
+  const customSchemaUrl = getInstanceCustomItemSchemaUrl(networkConfig, {
+    domain,
+    instanceUrl,
+    itemType,
+  });
+  if (customSchemaUrl) {
+    return getOrFetchCachedSchemaByUrl({
+      schemaUrl: customSchemaUrl,
+      network,
+      domain,
+      itemType,
+      instanceUrl,
+      kind: 'instance_custom_item_schema',
+    });
+  }
+
+  try {
+    return getDomainItemSchema(networkConfig, domain, itemType);
+  } catch {
+    return null;
+  }
 }
 
 async function resolveNetworkItemSchemaUrl(schemaUrl: string) {
