@@ -64,6 +64,14 @@ const PUBLIC_OPERATION_URLS = new Set([
   '/api/v1/auth/session/login',
   '/api/v1/auth/session/callback',
   '/api/v1/auth/session/logout',
+  // Partner-portal SSO. /login is where the partner redirects the browser; the
+  // /oidc routes are the identity provider Keycloak talks to (client-secret
+  // authenticated at /token, not user-authenticated).
+  '/api/v1/auth/sso/login',
+  '/api/v1/auth/sso/oidc/authorize',
+  '/api/v1/auth/sso/oidc/token',
+  '/api/v1/auth/sso/oidc/jwks',
+  '/api/v1/auth/sso/oidc/.well-known/openid-configuration',
 ]);
 
 // Operations guarded by peer_instance_guard (inter-instance HMAC) instead of

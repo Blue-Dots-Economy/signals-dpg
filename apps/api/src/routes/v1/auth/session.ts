@@ -243,6 +243,15 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         return authError(flow.appOrigin);
       }
 
+      // A partner-portal login (started at /sso/login): create the local user
+      // and the draft profile here, once per login, rather than on every
+      // request. Best-effort — it never fails the login. Lazy-imported so the
+      // provisioning/database graph stays out of this route's static imports.
+      if (flow.sso) {
+        const { completeSsoLogin } = await import('@/services/auth/sso/complete_sso_login');
+        await completeSsoLogin(flow.sso, tokens.accessToken, request.log);
+      }
+
       const sessionId = newSessionId();
       await createSession(sessionId, {
         accessToken: tokens.accessToken,

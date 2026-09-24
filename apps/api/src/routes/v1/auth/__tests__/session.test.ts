@@ -54,6 +54,11 @@ vi.mock('@/services/auth/oidc_exchange', () => ({
   OidcExchangeError: class OidcExchangeError extends Error {},
 }));
 
+const completeSsoLogin = vi.fn();
+vi.mock('@/services/auth/sso/complete_sso_login', () => ({
+  completeSsoLogin: (...a: unknown[]) => completeSsoLogin(...a),
+}));
+
 const saveFlowState = vi.fn();
 const consumeFlowState = vi.fn();
 /**
@@ -458,6 +463,32 @@ describe('GET /auth/session/callback', () => {
     await inject({ method: 'GET', url: CALLBACK });
 
     expect(consumeFlowState).not.toHaveBeenCalled();
+  });
+
+  it('completes an SSO login (provisioning + profile) before opening the session', async () => {
+    consumeFlowState.mockResolvedValue({
+      verifier: 'the-verifier',
+      nonce: 'nonce',
+      returnTo: '/discover',
+      redirectUri: 'https://api.example.org/api/v1/auth/session/callback',
+      appOrigin: 'https://app.example.org',
+      sso: { provider: 'ncs', handle: 'the-handle' },
+    });
+
+    const res = await inject({ method: 'GET', url: CALLBACK, headers: boundToThisBrowser });
+
+    expect(res.statusCode).toBe(302);
+    expect(completeSsoLogin).toHaveBeenCalledWith(
+      { provider: 'ncs', handle: 'the-handle' },
+      'the-access-token',
+      expect.anything()
+    );
+    expect(createSession).toHaveBeenCalledOnce();
+  });
+
+  it('does not run the SSO step for an ordinary login', async () => {
+    await inject({ method: 'GET', url: CALLBACK, headers: boundToThisBrowser });
+    expect(completeSsoLogin).not.toHaveBeenCalled();
   });
 
   it('clears the flow cookie once the session is open', async () => {

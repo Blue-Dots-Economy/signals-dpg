@@ -1,6 +1,8 @@
 import { ssoConfig } from '@/config';
 import { createNcsClient } from '@/services/auth/sso/ncs_client';
 import { createNcsProvider, NCS_PROVIDER_ID } from '@/services/auth/sso/providers/ncs';
+import { createOidcKeys, type OidcKeys } from '@/services/auth/sso/oidc_keys';
+import type { SsoProfileMapping } from '@/services/auth/sso/sso_profile_bootstrap';
 import type { SsoProvider } from '@/services/auth/sso/types';
 
 /**
@@ -33,7 +35,21 @@ export function getActiveSsoProvider(): SsoProvider | null {
   return active;
 }
 
+/** Profile-bootstrap mapping for a provider, or null when it has none. */
+export function getSsoProfileMapping(providerId: string): SsoProfileMapping | null {
+  return providerId === NCS_PROVIDER_ID ? ssoConfig.ncs.mapping : null;
+}
+
+let oidcKeys: OidcKeys | null = null;
+
+/** The id_token signing key. Only called once SSO is known to be enabled. */
+export function getSsoOidcKeys(): OidcKeys {
+  oidcKeys ??= createOidcKeys(ssoConfig.oidc.signing_key_pem);
+  return oidcKeys;
+}
+
 /** Test seam. */
 export function resetSsoProviderRegistry(): void {
   active = undefined;
+  oidcKeys = null;
 }
