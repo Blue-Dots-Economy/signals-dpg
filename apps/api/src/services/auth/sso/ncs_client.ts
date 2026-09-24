@@ -50,6 +50,12 @@ export interface NcsClient {
   validateToken(token: string): Promise<SsoResult<NcsUser>>;
 }
 
+/** Why a guarded NCS call did not produce an answer, for the log line. */
+function failureDetail(outcome: { reason: 'busy' | 'open' | 'failed'; error?: unknown }): string {
+  if (outcome.reason !== 'failed') return `NCS call refused (${outcome.reason})`;
+  return outcome.error instanceof Error ? outcome.error.message : 'NCS call failed';
+}
+
 export function createNcsClient(
   config: NcsClientConfig,
   fetchImpl: typeof fetch = fetch
@@ -98,13 +104,7 @@ export function createNcsClient(
     async validateToken(token) {
       const outcome = await guard.run(() => call(token));
       if (outcome.ok) return outcome.value;
-      const detail =
-        outcome.reason === 'failed'
-          ? outcome.error instanceof Error
-            ? outcome.error.message
-            : 'NCS call failed'
-          : `NCS call refused (${outcome.reason})`;
-      return { ok: false, reason: 'provider-unavailable', detail };
+      return { ok: false, reason: 'provider-unavailable', detail: failureDetail(outcome) };
     },
   };
 }

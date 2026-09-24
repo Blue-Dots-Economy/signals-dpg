@@ -42,7 +42,7 @@ export function SsoErrorPage() {
         <Alert variant="destructive">
           <OctagonX className="size-4" />
           <AlertTitle>{t('auth.sso_error_title')}</AlertTitle>
-          <AlertDescription>{t(`auth.sso_error_${reason.replace(/-/g, '_')}`)}</AlertDescription>
+          <AlertDescription>{t(`auth.sso_error_${reason.replaceAll('-', '_')}`)}</AlertDescription>
         </Alert>
         {partnerUrl ? (
           <Button asChild>

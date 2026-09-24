@@ -34,7 +34,7 @@ export interface OidcKeys {
  * store). Throws a message naming the variable, never the key material.
  */
 function parsePrivateKey(raw: string): KeyObject {
-  const pem = raw.includes('\\n') ? raw.replaceAll('\\n', '\n') : raw;
+  const pem = raw.includes(String.raw`\n`) ? raw.replaceAll(String.raw`\n`, '\n') : raw;
   try {
     return createPrivateKey(pem.trim());
   } catch {

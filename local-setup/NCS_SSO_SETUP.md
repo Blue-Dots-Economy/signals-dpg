@@ -142,9 +142,6 @@ redirect, so `localhost` works for local testing. The API calls NCS
 3. Re-open the same link → error page, *already used*. Links also expire
    5 minutes after NCS issues them.
 
-No NCS access yet? `local-setup/ncs-demo/` is a stand-in NCS portal + API
-(`SSO_NCS_BASE_URL=http://localhost:4555`, same Client ID/Secret on both sides).
-
 **Under-18 step:** if the seeker domain in your `network.json` has
 `"guardian_consent_required": true`, new seekers are asked for a birth year
 (NCS sends no date of birth). Set it to `false` in your local `network.json`

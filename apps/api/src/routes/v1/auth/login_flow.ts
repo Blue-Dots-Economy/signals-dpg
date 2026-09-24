@@ -99,7 +99,7 @@ export interface StartLoginFlowInput {
   /** Keycloak identity provider to go straight to (`kc_idp_hint`). */
   idpHint?: string;
   /** Carried to the callback for an SSO login. See `OidcFlowState.sso`. */
-  sso?: OidcFlowState['sso'];
+  sso?: NonNullable<OidcFlowState['sso']>;
 }
 
 /**

@@ -16,7 +16,7 @@ export function decryptCryptoJsAes(blob: string, passphrase: string): string | n
   if (typeof blob !== 'string' || blob.length === 0) return null;
 
   // A '+' in an unencoded query string arrives as a space.
-  const raw = Buffer.from(blob.replace(/ /g, '+'), 'base64');
+  const raw = Buffer.from(blob.replaceAll(' ', '+'), 'base64');
   if (raw.length < 32 || raw.subarray(0, 8).toString('latin1') !== 'Salted__') {
     return null;
   }

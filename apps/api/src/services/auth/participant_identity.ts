@@ -34,7 +34,6 @@ import {
   resetKeycloakAdminClient,
 } from '@/services/auth/keycloak_admin_instance';
 import { authConfig } from '@/config';
-import type { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
 import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
 
 /** Why a participant's realm identity could not be created. */
