@@ -51,7 +51,14 @@ async function buildApp(orgType: 'aggregator' | 'network_service' | 'voice' | nu
   app.setSerializerCompiler(serializerCompiler);
   if (orgType) {
     app.addHook('preHandler', async (request) => {
-      request.acting_org = { org_id: 'org_test', org_type: orgType, service_user_id: 'usr_test' };
+      request.acting_org = {
+        org_id: 'org_test',
+        // `voice` is the type #518 retired. `organization.type` is plain
+        // nullable text, so such a row stays representable at runtime and the
+        // rejection below must still be constructible — hence the cast.
+        org_type: orgType as 'aggregator' | 'network_service',
+        service_user_id: 'usr_test',
+      };
     });
   }
   const { participant_decrypt } = await import('../participant_decrypt');
@@ -88,7 +95,7 @@ describe('POST /api/v1/admin/participant/decrypt (unit)', () => {
     expect(res.json().error).toBe('INVALID_ACTING_ORG');
   });
 
-  it('rejects a voice acting org (403 ACTING_ORG_TYPE_NOT_ALLOWED)', async () => {
+  it('rejects the retired `voice` acting org (403 ACTING_ORG_TYPE_NOT_ALLOWED, #518)', async () => {
     const app2 = await buildApp('voice');
     const res = await app2.inject({ method: 'POST', url: '/participant/decrypt', payload: { item_ids: [uuid] } });
     expect(res.statusCode).toBe(403);

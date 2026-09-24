@@ -210,21 +210,34 @@ The existing `400 MISSING_ACTING_ORG`, `404 ACTING_ORG_NOT_FOUND` and
 
 ## Organization types
 
-The `organization.type` text column on the better-auth `organization` table
-carries one of three values in this model:
+The `organization.type` text column on the `organization` table carries one of
+two values in this model:
 
-- `network_service` — the integrating DPGs themselves
-  (`aggregator-dpg`, `voice-dpg`). Their service users are members of these
-  orgs. Created by the seed script.
+- `network_service` — the integrating DPGs themselves (`aggregator-dpg`, the
+  Raya voice bot). Their service users are members of these orgs. Created by
+  the seed script locally, and by `provision_service_users.sql` in production.
 - `aggregator` — every aggregator that has registered with aggregator-dpg,
   mirrored into Signals via `POST /api/v1/admin/aggregator/upsert`.
-- `voice` — same shape as `aggregator` but for voice-hosted instances
-  (future expansion; the preHandler already accepts the type).
 
-The `acting_org` preHandler accepts all three as valid `x-acting-org-id`
-targets. Individual routes can narrow further — e.g.
+The `acting_org` preHandler accepts both as valid `x-acting-org-id` targets.
+Individual routes can narrow further — e.g.
 `POST /api/v1/admin/aggregator/upsert` rejects with
 `403 NOT_NETWORK_SERVICE` if the acting org's type is not `network_service`.
+
+> **A third value, `voice`, was retired by #518.** It reached exactly as far as
+> `network_service` — the ownership check runs only for `aggregator`, so every
+> other admitted type got network-wide scope — which made it a synonym rather
+> than a distinct authority, and a reviewer had to check both to learn they
+> were the same. The voice bot's org is a `network_service` like any other.
+>
+> **The channel is now told apart by the Keycloak client id (`azp`), not the
+> org type.** `request.service_client_id` carries it, and it is bound onto the
+> request logger. Use it for audit and triage; never for authorization — that
+> conflation is what the retired type got wrong.
+>
+> `organization.type` is plain nullable text, so a `voice` row remains
+> *representable* even though nothing admits it. Such a row is refused with
+> `403 ACTING_ORG_TYPE_NOT_ALLOWED` at the acting-org preHandler.
 
 ## Local dev setup
 
@@ -245,10 +258,19 @@ ensures:
    `role='service'`.
 4. An `apikey` row (prefix `sk_signals_`) owned by that user.
 
-> **`SERVICES` currently contains only `aggregator-dpg`.** Despite what the
-> rest of this document implies, `voice-dpg` is *not* seeded — add it to the
-> list when that DPG is wired up. This matters for the Keycloak migration too:
-> the slug created here is what a client-credentials client id must match.
+> **`SERVICES` contains `aggregator-dpg` and `raya-voice-bot`** (#518), matching
+> the production `provision_service_users.sql`, which also provisions
+> `signals-search-client`.
+>
+> **Mind the two names for the voice bot.** Its organization slug is
+> `raya-voice-bot`; its Keycloak client is `voice-dpg`. They were chosen
+> independently and nothing enforces that they agree — which matters because
+> `resolveServiceAccount` maps a client-credentials token to a service user by
+> looking the **client id up as an organization slug**. A bearer token from the
+> `voice-dpg` client therefore finds no org and fails
+> `SERVICE_ACCOUNT_NOT_PROVISIONED`. That is latent rather than breaking today,
+> because `KEYCLOAK_SERVICE_CLIENT_IDS` is empty by default and the voice bot
+> authenticates with `x-api-key`. Reconciling the two names is its own change.
 
 The minted apikeys print to stdout **on the first run only** — capture them
 then. If you lose a key, the recovery path is to delete the corresponding
@@ -298,11 +320,13 @@ use to create or update participants. The behavior splits by the
 |------------------------|---------------------|------------------|----------------------------------------------------------------|----------------|------------------------|
 | Ecosystem manager      | network_service     | yes              | yes (full list, served-domain scoped)                          | yes (`item_id`)| yes (omit `item_id`)   |
 | Aggregator             | aggregator          | yes              | yes — but **only own users** (cross-aggregator returns `items:[]`) | no             | no                     |
-| Voice (future)         | voice               | (rejected today) | (rejected)                                                     | (rejected)     | (rejected)             |
 
-The future voice tier will piggyback on the aggregator behavior: when a
-voice instance is delegated to an aggregator, voice-dpg simply starts
-asserting the aggregator's `x-acting-org-id` — no code change needed.
+There is no third tier. The voice bot acts at the ecosystem-manager tier,
+because its org is a `network_service` (#518 retired the `voice` type that used
+to sit here as "future"). When a voice instance is instead delegated to an
+aggregator, it simply asserts that aggregator's `x-acting-org-id` and picks up
+the aggregator row above — no code change and no extra type needed, which is
+the whole reason the third type was never required.
 
 ### Request
 
@@ -445,7 +469,7 @@ or every entry was `false`/unrecognised).
   re-prompted them, and the channel had no way to tell. `has_age` is unrelated to
   document versions.
 - **Minors are rejected on the read too** (#692): `400 U18_NOT_ALLOWED` for
-  `voice` / `network_service` callers, matching the POST. `aggregator` callers
+  `network_service` callers, matching the POST. `aggregator` callers
   are unaffected, because their use of this endpoint is a read-only identity
   probe that never reads consent. Minors onboard through the portal.
 - `?network=` selects which network's consent documents define "current". It is
@@ -462,11 +486,11 @@ or every entry was `false`/unrecognised).
 | Caller shape | HTTP | error | When |
 |---|---|---|---|
 | acting_org missing | 403 | `INVALID_ACTING_ORG` | request reached the handler without acting_org |
-| acting_org_type == 'voice' (or anything not in aggregator/network_service) | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | not allowed today |
+| acting_org_type is anything other than `aggregator` / `network_service` — including the retired `voice` (#518) | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | the column is plain text, so an unknown or retired type is refused at the preHandler |
 | network_service + invalid `item_id` (doesn't belong to user) | 403 | `ITEM_NOT_OWNED_BY_USER` | item ownership check failed |
 | email + phone race | 409 | `USER_ALREADY_EXISTS` | another caller created the same identity between SELECT and signUp |
 | aggregator + participant already locked to another domain | 403 | `DOMAIN_LOCKED` | **not additive.** An account holds profiles in exactly ONE domain (`assertSingleDomain`). A previously-succeeding call now fails if `domain` (or its `'seeker'` default) differs from the domain the participant already holds. Body carries `locked_domain` / `requested_domain`. Per-row, so a batch is unaffected — the row does not land. |
-| `GET /admin/participant` + minor, caller is `voice`/`network_service` | 400 | `U18_NOT_ALLOWED` | **not additive (#692).** The read now matches the POST: minors onboard through the portal. `aggregator` callers are exempt — their probe never reads consent. Reported only after the disclosure check, so it cannot reveal minor status to a caller not entitled to the user. |
+| `GET /admin/participant` + minor, caller is `network_service` | 400 | `U18_NOT_ALLOWED` | **not additive (#692).** The read now matches the POST: minors onboard through the portal. `aggregator` callers are exempt — their probe never reads consent. Reported only after the disclosure check, so it cannot reveal minor status to a caller not entitled to the user. |
 | `GET /admin/participant` on a multi-network instance with no `?network=` | 400 | `NETWORK_REQUIRED` | **not additive (#692).** Consent documents are per-network, so version comparison needs one named. Single-network instances (all of them today) are unaffected — the served network is used. |
 | `GET /admin/participant` + `?network=` naming an unserved network | 400 | `NETWORK_NOT_SERVED` | **not additive (#692).** A typo (`blue-dot`) previously returned 200 with every flag `false`. Callers that omit `?network=` are unaffected. |
 
@@ -795,7 +819,7 @@ every `/api/v1/admin/*` route. Its checks (in order):
 | `x-acting-org-id` header missing or blank | 400 | `MISSING_ACTING_ORG` | header not sent or empty after trim |
 | `request.user` not set | 401 | `UNAUTHENTICATED` | apikey auth did not run (no `x-api-key`) |
 | `acting_org_id` does not match any `organization` row | 404 | `ACTING_ORG_NOT_FOUND` | unknown org id |
-| Org exists but `organization.type` is null/unknown | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | type is not `aggregator`, `voice`, or `network_service` |
+| Org exists but `organization.type` is null/unknown/retired | 403 | `ACTING_ORG_TYPE_NOT_ALLOWED` | type is not `aggregator` or `network_service` — includes the `voice` type retired by #518 |
 | Caller's service user is not a member of any org | 403 | `SERVICE_USER_NOT_REGISTERED` | no `member` row for `request.user.id` |
 
 On success the preHandler attaches:
@@ -803,7 +827,7 @@ On success the preHandler attaches:
 ```ts
 request.acting_org = {
   org_id: string,
-  org_type: 'aggregator' | 'voice' | 'network_service',
+  org_type: 'aggregator' | 'network_service',
   service_user_id: string,
 };
 ```
@@ -811,9 +835,14 @@ request.acting_org = {
 and Fastify continues to the route handler. The `FastifyRequest` type
 augmentation is declared in `apps/api/types.d.ts`.
 
+On the client-credentials path the request also carries
+`request.service_client_id` — the Keycloak client id (`azp`) the token was
+issued to. Since every service org is a `network_service`, `acting_org` says
+the caller is a service and this says *which* service. Audit only.
+
 ## Deferred: per-org allowlist
 
-Today's preHandler accepts **any** `aggregator` / `voice` / `network_service`
+Today's preHandler accepts **any** `aggregator` / `network_service`
 org id from **any** service user that is a member of at least one org.
 Tightening to "service user X can only assert orgs Y and Z" is intentionally
 deferred.
@@ -831,8 +860,8 @@ The intended path when this is picked up:
 This is safe to defer because:
 
 - Apikeys are only minted by the seed script (operator-controlled).
-- `aggregator` and `voice` orgs are only created via the
-  `network_service`-gated upsert endpoint.
+- `aggregator` orgs are only created via the `network_service`-gated upsert
+  endpoint.
 - The blast radius of a leaked service apikey is "can act for any
   aggregator on this instance", which an operator already needs to assume
   as part of treating the key as a secret.
@@ -846,10 +875,10 @@ Two `acting_org.org_type` values may use `acting_as_user_id` on
   (`user.onboarded_by_org_id === acting_org.org_id`). For
   counsellor-driven applications, future delegation models, etc.
 - **`network_service`** — unrestricted; may act for any user in the
-  network. Today's voice-DPG runs at this tier (network-hosted service).
+  network. The Raya voice bot runs at this tier (network-hosted service).
 
-Voice-type acting_orgs are rejected with `403 ACTING_ORG_TYPE_NOT_ALLOWED`
-(placeholder; no voice-typed orgs exist in production today).
+These are the only two. Every other `organization.type` — including the `voice`
+type retired by #518 — is rejected with `403 ACTING_ORG_TYPE_NOT_ALLOWED`.
 
 `POST /api/v1/action/update-status` is **self-acted only** — the caller
 must be the target item's owner. There is no `acting_as_user_id` field
@@ -887,7 +916,7 @@ effective actor — `403 SOURCE_ITEM_NOT_OWNED_BY_ACTOR` otherwise.
 | `network_service` apikey + acting_org | absent | `400 MISSING_ACTING_AS_USER_ID` |
 | `network_service` apikey + acting_org | present, user not found | `404 USER_NOT_FOUND` |
 | `network_service` apikey + acting_org | present, user exists | `201` |
-| `voice` acting_org | (any) | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
+| any other org type, including the retired `voice` (#518) | (any) | `403 ACTING_ORG_TYPE_NOT_ALLOWED` |
 
 ### Audit columns
 
@@ -899,6 +928,14 @@ caller:
 - `network_service` org_id → voice / ecosystem-manager-driven action.
 - `aggregator` org_id → counsellor / aggregator-DPG-driven action.
 - `NULL` → self-acted (UI session or apikey-as-self).
+
+These columns identify the **tier**, not the service: every integrating DPG
+holds a `network_service` org, so `performed_by_org_id` cannot by itself tell
+the voice bot from aggregator-dpg. On the client-credentials path that
+distinction lives in `request.service_client_id` (`azp`), which is bound onto
+the request logger rather than persisted — so today it is recoverable from logs,
+not by querying `item_actions`. Persisting it is a follow-up if audit ever needs
+to query on it.
 
 There are no indexes on these columns today — query via
 `WHERE performed_by_org_id = $1` sequentially when needed.
@@ -916,16 +953,18 @@ either:
 
 ## Voice DPG follows the same pattern
 
-Voice-dpg uses its own apikey from the seed and asserts `x-acting-org-id`
-set to either:
+The voice bot uses its own apikey from the seed (org slug `raya-voice-bot`) and
+asserts `x-acting-org-id` set to either:
 
 - the aggregator org id when voice is hosted per-aggregator
   (e.g. BBMP runs its own voice instance for itself); or
-- a designated network-voice org when voice is network-hosted with no
-  aggregator behind it (the org would be created with `type='voice'`).
+- its own `network_service` org when voice is network-hosted with no
+  aggregator behind it. Before #518 this was described as an org with
+  `type='voice'`; that type is retired, and the network-hosted case is served
+  by the `network_service` org it already has.
 
-The Signals-side handler logic does not change — `voice` and `aggregator`
-are interchangeable consumers from Signals' point of view. Routes that
+The Signals-side handler logic does not change — the voice bot and an
+aggregator are interchangeable consumers from Signals' point of view. Routes that
 need to discriminate (like the aggregator upsert) do so via
 `request.acting_org.org_type`.
 

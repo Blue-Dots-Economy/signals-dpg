@@ -219,8 +219,10 @@ describe('resolveServiceAccount', () => {
   });
 
   it('accepts the other seeded integrating DPG', async () => {
+    // The Keycloak client is still `voice-dpg`; what #518 changed is the org
+    // behind it, which is a `network_service` like every other service org.
     dbState.rows = [
-      { ...SERVICE_ROW, userId: 'usr_service_2', name: 'voice-dpg', orgType: 'voice' },
+      { ...SERVICE_ROW, userId: 'usr_service_2', name: 'voice-dpg', orgType: 'network_service' },
     ];
 
     const result = await resolveServiceAccount(
@@ -231,5 +233,8 @@ describe('resolveServiceAccount', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.user.id).toBe('usr_service_2');
+    // The one field that still distinguishes this DPG from aggregator-dpg now
+    // that both orgs are `network_service` (#518).
+    expect(result.client_id).toBe('voice-dpg');
   });
 });

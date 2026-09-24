@@ -122,7 +122,7 @@ describe('GET /api/v1/admin/participant (unit)', () => {
     expect(body.error).toBe('INVALID_ACTING_ORG');
   });
 
-  it('rejects an acting org outside the allowed set (voice IS allowed)', async () => {
+  it('rejects an acting org outside the allowed set', async () => {
     const app2 = Fastify().withTypeProvider<ZodTypeProvider>();
     app2.setValidatorCompiler(validatorCompiler);
     app2.setSerializerCompiler(serializerCompiler);
@@ -130,8 +130,6 @@ describe('GET /api/v1/admin/participant (unit)', () => {
     app2.addHook('preHandler', async (request, _reply) => {
       request.acting_org = {
         org_id: 'org_test',
-        // Was 'voice' — voice-dpg is now an admitted integrating DPG, so the
-        // rejection case needs a type that genuinely is not allowed.
         org_type: 'employer' as unknown as 'aggregator',
         service_user_id: 'usr_test',
       };

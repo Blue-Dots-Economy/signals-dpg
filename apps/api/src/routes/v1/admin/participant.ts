@@ -70,9 +70,9 @@ type OnboardingFields = {
   /**
    * The aggregator that owns this participant, or null when nobody does yet.
    *
-   * SS-3 (#640): this is NO LONGER simply the acting org. A `voice` or
-   * `network_service` caller is not an aggregator — the voice agent is hosted
-   * by the network, so a cold inbound caller genuinely has no aggregator — and
+   * SS-3 (#640): this is NO LONGER simply the acting org. A `network_service`
+   * caller is not an aggregator — the voice agent is hosted by the network, so
+   * a cold inbound caller genuinely has no aggregator of its own — and
    * tagging them to the network's own org satisfies "every entrant has an
    * owner" on paper while leaving a verification queue nobody would open.
    * Those callers resolve the instance's DEFAULT aggregator instead, and get
@@ -108,9 +108,9 @@ export const DOMAIN_REQUIRED_FOR_DEFAULT = {
 /**
  * Who owns a participant created through this route.
  *
- * An aggregator caller owns the participants it onboards, unchanged. Any other
- * caller (`voice`, `network_service`) is not an aggregator — the voice agent is
- * hosted by the network, so a cold inbound caller genuinely has no aggregator —
+ * An aggregator caller owns the participants it onboards, unchanged. A
+ * `network_service` caller is not an aggregator — the voice agent is hosted by
+ * the network, so a cold inbound caller genuinely has no aggregator of its own —
  * and falls back to the default nominated for the binding it is joining.
  *
  * `domain` is REQUIRED on that branch. The request schema marks it optional
@@ -129,7 +129,7 @@ export const DOMAIN_REQUIRED_FOR_DEFAULT = {
  */
 async function resolveOnboardingOwnerOrg(
   exec: DbOrTx,
-  acting: { org_id: string; org_type: 'aggregator' | 'voice' | 'network_service' },
+  acting: { org_id: string; org_type: 'aggregator' | 'network_service' },
   network: string,
   domain: string | undefined,
   log: FastifyRequest['log'],
@@ -597,11 +597,11 @@ async function existingUserOk(
  * onboarded user's local row already exists (insertLocalUser), so
  * provisioning.createMirror is skipped on first login and never sends Welcome.
  * `actingOrgType: 'aggregator'` is hard-coded deliberately: every service-org
- * onboarder (aggregator, network_service, voice) lands here, and all get the
+ * onboarder (aggregator, network_service) lands here, and all get the
  * initiation email — the self create/Welcome path is suppressed for all of
  * them, so collapsing them to the aggregator copy prevents a missed onboarding
- * email. (A network_service/voice onboard is thus described as an aggregator in
- * the copy — accepted.)
+ * email. (A network_service onboard is thus described as an aggregator in the
+ * copy — accepted.)
  * Fire-and-forget, lazy-imported to keep the notification chain off this
  * route's static graph.
  */
@@ -1089,7 +1089,7 @@ export const participant_handler = async (
       message:
         verdict.error === 'INVALID_ACTING_ORG'
           ? 'acting_org is required for /admin/participant'
-          : 'only aggregator, network_service or voice acting orgs are allowed',
+          : 'only aggregator or network_service acting orgs are allowed',
     });
   }
 

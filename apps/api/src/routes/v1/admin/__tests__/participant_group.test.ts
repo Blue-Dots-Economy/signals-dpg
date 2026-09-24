@@ -961,24 +961,7 @@ describe('participant_read_handler — item + consent projection', () => {
     expect(items[0].profile_consent_accepted).toBe(true);
   });
 
-  it('rejects a minor for a voice caller with U18_NOT_ALLOWED', async () => {
-    rowQueue.push([
-      { id: 'u1', email: 'a@b.com', phoneNumber: null, onboardedByOrgId: 'org_x' },
-    ]);
-    rowQueue.push([{ age: 15 }]);
-
-    const reply = await call(participant_read_handler, {
-      acting_org: { org_id: 'org_voice', org_type: 'voice', service_user_id: 's' },
-      query: { email: 'a@b.com' },
-    });
-
-    expect(reply.statusCode).toBe(400);
-    expect((reply.body as { error: string }).error).toBe('U18_NOT_ALLOWED');
-    // Nothing beyond the user + age lookups is read.
-    expect(queries.map((q) => q.table)).toEqual(['user', 'user']);
-  });
-
-  it('rejects a minor for network_service too', async () => {
+  it('rejects a minor for network_service', async () => {
     rowQueue.push([
       { id: 'u1', email: 'a@b.com', phoneNumber: null, onboardedByOrgId: 'org_x' },
     ]);
@@ -1197,17 +1180,22 @@ describe('participant_read_handler — item + consent projection', () => {
     expect((reply.body as { error: string }).error).toBe('NETWORK_NOT_SERVED');
   });
 
-  it('admits a voice acting org (treated as a service org; retire via #518)', async () => {
+  it('rejects the retired `voice` acting org (#518)', async () => {
     const reply = await call(participant_read_handler, {
-      acting_org: { org_id: 'org_voice', org_type: 'voice', service_user_id: 's' },
+      acting_org: {
+        org_id: 'org_voice',
+        // `organization.type` is plain nullable text, so a surviving `voice`
+        // row is representable even though the union no longer admits it.
+        org_type: 'voice' as unknown as 'network_service',
+        service_user_id: 's',
+      },
       query: { email: 'a@b.com' },
     });
 
-    // voice is admitted alongside aggregator/network_service — voice-dpg is a
-    // platform layer, not a restricted actor. The redundant `voice` org type is
-    // tracked for removal (model voice-dpg as network_service) in signals-dpg#518.
-    expect(reply.statusCode).not.toBe(403);
-    expect(queries.length).toBeGreaterThan(0);
+    expect(reply.statusCode).toBe(403);
+    expect((reply.body as { error: string }).error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
+    // Refused before any row is read.
+    expect(queries).toHaveLength(0);
   });
 
   it('propagates a DB failure instead of returning a 5xx body (no try/catch)', async () => {
