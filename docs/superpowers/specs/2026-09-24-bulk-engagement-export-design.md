@@ -24,7 +24,7 @@ widening is a request value or a `network.json` entry, not a new API.
 | Q | Answer | How this design honours it |
 |---|---|---|
 | Q1 | Providers & service providers only; seekers future | Eligibility is config on the interaction (§4), not code |
-| Q2 | Both incoming and outgoing | `ownership_role: all`; counterparty resolved per row (§5.2) |
+| Q2 | Both incoming and outgoing | API: `ownership_role: all`, counterparty resolved per row (§5.2). UI: selection kept across Sent/Received tabs → one file (§6A) |
 | Q3 | All fields always | `projection.fields: "*"` in v1; field list supported by the contract (§5.1) |
 | Q4 | Future scope | Status filter accepts any status; v1 UI sends `accepted` only |
 | Q5 | Audit metadata only | One `bulk_export_audit` row per download (§7) |
@@ -214,7 +214,7 @@ v1 rule:
 - A plain provider who only connects with seekers never sends it.
 - UI: a requester with more than one counterparty type sees one download per
   type ("Download seekers" / "Download providers"); everyone else sees one
-  "Download".
+  "Download". Buttons are derived from config (§6A).
 - A single-click bundle later = `format: "zip"` in the enum. No contract change.
 
 **Config consequence:** the `provider → provider` interaction needs its own
@@ -308,6 +308,146 @@ pii_revealed, <profile fields…>
 
 These are hard to change once providers build imports on them — fix them now.
 
+## 6A. UI — My Actions (`apps/ui`)
+
+### Current page (what the design must fit)
+
+- `pages/my-actions-page.tsx` is **scoped to one live profile** (`scopedId`,
+  kept in `?profile=`); a user with several profiles switches between them.
+- **Sent / Received are separate tabs** (`initiated` / `received`), each with
+  its own query (`useInitiatedActions` / `useReceivedActions`) sharing the
+  page filters: `status`, `type`, `facets`, `sort`.
+- Multi-select exists: `useCardSelection` + `BulkActionBar` in
+  `components/actions/action-list.tsx`, today offering status changes
+  (accept / reject / complete / cancel) on the selected cards of the active tab.
+- Copy goes through i18n `t('actions.…')`.
+- API calls use the axios client in `lib/api-client.ts` (`withCredentials`,
+  separate `baseURL`). There is **no file-download precedent** in the UI yet.
+
+### Entry point — selection only
+
+Export is **selection-based**: the user picks the cards to export. There is no
+"download everything matching" button in v1.
+
+- A **Download** button is shown whenever the user's domain can export (see
+  "Which buttons show"), and is **disabled until at least 1 card is selected**
+  (`selection.selected.size === 0` → disabled, tooltip
+  `actions.export_select_hint` "Select at least one accepted engagement").
+- Request: `filters: { item_id: scopedId, ownership_role: "all",
+  action_ids: [...selected], action_status: ["accepted"], counterparty_domain }`
+  — `action_status` is sent too, so a card whose status changed since it was
+  selected is dropped server-side rather than exported.
+
+### Selection kept across tabs (Q2 in one file)
+
+The user can select accepted cards on **Sent**, switch to **Received**, keep
+selecting, and download **one** file covering both directions.
+
+Changes:
+
+1. **Tab switch keeps an accepted selection.** Today `my-actions-page.tsx:382`
+   calls `selection.exitSelect()` on every tab change. New rule: keep the
+   selection when its lock group is `accepted`; still clear it when the group
+   is `pending`, so bulk accept / reject / cancel behave exactly as today
+   (those are single-tab operations).
+2. **Selected rows come from both tabs.** `selectedActions`
+   (`my-actions-page.tsx:431`) is computed from the active tab's list only;
+   compute it from the union of `initiatedActions` and `receivedActions`.
+3. **Lock group spans tabs.** An accepted card on Sent and one on Received are
+   the same `accepted` group, so the existing lock lets them combine and still
+   keeps pending out.
+4. **Bulk bar shows the split:** "5 selected (3 sent · 2 received)".
+   - **Download** covers all selected cards.
+   - **Complete** applies only to Received cards — hidden when any Sent card
+     is selected, so it never silently acts on part of the selection.
+5. **Clear / exit** clears both tabs' selection. Selection also clears when
+   the scoped profile (`?profile=`) changes — rows of another profile must
+   never ride along.
+6. Counterparty split (below) still applies across tabs: seekers and providers
+   go to separate files regardless of which tab they came from.
+
+No API change — the endpoint already takes `ownership_role: "all"` with
+`action_ids` from either side.
+
+### Required change to selectability
+
+Today `actionClassFor` (`components/actions/action-list.tsx:57`) makes a card
+selectable only for status actions: pending on both tabs, **accepted only on
+Received**. On the **Sent** tab an accepted card returns `null` and cannot be
+selected — so accepted engagements the provider initiated could never be
+exported.
+
+Fix: accepted cards are selectable on **both** tabs, in the `accepted` lock
+group. The bulk bar offers **Download** for that group, plus **Complete** when every
+selected card is on Received (see above). The existing lock (first card picked fixes the group) already
+keeps pending and accepted from mixing, so Download never receives pending
+cards.
+
+### Mixed counterparty types inside a selection
+
+On blue_dot a service provider's accepted cards can be seekers **and**
+providers. Each action row carries the counterparty's domain, so the bulk bar
+groups the selection by counterparty domain:
+
+| Selection | Bulk bar |
+|---|---|
+| one counterparty type | **Download (N)** |
+| several types | **Download seekers (3)** · **Download providers (2)** — one file each |
+
+This keeps "one file per counterparty type" (§5.2) without a server
+round-trip, and avoids firing several browser downloads from one click.
+
+### Which buttons show — from config
+
+The UI already loads the network config. From it, compute for the
+requester's domain the counterparty domains of every interaction whose
+`export.requester_domains` includes that domain. Empty (e.g. seeker in v1) →
+**no Download control at all**; otherwise the control is shown and follows the
+selection rules above. Labels use the domain display names.
+
+### Scale
+
+Selection works on loaded cards only (infinite scroll), and there is no
+select-all today. Exporting many records means scrolling and ticking each one.
+**Recommended follow-up:** "Select all loaded" in select mode, using the
+existing `selection.setSelected(ids)`. Selecting beyond loaded pages would
+need the server-side "all matching" mode, which the API already supports via
+filters without `action_ids`.
+
+### Download mechanics
+
+- `POST` via the existing axios client with `responseType: 'blob'`.
+- Filename from `Content-Disposition`; save via `URL.createObjectURL` +
+  temporary `<a download>`, then revoke the URL.
+- The API is on a separate origin, so the API's CORS config must add
+  `Access-Control-Expose-Headers: Content-Disposition, X-Export-Id,
+  X-Export-Row-Count, X-Export-Skipped-Cross-Instance,
+  X-Export-Skipped-Missing, X-Export-Skipped-Self` — otherwise the browser
+  hides them from JS.
+- Button shows a pending state and is disabled while a download runs (also
+  matches the server's one-export-at-a-time cap).
+- A 0-row response cannot happen from the UI (≥ 1 selected, all accepted);
+  if the server returns 0 rows anyway (e.g. selected rows turned
+  cross-instance / missing), show the skipped toast and do not save a file.
+
+### Feedback
+
+| Response | UI |
+|---|---|
+| 200, no skips | toast "Downloaded N records" |
+| 200, skips > 0 | toast "Downloaded N records · M could not be included" (cross-instance / missing) |
+| 403 `EXPORT_NOT_ENABLED` | toast; should not happen when buttons are config-driven |
+| 413 `EXPORT_TOO_LARGE` | "Too many records — narrow the filters" |
+| 429 | "An export is already running — try again shortly" |
+
+All strings as new `actions.export_*` i18n keys.
+
+### Out of scope (UI, v1)
+
+- Status picker for export (API supports it; v1 is accepted-only).
+- Field picker (API supports `projection.fields`; v1 sends `"*"`).
+- ZIP / single-click multi-type download.
+
 ## 7. Audit
 
 New table `bulk_export_audit` — one row per download (Q5: metadata only):
@@ -358,10 +498,12 @@ is expensive and is the obvious scraping route.
    profile's own header (§5.2).
 3. One domain per user: **enforced in code** (§3), guard kept for legacy
    accounts.
-
 4. Domains: **per-network**. blue_dot brands have `seeker` / `provider` /
    `service_provider`; purple_dot has `seeker` / `provider` (provider = service
    provider). Handled entirely by `requester_domains` config (§4).
+5. UI export is **selection-only**; Download disabled until ≥ 1 selected;
+   **accepted selection is kept across Sent/Received tabs** so one file can
+   cover both directions (§6A).
 
 ## 11. Delivery (child issues, after approval)
 
@@ -372,5 +514,9 @@ is expensive and is the obvious scraping route.
 2. **api** — shared row-set/counterparty helper; `POST /action/export`;
    `bulk_export_audit` table + migration; tests (both directions, masked
    paused row, skips, 403/413/400 paths).
-3. **ui** — "Download" on My Actions (all matching / selected), sending
-   `action_status: ["accepted"]`.
+3. **ui** (§6A) — selection-based Download (disabled at 0 selected);
+   accepted cards selectable on the Sent tab; accepted selection kept across
+   tabs; per-counterparty-type buttons in
+   `BulkActionBar`; blob download helper; `actions.export_*` i18n
+   keys; feedback toasts. Depends on the api ticket's CORS
+   `Access-Control-Expose-Headers` change.
