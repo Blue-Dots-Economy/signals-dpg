@@ -107,7 +107,7 @@ identity brokering cannot consume it directly.
 
 Build a **generic external-identity bridge inside the Signals API** that looks
 like a standard OIDC provider to Keycloak. Register it in the realm **once** as
-identity provider `signals-bridge`. Each partner portal is a small adapter in
+identity provider `signals-sso`. Each partner portal is a small adapter in
 Signals; NCS is the first.
 
 Rejected alternatives:
@@ -159,34 +159,47 @@ Base URLs: staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod
 
 ## 4. Flow
 
+The link is **fully verified at arrival** (step 3), before anything is written
+or Keycloak is involved. A bad, expired or replayed link fails in
+microseconds and never reaches NCS or Keycloak.
+
 ```
  1. User logs in on NCS, clicks the Bluedots link.
- 2. NCS → browser → GET /api/v1/auth/external/ncs/login?userName&sig&expiry&featureKey
- 3. API (entry):  adapter.parseEntry() — shape checks only, no trust yet
- 4.   stash the raw params in Redis under a random one-time handle (TTL 60s)
- 5.   set httpOnly cookies: ext_h=<handle>, oidc_flow (same as /session/login)
-      → 302 Keycloak /auth?client_id=signals-ui&kc_idp_hint=signals-bridge&state&PKCE
- 6. Keycloak → 302 /api/v1/auth/bridge/authorize?state=<kc-state>&…
- 7. Bridge: read ext_h → GETDEL the handle (single use)
- 8.   adapter.verify():
-        a. verify userName JWT HS256 with Client Secret; reject if exp passed
-        b. decrypt sig with Client Secret; check it matches (§11)
-        c. expiry == JWT exp
-        d. replay guard: SET NX sha256(JWT) until exp
-        e. POST validate-token (HMAC over the JWT) → require SUCCESS, status ACTIVE
-      → ExternalIdentity
- 9.   linking decision (§6) → issue one-time code → 302 Keycloak broker endpoint
-10. Keycloak → POST /api/v1/auth/bridge/token (server-to-server, client secret)
-      ← id_token signed by the bridge key (claims §5)
-    Keycloak verifies via /api/v1/auth/bridge/jwks
-11. Keycloak first-broker-login (§7): create or auto-link user → issue tokens
-12. Keycloak → 302 /api/v1/auth/session/callback (existing)
-13. API: exchange code, provisioning.ts mirrors user (§8), profile bootstrap (§9),
-    create Redis session, set sid cookie
-14. 302 UI route resolved from featureKey → user is logged in, sees My Profiles
+ 2. NCS → browser → GET /api/v1/auth/sso/login?userName&sig&expiry&featureKey
+    (no partner name in the URL — the provider comes from SSO_PROVIDERS)
+ 3. API (/sso/login) — provider.verify(), cheapest checks first:
+        a. shape + length limits
+        b. userName JWT HS256 with Client Secret; exp not passed, iat not future
+        c. sig decrypts with Client Secret and matches; expiry == JWT exp
+        d. replay guard: SET NX sso:replay:<provider>:<sha256(JWT)> until exp
+        e. POST NCS validate-token (HMAC over the JWT) → SUCCESS, status ACTIVE,
+           mobileNumber present
+        f. account-linking decision (§6) → preferred_username
+    Any failure → 302 UI /auth/sso/error?reason=<code>
+ 4.   SET sso:entry:<sha256(handle)> = verified identity + claims (TTL 5 min)
+ 5.   start the normal login flow (state, PKCE, nonce; flow state carries the
+      handle); clear any existing sid; set httpOnly cookies sso_h + oidc_flow
+      → 302 Keycloak /auth?client_id=signals-ui&kc_idp_hint=signals-sso&prompt=login
+ 6. Keycloak → 302 /api/v1/auth/sso/oidc/authorize?client_id&redirect_uri&state&nonce
+ 7. /sso/oidc/authorize: client_id + exact redirect_uri check; read sso_h cookie;
+      GET sso:entry:<hash>; SET sso:code:<sha256(code)> → handle + nonce (TTL 60s)
+      → 302 Keycloak broker endpoint?code&state
+ 8. Keycloak → POST /api/v1/auth/sso/oidc/token (server-to-server, client secret)
+      GETDEL sso:code → id_token signed with SSO_OIDC_SIGNING_KEY (claims §5)
+    Keycloak verifies it via /api/v1/auth/sso/oidc/jwks (cached)
+ 9. Keycloak first-broker-login (§7): create or auto-link user → issue tokens
+10. Keycloak → 302 /api/v1/auth/session/callback (existing)
+11. Callback: exchange code; flow state has an SSO handle →
+      GETDEL sso:entry:<hash>; provisioning with the gated-signup bypass (§8);
+      profile bootstrap (§9); create Redis session; set sid cookie
+12. 302 UI route resolved from featureKey → user is logged in, sees My Profiles
 ```
 
-The user sees none of steps 3–13.
+Per login: 5 browser redirects; server calls = NCS validate-token ×1,
+Keycloak Admin find-by-phone ×1, Keycloak→/sso/oidc/token ×1, existing code
+exchange ×1 (JWKS cached); ~8 Redis ops.
+
+The user sees none of steps 3–11.
 
 ### 4.1 Overview
 
@@ -200,16 +213,16 @@ sequenceDiagram
 
     U->>N: Login + click Bluedots
     N-->>U: redirect with userName, sig, expiry
-    U->>S: /external/ncs/login
-    S-->>U: redirect to Keycloak (kc_idp_hint=signals-bridge)
+    U->>S: /sso/login
+    S-->>U: redirect to Keycloak (kc_idp_hint=signals-sso)
     U->>K: /auth
-    K-->>U: redirect to Signals bridge /authorize
-    U->>S: /bridge/authorize
+    K-->>U: redirect to Signals /sso/oidc/authorize
+    U->>S: /sso/oidc/authorize
     S->>N: validate-token (HMAC)
     N-->>S: user details
     S-->>U: redirect to Keycloak with code
     U->>K: broker endpoint
-    K->>S: /bridge/token → id_token
+    K->>S: /sso/oidc/token → id_token
     K->>K: create/link user
     K-->>U: redirect to /session/callback
     U->>S: /session/callback
@@ -225,65 +238,57 @@ sequenceDiagram
     autonumber
     actor U as User (browser)
     participant N as NCS portal
-    participant E as Signals API<br/>external/:provider/login
+    participant S as Signals SSO API
     participant R as Redis
+    participant NA as NCS API
     participant K as Keycloak
-    participant B as Signals API<br/>bridge (OIDC)
-    participant NA as NCS API<br/>validate-token
     participant C as Signals API<br/>session/callback
     participant DB as Postgres
     participant UI as Signals UI
 
-    U->>N: Log in on NCS
-    U->>N: Click "Bluedots"
+    U->>N: Log in, click "Bluedots"
     N-->>U: 302 ?userName=JWT&sig&expiry&featureKey
-    U->>E: GET /api/v1/auth/external/ncs/login
-    E->>E: parseEntry (shape only, no trust)
-    E->>R: SET extentry:<handle> (TTL 60s)
-    E->>R: SET oidcflow:<state> {PKCE, nonce, external.handle}
-    E-->>U: 302 Keycloak /auth?kc_idp_hint=signals-bridge<br/>Set-Cookie ext_h, oidc_flow
-    U->>K: GET /auth
-    K-->>U: 302 bridge /authorize?state&nonce
-    U->>B: GET /bridge/authorize (cookie ext_h)
-    B->>R: GETDEL extentry:<handle>
-    B->>B: verify JWT HS256 (Client Secret), decrypt sig, expiry
-    B->>R: SET NX replay:<sha256(JWT)>
-    B->>NA: POST validate-token {token, HMAC, clientId}
-    NA-->>B: userId, fullName, mobileNumber, email, role, status
-    B->>K: Admin REST: find user by phone (+91…)
-    K-->>B: existing user? / federated links
-    alt refused (inactive, unverified phone, link conflict, NCS down)
-        B-->>U: 302 UI /auth/external-error?reason=…
-    else ok
-        B->>R: SET bridgecode:<code> {claims, nonce} (TTL 60s)
-        B->>R: SET extid:<handle> {NCS identity} (TTL 5m)
-        B-->>U: 302 Keycloak broker endpoint?code&state
+    U->>S: GET /api/v1/auth/sso/login
+    S->>S: shape, JWT HS256 + expiry, sig decrypt
+    S->>R: SET NX sso:replay:<hash>
+    S->>NA: POST validate-token {token, HMAC, clientId}
+    NA-->>S: userId, fullName, mobileNumber, email, role, status
+    S->>K: Admin REST: find user by phone (+91…)
+    alt any check fails
+        S-->>U: 302 UI /auth/sso/error?reason=…
+    else verified
+        S->>R: SET sso:entry:<handle> (identity, TTL 5m)
+        S->>R: SET oidcflow:<state> {PKCE, nonce, sso handle}
+        S-->>U: 302 Keycloak /auth?kc_idp_hint=signals-sso&prompt=login<br/>Set-Cookie sso_h, oidc_flow
+        U->>K: GET /auth
+        K-->>U: 302 /sso/oidc/authorize
+        U->>S: GET /sso/oidc/authorize (cookie sso_h)
+        S->>R: GET sso:entry, SET sso:code (TTL 60s)
+        S-->>U: 302 Keycloak broker endpoint?code
         U->>K: GET broker endpoint
-        K->>B: POST /bridge/token (client secret)
-        B-->>K: id_token {sub: ncs:<id>, preferred_username, phone…}
-        K->>B: GET /bridge/jwks
+        K->>S: POST /sso/oidc/token (client secret)
+        S->>R: GETDEL sso:code
+        S-->>K: id_token {sub: ncs:<id>, preferred_username, phone…}
         K->>K: first-broker-login: create or auto-link user
-        K-->>U: 302 /session/callback?code&state
+        K-->>U: 302 /session/callback
         U->>C: GET /session/callback (cookie oidc_flow)
         C->>K: exchange code (PKCE)
-        K-->>C: access / refresh / id tokens
-        C->>DB: provisioning (gated-signup bypass for bridge logins)
-        C->>R: GETDEL extid:<handle>
-        C->>DB: profile bootstrap → draft profile (skip if exists)
-        C->>R: SET session:<sid>
-        C-->>U: 302 UI (route from featureKey)<br/>Set-Cookie sid
-        U->>UI: Logged in → My Profiles shows NCS draft
+        C->>R: GETDEL sso:entry
+        C->>DB: provisioning (gated-signup bypass) + draft profile
+        C->>R: SET session
+        C-->>U: 302 UI (featureKey route), Set-Cookie sid
+        U->>UI: Logged in → My Profiles
     end
 ```
 
-## 5. Bridge id_token claims
+## 5. SSO id_token claims
 
 | Claim | Value |
 |---|---|
-| `iss` | `<api-base>/api/v1/auth/bridge` |
+| `iss` | `<api-base>/api/v1/auth/sso/oidc` |
 | `aud` | the Keycloak broker client id |
 | `sub` | `ncs:<data.userId>` — namespaced per provider, never collides across partners |
-| `ext_provider` | `ncs` |
+| `sso_provider` | `ncs` |
 | `preferred_username` | existing Keycloak username if linked (§6), else `+91<mobileNumber>` |
 | `name` | `data.fullName` |
 | `phone_number` / `phone_number_verified` | `+91<mobileNumber>` / `isMobileVerified` |
@@ -291,10 +296,10 @@ sequenceDiagram
 | `ext_role` | `data.role` (e.g. `JOBSEEKER`) |
 | `nonce` | echoed from Keycloak's authorize request |
 
-Lifetime 60s. Signed with `EXTERNAL_IDP_BRIDGE_SIGNING_KEY` (RS256/ES256);
+Lifetime 60s. Signed with `SSO_OIDC_SIGNING_KEY` (RS256/ES256);
 public key served at `/jwks`.
 
-## 6. Account linking — the bridge decides, Keycloak executes
+## 6. Account linking — the SSO API decides, Keycloak executes
 
 Realm facts (`infra/keycloak/realms/bluedots-realm.json`,
 `services/auth/user_to_keycloak.ts`): usernames are **email-first, then phone**;
@@ -312,7 +317,7 @@ Rules, evaluated by the bridge in order:
    `phone_number = +91<mobile>`:
    - `isMobileVerified = true` → the bridge emits that user's Keycloak username
      as `preferred_username`; first-broker-login auto-links on username.
-   - `isMobileVerified = false` → **refuse** (`EXTERNAL_IDP_PHONE_UNVERIFIED`).
+   - `isMobileVerified = false` → **refuse** (`SSO_PHONE_UNVERIFIED`).
      Auto-linking on an unverified number would hand an existing account to
      whoever typed that number into NCS.
    Because the bridge alone sets `preferred_username`, and never derives it
@@ -330,22 +335,23 @@ Rules, evaluated by the bridge in order:
    NCS email is kept as an attribute for profile prefill only. Side benefit: if
    direct OTP login is enabled on the instance, the same user can later sign in
    by phone OTP and land on the same account.
-5. **Conflict** — the phone matches a local user already linked to a
+5. **Conflict** — the phone matches a Keycloak user already linked to a
    *different* `ncs:` subject (NCS reassigned a number, or two NCS accounts share
-   one) → refuse, log `EXTERNAL_IDP_LINK_CONFLICT` for admin review.
+   one). Keycloak itself refuses a second link to the same identity provider,
+   so no extra lookup is made; the failure is logged as `SSO_LINK_CONFLICT`.
 6. **Phone changed on NCS** — a returning `ncs:<userId>` arrives with a
    different mobile: do **not** rewrite the Bluedots phone automatically
    (`syncMode=IMPORT` keeps the first value); log for review.
 
 ## 7. Keycloak realm (one-time)
 
-- Identity provider `signals-bridge` (OIDC): authorization/token/JWKS URLs on
+- Identity provider `signals-sso` (OIDC): authorization/token/JWKS URLs on
   the API; client auth `client_secret_post`; `trustEmail=false`;
   `syncMode=IMPORT`; `hideOnLoginPage=true`.
-- Mappers: `ext_provider`, `ext_role`, `ext_email`, `phone_number`,
-  `phone_number_verified`, `name` → user attributes; `ext_provider` also mapped
+- Mappers: `sso_provider`, `ext_role`, `ext_email`, `phone_number`,
+  `phone_number_verified`, `name` → user attributes; `sso_provider` also mapped
   into access/id tokens for Signals.
-- First-broker-login flow `signals-bridge-first-login`: *Detect existing
+- First-broker-login flow `signals-sso-first-login`: *Detect existing
   broker user* → *Automatically set existing user*; review-profile **off**; no
   email-verification or "confirm link" screens.
 - Brokered users get realm role `signals_participant` (hardcoded-role mapper),
@@ -357,24 +363,29 @@ Rules, evaluated by the bridge in order:
 
 | File | Change |
 |---|---|
-| `routes/v1/auth/external_login.ts` (new) | `GET /api/v1/auth/external/:provider/login`; `public_rate_limit`; reuses the `/session/login` flow-state helper (extract from `session.ts`) |
-| `routes/v1/auth/bridge/*.ts` (new) | `authorize`, `token`, `jwks`, `.well-known/openid-configuration` |
-| `services/auth/external_idp/registry.ts` (new) | provider lookup from `EXTERNAL_IDP_PROVIDERS` |
-| `services/auth/external_idp/types.ts` (new) | `ExternalIdentityProvider`, `ExternalIdentity` |
-| `services/auth/external_idp/providers/ncs.ts` (new) | `parseEntry`, `verify` (§4 step 8) |
-| `services/ncs/ncs_client.ts` (new) | HMAC helper, `validateToken()`, timeout, fail-closed |
-| `services/auth/external_idp/cryptojs_aes.ts` (new) | CryptoJS passphrase-format decrypt via `node:crypto` |
-| `services/auth/oidc_exchange.ts` | no change expected |
-| `services/auth/provisioning.ts` | allow gated-signup bypass when `ext_provider` ∈ providers with `allow_signup`; set `user.onboarded_by_org_id` to the provider's org; persist `ext_provider` + external subject |
-| `services/auth/external_profile_bootstrap.ts` (new) | §9 |
-| `routes/v1/auth/auth_config.ts` | expose enabled provider ids |
+| `routes/v1/auth/sso/sso_routes.ts` (new) | registers the SSO routes under `/api/v1/auth/sso` |
+| `routes/v1/auth/sso/sso_login.ts` (new) | `GET /api/v1/auth/sso/login`: verify, stash, start login flow |
+| `routes/v1/auth/sso/oidc_routes.ts` (new) | `.well-known/openid-configuration`, `authorize`, `token`, `jwks` under `/api/v1/auth/sso/oidc` |
+| `services/auth/sso/types.ts` (new) | `SsoProvider`, `SsoIdentity`, `SsoFailure` |
+| `services/auth/sso/registry.ts` (new) | active provider from `SSO_PROVIDERS` |
+| `services/auth/sso/providers/ncs.ts` (new) | NCS link verification (§4 step 3) |
+| `services/auth/sso/ncs_client.ts` (new) | `validate-token` call: HMAC, timeout, fail closed |
+| `services/auth/sso/sso_crypto.ts` (new) | HMAC hex, CryptoJS-format AES decrypt, phone normalisation |
+| `services/auth/sso/sso_store.ts` (new) | Redis: replay guard, entry stash, one-time codes |
+| `services/auth/sso/oidc_keys.ts` (new) | id_token signing + JWKS |
+| `services/auth/sso/link_resolver.ts` (new) | §6 decision via Keycloak Admin `findByPhone` |
+| `services/auth/sso/sso_profile_bootstrap.ts` (new) | §9 |
+| `services/auth/oidc_flow_state.ts` | flow state carries an optional `sso` handle |
+| `services/auth/oidc_exchange.ts` | `buildAuthorizeUrl` accepts `idpHint` + `prompt` |
+| `routes/v1/auth/session.ts` | login-flow start extracted to a shared helper; callback runs §8/§9 when the flow has an SSO handle |
+| `services/auth/provisioning.ts` | `allowSignup` option (used only by the SSO callback path) |
 
-Env (`packages/config/src/secrets.ts` **and** `turbo.json`):
-`EXTERNAL_IDP_PROVIDERS`, `EXTERNAL_IDP_BRIDGE_SIGNING_KEY`,
-`EXTERNAL_IDP_BRIDGE_CLIENT_SECRET`, `EXTERNAL_IDP_NCS_BASE_URL`,
-`EXTERNAL_IDP_NCS_CLIENT_ID`, `EXTERNAL_IDP_NCS_CLIENT_SECRET`,
-`EXTERNAL_IDP_NCS_TIMEOUT_MS`. Startup guard: a listed provider with missing
-secrets fails boot.
+Env (`packages/config/src/secrets.ts` **and** `turbo.json` `SSO_*`):
+`SSO_PROVIDERS`, `SSO_OIDC_SIGNING_KEY`, `SSO_OIDC_CLIENT_ID`,
+`SSO_OIDC_CLIENT_SECRET`, `SSO_NCS_BASE_URL`, `SSO_NCS_CLIENT_ID`,
+`SSO_NCS_CLIENT_SECRET`, `SSO_NCS_TIMEOUT_MS`, `SSO_NCS_MAPPING`.
+Startup guard: a listed provider with missing secrets, or SSO enabled without
+`AUTH_PROVIDER=keycloak`, fails boot.
 
 ## 9. Profile bootstrap
 
@@ -385,16 +396,21 @@ Runs after provisioning on every external login; idempotent.
   PII encryption, profile cap and single-domain lock all apply).
 - If a profile exists → do nothing. Never overwrite user edits.
 - Failure is logged, never blocks login.
-- Mapping is per provider per network config:
+- Mapping lives in `SSO_NCS_MAPPING` (JSON), per instance:
 
 ```json
-"external_profile_mapping": {
-  "ncs": {
-    "role_to_domain": { "JOBSEEKER": "<seeker-domain>" },
-    "fields": { "fullName": "<name-field>", "mobileNumber": "<phone-field>", "email": "<email-field>" }
-  }
+{
+  "network": "blue_dot",
+  "item_type": "profile_1.0",
+  "role_to_domain": { "JOBSEEKER": "<seeker-domain>" },
+  "fields": { "fullName": "<name-field>", "mobileNumber": "<phone-field>", "email": "<email-field>" },
+  "feature_routes": { "placement-prep": "/" },
+  "app_origin": "https://<ui-host>"
 }
 ```
+
+- The user's domain is claimed through the existing default-aggregator
+  mechanism (`tagUserForDomain`) rather than a dedicated NCS org.
 
   Fields the schema does not declare are dropped. Unmapped roles → no profile.
 - Profile stays `draft` until the user completes required fields and consents
@@ -403,19 +419,22 @@ Runs after provisioning on every external login; idempotent.
 
 ## 10. Security
 
-- Client Secret, bridge signing key and bridge client secret are secrets; the
-  JWT, `sig` and secrets are never logged.
-- Entry params are stashed server-side; they never appear in a later URL.
-  `ext_h` cookie: httpOnly, `SameSite=Lax`, short TTL, path-scoped — binds the
-  flow to the browser that started it.
-- Replay: `SET NX` on `sha256(JWT)` until `exp`.
-- Fail closed: NCS down / timeout / FAILURE / `status != ACTIVE` → error page
-  with "Back to NCS"; never an OTP or login-form fallback.
-- `/bridge/token` accepts only Keycloak's broker client; codes are single-use,
-  60s.
-- `featureKey` → allowlisted route map; unknown → home. Never used as a URL.
-- Bridge compromise ⇒ impersonation of any external user: treat the signing
-  key like a realm key (rotation via `kid` in JWKS).
+`/api/v1/auth/sso/login` must be public (the browser arrives straight from
+NCS), so protection is verification of the link plus limiting abuse.
+
+| Threat | Protection |
+|---|---|
+| Forged link | JWT HS256 with Client Secret + `sig` + NCS `validate-token` |
+| Stolen / copied link | 5-min lifetime, `iat` not in the future (30 s skew), single use (`SET NX` on the JWT hash) |
+| Flooding us or NCS | cheapest checks first (length → JWT → sig) before any Redis write or NCS call; `public_rate_limit` per IP; concurrency cap + short circuit-breaker on NCS |
+| Token leaking | never logged; ingress logs this path without query string; `Referrer-Policy: no-referrer`, `Cache-Control: no-store`; token never forwarded — only an opaque handle in an httpOnly `Secure` `SameSite=Lax` cookie |
+| Open redirect | `featureKey` → allowlisted route map; app origin from config; `/sso/oidc/authorize` requires exact `redirect_uri` (else 400, no redirect) |
+| Wrong account | existing `sid` cleared, `prompt=login`; link only on verified phone; never on email |
+| Forged id_tokens | `/sso/oidc/token` reachable only by Keycloak (internal URL, blocked at ingress), client secret compared in constant time, one-time 60 s codes bound to `redirect_uri`; signing key in the secret store with `kid` rotation |
+
+Fail closed everywhere: NCS down / timeout / FAILURE / `status != ACTIVE` →
+error page with "Back to NCS"; never an OTP or login-form fallback.
+`SSO_PROVIDERS` empty → every SSO route answers 404.
 
 ## 11. Open questions (NCS)
 
