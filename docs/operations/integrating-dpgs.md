@@ -235,9 +235,24 @@ Individual routes can narrow further — e.g.
 > request logger. Use it for audit and triage; never for authorization — that
 > conflation is what the retired type got wrong.
 >
-> `organization.type` is plain nullable text, so a `voice` row remains
-> *representable* even though nothing admits it. Such a row is refused with
-> `403 ACTING_ORG_TYPE_NOT_ALLOWED` at the acting-org preHandler.
+> `organization.type` is plain nullable text, so the TypeScript union is a claim
+> about the data rather than a guarantee from the database. Migration `0019`
+> closes that with a `CHECK` constraint — `organization_type_allowed` — so a
+> retired or unknown type is rejected at INSERT rather than surfacing later as a
+> `403 ACTING_ORG_TYPE_NOT_ALLOWED` far from whoever caused it. `NULL` remains
+> permitted; the preHandler refuses a null type on its own.
+>
+> **Before deploying `0019` to an instance, check the column's actual domain:**
+>
+> ```sql
+> SELECT type, count(*) FROM organization GROUP BY type;
+> ```
+>
+> Expect only `aggregator`, `network_service` and possibly `NULL`. Postgres
+> validates a `CHECK` against existing rows when the constraint is added, so a
+> single surviving `voice` row **fails the deploy migrate-Job** with
+> `check constraint ... is violated by some row`. Retype the row before
+> deploying; the constraint is not the place to discover it.
 
 ## Local dev setup
 

@@ -100,6 +100,23 @@ export const organization = pgTable('organization', {
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
   ),
+  // #518: `type` is plain text, so narrowing the TypeScript union stopped the
+  // app ACCEPTING a retired value without stopping the database STORING one.
+  // Without this, a row inserted by hand or by a script written against the old
+  // docs is only discovered as a `403 ACTING_ORG_TYPE_NOT_ALLOWED` at request
+  // time, far from whoever caused it. The constraint moves that failure to the
+  // INSERT.
+  //
+  // NULL stays permitted: the column is nullable and pre-existing rows rely on
+  // it (the acting-org preHandler refuses a null type on its own).
+  //
+  // Adding a value here is a migration, deliberately — an org type is an
+  // authorization tier, and `_resolve_acting_actor.ts` must be taught what
+  // reach it has in the same change.
+  check(
+    'organization_type_allowed',
+    sql`${table.type} IS NULL OR ${table.type} IN ('aggregator', 'network_service')`,
+  ),
   // NO global "one default per instance" index any more.
   //
   // There used to be a unique index on a constant expression here, allowing a
