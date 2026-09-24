@@ -4,6 +4,83 @@
 **Status:** Draft — open questions in §11 must be answered before implementation
 **Auth provider:** Keycloak only (`AUTH_PROVIDER=keycloak`); better-auth is not involved
 
+## 0. In plain terms (for readers new to Signals)
+
+**What Bluedots / Signals is.** Bluedots is a platform where job seekers,
+employers and training providers create profiles and find each other.
+"Signals" is the software behind it: a website (the **Signals UI**) and a
+server (the **Signals API**) that stores users and profiles.
+
+**What NCS is.** The National Career Service portal (run by the Government of
+India) already has millions of registered job seekers who log in there.
+
+**What we want.** A job seeker who is already logged in to NCS clicks a
+"Bluedots" link and arrives in Bluedots **already logged in**, with a profile
+pre-filled from their NCS details — no second sign-up, no OTP, no password.
+
+**The pieces involved.**
+
+| Piece | What it is, in one line |
+|---|---|
+| **NCS portal** | The government site where the user is already logged in. We cannot change it. |
+| **NCS API** | A service NCS runs that tells a partner "yes, this login link is genuine, and here are the user's details". |
+| **Signals API** | Our server. We add a new **Signals SSO API** to it for this feature. |
+| **Keycloak** | The login system Bluedots already uses. It is the only thing allowed to issue a Bluedots login. We only change its settings, once. |
+| **Signals UI** | The Bluedots website the user ends up on. |
+
+**Why the detour through Keycloak?** Bluedots only trusts logins that Keycloak
+issues. NCS does not speak Keycloak's language, so the Signals SSO API acts as
+a translator: it checks the NCS link, then vouches for the user to Keycloak in
+the standard format Keycloak understands (the same way "Log in with Google"
+works). Keycloak then issues a normal Bluedots login.
+
+```mermaid
+sequenceDiagram
+    actor U as Job seeker
+    participant N as NCS portal + NCS API
+    participant S as Signals SSO API<br/>(our server)
+    participant K as Keycloak<br/>(Bluedots login system)
+    participant UI as Bluedots website
+
+    U->>N: 1. Already logged in, clicks "Bluedots"
+    N-->>U: 2. Sends the user to us with a signed,<br/>5-minute login link
+    U->>S: 3. Arrives at the Signals SSO API
+    S-->>K: 4. "Please log this person in using our SSO API"
+    K->>S: 5. "Who is this person?"
+    S->>N: 6. "Is this login link genuine?"
+    N-->>S: 7. "Yes — name, mobile, email, role"
+    S-->>K: 8. "This is the NCS user with mobile +91…"
+    K->>K: 9. Finds the matching Bluedots account,<br/>or creates a new one
+    K-->>S: 10. "Logged in — here is their Bluedots login"
+    S->>S: 11. Creates a draft profile from the NCS details<br/>(only the first time)
+    S-->>UI: 12. Opens Bluedots, logged in
+    UI-->>U: 13. Sees "My Profiles" with the NCS profile
+```
+
+**What the user actually sees:** they click the link on NCS, the browser
+blinks through a few redirects in under a second, and they are inside
+Bluedots. Steps 3–12 are invisible.
+
+**How accounts are matched.** NCS always sends the user's mobile number. If a
+Bluedots account already has that number (and NCS says the number is
+verified), the user gets that existing account. Otherwise a new account is
+created. We never match on email, because NCS does not guarantee emails are
+verified.
+
+**What happens if something is wrong** (link expired or already used, NCS says
+the link is fake, NCS is down, account inactive): the user sees a Bluedots
+error page with a "Back to NCS" button. They are never shown an OTP screen and
+never logged in to the wrong account.
+
+**What is new vs. what already exists.**
+
+- New: the Signals SSO API (steps 3, 5–8, 11), a small change to who may sign
+  up, a "complete your profile" draft, and an error page.
+- Already exists, unchanged: Keycloak itself, Bluedots login sessions, profiles,
+  consent before a profile goes public.
+- One-time setting in Keycloak: register the Signals SSO API as a trusted login
+  source.
+
 ## 1. Problem
 
 The National Career Service (NCS) portal will host a link to Bluedots. A user
