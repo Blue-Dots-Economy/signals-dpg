@@ -125,6 +125,28 @@ map pins (P-follow-5) are still pending. See code comments at
 - **No `console.log` in library packages** — go through `request.log` in app code.
 - **No `// TODO` comments** — open an issue instead.
 
+## CI and releases
+
+Five workflows, and the split between them is load-bearing: **`ci.yaml` checks, `build-images.yaml` publishes, and the two are connected by a gate rather than by `needs:`.**
+
+- **`ci.yaml`** — `pull_request` into `develop`/`main`/`feature`, and `push` to `develop`/`main`. Jobs: `typecheck-api`, `typecheck-ui`, `test`, `sonar`, `dep-cruise`, `schema-parity`, `spec-drift`. Note there is **no `feature` push trigger** (#756) and **no tag trigger** — both existed only to drive a publish job that no longer lives here. `main` is in the list because the org's SonarCloud plan analyses the main branch only, so without it the dashboard reports `"main" branch has not been analyzed yet` however many PRs land.
+- **`build-images.yaml`** — publishes the `api` and `ui` images to GHCR on a **release tag** (`v*.*.*`, `20*-s*-rc*`) or a manual run. No branch push publishes (#756): the `:main` / `:develop` tags it used to produce were mutable and nothing consumed them, since deployments pin a release tag or an immutable `sha-` tag in `bluedots-automation`'s `global-images.yaml`.
+- **`cut-release.yaml`** — the front door for cutting a release. Dispatch it with a tag name and a base branch; it checks CI, creates the tag and the GitHub release with generated notes in one API call, then dispatches the image build. `dry_run` previews the notes without creating anything.
+- **`openapi-sync.yml`** (pushes `openapi.json` to `bluedots-docs`) and **`security.yml`** (thin caller into `bluedots-automation`'s reusable scan) are unrelated to the release path.
+
+**The CI gate (#765).** Publishing used to be gated by `needs: [typecheck-api, typecheck-ui, test, schema-parity]` on a `publish-images` job inside `ci.yaml`. #756 moved publishing into its own workflow, and `needs:` cannot reach across workflows, so the dependency is now a lookup: both `build-images.yaml`'s `verify-ci` job and `cut-release.yaml` query `ci.yaml` runs for the commit and refuse unless one concluded `success`. Three things about it are deliberate and easy to undo by accident:
+
+- It reads **workflow runs**, not check runs — this repo exposes one check per job, so there is no single check named `CI` to look for.
+- It **fails closed when there are zero runs**. That is the realistic accident (a tag on a commit CI never saw), not a tag on a commit CI rejected; a "did it fail?" test would wave it through.
+- Both carry a `skip_ci_check` input for an emergency publish, which logs a warning naming the commit so the bypass is visible.
+
+**Cut releases from `develop` or `main`, never `feature`.** Merges into `feature` run no CI — `pull_request` runs record the PR head, not the resulting merge commit — so the gate will refuse a tag cut there. This matches existing practice (`202609-s1-rc3` was cut from `develop`).
+
+**Two GitHub behaviours the release path depends on**, both of which look like bugs when you hit them:
+
+- **A tag pushed with `GITHUB_TOKEN` does not trigger `on: push: tags`** — GitHub suppresses it to prevent recursion. That is why `cut-release.yaml` creates the tag through the REST API and then dispatches `build-images.yaml` explicitly; `workflow_dispatch` is an exception to the suppression. A version that did `git push --follow-tags` would create the tag and silently build nothing.
+- **A workflow is not dispatchable until it exists on the default branch.** A new workflow on a side branch will not appear in the Actions tab or accept `gh workflow run`, even though the file is present.
+
 ## Authoring pull requests
 
 When you open a PR, include an **In Plain Terms** section in the description: a short, jargon-free explanation a non-expert teammate can follow — what the problem was and what the change does, in everyday language — alongside the usual Summary / Release Notes. Skip it only for a pure chore with no behavioural effect. This lives here as a Claude authoring rule rather than in the GitHub PR template on purpose, so PRs opened from other tools/flows aren't forced through it.
