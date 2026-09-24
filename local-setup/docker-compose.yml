@@ -109,6 +109,10 @@ services:
     restart: unless-stopped
     entrypoint: ["/opt/keycloak/render-realm.sh"]
     command: ["start-dev", "--import-realm"]
+    # Lets Keycloak reach the API on the host for the SSO token/JWKS calls
+    # (built in on Docker Desktop; needed explicitly on Linux).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       # Defaulted, NOT required (`:?`). Compose interpolates the whole file
@@ -128,6 +132,11 @@ services:
       # registered redirect URI. Defaults to PUBLIC_BASE_URL when they share a
       # host; locally they do not.
       API_BASE_URL: ${API_BASE_URL:-http://localhost:2742}
+      # Partner-portal SSO. Keycloak (in the container) calls the API's token
+      # and JWKS endpoints itself, so they go to the host, not localhost.
+      # SSO_OIDC_CLIENT_SECRET must equal the API's value.
+      SSO_API_INTERNAL_BASE_URL: ${SSO_API_INTERNAL_BASE_URL:-http://host.docker.internal:2742}
+      SSO_OIDC_CLIENT_SECRET: ${SSO_OIDC_CLIENT_SECRET:-sso-not-configured}
       # ── OTP SPI (infra/keycloak/providers/keycloak-otp-*.jar) ────────────
       # Phone channel. 'log' writes the code to the Keycloak container log,
       # which is what you want locally — no SMS account needed:
@@ -236,9 +245,13 @@ services:
       - -lc
       - |
         apk add --no-cache curl jq >/dev/null
-        exec /init/apply-user-profile.sh
+        /init/apply-user-profile.sh
+        exec /init/apply-sso-idp.sh
     environment:
       KC_URL: http://keycloak:8080
+      API_BASE_URL: ${API_BASE_URL:-http://localhost:2742}
+      SSO_API_INTERNAL_BASE_URL: ${SSO_API_INTERNAL_BASE_URL:-http://host.docker.internal:2742}
+      SSO_OIDC_CLIENT_SECRET: ${SSO_OIDC_CLIENT_SECRET:-sso-not-configured}
       KC_REALM: ${KEYCLOAK_REALM:-bluedots}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}

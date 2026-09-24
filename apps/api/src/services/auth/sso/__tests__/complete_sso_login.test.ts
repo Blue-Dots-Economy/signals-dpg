@@ -41,7 +41,7 @@ beforeEach(() => {
 
 describe('completeSsoLogin', () => {
   it('provisions with the signup bypass and bootstraps the profile', async () => {
-    await completeSsoLogin(SSO, 'access-token', log);
+    expect(await completeSsoLogin(SSO, 'access-token', log)).toBe('completed');
     expect(takeEntry).toHaveBeenCalledWith('h-1');
     expect(verifyKeycloakToken).toHaveBeenCalledWith('access-token');
     expect(provisionUserFromClaims).toHaveBeenCalledWith(CLAIMS, log, { allowSignup: true });
@@ -50,7 +50,7 @@ describe('completeSsoLogin', () => {
 
   it('does nothing without a live entry', async () => {
     takeEntry.mockResolvedValue(null);
-    await completeSsoLogin(SSO, 'access-token', log);
+    expect(await completeSsoLogin(SSO, 'access-token', log)).toBe('skipped');
     expect(provisionUserFromClaims).not.toHaveBeenCalled();
   });
 
@@ -59,7 +59,7 @@ describe('completeSsoLogin', () => {
       ok: true,
       claims: { ...CLAIMS, preferred_username: 'someone@else.org' },
     });
-    await completeSsoLogin(SSO, 'access-token', log);
+    expect(await completeSsoLogin(SSO, 'access-token', log)).toBe('wrong-account');
     expect(provisionUserFromClaims).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalled();
   });
@@ -82,7 +82,7 @@ describe('completeSsoLogin', () => {
 
   it('never throws', async () => {
     verifyKeycloakToken.mockRejectedValue(new Error('jwks down'));
-    await expect(completeSsoLogin(SSO, 'access-token', log)).resolves.toBeUndefined();
+    await expect(completeSsoLogin(SSO, 'access-token', log)).resolves.toBe('skipped');
     expect(log.error).toHaveBeenCalled();
   });
 });

@@ -486,6 +486,24 @@ describe('GET /auth/session/callback', () => {
     expect(createSession).toHaveBeenCalledOnce();
   });
 
+  it('opens no session when Keycloak logged in a different account than the partner vouched for', async () => {
+    consumeFlowState.mockResolvedValue({
+      verifier: 'the-verifier',
+      nonce: 'nonce',
+      returnTo: '/',
+      redirectUri: 'https://api.example.org/api/v1/auth/session/callback',
+      appOrigin: 'https://app.example.org',
+      sso: { provider: 'ncs', handle: 'the-handle' },
+    });
+    completeSsoLogin.mockResolvedValue('wrong-account');
+
+    const res = await inject({ method: 'GET', url: CALLBACK, headers: boundToThisBrowser });
+
+    expect(res.headers.location).toBe('https://app.example.org/auth/sso/error?reason=session-expired');
+    expect(createSession).not.toHaveBeenCalled();
+    expect(res.cookies.find((c) => c.name === 'sid')).toBeUndefined();
+  });
+
   it('does not run the SSO step for an ordinary login', async () => {
     await inject({ method: 'GET', url: CALLBACK, headers: boundToThisBrowser });
     expect(completeSsoLogin).not.toHaveBeenCalled();

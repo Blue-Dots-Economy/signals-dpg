@@ -249,7 +249,13 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       // provisioning/database graph stays out of this route's static imports.
       if (flow.sso) {
         const { completeSsoLogin } = await import('@/services/auth/sso/complete_sso_login');
-        await completeSsoLogin(flow.sso, tokens.accessToken, request.log);
+        const outcome = await completeSsoLogin(flow.sso, tokens.accessToken, request.log);
+        // Keycloak logged in someone other than the partner vouched for (e.g.
+        // an SSO session left over in this browser): open no session at all.
+        if (outcome === 'wrong-account') {
+          clearFlowCookie(reply);
+          return reply.redirect(`${flow.appOrigin}/auth/sso/error?reason=session-expired`);
+        }
       }
 
       const sessionId = newSessionId();

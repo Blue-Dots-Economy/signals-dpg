@@ -17,25 +17,30 @@ import { verifyKeycloakToken } from '@/utils/keycloak_token';
  *      this person), with every other provisioning gate intact
  *   4. create the draft profile on first login
  *
- * Never throws and never blocks the login: on any failure the session is
- * still created, and ordinary provisioning runs on the user's first request.
+ * Never throws. Returns `wrong-account` only when Keycloak logged in someone
+ * other than the account the SSO API vouched for — the caller must then refuse
+ * the login, because the person at the browser is not who the partner said.
+ * Every other failure returns `skipped`: the session is still
+ * created, and ordinary provisioning runs on the user's first request.
  */
+export type SsoCompletion = 'completed' | 'skipped' | 'wrong-account';
+
 export async function completeSsoLogin(
   sso: { provider: string; handle: string },
   accessToken: string,
   log: FastifyBaseLogger
-): Promise<void> {
+): Promise<SsoCompletion> {
   try {
     const entry = await takeEntry(sso.handle);
     if (!entry) {
       log.warn({ provider: sso.provider }, 'sso: callback without a live entry');
-      return;
+      return 'skipped';
     }
 
     const verified = await verifyKeycloakToken(accessToken);
     if (!verified.ok) {
       log.warn({ code: verified.code }, 'sso: callback token did not verify');
-      return;
+      return 'skipped';
     }
 
     const loggedInAs = verified.claims.preferred_username?.toLowerCase();
@@ -44,7 +49,7 @@ export async function completeSsoLogin(
         { provider: sso.provider, subject: entry.identity.subject },
         'sso: Keycloak logged in a different account than the SSO API vouched for'
       );
-      return;
+      return 'wrong-account';
     }
 
     const provisioned = await provisionUserFromClaims(verified.claims, log, {
@@ -52,14 +57,16 @@ export async function completeSsoLogin(
     });
     if (!provisioned.ok) {
       log.warn({ code: provisioned.code }, 'sso: provisioning refused the SSO user');
-      return;
+      return 'skipped';
     }
 
     const mapping = getSsoProfileMapping(sso.provider);
     if (mapping) {
       await bootstrapSsoProfile(provisioned.user.id, entry.identity, mapping, log);
     }
+    return 'completed';
   } catch (err) {
     log.error({ err, provider: sso.provider }, 'sso: completing the login failed');
+    return 'skipped';
   }
 }

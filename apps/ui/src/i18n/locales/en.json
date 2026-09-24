@@ -745,5 +745,18 @@
   "auth.toast_signout_incomplete_desc": "We could not reach the server. Close this browser to be sure you are signed out.",
   "auth.oidc_error_cancelled": "The sign-in was cancelled or timed out. Please try again.",
   "auth.session_expired_title": "Session expired",
-  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue."
+  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue.",
+  "auth.sso_error_title": "We couldn't sign you in",
+  "auth.sso_error_link_invalid": "This sign-in link isn't valid. Please go back and open Bluedots again from the partner portal.",
+  "auth.sso_error_link_expired": "This sign-in link has expired. Please go back and open Bluedots again from the partner portal.",
+  "auth.sso_error_link_reused": "This sign-in link has already been used. Please go back and open Bluedots again from the partner portal.",
+  "auth.sso_error_provider_unavailable": "We couldn't reach the partner portal to confirm your sign-in. Please try again in a few minutes.",
+  "auth.sso_error_account_inactive": "Your account on the partner portal isn't active, so we can't sign you in.",
+  "auth.sso_error_phone_unverified": "A Bluedots account already uses this mobile number, but the partner portal hasn't verified it. Verify your mobile number there, then try again.",
+  "auth.sso_error_link_conflict": "This mobile number is already linked to a different account. Please contact support.",
+  "auth.sso_error_session_expired": "Your sign-in took too long or was interrupted. Please go back and open Bluedots again from the partner portal.",
+  "auth.sso_error_unknown": "Something went wrong while signing you in. Please go back and try again from the partner portal.",
+  "auth.sso_back_to_partner": "Back to {{partner}}",
+  "auth.sso_partner_default": "the partner portal",
+  "auth.sso_go_home": "Go to Bluedots home"
 }

@@ -48,6 +48,12 @@
       "builtIn": false,
       "authenticationExecutions": [
         {
+          "authenticator": "identity-provider-redirector",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 5
+        },
+        {
           "authenticator": "auth-cookie",
           "authenticatorFlow": false,
           "requirement": "ALTERNATIVE",
@@ -80,6 +86,48 @@
           "requirement": "REQUIRED",
           "priority": 20,
           "authenticatorConfig": "bluedots-otp-choice-config"
+        }
+      ]
+    },
+    {
+      "alias": "signals-sso-first-login",
+      "description": "Partner SSO first login: create the user, or auto-link to the account the Signals SSO API named in preferred_username. No screens.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-create-user-if-unique",
+          "authenticatorFlow": false,
+          "requirement": "ALTERNATIVE",
+          "priority": 10
+        },
+        {
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "flowAlias": "signals-sso-auto-link"
+        }
+      ]
+    },
+    {
+      "alias": "signals-sso-auto-link",
+      "description": "Link to the existing account whose username the SSO API asserted.",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "idp-detect-existing-broker-user",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10
+        },
+        {
+          "authenticator": "idp-auto-link",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20
         }
       ]
     }
@@ -323,5 +371,90 @@
         "clientRole": false
       }
     ]
-  }
+  },
+  "identityProviders": [
+    {
+      "alias": "signals-sso",
+      "displayName": "Partner SSO",
+      "providerId": "oidc",
+      "enabled": true,
+      "trustEmail": false,
+      "storeToken": false,
+      "addReadTokenRoleOnCreate": false,
+      "linkOnly": false,
+      "hideOnLogin": true,
+      "firstBrokerLoginFlowAlias": "signals-sso-first-login",
+      "updateProfileFirstLoginMode": "off",
+      "config": {
+        "issuer": "__API_BASE_URL__/api/v1/auth/sso/oidc",
+        "authorizationUrl": "__API_BASE_URL__/api/v1/auth/sso/oidc/authorize",
+        "tokenUrl": "__SSO_API_INTERNAL_BASE_URL__/api/v1/auth/sso/oidc/token",
+        "jwksUrl": "__SSO_API_INTERNAL_BASE_URL__/api/v1/auth/sso/oidc/jwks",
+        "useJwksUrl": "true",
+        "validateSignature": "true",
+        "clientId": "signals-sso",
+        "clientSecret": "__SSO_OIDC_CLIENT_SECRET__",
+        "clientAuthMethod": "client_secret_post",
+        "defaultScope": "openid",
+        "syncMode": "IMPORT",
+        "disableUserInfo": "true",
+        "pkceEnabled": "false",
+        "hideOnLoginPage": "true",
+        "backchannelSupported": "false",
+        "sendIdTokenOnLogout": "false",
+        "disableNonce": "false"
+      }
+    }
+  ],
+  "identityProviderMappers": [
+    {
+      "name": "username from SSO API",
+      "identityProviderAlias": "signals-sso",
+      "identityProviderMapper": "oidc-username-idp-mapper",
+      "config": {
+        "syncMode": "IMPORT",
+        "template": "${CLAIM.preferred_username}",
+        "target": "LOCAL"
+      }
+    },
+    {
+      "name": "phoneNumber",
+      "identityProviderAlias": "signals-sso",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "syncMode": "IMPORT",
+        "claim": "phone_number",
+        "user.attribute": "phoneNumber"
+      }
+    },
+    {
+      "name": "phoneNumberVerified",
+      "identityProviderAlias": "signals-sso",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "syncMode": "IMPORT",
+        "claim": "phone_number_verified",
+        "user.attribute": "phoneNumberVerified"
+      }
+    },
+    {
+      "name": "sso_provider",
+      "identityProviderAlias": "signals-sso",
+      "identityProviderMapper": "oidc-user-attribute-idp-mapper",
+      "config": {
+        "syncMode": "IMPORT",
+        "claim": "sso_provider",
+        "user.attribute": "sso_provider"
+      }
+    },
+    {
+      "name": "signals_participant role",
+      "identityProviderAlias": "signals-sso",
+      "identityProviderMapper": "hardcoded-role-idp-mapper",
+      "config": {
+        "syncMode": "INHERIT",
+        "role": "signals_participant"
+      }
+    }
+  ]
 }
