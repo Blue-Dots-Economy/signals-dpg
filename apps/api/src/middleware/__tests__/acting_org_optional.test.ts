@@ -7,8 +7,8 @@ vi.mock('../acting_org.js', () => ({
   acting_org_preHandler: vi.fn(async (req: FastifyRequest) => {
     stricts.push({ called: true });
     (req as any).acting_org = {
-      org_id: 'org_voice',
-      org_type: 'voice',
+      org_id: 'org_signals',
+      org_type: 'network_service',
       service_user_id: 'svc',
     };
   }),
@@ -52,11 +52,11 @@ describe('acting_org_preHandler_optional', () => {
 
   it('delegates to strict preHandler when header is present', async () => {
     stricts.length = 0;
-    const req = makeRequest({ headers: { 'x-acting-org-id': 'org_voice' } });
+    const req = makeRequest({ headers: { 'x-acting-org-id': 'org_signals' } });
     const reply = makeReply();
     await acting_org_preHandler_optional(req, reply);
     expect(stricts).toHaveLength(1);
-    expect((req as any).acting_org?.org_id).toBe('org_voice');
+    expect((req as any).acting_org?.org_id).toBe('org_signals');
   });
 
   it('treats array-shaped header by checking first value for emptiness', async () => {

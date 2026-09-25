@@ -103,7 +103,7 @@ export const UpsertParticipantRequest = z
       .min(1)
       .optional()
       .describe(
-        "domain within the network (default: 'seeker'). REQUIRED when acting on behalf of a non-aggregator org (voice / network_service): it selects which default aggregator owns the participant, so the 'seeker' fallback would mis-assign a provider signup. Omitting it there returns 400 DOMAIN_REQUIRED. Aggregator callers own their own onboards and may omit it.",
+        "domain within the network (default: 'seeker'). REQUIRED when acting on behalf of a non-aggregator org (network_service): it selects which default aggregator owns the participant, so the 'seeker' fallback would mis-assign a provider signup. Omitting it there returns 400 DOMAIN_REQUIRED. Aggregator callers own their own onboards and may omit it.",
       ),
     item_type: z
       .string()
@@ -170,7 +170,7 @@ export const UpsertParticipantResponse = z.object({
   // rejected / owned-elsewhere branches can omit it.
   consent_recorded: z.number().int().optional(),
   // Who owns this participant (#640, SS-3). Exposed because the owner is no
-  // longer implicitly the acting org: a `voice` or `network_service` caller now
+  // longer implicitly the acting org: a `network_service` caller now
   // resolves the instance's default aggregator instead, and gets null when no
   // single default is nominated. Without these fields an integrating DPG could
   // not tell whether the participant it just onboarded is owned by itself, by a

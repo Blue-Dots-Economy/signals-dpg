@@ -75,7 +75,19 @@ const setProvider = (provider: 'betterauth' | 'keycloak') => {
 const makeRequest = (authorization?: string): FastifyRequest =>
   ({
     headers: authorization ? { authorization } : {},
-    log: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+    // `child` mirrors pino: `resolveServiceSession` binds the service client id
+    // onto the request logger. It returns the SAME stub so assertions made
+    // against `request.log.warn` still see the calls after the rebind.
+    log: (() => {
+      const logger: Record<string, unknown> = {
+        error: vi.fn(),
+        warn: vi.fn(),
+        info: vi.fn(),
+        debug: vi.fn(),
+      };
+      logger.child = vi.fn(() => logger);
+      return logger;
+    })(),
   }) as unknown as FastifyRequest;
 
 const okClaims = {
@@ -120,6 +132,7 @@ beforeEach(() => {
       name: 'aggregator-dpg',
       role: null,
     },
+    client_id: 'aggregator-dpg',
   });
 });
 
@@ -556,6 +569,42 @@ describe('acting-org grant plumbing (§5.1)', () => {
     await resolveKeycloakSession(request);
 
     expect(request.acting_org_grant).toEqual(['*']);
+  });
+
+  it('threads the service client id onto the request and the request logger (#518)', async () => {
+    // Since #518 every service org is `network_service`, so `acting_org` can no
+    // longer tell the voice bot from aggregator-dpg. `azp` is what carries that
+    // distinction into audit — for logging and triage only, never authorization.
+    isServiceAccountToken.mockReturnValue(true);
+    verifyKeycloakToken.mockResolvedValue({
+      ok: true,
+      claims: { sub: 's', azp: 'voice-dpg', client_id: 'voice-dpg' },
+    });
+    resolveServiceAccount.mockResolvedValue({
+      ok: true,
+      user: {
+        id: 'usr_service_2',
+        email: 'raya-voice-bot-svc@signals.local',
+        name: 'raya-voice-bot',
+        role: null,
+      },
+      client_id: 'voice-dpg',
+    });
+    const request = makeRequest('Bearer a.b.c');
+    const logger = request.log as unknown as { child: ReturnType<typeof vi.fn> };
+
+    const result = await resolveKeycloakSession(request);
+
+    expect(result.ok).toBe(true);
+    expect(request.service_client_id).toBe('voice-dpg');
+    expect(logger.child).toHaveBeenCalledWith({ service_client_id: 'voice-dpg' });
+  });
+
+  it('leaves the service client id undefined on the human path', async () => {
+    const { result, request } = await resolveHuman(okClaims);
+
+    expect(result.ok).toBe(true);
+    expect(request.service_client_id).toBeUndefined();
   });
 
   it('leaves the grant undefined when the token carries no claim', async () => {

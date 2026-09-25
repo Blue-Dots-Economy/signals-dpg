@@ -39,7 +39,7 @@ import { keycloakConfig } from '@/config';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 
 /** Org types permitted to own a service identity — mirrors acting_org.ts. */
-const SERVICE_ORG_TYPES = new Set(['network_service', 'aggregator', 'voice']);
+const SERVICE_ORG_TYPES = new Set(['network_service', 'aggregator']);
 
 /** The `member.role` that marks the org's machine identity (see the seed). */
 const SERVICE_MEMBER_ROLE = 'service';
@@ -61,7 +61,15 @@ export type ServiceAccountErrorCode =
   | 'SERVICE_ACCOUNT_LOOKUP_FAILED';
 
 export type ServiceAccountResult =
-  | { ok: true; user: ServiceIdentity }
+  /**
+   * `client_id` is the resolved Keycloak client (`azp`). It is the ONLY thing
+   * that still tells one integrating DPG from another: since #518 every service
+   * org carries `type='network_service'`, so the org type distinguishes the
+   * service tier from an aggregator but says nothing about which service. Audit
+   * and support triage need that distinction, so it is carried out of here
+   * rather than re-derived from the claims downstream.
+   */
+  | { ok: true; user: ServiceIdentity; client_id: string }
   | { ok: false; code: ServiceAccountErrorCode; message: string };
 
 /**
@@ -167,6 +175,7 @@ export async function resolveServiceAccount(
         name: row.name,
         role: row.role,
       },
+      client_id: clientId,
     };
   } catch (err) {
     log.error({ err, client_id: clientId }, 'service auth: lookup failed');

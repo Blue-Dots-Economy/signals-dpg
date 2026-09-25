@@ -38,7 +38,7 @@ import { isMinor } from '@/services/minor';
  *   document version this instance currently serves. Previously any accepted
  *   version counted, so a participant on a superseded document read as
  *   consented forever and the channel had no way to tell.
- * - A minor is rejected with 400 `U18_NOT_ALLOWED` for voice/network_service
+ * - A minor is rejected with 400 `U18_NOT_ALLOWED` for `network_service`
  *   callers (never for aggregators — see the gate for why). An aggregator
  *   therefore DOES read a minor, so the version comparison resolves the u18
  *   document set for one; see `consentVariantForAge`.
@@ -121,7 +121,7 @@ export const participant_read_handler = async (
   }
 
   // User exists — check ownership rules. An aggregator sees only the users it
-  // onboarded; network_service and voice can always read.
+  // onboarded; `network_service` can always read.
   const disclose =
     acting_org.org_type !== 'aggregator' ||
     existing.onboardedByOrgId === acting_org.org_id;
@@ -143,12 +143,12 @@ export const participant_read_handler = async (
   const age = ageRow?.age ?? null;
 
   // U18 (#692, mirroring the POST's #309/#331 gate): a minor is not readable by
-  // the channels that cannot legitimately act on one. The voice channel would
+  // the channels that cannot legitimately act on one. The voice bot would
   // otherwise be told "consent incomplete" and then be unable to complete it —
   // the POST answers `U18_NOT_ALLOWED` for every caller — so it is told plainly
   // to route the user to the portal instead.
   //
-  // Scoped to voice / network_service on purpose. `aggregator` callers keep the
+  // Scoped to `network_service` on purpose. `aggregator` callers keep the
   // 200: their only use of this endpoint is `probeUser`, a read-only
   // "resume or start fresh" identity check that reads just `user_id`/`items`
   // and never consent, and it treats a 400 as a hard ValidationError. Rejecting
@@ -222,18 +222,16 @@ function normalizeLookupIdentifier(query: GetParticipantQueryType): {
 }
 
 /** Acting orgs permitted to read this endpoint. */
-const READABLE_ORG_TYPES = new Set(['aggregator', 'network_service', 'voice']);
+const READABLE_ORG_TYPES = new Set(['aggregator', 'network_service']);
 
 type ReadableActingOrg = NonNullable<GetParticipantRequestType['acting_org']>;
 
 /**
  * Validates the acting org and narrows it to non-null for the handler.
  *
- * `voice` is admitted alongside aggregator and network_service: voice-dpg is an
- * integrating DPG that authenticates the same way (client-credentials token,
- * service org whose slug matches its Keycloak client id), and the platform
- * layers below already accept it (`SERVICE_ORG_TYPES`, `ALLOWED_ORG_TYPES`) —
- * this list predates it.
+ * Integrating DPGs — aggregator-dpg and the Raya voice bot alike — hold
+ * `network_service` orgs, so both read through that type (#518 retired the
+ * separate `voice` type, which granted the same reach).
  *
  * @param acting_org - The request's acting org, if the auth layer resolved one.
  * @returns The org on success, or the status/error/message to reply with.
@@ -256,8 +254,7 @@ function resolveReadableActingOrg(
       ok: false,
       status: 403,
       error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
-      message:
-        'only aggregator, network_service or voice acting orgs are allowed',
+      message: 'only aggregator or network_service acting orgs are allowed',
     };
   }
   return { ok: true, acting_org };
@@ -266,8 +263,8 @@ function resolveReadableActingOrg(
 /**
  * Whether this caller must be refused because the participant is a minor.
  *
- * See the call site for why the rejection is scoped to voice/network_service
- * and why it runs only after the disclosure verdict.
+ * See the call site for why the rejection is scoped to `network_service` and
+ * why it runs only after the disclosure verdict.
  *
  * @param age - The participant's stored age, or null when none is on file.
  * @param orgType - The acting org's type.

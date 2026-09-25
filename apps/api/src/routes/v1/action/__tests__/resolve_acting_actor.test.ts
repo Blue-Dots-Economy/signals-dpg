@@ -15,9 +15,14 @@ const network_service = {
   org_type: 'network_service' as const,
   service_user_id: 'svc_ns',
 };
-const voice = {
+/**
+ * #518 retired the `voice` org type. `organization.type` is plain nullable
+ * text, so a row carrying it is still representable at runtime even though the
+ * union no longer admits it — hence the cast, and hence the test below.
+ */
+const retired_voice = {
   org_id: 'org_voice_x',
-  org_type: 'voice' as const,
+  org_type: 'voice' as unknown as typeof aggregator.org_type,
   service_user_id: 'svc_voice',
 };
 
@@ -58,14 +63,15 @@ describe('resolve_acting_actor', () => {
   });
 
   describe('tier gate', () => {
-    it('admits voice, and does NOT apply the aggregator ownership rule to it', async () => {
-      // voice-dpg is an integrating DPG on the same client-credentials footing
-      // as the aggregator. It behaves like network_service here: no
-      // onboarded_by_org_id check, because "the org that onboarded this user"
-      // has no voice equivalent — note the target below is onboarded by a
-      // DIFFERENT org and is still allowed.
+    it('rejects the retired `voice` org type (#518)', async () => {
+      // The union cannot express this case, so the compiler cannot check it —
+      // which is exactly why it needs a test. A `voice` row surviving in some
+      // database must be refused here, not silently treated as network-wide.
+      // (The network-wide behaviour voice used to assert is covered by the
+      // `network_service tier` block below, including a cross-aggregator
+      // target.)
       const result = await resolve_acting_actor({
-        acting_org: voice,
+        acting_org: retired_voice,
         request_user_id: 'svc',
         acting_as_user_id: 'usr_target',
         lookup_user: lookup_user_factory({
@@ -73,12 +79,9 @@ describe('resolve_acting_actor', () => {
         }),
       });
       expect(result).toEqual({
-        ok: true,
-        effective_user_id: 'usr_target',
-        audit: {
-          performed_by_org_id: voice.org_id,
-          performed_by_service_user_id: voice.service_user_id,
-        },
+        ok: false,
+        status: 403,
+        error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
       });
     });
 
