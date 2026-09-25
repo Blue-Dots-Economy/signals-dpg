@@ -750,7 +750,7 @@
   "actions.export_download": "Download",
   "actions.export_download_count": "Download ({{count}})",
   "actions.export_download_type": "Download {{label}} ({{count}})",
-  "actions.export_select_hint": "Select at least one accepted engagement",
+  "actions.export_select_hint": "Select at least one engagement to download",
   "actions.export_done_one": "Downloaded {{count}} record",
   "actions.export_done_other": "Downloaded {{count}} records",
   "actions.export_done_skipped": "Downloaded {{count}} records · {{skipped}} could not be included",
@@ -759,5 +759,9 @@
   "actions.export_in_progress": "An export is already running — try again shortly",
   "actions.export_not_enabled": "Export is not available for these engagements",
   "actions.export_failed": "Could not download the export",
-  "actions.selection_split": "{{sent}} sent · {{received}} received"
+  "actions.selection_split": "{{sent}} sent · {{received}} received",
+  "actions.export_rate_limited": "Export limit reached — try again in a while",
+  "actions.export_status_not_allowed": "Only accepted or completed engagements can be exported",
+  "actions.export_mixed_types": "Select one profile type at a time to download",
+  "actions.export_unavailable": "Export is temporarily unavailable — try again shortly"
 }

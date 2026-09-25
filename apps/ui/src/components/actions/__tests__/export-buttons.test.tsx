@@ -9,18 +9,18 @@ describe('ExportButtons', () => {
     render(<ExportButtons groups={[]} onDownload={vi.fn()} />);
     const btn = screen.getByRole('button', { name: /download/i });
     expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute('title', 'Select at least one accepted engagement');
+    expect(btn).toHaveAttribute('title', 'Select at least one engagement to download');
   });
 
   it('one counterparty type → a single Download (N)', () => {
     const onDownload = vi.fn();
     render(
-      <ExportButtons groups={[{ domain: 'seeker', label: 'Seekers', count: 3 }]} onDownload={onDownload} />,
+      <ExportButtons groups={[{ key: 'seeker::profile', label: 'Seekers', count: 3 }]} onDownload={onDownload} />,
     );
     const btn = screen.getByRole('button', { name: 'Download (3)' });
     expect(btn).toBeEnabled();
     fireEvent.click(btn);
-    expect(onDownload).toHaveBeenCalledWith('seeker');
+    expect(onDownload).toHaveBeenCalledWith('seeker::profile');
   });
 
   it('several types → one button per type', () => {
@@ -28,21 +28,21 @@ describe('ExportButtons', () => {
     render(
       <ExportButtons
         groups={[
-          { domain: 'provider', label: 'Providers', count: 2 },
-          { domain: 'seeker', label: 'Seekers', count: 3 },
+          { key: 'provider::profile', label: 'Providers', count: 2 },
+          { key: 'seeker::profile', label: 'Seekers', count: 3 },
         ]}
         onDownload={onDownload}
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Download Providers (2)' }));
     fireEvent.click(screen.getByRole('button', { name: 'Download Seekers (3)' }));
-    expect(onDownload.mock.calls).toEqual([['provider'], ['seeker']]);
+    expect(onDownload.mock.calls).toEqual([['provider::profile'], ['seeker::profile']]);
   });
 
   it('disables every button while a download runs', () => {
     render(
       <ExportButtons
-        groups={[{ domain: 'seeker', label: 'Seekers', count: 1 }]}
+        groups={[{ key: 'seeker::profile', label: 'Seekers', count: 1 }]}
         pending
         onDownload={vi.fn()}
       />,

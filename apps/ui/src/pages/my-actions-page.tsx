@@ -25,7 +25,7 @@ import { pluralizeDomainLabel } from '@/lib/domain-icons';
 import {
   ActionExportError,
   exportActions,
-  groupByCounterpartyDomain,
+  groupByCounterpartyType,
   saveBlob,
 } from '@/lib/action-export';
 import {
@@ -480,18 +480,24 @@ export function MyActionsPage() {
   const canComplete = selectedActions.every(
     (a) => a.ownership_roles.includes('received') && a.action_status === 'accepted',
   );
-  const exportGroups: ExportButtonGroup[] = groupByCounterpartyDomain(exportableSelected)
-    .filter((g) => exportableDomains.has(g.domain))
-    .map((g) => ({
-      domain: g.domain,
-      label: pluralizeDomainLabel(g.domain, domains),
+  const selectedGroups = groupByCounterpartyType(exportableSelected).filter((g) =>
+    exportableDomains.has(g.domain),
+  );
+  // A domain that appears with more than one item type is labelled with the
+  // type too, so the two downloads are distinguishable.
+  const domainCounts = new Map<string, number>();
+  for (const g of selectedGroups) domainCounts.set(g.domain, (domainCounts.get(g.domain) ?? 0) + 1);
+  const exportGroups: ExportButtonGroup[] = selectedGroups.map((g) => {
+    const label = pluralizeDomainLabel(g.domain, domains);
+    return {
+      key: g.key,
+      label: (domainCounts.get(g.domain) ?? 0) > 1 ? `${label} (${g.itemType})` : label,
       count: g.actionIds.length,
-    }));
+    };
+  });
 
-  const handleDownload = async (counterpartyDomain: string) => {
-    const group = groupByCounterpartyDomain(exportableSelected).find(
-      (g) => g.domain === counterpartyDomain,
-    );
+  const handleDownload = async (groupKey: string) => {
+    const group = selectedGroups.find((g) => g.key === groupKey);
     if (!group || !scopedId) return;
     setExportPending(true);
     try {
@@ -503,7 +509,8 @@ export function MyActionsPage() {
           // Sent too, so a card whose status changed since it was selected is
           // dropped server-side rather than exported.
           action_status: exportStatuses,
-          counterparty_domain: counterpartyDomain,
+          counterparty_domain: group.domain,
+          counterparty_item_type: group.itemType,
         },
         projection: { fields: '*' },
         format: 'csv',
@@ -523,7 +530,13 @@ export function MyActionsPage() {
       const messages: Record<string, string> = {
         EXPORT_TOO_LARGE: t('actions.export_too_large'),
         EXPORT_IN_PROGRESS: t('actions.export_in_progress'),
+        EXPORT_RATE_LIMITED: t('actions.export_rate_limited'),
         EXPORT_NOT_ENABLED: t('actions.export_not_enabled'),
+        SERVICE_CALLER_NOT_ALLOWED: t('actions.export_not_enabled'),
+        STATUS_NOT_EXPORTABLE: t('actions.export_status_not_allowed'),
+        MIXED_COUNTERPARTY_TYPES: t('actions.export_mixed_types'),
+        NETWORK_CONFIG_UNAVAILABLE: t('actions.export_unavailable'),
+        EXPORT_RATE_LIMIT_UNAVAILABLE: t('actions.export_unavailable'),
       };
       toast.error(messages[code] ?? t('actions.export_failed'));
     } finally {

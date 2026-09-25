@@ -15,6 +15,8 @@ export interface ExportableAction {
   ownership_roles: ('initiated' | 'received')[];
   source_item_domain: string;
   target_item_domain: string;
+  source_item_type: string;
+  target_item_type: string;
 }
 
 /** Domain of the side the caller does NOT own. */
@@ -26,24 +28,40 @@ export function counterpartyDomainOf(
     : action.target_item_domain;
 }
 
+/** Item type of the side the caller does NOT own. */
+export function counterpartyItemTypeOf(
+  action: Pick<ExportableAction, 'ownership_roles' | 'source_item_type' | 'target_item_type'>,
+): string {
+  return action.ownership_roles.includes('received')
+    ? action.source_item_type
+    : action.target_item_type;
+}
+
 export interface CounterpartyGroup {
+  /** Stable id of the group: `<domain>::<itemType>`. */
+  key: string;
   domain: string;
+  itemType: string;
   actionIds: string[];
 }
 
 /**
- * One group per counterparty domain, sorted by domain. The server returns one
- * counterparty type per file, so each group is one download.
+ * One group per counterparty (domain, item type), sorted. The server returns
+ * one counterparty (domain, item type) per file, so each group is exactly one
+ * download — grouping by domain alone would send a mixed-type request the
+ * server refuses (MIXED_COUNTERPARTY_TYPES).
  */
-export function groupByCounterpartyDomain(actions: readonly ExportableAction[]): CounterpartyGroup[] {
-  const groups = new Map<string, string[]>();
+export function groupByCounterpartyType(actions: readonly ExportableAction[]): CounterpartyGroup[] {
+  const groups = new Map<string, CounterpartyGroup>();
   for (const a of actions) {
     const domain = counterpartyDomainOf(a);
-    groups.set(domain, [...(groups.get(domain) ?? []), a.action_id]);
+    const itemType = counterpartyItemTypeOf(a);
+    const key = `${domain}::${itemType}`;
+    const g = groups.get(key) ?? { key, domain, itemType, actionIds: [] };
+    g.actionIds.push(a.action_id);
+    groups.set(key, g);
   }
-  return [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([domain, actionIds]) => ({ domain, actionIds }));
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /** Filename from a `Content-Disposition` header, path separators neutralised. */
@@ -59,6 +77,7 @@ export interface ExportActionsBody {
     action_ids?: string[];
     action_status?: string[];
     counterparty_domain?: string;
+    counterparty_item_type?: string;
   };
   projection: { fields: '*' | string[] };
   format: 'csv';
@@ -135,7 +154,11 @@ export async function exportActions(body: ExportActionsBody): Promise<ExportActi
   }
 }
 
-/** Saves a blob through a temporary `<a download>`, then revokes its URL. */
+// Safari and some Firefox builds start the download after click() returns;
+// revoking the URL in the same tick can cancel it or save an empty file.
+const REVOKE_DELAY_MS = 1000;
+
+/** Saves a blob through a temporary `<a download>`; its URL is revoked shortly after. */
 export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -146,6 +169,6 @@ export function saveBlob(blob: Blob, filename: string): void {
     a.click();
   } finally {
     a.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
   }
 }

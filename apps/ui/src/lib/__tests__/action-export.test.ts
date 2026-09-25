@@ -18,19 +18,27 @@ vi.mock('../api-client', () => ({
 
 const {
   counterpartyDomainOf,
-  groupByCounterpartyDomain,
+  groupByCounterpartyType,
   filenameFromContentDisposition,
   exportActions,
   saveBlob,
   ActionExportError,
 } = await import('../action-export');
 
-type Pick = Parameters<typeof counterpartyDomainOf>[0];
-const action = (id: string, roles: Array<'initiated' | 'received'>, src: string, tgt: string): Pick & { action_id: string } => ({
+const action = (
+  id: string,
+  roles: Array<'initiated' | 'received'>,
+  src: string,
+  tgt: string,
+  srcType = 'profile_1.0',
+  tgtType = 'profile_1.0',
+) => ({
   action_id: id,
   ownership_roles: roles,
   source_item_domain: src,
   target_item_domain: tgt,
+  source_item_type: srcType,
+  target_item_type: tgtType,
 });
 
 beforeEach(() => {
@@ -45,21 +53,29 @@ describe('counterpartyDomainOf', () => {
   });
 });
 
-describe('groupByCounterpartyDomain', () => {
-  it('groups a mixed selection by counterparty domain, sorted, with ids', () => {
-    const groups = groupByCounterpartyDomain([
+describe('groupByCounterpartyType', () => {
+  it('groups a mixed selection by counterparty (domain, item type), sorted, with ids', () => {
+    const groups = groupByCounterpartyType([
       action('a1', ['received'], 'seeker', 'service_provider'),
-      action('a2', ['initiated'], 'service_provider', 'provider'),
+      action('a2', ['initiated'], 'service_provider', 'provider', 'profile_1.0', 'job_posting_1.0'),
       action('a3', ['initiated'], 'service_provider', 'seeker'),
     ]);
     expect(groups).toEqual([
-      { domain: 'provider', actionIds: ['a2'] },
-      { domain: 'seeker', actionIds: ['a1', 'a3'] },
+      { key: 'provider::job_posting_1.0', domain: 'provider', itemType: 'job_posting_1.0', actionIds: ['a2'] },
+      { key: 'seeker::profile_1.0', domain: 'seeker', itemType: 'profile_1.0', actionIds: ['a1', 'a3'] },
     ]);
   });
 
+  it('splits one domain with two item types into two groups', () => {
+    const groups = groupByCounterpartyType([
+      action('a1', ['received'], 'provider', 'seeker', 'job_posting_1.0'),
+      action('a2', ['received'], 'provider', 'seeker', 'training_1.0'),
+    ]);
+    expect(groups.map((g) => g.key)).toEqual(['provider::job_posting_1.0', 'provider::training_1.0']);
+  });
+
   it('empty selection → no groups', () => {
-    expect(groupByCounterpartyDomain([])).toEqual([]);
+    expect(groupByCounterpartyType([])).toEqual([]);
   });
 });
 
@@ -133,17 +149,25 @@ describe('exportActions', () => {
 });
 
 describe('saveBlob', () => {
-  it('clicks a temporary download link and revokes the object URL', () => {
+  it('clicks a temporary download link and revokes the object URL shortly after', () => {
     const create = vi.fn(() => 'blob:x');
     const revoke = vi.fn();
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
 
-    saveBlob(new Blob(['x']), 'f.csv');
+    vi.useFakeTimers();
+    try {
+      saveBlob(new Blob(['x']), 'f.csv');
 
-    expect(create).toHaveBeenCalled();
-    expect(click).toHaveBeenCalled();
-    expect(revoke).toHaveBeenCalledWith('blob:x');
-    expect(document.querySelector('a[download]')).toBeNull();
+      expect(create).toHaveBeenCalled();
+      expect(click).toHaveBeenCalled();
+      expect(document.querySelector('a[download]')).toBeNull();
+      // Not revoked in the same tick — some browsers start the download later.
+      expect(revoke).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(revoke).toHaveBeenCalledWith('blob:x');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

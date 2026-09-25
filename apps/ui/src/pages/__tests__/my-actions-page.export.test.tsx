@@ -76,6 +76,8 @@ const act_ = (
   ownership_roles: [role],
   source_item_domain: role === 'received' ? counterparty : myDomain,
   target_item_domain: role === 'received' ? myDomain : counterparty,
+  source_item_type: 'profile_1.0',
+  target_item_type: 'profile_1.0',
 });
 
 let initiated: ReturnType<typeof act_>[] = [];
@@ -241,6 +243,7 @@ describe('MyActionsPage — bulk export', () => {
         // From config (reveals_pii_on_status), not hardcoded.
         action_status: ['accepted', 'completed'],
         counterparty_domain: 'seeker',
+        counterparty_item_type: 'profile_1.0',
       },
       projection: { fields: '*' },
       format: 'csv',

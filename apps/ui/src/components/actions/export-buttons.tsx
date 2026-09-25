@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 
 /** One downloadable counterparty type in the current selection. */
 export interface ExportButtonGroup {
-  domain: string;
+  /** Stable group id handed back to `onDownload`. */
+  key: string;
   /** Display name of the counterparty domain (plural), e.g. "Seekers". */
   label: string;
   count: number;
@@ -15,7 +16,7 @@ interface ExportButtonsProps {
   groups: readonly ExportButtonGroup[];
   /** A download is running — every button is disabled. */
   pending?: boolean;
-  onDownload: (domain: string) => void;
+  onDownload: (key: string) => void;
 }
 
 /**
@@ -45,11 +46,11 @@ export function ExportButtons({
     <>
       {groups.map((g) => (
         <Button
-          key={g.domain}
+          key={g.key}
           variant="default"
           size="sm"
           disabled={pending}
-          onClick={() => onDownload(g.domain)}
+          onClick={() => onDownload(g.key)}
         >
           <Icon className={iconClass} />
           {groups.length === 1
