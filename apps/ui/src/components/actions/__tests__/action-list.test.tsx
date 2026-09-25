@@ -168,4 +168,58 @@ describe('ActionList', () => {
     expect(screen.getByText('actions.bulk_reject')).toBeInTheDocument();
     expect(screen.getByText('actions.bulk_accept')).toBeInTheDocument();
   });
+
+  // ── #771: bulk export ────────────────────────────────────────────────────
+  describe('bulk export', () => {
+    const sentAccepted = [makeAction({ action_id: 's1', action_status: 'accepted' })];
+
+    it('accepted cards on Sent are NOT selectable without export', () => {
+      render(<Harness {...baseProps} activeTab="initiated" initiatedActions={sentAccepted} />);
+      expect(screen.queryByText('selection.select')).not.toBeInTheDocument();
+    });
+
+    it('accepted cards on Sent ARE selectable with export; Complete is not offered', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="initiated"
+          initiatedActions={sentAccepted}
+          exportEnabled
+          selectionSplit={{ sent: 1, received: 0 }}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /s1/ }));
+      expect(screen.getByText('selection.n_selected')).toBeInTheDocument();
+      expect(screen.queryByText('actions.bulk_complete')).not.toBeInTheDocument();
+    });
+
+    it('Received-only accepted selection still offers Complete', async () => {
+      const user = userEvent.setup();
+      const received = [makeAction({ action_id: 'r1', action_status: 'accepted' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          selectionSplit={{ sent: 0, received: 1 }}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /r1/ }));
+      expect(screen.getByText('actions.bulk_complete')).toBeInTheDocument();
+    });
+
+    it('renders the export controls only when export is enabled', () => {
+      const controls = <button type="button">export-controls</button>;
+      const { rerender } = render(
+        <Harness {...baseProps} exportControls={controls} />,
+      );
+      expect(screen.queryByText('export-controls')).not.toBeInTheDocument();
+      rerender(<Harness {...baseProps} exportEnabled exportControls={controls} />);
+      expect(screen.getByText('export-controls')).toBeInTheDocument();
+    });
+  });
 });

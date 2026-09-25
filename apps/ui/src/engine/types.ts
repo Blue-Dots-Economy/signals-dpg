@@ -137,6 +137,8 @@ export interface DotNetworkInteraction {
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
   reveals_pii_on_status?: string[];
+  /** Bulk-export eligibility (#769): which side(s) may export the counterparty. */
+  export?: { requester_domains: string[] };
 }
 
 export interface DotNetworkInstance {
