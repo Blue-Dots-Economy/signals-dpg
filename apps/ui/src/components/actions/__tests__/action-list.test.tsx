@@ -248,14 +248,40 @@ describe('ActionList', () => {
       expect(screen.queryByText('selection.select')).not.toBeInTheDocument();
     });
 
-    it('renders the export controls only when export is enabled', () => {
-      const controls = <button type="button">export-controls</button>;
-      const { rerender } = render(
-        <Harness {...baseProps} exportControls={controls} />,
+    it('Export in the toolbar starts selection; only shown when export is enabled', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<Harness {...baseProps} receivedActions={sentAccepted} />);
+      expect(screen.queryByText('actions.export_entry')).not.toBeInTheDocument();
+      rerender(
+        <Harness {...baseProps} receivedActions={sentAccepted} exportEnabled exportStatuses={['accepted']} />,
+      );
+      await user.click(screen.getByText('actions.export_entry'));
+      // In select mode the toolbar only offers Cancel selection.
+      expect(screen.getByText('selection.cancel')).toBeInTheDocument();
+      expect(screen.queryByText('actions.export_entry')).not.toBeInTheDocument();
+    });
+
+    it('the download control and Select all loaded live in the bulk bar', async () => {
+      const user = userEvent.setup();
+      const onSelectAllLoaded = vi.fn();
+      const received = [makeAction({ action_id: 'r1', action_status: 'accepted' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted']}
+          exportControls={<button type="button">export-controls</button>}
+          onSelectAllLoaded={onSelectAllLoaded}
+        />,
       );
       expect(screen.queryByText('export-controls')).not.toBeInTheDocument();
-      rerender(<Harness {...baseProps} exportEnabled exportControls={controls} />);
+      await user.click(screen.getByText('actions.export_entry'));
+      await user.click(screen.getByRole('button', { name: /r1/ }));
       expect(screen.getByText('export-controls')).toBeInTheDocument();
+      await user.click(screen.getByText('selection.select_all_loaded'));
+      expect(onSelectAllLoaded).toHaveBeenCalled();
     });
   });
 });

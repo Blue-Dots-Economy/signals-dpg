@@ -139,6 +139,7 @@ vi.mock('@/lib/action-export', async (importOriginal) => {
 // Stub ActionList: exposes the export props and hands the selection out.
 let selectionRef: CardSelection | null = null;
 let onTabChangeRef: ((t: 'initiated' | 'received') => void) | null = null;
+let selectAllRef: (() => void) | null = null;
 vi.mock('@/components/actions/action-list', () => ({
   ActionList: (props: {
     selection: CardSelection;
@@ -146,9 +147,11 @@ vi.mock('@/components/actions/action-list', () => ({
     exportEnabled?: boolean;
     exportControls?: React.ReactNode;
     selectionSplit?: { sent: number; received: number };
+    onSelectAllLoaded?: () => void;
   }) => {
     selectionRef = props.selection;
     onTabChangeRef = props.onTabChange;
+    selectAllRef = props.onSelectAllLoaded ?? null;
     return (
       <div>
         <span data-testid="export-enabled">{String(!!props.exportEnabled)}</span>
@@ -198,10 +201,20 @@ describe('MyActionsPage — bulk export', () => {
     expect(screen.queryByRole('button', { name: /export_download/ })).not.toBeInTheDocument();
   });
 
-  it('entitled → a disabled Download until something is selected', () => {
+  it('entitled → no download control until an exportable card is selected', () => {
     renderPage();
     expect(screen.getByTestId('export-enabled')).toHaveTextContent('true');
-    expect(screen.getByRole('button', { name: /actions\.export_download/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /export_download/ })).not.toBeInTheDocument();
+  });
+
+  it('Select all loaded selects every exportable card on both tabs, locked to the export group', async () => {
+    initiated = [act_('s1', 'initiated', 'seeker'), act_('s2', 'initiated', 'seeker', 'invited')];
+    received = [act_('r1', 'received', 'seeker', 'completed'), act_('r2', 'received', 'seeker', 'created')];
+    renderPage();
+    await select('r1');
+    await act(async () => selectAllRef!());
+    expect([...selectionRef!.selected].sort()).toEqual(['r1', 's1']);
+    expect(selectionRef!.lockKey).toBe('accepted');
   });
 
   it('keeps an accepted selection across a tab switch, split by tab', async () => {
@@ -222,7 +235,7 @@ describe('MyActionsPage — bulk export', () => {
     expect(selectionRef!.selected.size).toBe(0);
   });
 
-  it('mixed counterparties → one button per type; each sends its own ids + domain', async () => {
+  it('mixed counterparties → one Download with a menu; each item sends its own ids + type', async () => {
     received = [act_('r1', 'received', 'seeker'), act_('r2', 'received', 'provider')];
     exportActionsMock.mockResolvedValue({ blob: new Blob(['x']), filename: 'f.csv', exportId: 'e', rowCount: 1, skipped: 0 });
     const user = userEvent.setup();
@@ -230,9 +243,10 @@ describe('MyActionsPage — bulk export', () => {
     await select('r1');
     await act(async () => selectionRef!.toggle('r2', 'accepted'));
 
-    const seekersBtn = screen.getByRole('button', { name: /export_download_type.*Seekers/ });
-    expect(screen.getByRole('button', { name: /export_download_type.*Providers/ })).toBeEnabled();
-    await user.click(seekersBtn);
+    // One Download control with the total; the menu lists one item per type.
+    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    expect(await screen.findByRole('menuitem', { name: /Providers/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('menuitem', { name: /Seekers/ }));
 
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
     expect(exportActionsMock).toHaveBeenCalledWith({
@@ -302,7 +316,7 @@ describe('MyActionsPage — bulk export', () => {
     received = [act_('r1', 'received', 'seeker', 'completed')];
     renderPage();
     await select('r1');
-    // Selected, but not exportable → the only control is the disabled Download.
-    expect(screen.getByRole('button', { name: /actions\.export_download$/ })).toBeDisabled();
+    // Selected, but not exportable → no download control.
+    expect(screen.queryByRole('button', { name: /export_download/ })).not.toBeInTheDocument();
   });
 });

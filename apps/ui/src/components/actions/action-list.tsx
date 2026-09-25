@@ -1,7 +1,16 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { RefreshCw, Inbox, Send, AlertCircle, CheckSquare, Loader2 } from 'lucide-react';
+import {
+  RefreshCw,
+  Inbox,
+  Send,
+  AlertCircle,
+  CheckSquare,
+  Loader2,
+  Download,
+  X,
+} from 'lucide-react';
 import { ActionCard } from './action-card';
 import { ActionToolbar, type ActionStatusFilter, type ActionSort, type ActiveFacet } from './action-toolbar';
 import { SelectableCard } from '@/components/selection/selectable-card';
@@ -43,8 +52,13 @@ interface ActionListProps {
   exportStatuses?: readonly string[];
   /** Every selected card can be bulk-completed (Received + accepted). */
   canComplete?: boolean;
-  /** Download control(s), rendered in the toolbar when `exportEnabled`. */
+  /** Download control, rendered in the bulk bar when `exportEnabled`. */
   exportControls?: React.ReactNode;
+  /**
+   * Select every loaded exportable card on both tabs. When given (and export
+   * is enabled) the bulk bar offers "Select all loaded".
+   */
+  onSelectAllLoaded?: () => void;
   /** How the (cross-tab) selection splits between the Sent and Received tabs. */
   selectionSplit?: { sent: number; received: number };
   // ── Toolbar (#439 Task 13) — all state/URL-wiring lives on the page; this
@@ -105,6 +119,7 @@ export function ActionList({
   exportStatuses = [],
   canComplete,
   exportControls,
+  onSelectAllLoaded,
   selectionSplit,
   toolbarStatus,
   toolbarSort,
@@ -239,16 +254,28 @@ export function ActionList({
         />
 
         <div className="flex items-center gap-2">
-          {exportEnabled && exportControls}
-          {(hasSelectable || selection.selectMode) && (
-            <Button
-              variant={selection.selectMode ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => (selection.selectMode ? selection.exitSelect() : selection.enterSelect())}
-            >
-              <CheckSquare className="mr-2 h-4 w-4" />
-              {selection.selectMode ? t('selection.done') : t('selection.select')}
+          {/* One entry point: Export starts selection; every selection action
+              (download, complete, select all) lives in the bulk bar (#771). */}
+          {selection.selectMode ? (
+            <Button variant="outline" size="sm" onClick={() => selection.exitSelect()}>
+              <X className="mr-2 h-4 w-4" />
+              {t('selection.cancel')}
             </Button>
+          ) : (
+            <>
+              {exportEnabled && (
+                <Button variant="outline" size="sm" onClick={() => selection.enterSelect()}>
+                  <Download className="mr-2 h-4 w-4" />
+                  {t('actions.export_entry')}
+                </Button>
+              )}
+              {hasSelectable && (
+                <Button variant="outline" size="sm" onClick={() => selection.enterSelect()}>
+                  <CheckSquare className="mr-2 h-4 w-4" />
+                  {t('selection.select')}
+                </Button>
+              )}
+            </>
           )}
 
           <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefetching}>
@@ -308,7 +335,19 @@ export function ActionList({
               ? t('actions.selection_split', selectionSplit)
               : undefined
           }
+          secondary={
+            exportEnabled && onSelectAllLoaded && selection.lockKey === 'accepted' ? (
+              <button
+                type="button"
+                onClick={onSelectAllLoaded}
+                className="rounded-lg border border-background/30 px-3 py-1.5 text-xs font-semibold text-background/80 transition hover:text-background"
+              >
+                {t('selection.select_all_loaded')}
+              </button>
+            ) : undefined
+          }
         >
+          {exportEnabled && selection.lockKey === 'accepted' && exportControls}
           {selection.lockKey === 'accepted' ? (
             // Accepted selection → bulk complete, but only when every selected
             // card is a Received + accepted one: complete never applies to a

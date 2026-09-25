@@ -408,7 +408,7 @@ describe('MyActionsPage', () => {
     await user.click(screen.getByRole('button', { name: 'settle-all-failed' }));
     // Still in select mode with the failed action selected.
     expect(screen.getByText('1 selected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel selection' })).toBeInTheDocument();
   });
 
   it('leaves select mode when the tab changes so a hidden selection cannot go stale', async () => {
