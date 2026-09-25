@@ -524,6 +524,12 @@ is expensive and is the obvious scraping route.
    `X-Export-Generated-At`, each with its offset. No network.json change.
    `bulk_export_audit` stays in UTC.
 
+8. Mixed counterparties: **one file per domain** (product confirmed
+   2026-09-25), on the assumption of one schema per domain. The UI shows a
+   separate Download button per counterparty domain in the bulk bar. The
+   code groups by (domain, item type) as a guard; with one schema per domain
+   that is exactly one file per domain.
+
 ## 11. Delivery (child issues, after approval)
 
 1. **schemas/config** — interaction `export` block; `EXPORT_MAX_ROWS`; add
