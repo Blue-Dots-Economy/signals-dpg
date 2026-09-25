@@ -4,3 +4,4 @@ export * from './pii_reveal_audit';
 export * from './aggregator_default_audit';
 export * from './consent_record';
 export * from './minor_guardian';
+export * from './bulk_export_audit';

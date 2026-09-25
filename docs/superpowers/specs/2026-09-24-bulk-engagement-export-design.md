@@ -133,7 +133,8 @@ Content-Type: application/json
     "action_status":  ["accepted"],
     "ownership_role": "all",
     "item_id":        "<uuid, optional — one of my items>",
-    "counterparty_domain": ["seeker"],
+    "counterparty_domain": "seeker",
+    "counterparty_item_type": "<optional>",
     "action_ids":     ["<uuid>", "..."],
     "facets":         [{ "field": "...", "values": ["..."] }],
     "updated_from":   "<ISO-8601, optional>",
@@ -248,13 +249,16 @@ Rows never become blank lines; they are skipped and counted:
 | `skipped_cross_instance` | counterparty on another instance (contact-details returns 501 for these today) |
 | `skipped_missing` | counterparty item hard-deleted (`delete_item.ts`) |
 | `skipped_self` | counterparty owned by the requester (legacy two-domain accounts, §3) |
+| `skipped_not_enabled` | the row's interaction does not list the requester's domain in `export.requester_domains` (all rows ⇒ `403 EXPORT_NOT_ENABLED`) |
 
 Counts go in response headers and the audit row.
 
 ## 6. Response
 
-`200`, streamed (pattern: `apps/api/src/routes/v1/aggregator/export.ts`, minus
-its hardcoded `COLUMNS` const).
+`200`, built in memory rather than streamed: `EXPORT_MAX_ROWS` bounds it, and the
+row / skip counts must be sent as headers before the body. Prefixed with a UTF-8
+BOM so Excel reads non-Latin names correctly. Columns come from the schema, never a
+hardcoded `COLUMNS` const.
 
 **Headers**
 
@@ -268,6 +272,7 @@ X-Export-Row-Count: <n>
 X-Export-Skipped-Cross-Instance: <n>
 X-Export-Skipped-Missing: <n>
 X-Export-Skipped-Self: <n>
+X-Export-Skipped-Not-Enabled: <n>
 ```
 
 **Filename** — no PII:
@@ -466,10 +471,12 @@ New table `bulk_export_audit` — one row per download (Q5: metadata only):
 | `skipped_cross_instance` | int |
 | `skipped_missing` | int |
 | `skipped_self` | int |
+| `skipped_not_enabled` | int |
 | `created_at` | timestamptz |
 
 `filters`/`projection` as jsonb means new filters or a later per-subject audit
-need no migration. `pii_reveal_audit` (per-subject) is **not** written on this
+need no migration. **Fail-closed:** if the audit row cannot be written the file is
+not served (`500 EXPORT_AUDIT_FAILED`). `pii_reveal_audit` (per-subject) is **not** written on this
 path in v1, per Q5.
 
 ## 8. Configuration — env

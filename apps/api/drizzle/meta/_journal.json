@@ -134,6 +134,13 @@
       "when": 1789989423336,
       "tag": "0018_drop_better_auth_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790314367978,
+      "tag": "0019_bulk_export_audit",
+      "breakpoints": true
     }
   ]
 }
