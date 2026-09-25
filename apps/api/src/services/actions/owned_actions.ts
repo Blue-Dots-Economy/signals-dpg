@@ -37,6 +37,65 @@ function counterpartyEquals(
   );
 }
 
+/** Row filters that do not depend on which side the caller owns. */
+function rowFilterConditions(filters: OwnedActionsFilters): Array<SQL | undefined> {
+  const { action_id, action_ids, action_type, action_status, updated_from, updated_to } = filters;
+  return [
+    action_id ? eq(item_actions.action_id, action_id) : undefined,
+    action_ids?.length ? inArray(item_actions.action_id, action_ids) : undefined,
+    action_type?.length ? inArray(item_actions.action_type, action_type) : undefined,
+    action_status?.length ? inArray(item_actions.action_status, action_status) : undefined,
+    updated_from ? gte(item_actions.updated_at, updated_from) : undefined,
+    updated_to ? lte(item_actions.updated_at, updated_to) : undefined,
+  ];
+}
+
+/** Counterparty domain / item type, matched on the side the caller does not own. */
+function counterpartyConditions(
+  userId: string,
+  filters: OwnedActionsFilters
+): Array<SQL | undefined> {
+  return [
+    filters.counterparty_domain
+      ? counterpartyEquals(
+          userId,
+          item_actions.source_item_domain,
+          item_actions.target_item_domain,
+          filters.counterparty_domain
+        )
+      : undefined,
+    filters.counterparty_item_type
+      ? counterpartyEquals(
+          userId,
+          item_actions.source_item_type,
+          item_actions.target_item_type,
+          filters.counterparty_item_type
+        )
+      : undefined,
+  ];
+}
+
+/** `item_id` narrowed to the side(s) the ownership role covers. */
+function itemCondition(
+  itemId: string | undefined,
+  role: OwnedActionsFilters['ownership_role']
+): SQL | undefined {
+  if (!itemId) return undefined;
+  if (role === 'initiated') return eq(item_actions.source_item_id, itemId);
+  if (role === 'received') return eq(item_actions.target_item_id, itemId);
+  return or(eq(item_actions.source_item_id, itemId), eq(item_actions.target_item_id, itemId));
+}
+
+/** Ownership: caller owns the source (`initiated`), the target (`received`), or either. */
+function ownerCondition(
+  userId: string,
+  role: OwnedActionsFilters['ownership_role']
+): SQL | undefined {
+  if (role === 'initiated') return eq(item_actions.source_item_owner, userId);
+  if (role === 'received') return eq(item_actions.target_item_owner, userId);
+  return or(eq(item_actions.source_item_owner, userId), eq(item_actions.target_item_owner, userId));
+}
+
 /**
  * WHERE clause for the caller's own actions under the given filters.
  *
@@ -49,64 +108,12 @@ export function buildOwnedActionsWhere(
   userId: string,
   filters: OwnedActionsFilters
 ): SQL | undefined {
-  const { action_id, action_ids, action_type, action_status, item_id, ownership_role } =
-    filters;
-  const conditions: Array<SQL | undefined> = [];
-
-  if (action_id) conditions.push(eq(item_actions.action_id, action_id));
-  if (action_ids?.length) conditions.push(inArray(item_actions.action_id, action_ids));
-  if (action_type?.length) conditions.push(inArray(item_actions.action_type, action_type));
-  if (action_status?.length)
-    conditions.push(inArray(item_actions.action_status, action_status));
-  if (filters.updated_from) conditions.push(gte(item_actions.updated_at, filters.updated_from));
-  if (filters.updated_to) conditions.push(lte(item_actions.updated_at, filters.updated_to));
-  if (filters.counterparty_domain) {
-    conditions.push(
-      counterpartyEquals(
-        userId,
-        item_actions.source_item_domain,
-        item_actions.target_item_domain,
-        filters.counterparty_domain
-      )
-    );
-  }
-  if (filters.counterparty_item_type) {
-    conditions.push(
-      counterpartyEquals(
-        userId,
-        item_actions.source_item_type,
-        item_actions.target_item_type,
-        filters.counterparty_item_type
-      )
-    );
-  }
-
-  if (item_id) {
-    if (ownership_role === 'initiated') {
-      conditions.push(eq(item_actions.source_item_id, item_id));
-    } else if (ownership_role === 'received') {
-      conditions.push(eq(item_actions.target_item_id, item_id));
-    } else {
-      conditions.push(
-        or(eq(item_actions.source_item_id, item_id), eq(item_actions.target_item_id, item_id))
-      );
-    }
-  }
-
-  if (ownership_role === 'initiated') {
-    conditions.push(eq(item_actions.source_item_owner, userId));
-  } else if (ownership_role === 'received') {
-    conditions.push(eq(item_actions.target_item_owner, userId));
-  } else {
-    conditions.push(
-      or(
-        eq(item_actions.source_item_owner, userId),
-        eq(item_actions.target_item_owner, userId)
-      )
-    );
-  }
-
-  return and(...conditions);
+  return and(
+    ...rowFilterConditions(filters),
+    ...counterpartyConditions(userId, filters),
+    itemCondition(filters.item_id, filters.ownership_role),
+    ownerCondition(userId, filters.ownership_role)
+  );
 }
 
 /** The subset of an `item_actions` row the side resolvers need. */

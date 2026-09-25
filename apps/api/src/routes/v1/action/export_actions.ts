@@ -19,6 +19,7 @@ import { csvLine } from '@/utils/csv';
 import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
 import {
   buildExport,
+  type ExportCounts,
   type ExportItem,
   type ExportReveal,
 } from '@/services/action_export/build_export';
@@ -170,51 +171,9 @@ async function runExport(
     });
   }
 
-  // Same loud ownership check as fetch_actions: a foreign or missing item_id
-  // gets an identical 403, never an empty-but-200 file.
-  const requester = await resolveRequesterItem(userId, filters.item_id);
-  if (filters.item_id && requester?.created_by !== userId) {
-    return reply.code(403).send({
-      error: 'FORBIDDEN_ITEM',
-      message: 'item_id is not owned by the caller',
-    });
-  }
-  if (!requester) {
-    return reply.code(403).send({
-      error: 'EXPORT_NOT_ENABLED',
-      message: 'Bulk export is not enabled for your profile type',
-    });
-  }
-
-  // Which statuses this requester may export comes from config (the reveal
-  // statuses of the interactions their domain can export). Enforced here —
-  // a caller asking for anything else is refused, not served masked rows.
-  let requesterConfig: NetworkConfigDocument;
-  try {
-    requesterConfig = await getNetworkConfigById(requester.item_network);
-  } catch (err) {
-    request.log.error({ err, network: requester.item_network }, 'network config unavailable for export');
-    return reply.code(500).send({
-      error: 'NETWORK_CONFIG_UNAVAILABLE',
-      message: 'A network configuration could not be loaded; try again shortly',
-    });
-  }
-  const exportable = getExportableStatuses(requesterConfig, requester.item_domain);
-  if (exportable.length === 0) {
-    return reply.code(403).send({
-      error: 'EXPORT_NOT_ENABLED',
-      message: 'Bulk export is not enabled for your profile type',
-    });
-  }
-  const notExportable = (filters.action_status ?? []).filter((s) => !exportable.includes(s));
-  if (notExportable.length > 0) {
-    return reply.code(400).send({
-      error: 'STATUS_NOT_EXPORTABLE',
-      message: `Only these statuses can be exported: ${exportable.join(', ')}`,
-      details: { not_exportable: notExportable, allowed: exportable },
-    });
-  }
-  const statuses = filters.action_status?.length ? filters.action_status : exportable;
+  const scope = await resolveExportScope(request, userId);
+  if (!scope.ok) return reply.code(scope.status).send(scope.body);
+  const { requester, requesterConfig, statuses } = scope;
 
   const rows = await db
     .select()
@@ -265,25 +224,12 @@ async function runExport(
     ])
   );
 
-  // Resolve every network config up front so buildExport stays synchronous.
-  // A failed load is recorded as null; buildExport turns that into a 500,
-  // never a "not enabled".
-  const networks = new Set<string>([
-    ...rows.map((r) => r.target_item_network),
-    ...itemRows.map((it) => it.item_network),
-  ]);
-  const configs = new Map<string, NetworkConfigDocument | null>([
-    [requester.item_network, requesterConfig],
-  ]);
-  for (const network of networks) {
-    if (configs.has(network)) continue;
-    try {
-      configs.set(network, await getNetworkConfigById(network));
-    } catch (err) {
-      request.log.error({ err, network }, 'network config unavailable for export');
-      configs.set(network, null);
-    }
-  }
+  const configs = await loadNetworkConfigs(
+    request,
+    [...rows.map((r) => r.target_item_network), ...itemRows.map((it) => it.item_network)],
+    requester.item_network,
+    requesterConfig
+  );
 
   const result = buildExport({
     userId,
@@ -316,35 +262,16 @@ async function runExport(
   const { counts } = result;
 
   // Fail closed: an export that cannot be audited is not served (#639 Q5).
-  // The download row and one pii_reveal_audit row per revealed counterparty
-  // are written together, so "who has seen this person's data" covers bulk
-  // exports exactly as it covers the one-at-a-time contact-details reveal.
   try {
-    await db.transaction(async (tx) => {
-      await tx.insert(bulk_export_audit).values({
-        exportId,
-        requesterUserId: userId,
-        requesterItemId: filters.item_id ?? requester.item_id,
-        filters: { ...filters, action_status: statuses },
-        projection,
-        format,
-        rowCount: counts.row_count,
-        revealedCount: counts.revealed_count,
-        maskedCount: counts.masked_count,
-        skippedCrossInstance: counts.skipped_cross_instance,
-        skippedMissing: counts.skipped_missing,
-        skippedSelf: counts.skipped_self,
-        skippedNotEnabled: counts.skipped_not_enabled,
-      });
-      for (let i = 0; i < result.reveals.length; i += REVEAL_AUDIT_BATCH) {
-        await tx
-          .insert(pii_reveal_audit)
-          .values(
-            result.reveals
-              .slice(i, i + REVEAL_AUDIT_BATCH)
-              .map((r) => revealAuditRow(r, userId))
-          );
-      }
+    await writeExportAudit({
+      exportId,
+      userId,
+      requesterItemId: filters.item_id ?? requester.item_id,
+      filters: { ...filters, action_status: statuses },
+      projection,
+      format,
+      counts,
+      reveals: result.reveals,
     });
   } catch (err) {
     request.log.error(
@@ -399,6 +326,141 @@ async function runExport(
     .header('X-Export-Skipped-Self', String(counts.skipped_self))
     .header('X-Export-Skipped-Not-Enabled', String(counts.skipped_not_enabled))
     .send(body);
+}
+
+type ScopeResult =
+  | {
+      ok: true;
+      requester: NonNullable<Awaited<ReturnType<typeof resolveRequesterItem>>>;
+      requesterConfig: NetworkConfigDocument;
+      statuses: string[];
+    }
+  | { ok: false; status: 400 | 403 | 500; body: Record<string, unknown> };
+
+const NOT_ENABLED = {
+  error: 'EXPORT_NOT_ENABLED',
+  message: 'Bulk export is not enabled for your profile type',
+};
+
+/**
+ * Who is exporting and which statuses they may export — all enforced here,
+ * not in the UI. Same loud ownership check as fetch_actions (a foreign or
+ * missing item_id is an identical 403). The exportable statuses come from
+ * config (the reveal statuses of the interactions the requester's domain can
+ * export); asking for anything else is refused rather than served masked.
+ */
+async function resolveExportScope(request: ExportRequest, userId: string): Promise<ScopeResult> {
+  const { filters } = request.body;
+  const requester = await resolveRequesterItem(userId, filters.item_id);
+  if (filters.item_id && requester?.created_by !== userId) {
+    return {
+      ok: false,
+      status: 403,
+      body: { error: 'FORBIDDEN_ITEM', message: 'item_id is not owned by the caller' },
+    };
+  }
+  if (!requester) return { ok: false, status: 403, body: NOT_ENABLED };
+
+  let requesterConfig: NetworkConfigDocument;
+  try {
+    requesterConfig = await getNetworkConfigById(requester.item_network);
+  } catch (err) {
+    request.log.error({ err, network: requester.item_network }, 'network config unavailable for export');
+    return {
+      ok: false,
+      status: 500,
+      body: {
+        error: 'NETWORK_CONFIG_UNAVAILABLE',
+        message: 'A network configuration could not be loaded; try again shortly',
+      },
+    };
+  }
+
+  const exportable = getExportableStatuses(requesterConfig, requester.item_domain);
+  if (exportable.length === 0) return { ok: false, status: 403, body: NOT_ENABLED };
+
+  const notExportable = (filters.action_status ?? []).filter((s) => !exportable.includes(s));
+  if (notExportable.length > 0) {
+    return {
+      ok: false,
+      status: 400,
+      body: {
+        error: 'STATUS_NOT_EXPORTABLE',
+        message: `Only these statuses can be exported: ${exportable.join(', ')}`,
+        details: { not_exportable: notExportable, allowed: exportable },
+      },
+    };
+  }
+  const statuses = filters.action_status?.length ? filters.action_status : exportable;
+  return { ok: true, requester, requesterConfig, statuses };
+}
+
+/**
+ * Every network config the export touches, resolved up front so buildExport
+ * stays synchronous. A failed load is recorded as null — buildExport turns
+ * that into a 500, never a "not enabled".
+ */
+async function loadNetworkConfigs(
+  request: ExportRequest,
+  networkIds: readonly string[],
+  knownId: string,
+  knownConfig: NetworkConfigDocument
+): Promise<Map<string, NetworkConfigDocument | null>> {
+  const configs = new Map<string, NetworkConfigDocument | null>([[knownId, knownConfig]]);
+  for (const network of new Set(networkIds)) {
+    if (configs.has(network)) continue;
+    try {
+      configs.set(network, await getNetworkConfigById(network));
+    } catch (err) {
+      request.log.error({ err, network }, 'network config unavailable for export');
+      configs.set(network, null);
+    }
+  }
+  return configs;
+}
+
+/**
+ * The download row and one pii_reveal_audit row per revealed counterparty,
+ * in one transaction — both or neither — so "who has seen this person's
+ * data" covers bulk exports exactly as it covers contact-details.
+ *
+ * @throws when the transaction fails; the caller refuses the export.
+ */
+async function writeExportAudit(input: {
+  exportId: string;
+  userId: string;
+  requesterItemId: string;
+  filters: Record<string, unknown>;
+  projection: unknown;
+  format: string;
+  counts: ExportCounts;
+  reveals: readonly ExportReveal[];
+}): Promise<void> {
+  const { counts } = input;
+  await db.transaction(async (tx) => {
+    await tx.insert(bulk_export_audit).values({
+      exportId: input.exportId,
+      requesterUserId: input.userId,
+      requesterItemId: input.requesterItemId,
+      filters: input.filters,
+      projection: input.projection,
+      format: input.format,
+      rowCount: counts.row_count,
+      revealedCount: counts.revealed_count,
+      maskedCount: counts.masked_count,
+      skippedCrossInstance: counts.skipped_cross_instance,
+      skippedMissing: counts.skipped_missing,
+      skippedSelf: counts.skipped_self,
+      skippedNotEnabled: counts.skipped_not_enabled,
+    });
+    for (let i = 0; i < input.reveals.length; i += REVEAL_AUDIT_BATCH) {
+      await tx
+        .insert(pii_reveal_audit)
+        .values(
+          input.reveals.slice(i, i + REVEAL_AUDIT_BATCH).map((r) => revealAuditRow(r, input.userId))
+        );
+    }
+  });
 }
 
 /** A per-subject reveal record, the same shape contact-details writes. */
