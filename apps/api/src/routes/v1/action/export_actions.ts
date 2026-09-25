@@ -1,27 +1,40 @@
 import { randomUUID } from 'node:crypto';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { asc, desc, eq, inArray } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
-import z, { ExportActionsBodySchema, type NetworkConfigDocument } from '@dpg/schemas';
+import z, {
+  ExportActionsBodySchema,
+  getExportableStatuses,
+  type NetworkConfigDocument,
+} from '@dpg/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
-import { bulk_export_audit } from '@api/db/postgres/schema';
+import { bulk_export_audit, pii_reveal_audit } from '@api/db/postgres/schema';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
-import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
-import { buildExport, type ExportItem } from '@/services/action_export/build_export';
+import { incrWithinWindow } from '@/utils/rate_window';
 import { csvLine } from '@/utils/csv';
+import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
+import {
+  buildExport,
+  type ExportItem,
+  type ExportReveal,
+} from '@/services/action_export/build_export';
 import { buildExportFilename } from '@/services/action_export/filename';
 import { formatIsoInZone } from '@/services/action_export/time';
 
 /**
  * `POST /api/v1/action/export` (#770) — CSV of the caller's engagement
  * COUNTERPARTIES, one counterparty type per file. Thin I/O shell around
- * `buildExport`, which owns the export rules; this handler adds auth, item
- * ownership, the row cap, one-export-at-a-time, the audit row and the
- * response.
+ * `buildExport`, which owns the per-row export rules; this handler enforces
+ * everything that needs I/O, so no rule depends on the UI:
+ *
+ * - human callers only (service credentials are refused),
+ * - one export at a time per process + a per-user hourly limit across pods,
+ * - item ownership, the requester's exportable statuses and domain,
+ * - the row cap, and a fail-closed audit (download + one row per reveal).
  *
  * The file is built in memory rather than streamed: the row cap bounds it,
  * and the row/skip counts must be sent as headers before the body.
@@ -29,12 +42,15 @@ import { formatIsoInZone } from '@/services/action_export/time';
 
 type ExportRequest = FastifyRequest<{ Body: z.infer<typeof ExportActionsBodySchema> }>;
 
-// Per-process guard: bulk decrypt is expensive and the obvious scraping route.
-// Best-effort across pods — each process enforces its own.
+// Per-process guard against parallel exports by one user; the Redis window
+// below is the cross-pod limit.
 const inFlight = new Set<string>();
 
 // Excel opens BOM-less UTF-8 CSV as a legacy code page, garbling non-Latin names.
 const UTF8_BOM = '﻿';
+const RATE_WINDOW_SEC = 3600;
+// Keeps each pii_reveal_audit INSERT well under Postgres' 65535-parameter cap.
+const REVEAL_AUDIT_BATCH = 1000;
 
 export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -45,7 +61,8 @@ export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
       tags: ['action'],
       description:
         'Download the counterparty profiles of the caller’s engagements as CSV (text/csv). ' +
-        'One counterparty type per file; private fields are revealed per row under the same ' +
+        'Human session only. One counterparty type per file; only statuses the network ' +
+        'reveals on are exportable, and private fields are revealed per row under the same ' +
         'gate as contact-details. Row and skip counts are in the X-Export-* response headers.',
       body: ExportActionsBodySchema,
     },
@@ -61,10 +78,40 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
       message: 'Authenticated user is required to export actions',
     });
   }
+  // An integrating DPG's service identity (x-api-key / client-credentials)
+  // owns no engagements of its own; exporting on a provider's behalf is not
+  // offered, so refuse it outright rather than serving an empty file.
+  if (request.user?.role === 'service') {
+    return reply.code(403).send({
+      error: 'SERVICE_CALLER_NOT_ALLOWED',
+      message: 'Bulk export is available to signed-in participants only',
+    });
+  }
   if (inFlight.has(userId)) {
     return reply.code(429).send({
       error: 'EXPORT_IN_PROGRESS',
       message: 'An export is already running for this user; try again when it finishes',
+    });
+  }
+
+  // Cross-pod per-user limit. Fails CLOSED: this route bulk-decrypts PII, so
+  // an unavailable limiter must not turn into an unlimited one.
+  try {
+    const used = await incrWithinWindow(`export:rl:${userId}`, RATE_WINDOW_SEC);
+    if (used > apiConfig.export_rate_limit_per_hour) {
+      return reply.code(429).send({
+        error: 'EXPORT_RATE_LIMITED',
+        message: 'Too many exports in the last hour; try again later',
+      });
+    }
+  } catch (err) {
+    request.log.error(
+      { err, operation: 'action.export', status: 'failure' },
+      'export rate-limit check unavailable — refusing export'
+    );
+    return reply.code(503).send({
+      error: 'EXPORT_RATE_LIMIT_UNAVAILABLE',
+      message: 'Export is temporarily unavailable; try again shortly',
     });
   }
 
@@ -86,6 +133,26 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
   }
 };
 
+/**
+ * The caller's own profile the export is scoped to: `item_id` when given
+ * (must be theirs), otherwise their first profile (one domain per user).
+ */
+async function resolveRequesterItem(userId: string, itemId: string | undefined) {
+  const where = itemId ? eq(items.item_id, itemId) : eq(items.created_by, userId);
+  const [row] = await db
+    .select({
+      item_id: items.item_id,
+      created_by: items.created_by,
+      item_network: items.item_network,
+      item_domain: items.item_domain,
+    })
+    .from(items)
+    .where(where)
+    .orderBy(asc(items.created_at))
+    .limit(1);
+  return row;
+}
+
 async function runExport(
   request: ExportRequest,
   reply: FastifyReply,
@@ -93,24 +160,62 @@ async function runExport(
   started: number
 ) {
   const { filters, projection, include, format } = request.body;
+  const maxRows = apiConfig.export_max_rows;
+
+  if ((filters.action_ids?.length ?? 0) > maxRows) {
+    return reply.code(413).send({
+      error: 'EXPORT_TOO_LARGE',
+      message: `At most ${maxRows} engagements can be exported at once`,
+      details: { max_rows: maxRows },
+    });
+  }
 
   // Same loud ownership check as fetch_actions: a foreign or missing item_id
   // gets an identical 403, never an empty-but-200 file.
-  if (filters.item_id) {
-    const [owned] = await db
-      .select({ created_by: items.created_by })
-      .from(items)
-      .where(eq(items.item_id, filters.item_id))
-      .limit(1);
-    if (owned?.created_by !== userId) {
-      return reply.code(403).send({
-        error: 'FORBIDDEN_ITEM',
-        message: 'item_id is not owned by the caller',
-      });
-    }
+  const requester = await resolveRequesterItem(userId, filters.item_id);
+  if (filters.item_id && requester?.created_by !== userId) {
+    return reply.code(403).send({
+      error: 'FORBIDDEN_ITEM',
+      message: 'item_id is not owned by the caller',
+    });
+  }
+  if (!requester) {
+    return reply.code(403).send({
+      error: 'EXPORT_NOT_ENABLED',
+      message: 'Bulk export is not enabled for your profile type',
+    });
   }
 
-  const maxRows = apiConfig.export_max_rows;
+  // Which statuses this requester may export comes from config (the reveal
+  // statuses of the interactions their domain can export). Enforced here —
+  // a caller asking for anything else is refused, not served masked rows.
+  let requesterConfig: NetworkConfigDocument;
+  try {
+    requesterConfig = await getNetworkConfigById(requester.item_network);
+  } catch (err) {
+    request.log.error({ err, network: requester.item_network }, 'network config unavailable for export');
+    return reply.code(500).send({
+      error: 'NETWORK_CONFIG_UNAVAILABLE',
+      message: 'A network configuration could not be loaded; try again shortly',
+    });
+  }
+  const exportable = getExportableStatuses(requesterConfig, requester.item_domain);
+  if (exportable.length === 0) {
+    return reply.code(403).send({
+      error: 'EXPORT_NOT_ENABLED',
+      message: 'Bulk export is not enabled for your profile type',
+    });
+  }
+  const notExportable = (filters.action_status ?? []).filter((s) => !exportable.includes(s));
+  if (notExportable.length > 0) {
+    return reply.code(400).send({
+      error: 'STATUS_NOT_EXPORTABLE',
+      message: `Only these statuses can be exported: ${exportable.join(', ')}`,
+      details: { not_exportable: notExportable, allowed: exportable },
+    });
+  }
+  const statuses = filters.action_status?.length ? filters.action_status : exportable;
+
   const rows = await db
     .select()
     .from(item_actions)
@@ -118,11 +223,13 @@ async function runExport(
       buildOwnedActionsWhere(userId, {
         action_ids: filters.action_ids,
         action_type: filters.action_type,
-        action_status: filters.action_status,
+        action_status: statuses,
         item_id: filters.item_id,
         ownership_role: filters.ownership_role,
         updated_from: filters.updated_from,
         updated_to: filters.updated_to,
+        counterparty_domain: filters.counterparty_domain,
+        counterparty_item_type: filters.counterparty_item_type,
       })
     )
     .orderBy(desc(item_actions.updated_at), desc(item_actions.created_at))
@@ -159,16 +266,21 @@ async function runExport(
   );
 
   // Resolve every network config up front so buildExport stays synchronous.
+  // A failed load is recorded as null; buildExport turns that into a 500,
+  // never a "not enabled".
   const networks = new Set<string>([
     ...rows.map((r) => r.target_item_network),
     ...itemRows.map((it) => it.item_network),
   ]);
-  const configs = new Map<string, NetworkConfigDocument | null>();
+  const configs = new Map<string, NetworkConfigDocument | null>([
+    [requester.item_network, requesterConfig],
+  ]);
   for (const network of networks) {
+    if (configs.has(network)) continue;
     try {
       configs.set(network, await getNetworkConfigById(network));
     } catch (err) {
-      request.log.warn({ err, network }, 'network config unavailable for export — rows not exportable');
+      request.log.error({ err, network }, 'network config unavailable for export');
       configs.set(network, null);
     }
   }
@@ -187,6 +299,8 @@ async function runExport(
         .mergedState,
     onDecryptError: (err, itemId) =>
       request.log.warn({ err, item_id: itemId }, 'pii decrypt failed in export — row exported masked'),
+    onRuleError: (err, ref) =>
+      request.log.warn({ err, ref }, 'export rule could not be resolved — treated as not exportable'),
   });
 
   if (!result.ok) {
@@ -202,26 +316,40 @@ async function runExport(
   const { counts } = result;
 
   // Fail closed: an export that cannot be audited is not served (#639 Q5).
+  // The download row and one pii_reveal_audit row per revealed counterparty
+  // are written together, so "who has seen this person's data" covers bulk
+  // exports exactly as it covers the one-at-a-time contact-details reveal.
   try {
-    await db.insert(bulk_export_audit).values({
-      exportId,
-      requesterUserId: userId,
-      requesterItemId: filters.item_id ?? null,
-      filters,
-      projection,
-      format,
-      rowCount: counts.row_count,
-      revealedCount: counts.revealed_count,
-      maskedCount: counts.masked_count,
-      skippedCrossInstance: counts.skipped_cross_instance,
-      skippedMissing: counts.skipped_missing,
-      skippedSelf: counts.skipped_self,
-      skippedNotEnabled: counts.skipped_not_enabled,
+    await db.transaction(async (tx) => {
+      await tx.insert(bulk_export_audit).values({
+        exportId,
+        requesterUserId: userId,
+        requesterItemId: filters.item_id ?? requester.item_id,
+        filters: { ...filters, action_status: statuses },
+        projection,
+        format,
+        rowCount: counts.row_count,
+        revealedCount: counts.revealed_count,
+        maskedCount: counts.masked_count,
+        skippedCrossInstance: counts.skipped_cross_instance,
+        skippedMissing: counts.skipped_missing,
+        skippedSelf: counts.skipped_self,
+        skippedNotEnabled: counts.skipped_not_enabled,
+      });
+      for (let i = 0; i < result.reveals.length; i += REVEAL_AUDIT_BATCH) {
+        await tx
+          .insert(pii_reveal_audit)
+          .values(
+            result.reveals
+              .slice(i, i + REVEAL_AUDIT_BATCH)
+              .map((r) => revealAuditRow(r, userId))
+          );
+      }
     });
   } catch (err) {
     request.log.error(
       { err, operation: 'action.export', status: 'failure', export_id: exportId },
-      'Failed to write bulk_export_audit row — export refused'
+      'Failed to write export audit — export refused'
     );
     return reply.code(500).send({
       error: 'EXPORT_AUDIT_FAILED',
@@ -230,7 +358,7 @@ async function runExport(
   }
 
   // Dates, filename and generated-at in EXPORT_TIMEZONE (default IST), each
-  // with its offset. The audit row stays in UTC.
+  // with its offset. The audit rows stay in UTC.
   const timeZone = apiConfig.export_timezone;
   const formatDate = (d: Date) => formatIsoInZone(d, timeZone);
   const body =
@@ -240,7 +368,7 @@ async function runExport(
   const filename = buildExportFilename({
     network: result.counterparty?.network,
     counterpartyDomain: result.counterparty?.domain,
-    statuses: filters.action_status,
+    statuses,
     exportId,
     now,
     timeZone,
@@ -271,4 +399,16 @@ async function runExport(
     .header('X-Export-Skipped-Self', String(counts.skipped_self))
     .header('X-Export-Skipped-Not-Enabled', String(counts.skipped_not_enabled))
     .send(body);
+}
+
+/** A per-subject reveal record, the same shape contact-details writes. */
+function revealAuditRow(r: ExportReveal, viewerUserId: string) {
+  return {
+    actionId: r.action_id,
+    viewerUserId,
+    revealedItemId: r.item_id,
+    revealedItemOwner: r.item_owner ?? '',
+    revealedActionType: r.action_type,
+    revealedActionStatusAtView: r.action_status,
+  };
 }

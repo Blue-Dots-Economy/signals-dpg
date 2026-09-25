@@ -1,4 +1,5 @@
 import { and, eq, gte, inArray, lte, or, type SQL } from 'drizzle-orm';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { item_actions } from '@dpg/database';
 
 /**
@@ -15,6 +16,25 @@ export interface OwnedActionsFilters {
   ownership_role: 'all' | 'initiated' | 'received';
   updated_from?: Date;
   updated_to?: Date;
+  /** Counterparty (the side the caller does NOT own) domain / item type. */
+  counterparty_domain?: string;
+  counterparty_item_type?: string;
+}
+
+/**
+ * Condition on the counterparty side: when the caller owns the target the
+ * counterparty is the source, and vice versa.
+ */
+function counterpartyEquals(
+  userId: string,
+  sourceCol: AnyPgColumn,
+  targetCol: AnyPgColumn,
+  value: string
+): SQL | undefined {
+  return or(
+    and(eq(item_actions.target_item_owner, userId), eq(sourceCol, value)),
+    and(eq(item_actions.source_item_owner, userId), eq(targetCol, value))
+  );
 }
 
 /**
@@ -40,6 +60,26 @@ export function buildOwnedActionsWhere(
     conditions.push(inArray(item_actions.action_status, action_status));
   if (filters.updated_from) conditions.push(gte(item_actions.updated_at, filters.updated_from));
   if (filters.updated_to) conditions.push(lte(item_actions.updated_at, filters.updated_to));
+  if (filters.counterparty_domain) {
+    conditions.push(
+      counterpartyEquals(
+        userId,
+        item_actions.source_item_domain,
+        item_actions.target_item_domain,
+        filters.counterparty_domain
+      )
+    );
+  }
+  if (filters.counterparty_item_type) {
+    conditions.push(
+      counterpartyEquals(
+        userId,
+        item_actions.source_item_type,
+        item_actions.target_item_type,
+        filters.counterparty_item_type
+      )
+    );
+  }
 
   if (item_id) {
     if (ownership_role === 'initiated') {

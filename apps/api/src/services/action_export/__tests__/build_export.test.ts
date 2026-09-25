@@ -232,11 +232,35 @@ describe('buildExport — reveal gate', () => {
     expect(r.counts).toMatchObject({ row_count: 1, revealed_count: 1, masked_count: 0 });
   });
 
-  it('status not in reveals_pii_on_status → masked', () => {
-    const r = okOf(buildExport(input({ rows: [row(seekerA, myProvider, 'created')] })));
-    expect(r.records[0][col(r, 'beneficiary_name')]).toBe('M***');
-    expect(r.records[0][col(r, 'pii_revealed')]).toBe(false);
-    expect(r.counts.masked_count).toBe(1);
+  it('a status outside reveals_pii_on_status is never exported (skipped, counted)', () => {
+    const r = okOf(
+      buildExport(input({ rows: [row(seekerA, myProvider), row(seekerB, myProvider, 'created')] }))
+    );
+    expect(r.records.map((rec) => rec[col(r, 'counterparty_item_id')])).toEqual(['s-a']);
+    expect(r.counts.skipped_not_enabled).toBe(1);
+  });
+
+  it('only non-exportable statuses → 403, nothing exported', () => {
+    const r = buildExport(input({ rows: [row(seekerA, myProvider, 'created')] }));
+    expect(r).toMatchObject({ ok: false, status: 403, error: 'EXPORT_NOT_ENABLED' });
+  });
+
+  it('lists every revealed row for the per-subject reveal audit', () => {
+    const items = baseItems();
+    items.set('s-b', { ...items.get('s-b')!, lifecycle_status: 'paused' });
+    const a = row(seekerA, myProvider);
+    const b = row(seekerB, myProvider);
+    const r = okOf(buildExport(input({ rows: [a, b], items })));
+    // s-b is paused → masked → not a reveal.
+    expect(r.reveals).toEqual([
+      {
+        action_id: a.action_id,
+        action_type: 'connect',
+        action_status: 'accepted',
+        item_id: 's-a',
+        item_owner: OTHER,
+      },
+    ]);
   });
 
   it('counterparty paused → masked', () => {
@@ -296,6 +320,35 @@ describe('buildExport — skips', () => {
       skipped_missing: 1,
       skipped_self: 1,
     });
+  });
+});
+
+describe('buildExport — config failures are errors, not "not enabled"', () => {
+  it('missing network config for a row → 500 NETWORK_CONFIG_UNAVAILABLE', () => {
+    const r = buildExport(input({ rows: [row(seekerA, myProvider)], getNetworkConfig: () => null }));
+    expect(r).toMatchObject({ ok: false, status: 500, error: 'NETWORK_CONFIG_UNAVAILABLE' });
+  });
+
+  it('missing counterparty network config → 500, not a thrown error', () => {
+    const r = buildExport(
+      input({
+        rows: [row(seekerA, myProvider)],
+        items: new Map([
+          ...baseItems(),
+          ['s-a', { ...baseItems().get('s-a')!, item_network: 'elsewhere' }],
+        ]),
+      })
+    );
+    expect(r).toMatchObject({ ok: false, status: 500, error: 'NETWORK_CONFIG_UNAVAILABLE' });
+  });
+
+  it('an undeclared interaction is reported, then treated as not exportable', () => {
+    const onRuleError = vi.fn();
+    const r = buildExport(
+      input({ rows: [row(seekerA, myProvider, 'accepted', { action_type: 'apply' })], onRuleError })
+    );
+    expect(r).toMatchObject({ ok: false, status: 403, error: 'EXPORT_NOT_ENABLED' });
+    expect(onRuleError).toHaveBeenCalledWith(expect.any(Error), expect.any(String));
   });
 });
 

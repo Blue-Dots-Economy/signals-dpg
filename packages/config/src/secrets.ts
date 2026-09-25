@@ -359,6 +359,9 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // Row cap for one bulk engagement export (#639 / #769). Above it the export
   // endpoint refuses with 413 rather than streaming an unbounded decrypt.
   EXPORT_MAX_ROWS: z.coerce.number().int().positive().default(10000),
+  // Per-user bulk exports allowed per rolling hour, shared across pods via
+  // Redis. Bulk decrypt is the obvious scraping route.
+  EXPORT_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
   // IANA zone for bulk-export timestamps (filename, CSV dates, generated-at).
   // Every value carries its offset, so the file stays unambiguous.
   EXPORT_TIMEZONE: z

@@ -57,6 +57,18 @@ describe('ExportActionsBodySchema', () => {
     ['bad date', { filters: { updated_from: 'yesterday' } }],
     ['unknown top-level key', { extra: true }],
     ['unknown filter key', { filters: { status: 'accepted' } }],
+    [
+      'too many action_ids',
+      { filters: { action_ids: Array.from({ length: 10_001 }, () => UUID) } },
+    ],
+    [
+      'too many facets',
+      { filters: { facets: Array.from({ length: 21 }, (_, i) => ({ field: `f${i}`, values: ['x'] })) } },
+    ],
+    [
+      'too many facet values',
+      { filters: { facets: [{ field: 'f', values: Array.from({ length: 101 }, (_, i) => `v${i}`) }] } },
+    ],
   ])('rejects %s', (_label, body) => {
     expect(ExportActionsBodySchema.safeParse(body).success).toBe(false);
   });

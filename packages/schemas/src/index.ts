@@ -26,6 +26,7 @@ export {
   getInteractionPiiRevealStatuses,
   getInteractionExportRequesterDomains,
   getExportableCounterparties,
+  getExportableStatuses,
   type ExportableCounterparty,
   PROFILE_GO_LIVE_GATES,
   type GoLiveGate,

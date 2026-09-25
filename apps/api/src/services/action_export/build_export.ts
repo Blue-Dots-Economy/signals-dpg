@@ -86,6 +86,20 @@ export interface BuildExportInput {
   decrypt: (item: ExportItem) => Record<string, unknown>;
   /** Called when a permitted decrypt fails; the row is exported masked. */
   onDecryptError?: (err: unknown, itemId: string) => void;
+  /**
+   * Called when a row's interaction cannot be resolved (not declared by the
+   * network); the row is then treated as not exportable.
+   */
+  onRuleError?: (err: unknown, actionId: string) => void;
+}
+
+/** One revealed counterparty, for the per-subject `pii_reveal_audit`. */
+export interface ExportReveal {
+  action_id: string;
+  action_type: string;
+  action_status: string;
+  item_id: string;
+  item_owner: string | null;
 }
 
 export interface ExportCounts {
@@ -112,11 +126,17 @@ export type BuildExportResult =
       header: string[];
       records: unknown[][];
       counts: ExportCounts;
+      /** Every row whose private fields were decrypted into the file. */
+      reveals: ExportReveal[];
     }
   | {
       ok: false;
-      status: 400 | 403;
-      error: 'EXPORT_NOT_ENABLED' | 'MIXED_COUNTERPARTY_TYPES' | 'UNKNOWN_FIELD';
+      status: 400 | 403 | 500;
+      error:
+        | 'EXPORT_NOT_ENABLED'
+        | 'MIXED_COUNTERPARTY_TYPES'
+        | 'UNKNOWN_FIELD'
+        | 'NETWORK_CONFIG_UNAVAILABLE';
       message: string;
       details?: Record<string, unknown>;
     };
@@ -152,26 +172,38 @@ const emptyCounts = (): ExportCounts => ({
   skipped_not_enabled: 0,
 });
 
+type InteractionRules =
+  | { ok: true; requesters: readonly string[]; revealStatuses: readonly string[] }
+  | { ok: false };
+
 /**
  * Export rule set of one row's interaction: who may export it and which
- * statuses reveal PII. An undeclared interaction or missing config ⇒ nobody.
+ * statuses reveal PII. A missing config is `{ ok: false }` — an upstream
+ * failure, not a "no". An interaction the network does not declare is
+ * reported and exports to nobody.
  */
-function interactionRules(
-  input: BuildExportInput,
-  row: ExportActionRow
-): { requesters: readonly string[]; revealStatuses: readonly string[] } {
+function interactionRules(input: BuildExportInput, row: ExportActionRow): InteractionRules {
   // Same config lookup as fetch_actions / contact-details (target network).
   const cfg = input.getNetworkConfig(row.target_item_network);
-  if (!cfg) return { requesters: [], revealStatuses: [] };
+  if (!cfg) return { ok: false };
   try {
     return {
+      ok: true,
       requesters: getInteractionExportRequesterDomains(cfg, interactionInput(row)),
       revealStatuses: getInteractionPiiRevealStatuses(cfg, interactionInput(row)),
     };
-  } catch {
-    return { requesters: [], revealStatuses: [] };
+  } catch (err) {
+    input.onRuleError?.(err, row.action_id);
+    return { ok: true, requesters: [], revealStatuses: [] };
   }
 }
+
+const CONFIG_UNAVAILABLE = {
+  ok: false,
+  status: 500,
+  error: 'NETWORK_CONFIG_UNAVAILABLE',
+  message: 'A network configuration could not be loaded; try again shortly',
+} as const;
 
 /** The caller's own domain and the counterparty's owner / instance on a row. */
 function sidesOf(row: ExportActionRow, userId: string) {
@@ -195,7 +227,7 @@ function sidesOf(row: ExportActionRow, userId: string) {
 function collectCandidates(
   input: BuildExportInput,
   counts: ExportCounts
-): { candidates: Candidate[]; eligible: number } {
+): { candidates: Candidate[]; eligible: number; configUnavailable: boolean } {
   const { userId } = input;
   let eligible = 0;
   const candidates: Candidate[] = [];
@@ -207,8 +239,13 @@ function collectCandidates(
       counts.skipped_self++;
       continue;
     }
-    const { requesters, revealStatuses } = interactionRules(input, row);
-    if (!requesters.includes(ownDomain)) {
+    const rules = interactionRules(input, row);
+    if (!rules.ok) return { candidates: [], eligible: 0, configUnavailable: true };
+    const { requesters, revealStatuses } = rules;
+    // Enforced here, not only in the UI: the requester's domain must be
+    // allowed on this interaction, and only a status the network reveals on
+    // is exportable at all — never a masked created / rejected row.
+    if (!requesters.includes(ownDomain) || !revealStatuses.includes(row.action_status)) {
       counts.skipped_not_enabled++;
       continue;
     }
@@ -229,15 +266,16 @@ function collectCandidates(
       revealStatuses,
     });
   }
-  return { candidates, eligible };
+  return { candidates, eligible, configUnavailable: false };
 }
 
 /** Facets restricted to the counterparty's declared, non-private fields. */
 function passesFacets(input: BuildExportInput, c: Candidate): boolean {
   const selections = input.filters.facets ?? [];
   if (selections.length === 0) return true;
+  // A missing counterparty config is caught before selection (buildExport).
   const cfg = input.getNetworkConfig(c.counterparty.item_network);
-  if (!cfg) return true;
+  if (!cfg) return false;
   let allowed: ReturnType<typeof resolveAllowedFacetFilters> = [];
   try {
     allowed = resolveAllowedFacetFilters(
@@ -283,7 +321,8 @@ function buildRecord(
   c: Candidate,
   columns: ProfileColumn[],
   withMatchScore: boolean,
-  counts: ExportCounts
+  counts: ExportCounts,
+  reveals: ExportReveal[]
 ): unknown[] {
   const { row, counterparty: cp, own } = c;
   let revealed =
@@ -299,8 +338,19 @@ function buildRecord(
       revealed = false;
     }
   }
-  if (revealed) counts.revealed_count++;
-  else counts.masked_count++;
+  if (revealed) {
+    counts.revealed_count++;
+    reveals.push({
+      action_id: row.action_id,
+      action_type: row.action_type,
+      action_status: row.action_status,
+      item_id: cp.item_id,
+      item_owner:
+        row.target_item_owner === input.userId ? row.source_item_owner : row.target_item_owner,
+    });
+  } else {
+    counts.masked_count++;
+  }
 
   return [
     row.action_id,
@@ -321,7 +371,12 @@ function buildRecord(
 /** Builds the export table, or the client error that prevents it. */
 export function buildExport(input: BuildExportInput): BuildExportResult {
   const counts = emptyCounts();
-  const { candidates, eligible } = collectCandidates(input, counts);
+  const { candidates, eligible, configUnavailable } = collectCandidates(input, counts);
+  if (configUnavailable) return CONFIG_UNAVAILABLE;
+  // Every counterparty's own network config must load too (schema, facets).
+  if (candidates.some((c) => !input.getNetworkConfig(c.counterparty.item_network))) {
+    return CONFIG_UNAVAILABLE;
+  }
 
   if (eligible === 0 && counts.skipped_not_enabled > 0) {
     return {
@@ -354,15 +409,28 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
   const extraColumns = withMatchScore ? ['match_score'] : [];
   const counterparty = types[0];
   if (!counterparty) {
-    return { ok: true, header: [...FIXED_COLUMNS, ...extraColumns], records: [], counts };
+    return {
+      ok: true,
+      header: [...FIXED_COLUMNS, ...extraColumns],
+      records: [],
+      counts,
+      reveals: [],
+    };
   }
 
   const cpCfg = input.getNetworkConfig(counterparty.network);
-  if (!cpCfg) throw new Error(`network config "${counterparty.network}" unavailable`);
-  const schema = getDomainItemSchema(cpCfg, counterparty.domain, counterparty.item_type) as Record<
-    string,
-    unknown
-  >;
+  if (!cpCfg) return CONFIG_UNAVAILABLE;
+  let schema: Record<string, unknown>;
+  try {
+    schema = getDomainItemSchema(cpCfg, counterparty.domain, counterparty.item_type) as Record<
+      string,
+      unknown
+    >;
+  } catch (err) {
+    // The counterparty's domain / item type is not in its network's config.
+    input.onRuleError?.(err, `${counterparty.domain}/${counterparty.item_type}`);
+    return CONFIG_UNAVAILABLE;
+  }
   const columns = resolveProfileColumns(schema, input.projection.fields);
   if (!columns.ok) {
     return {
@@ -374,8 +442,9 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
     };
   }
 
+  const reveals: ExportReveal[] = [];
   const records = selected.map((c) =>
-    buildRecord(input, c, columns.columns, withMatchScore, counts)
+    buildRecord(input, c, columns.columns, withMatchScore, counts, reveals)
   );
   counts.row_count = records.length;
 
@@ -385,5 +454,6 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
     header: [...FIXED_COLUMNS, ...extraColumns, ...columns.columns.map((c) => c.header)],
     records,
     counts,
+    reveals,
   };
 }

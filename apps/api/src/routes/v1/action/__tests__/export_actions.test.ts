@@ -15,7 +15,7 @@ import {
  */
 
 vi.mock('@/config', () => ({
-  apiConfig: { export_max_rows: 2, export_timezone: 'Asia/Kolkata' },
+  apiConfig: { export_max_rows: 2, export_timezone: 'Asia/Kolkata', export_rate_limit_per_hour: 3 },
   getCurrentApiBaseUrl: () => 'http://here.local',
 }));
 
@@ -85,9 +85,19 @@ vi.mock('@/utils/item_decrypt', () => ({
 const state = {
   selects: [] as unknown[][],
   audit: [] as Array<Record<string, unknown>>,
+  revealAudit: [] as Array<Record<string, unknown>>,
   auditThrows: false,
   holdRows: null as Promise<void> | null,
+  rateCount: 1,
+  rateThrows: false,
 };
+
+vi.mock('@/utils/rate_window', () => ({
+  incrWithinWindow: vi.fn(async () => {
+    if (state.rateThrows) throw new Error('redis down');
+    return state.rateCount;
+  }),
+}));
 
 function chain(result: () => Promise<unknown[]>) {
   const node: Record<string, unknown> = {
@@ -108,12 +118,27 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         if (state.holdRows) await state.holdRows;
         return next;
       }),
-    insert: () => ({
-      values: async (row: Record<string, unknown>) => {
-        if (state.auditThrows) throw new Error('audit down');
-        state.audit.push(row);
-      },
-    }),
+    // Audit writes go through a transaction; bulk_export_audit rows carry
+    // `exportId`, pii_reveal_audit rows carry `revealedItemId`.
+    transaction: async (fn: (tx: unknown) => Promise<void>) => {
+      const staged: { audit: Array<Record<string, unknown>>; reveal: Array<Record<string, unknown>> } = {
+        audit: [],
+        reveal: [],
+      };
+      await fn({
+        insert: () => ({
+          values: async (v: Record<string, unknown> | Array<Record<string, unknown>>) => {
+            if (state.auditThrows) throw new Error('audit down');
+            for (const row of Array.isArray(v) ? v : [v]) {
+              if ('exportId' in row) staged.audit.push(row);
+              else staged.reveal.push(row);
+            }
+          },
+        }),
+      });
+      state.audit.push(...staged.audit);
+      state.revealAudit.push(...staged.reveal);
+    },
   },
 }));
 
@@ -139,6 +164,13 @@ const actionRow = (id: string) => ({
   target_item_owner: ME,
   target_item_instance_url: 'http://here.local',
 });
+// The caller's own profile the route resolves first (one domain per user).
+const requesterRow = (userId = ME, domain = 'provider') => ({
+  item_id: 'p-me',
+  created_by: userId,
+  item_network: NET,
+  item_domain: domain,
+});
 const itemRow = (id: string, domain: string, st: Record<string, unknown>) => ({
   item_id: id,
   item_network: NET,
@@ -149,12 +181,12 @@ const itemRow = (id: string, domain: string, st: Record<string, unknown>) => ({
   lifecycle_status: 'live',
 });
 
-async function buildApp(userId: string | null = ME): Promise<FastifyInstance> {
+async function buildApp(userId: string | null = ME, role = 'user'): Promise<FastifyInstance> {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   app.addHook('preHandler', async (req) => {
-    if (userId) (req as unknown as { user: { id: string } }).user = { id: userId };
+    if (userId) (req as unknown as { user: { id: string; role: string } }).user = { id: userId, role };
   });
   await app.register(export_actions, { prefix: '/api/v1/action' });
   await app.ready();
@@ -167,8 +199,11 @@ const post = (app: FastifyInstance, payload: unknown) =>
 beforeEach(() => {
   state.selects = [];
   state.audit = [];
+  state.revealAudit = [];
   state.auditThrows = false;
   state.holdRows = null;
+  state.rateCount = 1;
+  state.rateThrows = false;
 });
 
 describe('POST /api/v1/action/export', () => {
@@ -192,7 +227,7 @@ describe('POST /api/v1/action/export', () => {
 
   it('413 when rows exceed EXPORT_MAX_ROWS', async () => {
     const app = await buildApp();
-    state.selects = [[actionRow('a1'), actionRow('a2'), actionRow('a3')]];
+    state.selects = [[requesterRow()], [actionRow('a1'), actionRow('a2'), actionRow('a3')]];
     const res = await post(app, {});
     expect(res.statusCode).toBe(413);
     expect(res.json()).toMatchObject({ error: 'EXPORT_TOO_LARGE', details: { max_rows: 2 } });
@@ -202,6 +237,7 @@ describe('POST /api/v1/action/export', () => {
   it('200: CSV body, PII-free filename, X-Export-* headers, one audit row', async () => {
     const app = await buildApp();
     state.selects = [
+      [requesterRow()],
       [actionRow('a1')],
       [
         itemRow('s-a1', 'seeker', { beneficiary_name: 'M***', gender: 'Female' }),
@@ -256,30 +292,111 @@ describe('POST /api/v1/action/export', () => {
     });
   });
 
-  it('passes a buildExport client error through (400 MIXED / 403 NOT ENABLED)', async () => {
-    const app = await buildApp('user-other'); // the seeker side — not entitled
-    state.selects = [[actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
+  it('a domain with no export entitlement is refused before any rows load', async () => {
+    const app = await buildApp('user-other'); // a seeker — not entitled
+    state.selects = [[requesterRow('user-other', 'seeker')]];
     const res = await post(app, {});
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('EXPORT_NOT_ENABLED');
+    expect(state.selects).toHaveLength(0);
     expect(state.audit).toHaveLength(0);
+  });
+
+  it('403 for a caller with no profile at all', async () => {
+    const app = await buildApp();
+    state.selects = [[]];
+    expect((await post(app, {})).json().error).toBe('EXPORT_NOT_ENABLED');
+  });
+
+  it('403 SERVICE_CALLER_NOT_ALLOWED for a service identity (API key / client credentials)', async () => {
+    const app = await buildApp('svc-user', 'service');
+    const res = await post(app, {});
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('SERVICE_CALLER_NOT_ALLOWED');
+  });
+
+  it('400 STATUS_NOT_EXPORTABLE when asking for a status the network does not reveal on', async () => {
+    const app = await buildApp();
+    state.selects = [[requesterRow()]];
+    const res = await post(app, { filters: { action_status: ['accepted', 'created'] } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: 'STATUS_NOT_EXPORTABLE',
+      details: { not_exportable: ['created'], allowed: ['accepted'] },
+    });
+  });
+
+  it('with no status filter, only exportable statuses are queried (and recorded)', async () => {
+    const app = await buildApp();
+    state.selects = [[requesterRow()], [actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
+    const res = await post(app, {});
+    expect(res.statusCode).toBe(200);
+    expect(state.audit[0]).toMatchObject({ filters: { action_status: ['accepted'] } });
+  });
+
+  it('413 before any query when action_ids exceed EXPORT_MAX_ROWS', async () => {
+    const app = await buildApp();
+    const ids = [1, 2, 3].map((i) => `3f9a1c2e-0000-4000-8000-00000000000${i}`);
+    const res = await post(app, { filters: { action_ids: ids } });
+    expect(res.statusCode).toBe(413);
+  });
+
+  it('429 EXPORT_RATE_LIMITED past the hourly limit', async () => {
+    const app = await buildApp();
+    state.rateCount = 4; // limit is 3
+    const res = await post(app, {});
+    expect(res.statusCode).toBe(429);
+    expect(res.json().error).toBe('EXPORT_RATE_LIMITED');
+  });
+
+  it('503 when the rate limiter is unavailable (fails closed)', async () => {
+    const app = await buildApp();
+    state.rateThrows = true;
+    const res = await post(app, {});
+    expect(res.statusCode).toBe(503);
+    expect(res.json().error).toBe('EXPORT_RATE_LIMIT_UNAVAILABLE');
+  });
+
+  it('writes one pii_reveal_audit row per revealed counterparty, with the download row', async () => {
+    const app = await buildApp();
+    state.selects = [
+      [requesterRow()],
+      [actionRow('a1')],
+      [itemRow('s-a1', 'seeker', { beneficiary_name: 'M***' }), itemRow('p-me', 'provider', {})],
+    ];
+    const res = await post(app, {});
+    expect(res.statusCode).toBe(200);
+    expect(state.audit).toHaveLength(1);
+    expect(state.revealAudit).toEqual([
+      {
+        actionId: 'a1',
+        viewerUserId: ME,
+        revealedItemId: 's-a1',
+        revealedItemOwner: 'user-other',
+        revealedActionType: 'connect',
+        revealedActionStatusAtView: 'accepted',
+      },
+    ]);
   });
 
   it('500 and no file when the audit row cannot be written (fail-closed)', async () => {
     const app = await buildApp();
     state.auditThrows = true;
-    state.selects = [[actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
+    state.selects = [[requesterRow()], [actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
     const res = await post(app, {});
     expect(res.statusCode).toBe(500);
     expect(res.json().error).toBe('EXPORT_AUDIT_FAILED');
     expect(res.body).not.toContain('Meera');
+    // Nothing half-written: the transaction commits both or neither.
+    expect(state.audit).toHaveLength(0);
+    expect(state.revealAudit).toHaveLength(0);
   });
 
   it('429 while the same user already has an export running', async () => {
     const app = await buildApp();
     let release!: () => void;
     state.holdRows = new Promise<void>((r) => (release = r));
-    state.selects = [[], []];
+    state.selects = [[requesterRow()], [], [requesterRow()], []];
     const first = post(app, {});
     await new Promise((r) => setTimeout(r, 10));
     const second = await post(app, {});

@@ -63,6 +63,23 @@ describe('buildOwnedActionsWhere', () => {
   });
 });
 
+describe('buildOwnedActionsWhere — counterparty filters (#770 review #1)', () => {
+  it('counterparty_domain matches the side the caller does not own', () => {
+    const q = render('u1', { ownership_role: 'all', counterparty_domain: 'seeker' });
+    // (target owner = me AND source domain = seeker) OR (source owner = me AND target domain = seeker)
+    expect(q.sql).toMatch(/"target_item_owner" = \$\d+ and "item_actions"\."source_item_domain" = \$\d+/);
+    expect(q.sql).toMatch(/"source_item_owner" = \$\d+ and "item_actions"\."target_item_domain" = \$\d+/);
+    expect(q.params).toContain('seeker');
+  });
+
+  it('counterparty_item_type narrows the same way', () => {
+    const q = render('u1', { ownership_role: 'all', counterparty_item_type: 'profile_1.0' });
+    expect(q.sql).toContain('"source_item_type"');
+    expect(q.sql).toContain('"target_item_type"');
+    expect(q.params).toContain('profile_1.0');
+  });
+});
+
 describe('counterparty / own side', () => {
   const row = { source_item_id: 'S', target_item_id: 'T', target_item_owner: 'owner-t' };
 
