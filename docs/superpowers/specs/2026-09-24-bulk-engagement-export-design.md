@@ -512,6 +512,12 @@ is expensive and is the obvious scraping route.
    **accepted selection is kept across Sent/Received tabs** so one file can
    cover both directions (§6A).
 
+6. Exportable statuses: **accepted and completed**. Driven by config — the
+   export statuses are each interaction's `reveals_pii_on_status`
+   (`getExportableStatuses`), so networks declare `["accepted", "completed"]`
+   and add `completed` to the event status enum (which `update-status` also
+   needs to accept a Complete). No status is hardcoded in the UI.
+
 ## 11. Delivery (child issues, after approval)
 
 1. **schemas/config** — interaction `export` block; `EXPORT_MAX_ROWS`; add

@@ -4,7 +4,10 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import type { RJSFSchema } from '@rjsf/utils';
-import { getExportableCounterparties } from '@dpg/schemas/export_eligibility';
+import {
+  getExportableCounterparties,
+  getExportableStatuses,
+} from '@dpg/schemas/export_eligibility';
 import { useInitiatedActions, useReceivedActions } from '@/hooks/use-actions';
 import { useMyItems } from '@/hooks/use-my-items';
 import { useActiveProfile } from '@/hooks/use-active-profile';
@@ -399,7 +402,13 @@ export function MyActionsPage() {
         : new Set<string>(),
     [network, myDomain],
   );
-  const exportEnabled = exportableDomains.size > 0;
+  // Exportable statuses are the network's reveal statuses for those
+  // interactions (e.g. accepted + completed) — never a hardcoded list.
+  const exportStatuses = React.useMemo(
+    () => (network && myDomain ? getExportableStatuses(network, myDomain) : []),
+    [network, myDomain],
+  );
+  const exportEnabled = exportableDomains.size > 0 && exportStatuses.length > 0;
   const [exportPending, setExportPending] = React.useState(false);
 
   // A different profile has different engagements — never carry a selection over.
@@ -465,9 +474,13 @@ export function MyActionsPage() {
   const selectedActions = [...selectedInitiated, ...selectedReceived];
   const selectionSplit = { sent: selectedInitiated.length, received: selectedReceived.length };
 
-  const exportGroups: ExportButtonGroup[] = groupByCounterpartyDomain(
-    selectedActions.filter((a) => a.action_status === 'accepted'),
-  )
+  const exportableSelected = selectedActions.filter((a) => exportStatuses.includes(a.action_status));
+  // Complete applies only to Received + accepted cards, never to Sent or
+  // already-completed ones.
+  const canComplete = selectedActions.every(
+    (a) => a.ownership_roles.includes('received') && a.action_status === 'accepted',
+  );
+  const exportGroups: ExportButtonGroup[] = groupByCounterpartyDomain(exportableSelected)
     .filter((g) => exportableDomains.has(g.domain))
     .map((g) => ({
       domain: g.domain,
@@ -476,9 +489,9 @@ export function MyActionsPage() {
     }));
 
   const handleDownload = async (counterpartyDomain: string) => {
-    const group = groupByCounterpartyDomain(
-      selectedActions.filter((a) => a.action_status === 'accepted'),
-    ).find((g) => g.domain === counterpartyDomain);
+    const group = groupByCounterpartyDomain(exportableSelected).find(
+      (g) => g.domain === counterpartyDomain,
+    );
     if (!group || !scopedId) return;
     setExportPending(true);
     try {
@@ -489,7 +502,7 @@ export function MyActionsPage() {
           action_ids: group.actionIds,
           // Sent too, so a card whose status changed since it was selected is
           // dropped server-side rather than exported.
-          action_status: ['accepted'],
+          action_status: exportStatuses,
           counterparty_domain: counterpartyDomain,
         },
         projection: { fields: '*' },
@@ -562,6 +575,8 @@ export function MyActionsPage() {
             setBulkOpen(true);
           }}
           exportEnabled={exportEnabled}
+          exportStatuses={exportStatuses}
+          canComplete={canComplete}
           exportControls={
             <ExportButtons
               groups={exportGroups}

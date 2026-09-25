@@ -31,10 +31,18 @@ interface ActionListProps {
   /** Open the bulk confirm dialog for the given target status. */
   onBulkAction: (targetStatus: string) => void;
   /**
-   * Bulk export is enabled for the viewer's domain (#771): accepted cards on
-   * the Sent tab become selectable too, and `exportControls` are shown.
+   * Bulk export is enabled for the viewer's domain (#771): cards in an
+   * exportable status become selectable on both tabs, and `exportControls`
+   * are shown.
    */
   exportEnabled?: boolean;
+  /**
+   * Action statuses the viewer may export — the network's reveal statuses for
+   * the interactions their domain can export (e.g. accepted, completed).
+   */
+  exportStatuses?: readonly string[];
+  /** Every selected card can be bulk-completed (Received + accepted). */
+  canComplete?: boolean;
   /** Download control(s), rendered in the toolbar when `exportEnabled`. */
   exportControls?: React.ReactNode;
   /** How the (cross-tab) selection splits between the Sent and Received tabs. */
@@ -63,16 +71,18 @@ interface ActionListProps {
 // items (never mixed); on the Initiated tab you bulk cancel PENDING items.
 type ActionClass = 'pending' | 'accepted';
 
-// With bulk export enabled (#771) an accepted card on the Initiated tab is
-// selectable too — export is its only bulk action — so engagements the viewer
-// started can be downloaded as well as the ones they received.
+// With bulk export enabled (#771) a card in any exportable status (config:
+// the network's reveal statuses, e.g. accepted + completed) is selectable on
+// both tabs, in the same group as Received+accepted — so engagements the
+// viewer started, and completed ones, can be downloaded too.
 function actionClassFor(
   tab: 'initiated' | 'received',
   status: string,
-  exportEnabled = false,
+  exportStatuses: readonly string[] = [],
 ): ActionClass | null {
   if (status === 'created' || status === 'pending') return 'pending';
-  if (status === 'accepted' && (tab === 'received' || exportEnabled)) return 'accepted';
+  if (tab === 'received' && status === 'accepted') return 'accepted';
+  if (exportStatuses.includes(status)) return 'accepted';
   return null;
 }
 
@@ -92,6 +102,8 @@ export function ActionList({
   selection,
   onBulkAction,
   exportEnabled = false,
+  exportStatuses = [],
+  canComplete,
   exportControls,
   selectionSplit,
   toolbarStatus,
@@ -115,7 +127,7 @@ export function ActionList({
   // A card is selectable when it has an actionable class for this tab. The
   // lock group is that class, so the first pick fixes pending-vs-accepted.
   const isSelectable = (a: Action) =>
-    actionClassFor(activeTab, a.action_status, exportEnabled) !== null;
+    actionClassFor(activeTab, a.action_status, exportEnabled ? exportStatuses : []) !== null;
   const hasSelectable = actions.some(isSelectable);
 
   const tabs = [
@@ -155,7 +167,11 @@ export function ActionList({
       <>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {actions.map((action) => {
-            const cls = actionClassFor(activeTab, action.action_status, exportEnabled);
+            const cls = actionClassFor(
+              activeTab,
+              action.action_status,
+              exportEnabled ? exportStatuses : [],
+            );
             return (
               <SelectableCard
                 key={action.action_id}
@@ -295,9 +311,11 @@ export function ActionList({
         >
           {selection.lockKey === 'accepted' ? (
             // Accepted selection → bulk complete, but only when every selected
-            // card is a Received one: complete never applies to a Sent card and
-            // must not silently act on part of the selection (#771).
-            (selectionSplit?.sent ?? 0) === 0 && (
+            // card is a Received + accepted one: complete never applies to a
+            // Sent or already-completed card and must not silently act on part
+            // of the selection (#771). Without a page-supplied answer, fall
+            // back to "nothing from Sent is selected".
+            (canComplete ?? (selectionSplit?.sent ?? 0) === 0) && (
               <button
                 type="button"
                 onClick={() => onBulkAction('completed')}

@@ -16,6 +16,7 @@ export interface ExportEligibilityConfig {
         from_domain: string;
         to_network?: string;
         to_domain: string;
+        reveals_pii_on_status?: readonly string[];
         export?: { requester_domains: readonly string[] };
       }>;
     }
@@ -60,4 +61,28 @@ export function getExportableCounterparties(
   return [...found.values()].sort(
     (a, b) => a.network.localeCompare(b.network) || a.domain.localeCompare(b.domain)
   );
+}
+
+/**
+ * Action statuses a requester in `requesterDomain` may export: the union of
+ * `reveals_pii_on_status` over every interaction whose export block lists
+ * that domain. Sorted, deduplicated.
+ *
+ * Exporting is only useful where the counterparty's details are revealed, so
+ * the reveal statuses are the export statuses — adding a status to a
+ * network's `reveals_pii_on_status` (e.g. `completed`) makes it exportable
+ * with no code change.
+ */
+export function getExportableStatuses(
+  networkConfig: ExportEligibilityConfig,
+  requesterDomain: string
+): string[] {
+  const statuses = new Set<string>();
+  for (const action of Object.values(networkConfig.actions ?? {})) {
+    for (const interaction of action.interactions ?? []) {
+      if (!interaction.export?.requester_domains.includes(requesterDomain)) continue;
+      for (const s of interaction.reveals_pii_on_status ?? []) statuses.add(s);
+    }
+  }
+  return [...statuses].sort((a, b) => a.localeCompare(b));
 }

@@ -15,12 +15,13 @@ import type { CardSelection } from '@/hooks/use-card-selection';
 // directly.
 
 const statusEvent = { type: 'object', properties: { status: { type: 'string' } } };
+let revealStatuses = ['accepted', 'completed'];
 const inter = (from: string, to: string, requester?: string[]) => ({
   from_domain: from,
   to_domain: to,
   requirement_schema: { type: 'object' },
   event_schema: statusEvent,
-  reveals_pii_on_status: ['accepted'],
+  reveals_pii_on_status: revealStatuses,
   ...(requester ? { export: { requester_domains: requester } } : {}),
 });
 
@@ -175,6 +176,7 @@ const select = (id: string, group = 'accepted') =>
   });
 
 beforeEach(() => {
+  revealStatuses = ['accepted', 'completed'];
   network = buildNetwork();
   myDomain = 'service_provider';
   initiated = [];
@@ -236,7 +238,8 @@ describe('MyActionsPage — bulk export', () => {
         item_id: 'item-me',
         ownership_role: 'all',
         action_ids: ['r1'],
-        action_status: ['accepted'],
+        // From config (reveals_pii_on_status), not hardcoded.
+        action_status: ['accepted', 'completed'],
         counterparty_domain: 'seeker',
       },
       projection: { fields: '*' },
@@ -274,5 +277,29 @@ describe('MyActionsPage — bulk export', () => {
     await select('r1');
     await user.click(screen.getByRole('button', { name: /export_download_count/ }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
+  });
+
+  it('completed engagements are exportable alongside accepted ones', async () => {
+    received = [act_('r1', 'received', 'seeker'), act_('r2', 'received', 'seeker', 'completed')];
+    exportActionsMock.mockResolvedValue({ blob: new Blob(['x']), filename: 'f.csv', exportId: 'e', rowCount: 2, skipped: 0 });
+    const user = userEvent.setup();
+    renderPage();
+    await select('r1');
+    await act(async () => selectionRef!.toggle('r2', 'accepted'));
+    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
+    const body = exportActionsMock.mock.calls[0][0] as { filters: { action_ids: string[]; action_status: string[] } };
+    expect(body.filters.action_ids).toEqual(['r1', 'r2']);
+    expect(body.filters.action_status).toEqual(['accepted', 'completed']);
+  });
+
+  it('a network that reveals only on accepted never exports completed', async () => {
+    revealStatuses = ['accepted'];
+    network = buildNetwork();
+    received = [act_('r1', 'received', 'seeker', 'completed')];
+    renderPage();
+    await select('r1');
+    // Selected, but not exportable → the only control is the disabled Download.
+    expect(screen.getByRole('button', { name: /actions\.export_download$/ })).toBeDisabled();
   });
 });

@@ -583,6 +583,7 @@ export function getInteractionExportRequesterDomains(
 // Lives in a dependency-free module so the UI can import it too.
 export {
   getExportableCounterparties,
+  getExportableStatuses,
   type ExportableCounterparty,
 } from './export_eligibility';
 

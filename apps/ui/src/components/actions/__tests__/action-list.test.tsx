@@ -186,7 +186,9 @@ describe('ActionList', () => {
           activeTab="initiated"
           initiatedActions={sentAccepted}
           exportEnabled
+          exportStatuses={['accepted', 'completed']}
           selectionSplit={{ sent: 1, received: 0 }}
+          canComplete={false}
         />,
       );
       await user.click(screen.getByText('selection.select'));
@@ -210,6 +212,40 @@ describe('ActionList', () => {
       await user.click(screen.getByText('selection.select'));
       await user.click(screen.getByRole('button', { name: /r1/ }));
       expect(screen.getByText('actions.bulk_complete')).toBeInTheDocument();
+    });
+
+    it('completed cards are selectable when completed is an export status', async () => {
+      const user = userEvent.setup();
+      const received = [makeAction({ action_id: 'c1', action_status: 'completed' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted', 'completed']}
+          canComplete={false}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /c1/ }));
+      expect(screen.getByText('selection.n_selected')).toBeInTheDocument();
+      // Already completed → Complete is not offered.
+      expect(screen.queryByText('actions.bulk_complete')).not.toBeInTheDocument();
+    });
+
+    it('completed cards are NOT selectable when completed is not an export status', () => {
+      const received = [makeAction({ action_id: 'c1', action_status: 'completed' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted']}
+        />,
+      );
+      expect(screen.queryByText('selection.select')).not.toBeInTheDocument();
     });
 
     it('renders the export controls only when export is enabled', () => {
