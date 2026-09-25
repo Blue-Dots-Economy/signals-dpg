@@ -23,7 +23,11 @@ interface ExportButtonsProps {
  * exportable card is selected; one button per counterparty type, since the
  * server returns one counterparty type per file.
  */
-export function ExportButtons({ groups, pending = false, onDownload }: ExportButtonsProps) {
+export function ExportButtons({
+  groups,
+  pending = false,
+  onDownload,
+}: Readonly<ExportButtonsProps>) {
   const { t } = useTranslation();
   const Icon = pending ? Loader2 : Download;
   const iconClass = `mr-2 h-4 w-4 ${pending ? 'animate-spin' : ''}`;

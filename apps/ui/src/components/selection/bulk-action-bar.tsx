@@ -10,7 +10,12 @@ interface BulkActionBarProps {
   detail?: string;
 }
 
-export function BulkActionBar({ count, onClear, children, detail }: BulkActionBarProps) {
+export function BulkActionBar({
+  count,
+  onClear,
+  children,
+  detail,
+}: Readonly<BulkActionBarProps>) {
   const { t } = useTranslation();
   if (count === 0) return null;
   return (
