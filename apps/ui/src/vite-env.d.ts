@@ -19,6 +19,10 @@ interface ImportMetaEnv {
    * state's list backs the reference-autocomplete college field. Maps to
    * public/reference/colleges-<code>.json. Falls back to "ka". */
   readonly VITE_COLLEGE_DATASET?: string;
+  /** Partner portal the SSO error page links back to ("Back to NCS"). */
+  readonly VITE_SSO_PARTNER_URL?: string;
+  /** Partner name shown on that link, e.g. "NCS". */
+  readonly VITE_SSO_PARTNER_NAME?: string;
   /** Per-deployment base URL the reference datasets are fetched from (set via
    * ConfigMap). Falls back to the UI's own "/reference/". Lets the college
    * lists be hosted/updated independently of the UI image, like network.json. */

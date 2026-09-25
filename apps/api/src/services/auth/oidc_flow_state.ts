@@ -1,6 +1,5 @@
-import { createHash } from 'node:crypto';
 import { allowed_origins } from '@dpg/config';
-import { redis } from '@api/db/secondary/redis';
+import { putValue, takeValue } from '@/utils/one_time_store';
 
 /**
  * The origins a browser may legitimately reach this API from.
@@ -50,32 +49,28 @@ export interface OidcFlowState {
   redirectUri: string;
   /** Browser origin to hand the user back to. See `safeAppOrigin`. */
   appOrigin: string;
+  /**
+   * Present only for a partner-portal SSO login. `handle` keys the verified
+   * partner identity the callback reads back (`services/auth/sso/sso_store`),
+   * which is what lets it create the draft profile without asking Keycloak to
+   * carry partner data in its tokens.
+   */
+  sso?: { provider: string; handle: string };
 }
 
-/** `state` is a credential for this flow; keep it out of Redis keys in the clear. */
-function flowKey(state: string): string {
-  return FLOW_PREFIX + createHash('sha256').update(state).digest('hex');
-}
-
+/** `state` is a credential for this flow; the store hashes it into the key. */
 export async function saveFlowState(
   state: string,
   data: OidcFlowState
 ): Promise<void> {
-  await redis.set(flowKey(state), JSON.stringify(data), 'EX', FLOW_TTL_SECONDS);
+  await putValue(FLOW_PREFIX, state, data, FLOW_TTL_SECONDS);
 }
 
 /** Reads and deletes in one step: a `state` is good for exactly one callback. */
 export async function consumeFlowState(
   state: string
 ): Promise<OidcFlowState | null> {
-  const key = flowKey(state);
-  const raw = await redis.getdel(key);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as OidcFlowState;
-  } catch {
-    return null;
-  }
+  return takeValue<OidcFlowState>(FLOW_PREFIX, state);
 }
 
 /**

@@ -9,4 +9,5 @@ export * from './network_runtime';
 export * from './properties_file_io';
 export * from './secrets';
 export * from './sms_templates_loader';
+export * from './sso_config';
 export * from './ui_host_bindings';

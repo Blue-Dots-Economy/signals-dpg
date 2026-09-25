@@ -1,4 +1,5 @@
 import { renderSmsPreview, type SmsTemplateIndex } from './sms_templates';
+import { maskPhone } from '@/utils/pii_log';
 
 /**
  * Central SMS sender (#532/#535) — the mirror of the #529 email sender, but
@@ -15,16 +16,6 @@ import { renderSmsPreview, type SmsTemplateIndex } from './sms_templates';
  */
 
 export type SmsPriority = 'realtime' | 'other';
-
-/**
- * Mask a phone to its last 4 digits for the dev preview log. The preview is
- * non-prod only, but no raw phone (PII) is ever placed into a log-bound string
- * — a mis-wired previewLog must not be able to leak a full number.
- */
-function maskPhone(to: string): string {
-  const tail = to.replace(/\D/g, '').slice(-4);
-  return tail ? `****${tail}` : '****';
-}
 
 /**
  * Project the caller's variables onto the template's declared `vars`: keep only

@@ -27,14 +27,18 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import {
+  getKeycloakAdminClient,
+  resetKeycloakAdminClient,
+} from '@/services/auth/keycloak_admin_instance';
 import { or, eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
 import { db } from '@api/db/postgres/drizzle_config';
 import { user as userTable } from '@api/db/postgres/schema/auth';
 import { redis } from '@api/db/secondary/redis';
-import { apiConfig, authConfig, keycloakConfig } from '@/config';
+import { apiConfig, authConfig } from '@/config';
 import { stashSignupExtras } from '@/services/auth/signup_extras';
-import { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
+import type { KeycloakAdminClient } from '@/services/auth/keycloak_admin';
 import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
 
 export interface SelfSignupInput {
@@ -105,7 +109,6 @@ async function overLimit(key: string, max: number, log: FastifyBaseLogger): Prom
   }
 }
 
-let adminClient: KeycloakAdminClient | null = null;
 
 /**
  * Whether the realm retains a written `phoneNumber` attribute, memoised.
@@ -121,21 +124,10 @@ let phoneAttributePersists: boolean | null = null;
 
 /** Test seam: forget the memoised admin client and realm-profile probe. */
 export function resetSelfSignupState(): void {
-  adminClient = null;
+  resetKeycloakAdminClient();
   phoneAttributePersists = null;
 }
 
-function getAdminClient(): KeycloakAdminClient | null {
-  if (adminClient) return adminClient;
-  if (!keycloakConfig.internal_base_url || !keycloakConfig.api_client_secret) return null;
-  adminClient = new KeycloakAdminClient({
-    baseUrl: keycloakConfig.internal_base_url,
-    realm: keycloakConfig.realm,
-    clientId: keycloakConfig.api_client_id,
-    clientSecret: keycloakConfig.api_client_secret,
-  });
-  return adminClient;
-}
 
 /** The validated inputs a signup proceeds with once every guard has passed. */
 interface PreparedSignup {
@@ -228,7 +220,7 @@ async function prepareSignup(
     };
   }
 
-  const client = getAdminClient();
+  const client = getKeycloakAdminClient();
   if (!client) {
     log.error('self-signup: KEYCLOAK_API_CLIENT_SECRET is not configured');
     return {

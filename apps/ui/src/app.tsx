@@ -10,6 +10,7 @@ import { ProfileFormPage } from './pages/profile-form-page';
 import { LoginPage } from './pages/auth/login-page';
 import { OtpPage } from './pages/auth/otp-page';
 import { OidcCallbackPage } from './pages/auth/oidc-callback-page';
+import { SsoErrorPage } from './pages/auth/sso-error-page';
 import { MyActionsPage } from './pages/my-actions-page';
 import { LegalPage } from './pages/legal/legal-page';
 import { PublicProfilePage } from './pages/public-profile-page';
@@ -41,6 +42,8 @@ export function App() {
                 route exists the moment VITE_AUTH_PROVIDER is flipped, without
                 a rebuild — the page is inert if nobody redirects here. */}
             <Route path="/auth/callback" element={<OidcCallbackPage />} />
+            {/* A refused partner-portal SSO login (the API's /sso routes). */}
+            <Route path="/auth/sso/error" element={<SsoErrorPage />} />
             <Route path="/legal" element={<LegalPage />} />
             {/* Both documents live on one page now. These two paths are what
                 operators have already shared over SMS and email (see #637), so
