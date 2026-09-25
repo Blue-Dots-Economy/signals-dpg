@@ -359,6 +359,22 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // Row cap for one bulk engagement export (#639 / #769). Above it the export
   // endpoint refuses with 413 rather than streaming an unbounded decrypt.
   EXPORT_MAX_ROWS: z.coerce.number().int().positive().default(10000),
+  // IANA zone for bulk-export timestamps (filename, CSV dates, generated-at).
+  // Every value carries its offset, so the file stays unambiguous.
+  EXPORT_TIMEZONE: z
+    .string()
+    .default('Asia/Kolkata')
+    .refine(
+      (tz) => {
+        try {
+          new Intl.DateTimeFormat('en-US', { timeZone: tz });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { message: 'EXPORT_TIMEZONE must be an IANA time zone, e.g. Asia/Kolkata' }
+    ),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
   // Global default cap on profiles a single user may own per (network, domain,

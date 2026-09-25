@@ -13,12 +13,13 @@ describe('buildExportFilename', () => {
         statuses: ['accepted'],
         exportId,
         now,
+        timeZone: 'UTC',
       })
     ).toBe('purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.csv');
   });
 
   it('joins several statuses and uses "all" when unfiltered', () => {
-    const base = { network: 'n', counterpartyDomain: 'd', exportId, now };
+    const base = { network: 'n', counterpartyDomain: 'd', exportId, now, timeZone: 'UTC' };
     expect(buildExportFilename({ ...base, statuses: ['accepted', 'completed'] })).toContain(
       '_accepted-completed_'
     );
@@ -27,7 +28,7 @@ describe('buildExportFilename', () => {
 
   it('falls back when no counterparty type was resolved (empty export)', () => {
     expect(
-      buildExportFilename({ network: undefined, counterpartyDomain: undefined, statuses: [], exportId, now })
+      buildExportFilename({ network: undefined, counterpartyDomain: undefined, statuses: [], exportId, now, timeZone: 'UTC' })
     ).toBe('export_none_all_3f9a1c2e_2026-09-24T10-15-00Z.csv');
   });
 
@@ -39,7 +40,21 @@ describe('buildExportFilename', () => {
         statuses: ['x y'],
         exportId,
         now,
+        timeZone: 'UTC',
       })
     ).toBe('a-b_c-d_x-y_3f9a1c2e_2026-09-24T10-15-00Z.csv');
+  });
+
+  it('uses EXPORT_TIMEZONE with a compact offset (IST)', () => {
+    expect(
+      buildExportFilename({
+        network: 'blue_dot',
+        counterpartyDomain: 'seeker',
+        statuses: ['accepted', 'completed'],
+        exportId,
+        now,
+        timeZone: 'Asia/Kolkata',
+      })
+    ).toBe('blue_dot_seeker_accepted-completed_3f9a1c2e_2026-09-24T15-45-00+0530.csv');
   });
 });

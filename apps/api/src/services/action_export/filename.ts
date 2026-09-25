@@ -1,3 +1,5 @@
+import { filenameStamp } from './time';
+
 /**
  * Download filename for an engagement export (#770). Carries no PII — it lands
  * in download history, mail attachments and shared drives — only the network,
@@ -10,11 +12,14 @@ export function buildExportFilename(input: {
   statuses: readonly string[] | undefined;
   exportId: string;
   now: Date;
+  /** IANA zone for the timestamp (EXPORT_TIMEZONE). */
+  timeZone: string;
 }): string {
   const part = (s: string) => s.replaceAll(/[^A-Za-z0-9_-]/g, '-');
   const status = input.statuses?.length ? input.statuses.join('-') : 'all';
-  // UTC, second precision, `-` for `:` (Windows forbids `:` in filenames).
-  const ts = input.now.toISOString().replace(/\.\d{3}Z$/, 'Z').replaceAll(':', '-');
+  // Second precision in the configured zone, with its offset; `-` for `:`
+  // (Windows forbids `:` in filenames).
+  const ts = filenameStamp(input.now, input.timeZone);
   return [
     part(input.network ?? 'export'),
     part(input.counterpartyDomain ?? 'none'),

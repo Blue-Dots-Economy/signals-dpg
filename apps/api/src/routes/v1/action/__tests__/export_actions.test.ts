@@ -15,7 +15,7 @@ import {
  */
 
 vi.mock('@/config', () => ({
-  apiConfig: { export_max_rows: 2 },
+  apiConfig: { export_max_rows: 2, export_timezone: 'Asia/Kolkata' },
   getCurrentApiBaseUrl: () => 'http://here.local',
 }));
 
@@ -216,7 +216,7 @@ describe('POST /api/v1/action/export', () => {
     const exportId = res.headers['x-export-id'] as string;
     expect(exportId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.headers['content-disposition']).toMatch(
-      new RegExp(`^attachment; filename="net1_seeker_accepted_${exportId.slice(0, 8)}_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}Z\\.csv"$`)
+      new RegExp(`^attachment; filename="net1_seeker_accepted_${exportId.slice(0, 8)}_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\+0530\\.csv"$`)
     );
     expect(res.headers['content-disposition']).not.toContain('Meera');
     expect(res.headers['x-export-row-count']).toBe('1');
@@ -224,7 +224,7 @@ describe('POST /api/v1/action/export', () => {
     expect(res.headers['x-export-skipped-missing']).toBe('0');
     expect(res.headers['x-export-skipped-self']).toBe('0');
     expect(res.headers['x-export-skipped-not-enabled']).toBe('0');
-    expect(res.headers['x-export-generated-at']).toMatch(/Z$/);
+    expect(res.headers['x-export-generated-at']).toMatch(/\+05:30$/);
     // Every X-Export-* header the route sets is exposed to the cross-origin UI.
     const { EXPORT_EXPOSED_HEADERS } = await import('@/services/action_export/headers');
     const exposed = EXPORT_EXPOSED_HEADERS.map((h) => h.toLowerCase());
@@ -239,6 +239,8 @@ describe('POST /api/v1/action/export', () => {
       'action_id,action_type,action_status,direction,counterparty_item_id,counterparty_domain,counterparty_item_type,created_at,updated_at,pii_revealed,beneficiary_name,gender'
     );
     expect(lines[1]).toContain('a1,connect,accepted,received,s-a1,seeker,profile_1');
+    // Dates in EXPORT_TIMEZONE (IST), with the offset.
+    expect(lines[1]).toContain(',2026-09-01T05:30:00+05:30,2026-09-02T05:30:00+05:30,');
     expect(lines[1]).toContain('true,Meera Kumari,Female');
 
     expect(state.audit).toHaveLength(1);

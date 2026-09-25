@@ -224,6 +224,7 @@ describe('NetworkRuntimeSecretsSchema', () => {
     expect(parsed.ALLOW_EXTRA_SCHEMA_DATA).toBe(false);
     expect(parsed.BULK_MAX_ITEMS).toBe(100);
     expect(parsed.EXPORT_MAX_ROWS).toBe(10000);
+    expect(parsed.EXPORT_TIMEZONE).toBe('Asia/Kolkata');
     expect(parsed.MAX_WARDS_PER_GUARDIAN).toBe(6);
     expect(parsed.MAX_PROFILES_PER_USER).toBe(5);
     expect(parsed.PEER_FETCH_TIMEOUT_MS).toBe(10000);
@@ -251,6 +252,8 @@ describe('NetworkRuntimeSecretsSchema', () => {
   it('rejects non-positive or fractional caps', () => {
     expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, BULK_MAX_ITEMS: '0' })).toThrow();
     expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_MAX_ROWS: '0' })).toThrow();
+    expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_TIMEZONE: 'IST+5' })).toThrow();
+    expect(NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_TIMEZONE: 'UTC' }).EXPORT_TIMEZONE).toBe('UTC');
     expect(() =>
       NetworkRuntimeSecretsSchema.parse({ ...base, MAX_PROFILES_PER_USER: '-1' })
     ).toThrow();

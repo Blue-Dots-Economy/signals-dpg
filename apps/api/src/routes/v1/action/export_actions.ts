@@ -14,6 +14,7 @@ import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
 import { buildExport, type ExportItem } from '@/services/action_export/build_export';
 import { csvLine } from '@/services/action_export/csv';
 import { buildExportFilename } from '@/services/action_export/filename';
+import { formatIsoInZone } from '@/services/action_export/time';
 
 /**
  * `POST /api/v1/action/export` (#770) — CSV of the caller's engagement
@@ -228,14 +229,21 @@ async function runExport(
     });
   }
 
+  // Dates, filename and generated-at in EXPORT_TIMEZONE (default IST), each
+  // with its offset. The audit row stays in UTC.
+  const timeZone = apiConfig.export_timezone;
+  const formatDate = (d: Date) => formatIsoInZone(d, timeZone);
   const body =
-    UTF8_BOM + csvLine(result.header) + result.records.map((rec) => csvLine(rec)).join('');
+    UTF8_BOM +
+    csvLine(result.header, formatDate) +
+    result.records.map((rec) => csvLine(rec, formatDate)).join('');
   const filename = buildExportFilename({
     network: result.counterparty?.network,
     counterpartyDomain: result.counterparty?.domain,
     statuses: filters.action_status,
     exportId,
     now,
+    timeZone,
   });
 
   request.log.info(
@@ -256,7 +264,7 @@ async function runExport(
     .header('Content-Disposition', `attachment; filename="${filename}"`)
     .header('Cache-Control', 'no-store')
     .header('X-Export-Id', exportId)
-    .header('X-Export-Generated-At', now.toISOString())
+    .header('X-Export-Generated-At', formatDate(now))
     .header('X-Export-Row-Count', String(counts.row_count))
     .header('X-Export-Skipped-Cross-Instance', String(counts.skipped_cross_instance))
     .header('X-Export-Skipped-Missing', String(counts.skipped_missing))

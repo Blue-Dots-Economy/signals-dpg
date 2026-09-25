@@ -13,9 +13,17 @@ function isPrimitive(v: unknown): v is string | number | boolean {
   return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean';
 }
 
-function toText(value: unknown): { text: string; fromString: boolean } {
+/** Renders a Date cell; defaults to UTC ISO-8601. */
+export type DateFormatter = (d: Date) => string;
+
+const isoUtc: DateFormatter = (d) => d.toISOString();
+
+function toText(
+  value: unknown,
+  formatDate: DateFormatter
+): { text: string; fromString: boolean } {
   if (value === null || value === undefined) return { text: '', fromString: false };
-  if (value instanceof Date) return { text: value.toISOString(), fromString: false };
+  if (value instanceof Date) return { text: formatDate(value), fromString: false };
   if (typeof value === 'string') return { text: value, fromString: true };
   if (typeof value === 'number' || typeof value === 'boolean') {
     return { text: String(value), fromString: false };
@@ -26,14 +34,14 @@ function toText(value: unknown): { text: string; fromString: boolean } {
   return { text: JSON.stringify(value), fromString: false };
 }
 
-/** One encoded CSV cell. */
-export function csvCell(value: unknown): string {
-  const { text, fromString } = toText(value);
+/** One encoded CSV cell; `formatDate` renders Date values (default UTC ISO). */
+export function csvCell(value: unknown, formatDate: DateFormatter = isoUtc): string {
+  const { text, fromString } = toText(value, formatDate);
   const safe = fromString && FORMULA_LEAD.test(text) ? `'${text}` : text;
   return NEEDS_QUOTES.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
 }
 
 /** One CSV record, CRLF-terminated (RFC 4180). */
-export function csvLine(values: readonly unknown[]): string {
-  return values.map(csvCell).join(',') + '\r\n';
+export function csvLine(values: readonly unknown[], formatDate: DateFormatter = isoUtc): string {
+  return values.map((v) => csvCell(v, formatDate)).join(',') + '\r\n';
 }

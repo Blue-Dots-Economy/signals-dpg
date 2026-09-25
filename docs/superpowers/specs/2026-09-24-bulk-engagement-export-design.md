@@ -518,6 +518,12 @@ is expensive and is the obvious scraping route.
    and add `completed` to the event status enum (which `update-status` also
    needs to accept a Complete). No status is hardcoded in the UI.
 
+7. Timestamps: **IST by default, set by env only.** `EXPORT_TIMEZONE`
+   (IANA zone, default `Asia/Kolkata`) drives the filename stamp
+   (`…_2026-09-25T12-09-43+0530.csv`), the CSV date columns and
+   `X-Export-Generated-At`, each with its offset. No network.json change.
+   `bulk_export_audit` stays in UTC.
+
 ## 11. Delivery (child issues, after approval)
 
 1. **schemas/config** — interaction `export` block; `EXPORT_MAX_ROWS`; add

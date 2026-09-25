@@ -41,6 +41,14 @@ describe('csvCell', () => {
   });
 });
 
+describe('csvCell date formatter', () => {
+  it('renders dates with the supplied formatter', () => {
+    expect(csvCell(new Date('2026-09-25T06:39:43Z'), () => '2026-09-25T12:09:43+05:30')).toBe(
+      '2026-09-25T12:09:43+05:30'
+    );
+  });
+});
+
 describe('csvLine', () => {
   it('joins cells with commas and ends with CRLF', () => {
     expect(csvLine(['a', 'b, c', null])).toBe('a,"b, c",\r\n');
