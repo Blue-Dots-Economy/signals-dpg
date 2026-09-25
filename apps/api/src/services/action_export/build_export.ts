@@ -6,7 +6,7 @@ import {
 } from '@dpg/schemas';
 import { counterpartyItemId, ownItemId, stateMatchesFacets } from '@/services/actions/owned_actions';
 import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
-import { resolveProfileColumns, valueAtPath } from './columns';
+import { resolveProfileColumns, valueAtPath, type ProfileColumn } from './columns';
 
 /**
  * Pure core of `POST /api/v1/action/export` (#770): turns the caller's action
@@ -142,53 +142,77 @@ function interactionInput(row: ExportActionRow) {
   };
 }
 
-/** Builds the export table, or the client error that prevents it. */
-export function buildExport(input: BuildExportInput): BuildExportResult {
-  const { userId, filters } = input;
-  const counts: ExportCounts = {
-    row_count: 0,
-    revealed_count: 0,
-    masked_count: 0,
-    skipped_cross_instance: 0,
-    skipped_missing: 0,
-    skipped_self: 0,
-    skipped_not_enabled: 0,
-  };
+const emptyCounts = (): ExportCounts => ({
+  row_count: 0,
+  revealed_count: 0,
+  masked_count: 0,
+  skipped_cross_instance: 0,
+  skipped_missing: 0,
+  skipped_self: 0,
+  skipped_not_enabled: 0,
+});
 
-  // 1. Eligibility, counterparty resolution, skips.
+/**
+ * Export rule set of one row's interaction: who may export it and which
+ * statuses reveal PII. An undeclared interaction or missing config ⇒ nobody.
+ */
+function interactionRules(
+  input: BuildExportInput,
+  row: ExportActionRow
+): { requesters: readonly string[]; revealStatuses: readonly string[] } {
+  // Same config lookup as fetch_actions / contact-details (target network).
+  const cfg = input.getNetworkConfig(row.target_item_network);
+  if (!cfg) return { requesters: [], revealStatuses: [] };
+  try {
+    return {
+      requesters: getInteractionExportRequesterDomains(cfg, interactionInput(row)),
+      revealStatuses: getInteractionPiiRevealStatuses(cfg, interactionInput(row)),
+    };
+  } catch {
+    return { requesters: [], revealStatuses: [] };
+  }
+}
+
+/** The caller's own domain and the counterparty's owner / instance on a row. */
+function sidesOf(row: ExportActionRow, userId: string) {
+  return row.target_item_owner === userId
+    ? {
+        cpOwner: row.source_item_owner,
+        cpInstance: row.source_item_instance_url,
+        ownDomain: row.target_item_domain,
+      }
+    : {
+        cpOwner: row.target_item_owner,
+        cpInstance: row.target_item_instance_url,
+        ownDomain: row.source_item_domain,
+      };
+}
+
+/**
+ * Step 1: eligibility, counterparty resolution and skips. Mutates `counts`
+ * with every skip, so no row silently disappears.
+ */
+function collectCandidates(
+  input: BuildExportInput,
+  counts: ExportCounts
+): { candidates: Candidate[]; eligible: number } {
+  const { userId } = input;
   let eligible = 0;
   const candidates: Candidate[] = [];
   for (const row of input.rows) {
-    const callerIsTarget = row.target_item_owner === userId;
-    const cpOwner = callerIsTarget ? row.source_item_owner : row.target_item_owner;
-    const cpInstance = callerIsTarget ? row.source_item_instance_url : row.target_item_instance_url;
-    const ownDomain = callerIsTarget ? row.target_item_domain : row.source_item_domain;
+    const { cpOwner, cpInstance, ownDomain } = sidesOf(row, userId);
 
     // Legacy two-domain accounts can own both sides; never export oneself.
     if (cpOwner === userId) {
       counts.skipped_self++;
       continue;
     }
-
-    // Same config lookup as fetch_actions / contact-details (target network).
-    // An undeclared interaction or missing config is not exportable.
-    const cfg = input.getNetworkConfig(row.target_item_network);
-    let requesters: readonly string[] = [];
-    let revealStatuses: readonly string[] = [];
-    if (cfg) {
-      try {
-        requesters = getInteractionExportRequesterDomains(cfg, interactionInput(row));
-        revealStatuses = getInteractionPiiRevealStatuses(cfg, interactionInput(row));
-      } catch {
-        requesters = [];
-      }
-    }
+    const { requesters, revealStatuses } = interactionRules(input, row);
     if (!requesters.includes(ownDomain)) {
       counts.skipped_not_enabled++;
       continue;
     }
     eligible++;
-
     if (cpInstance !== input.currentInstanceUrl) {
       counts.skipped_cross_instance++;
       continue;
@@ -205,6 +229,99 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
       revealStatuses,
     });
   }
+  return { candidates, eligible };
+}
+
+/** Facets restricted to the counterparty's declared, non-private fields. */
+function passesFacets(input: BuildExportInput, c: Candidate): boolean {
+  const selections = input.filters.facets ?? [];
+  if (selections.length === 0) return true;
+  const cfg = input.getNetworkConfig(c.counterparty.item_network);
+  if (!cfg) return true;
+  let allowed: ReturnType<typeof resolveAllowedFacetFilters> = [];
+  try {
+    allowed = resolveAllowedFacetFilters(
+      cfg,
+      c.counterparty.item_domain,
+      c.counterparty.item_type,
+      selections.map((f) => ({ field: f.field, values: f.values }))
+    );
+  } catch {
+    allowed = [];
+  }
+  return stateMatchesFacets(c.counterparty.item_state, allowed);
+}
+
+/** Step 2: facets plus the requested counterparty domain / item type. */
+function selectCandidates(input: BuildExportInput, candidates: Candidate[]): Candidate[] {
+  const { counterparty_domain: domain, counterparty_item_type: itemType } = input.filters;
+  return candidates.filter(
+    (c) =>
+      passesFacets(input, c) &&
+      (!domain || c.counterparty.item_domain === domain) &&
+      (!itemType || c.counterparty.item_type === itemType)
+  );
+}
+
+/** Distinct counterparty types among the selected rows, sorted. */
+function counterpartyTypes(selected: Candidate[]): CounterpartyType[] {
+  const types = new Map<string, CounterpartyType>();
+  for (const { counterparty: cp } of selected) {
+    const t = { network: cp.item_network, domain: cp.item_domain, item_type: cp.item_type };
+    types.set(typeKey(t), t);
+  }
+  return [...types.values()].sort((a, b) => typeKey(a).localeCompare(typeKey(b)));
+}
+
+/**
+ * Step 5: one CSV record, with the reveal gate applied. Mirrors
+ * contact-details: status reveals AND both profiles live (a non-local own
+ * item counts as live). A failed decrypt exports the row masked.
+ */
+function buildRecord(
+  input: BuildExportInput,
+  c: Candidate,
+  columns: ProfileColumn[],
+  withMatchScore: boolean,
+  counts: ExportCounts
+): unknown[] {
+  const { row, counterparty: cp, own } = c;
+  let revealed =
+    c.revealStatuses.includes(row.action_status) &&
+    cp.lifecycle_status === 'live' &&
+    (own ? own.lifecycle_status === 'live' : true);
+  let state = cp.item_state;
+  if (revealed) {
+    try {
+      state = input.decrypt(cp);
+    } catch (err) {
+      input.onDecryptError?.(err, cp.item_id);
+      revealed = false;
+    }
+  }
+  if (revealed) counts.revealed_count++;
+  else counts.masked_count++;
+
+  return [
+    row.action_id,
+    row.action_type,
+    row.action_status,
+    row.target_item_owner === input.userId ? 'received' : 'initiated',
+    cp.item_id,
+    cp.item_domain,
+    cp.item_type,
+    row.created_at,
+    row.updated_at,
+    revealed,
+    ...(withMatchScore ? [row.match_score ?? null] : []),
+    ...columns.map((col) => valueAtPath(state, col.path)),
+  ];
+}
+
+/** Builds the export table, or the client error that prevents it. */
+export function buildExport(input: BuildExportInput): BuildExportResult {
+  const counts = emptyCounts();
+  const { candidates, eligible } = collectCandidates(input, counts);
 
   if (eligible === 0 && counts.skipped_not_enabled > 0) {
     return {
@@ -215,46 +332,9 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
     };
   }
 
-  // 2. Facets — declared non-private fields of the counterparty only.
-  const facetSelections = filters.facets ?? [];
-  const passesFacets = (c: Candidate) => {
-    if (facetSelections.length === 0) return true;
-    const cfg = input.getNetworkConfig(c.counterparty.item_network);
-    if (!cfg) return true;
-    let allowed: ReturnType<typeof resolveAllowedFacetFilters> = [];
-    try {
-      allowed = resolveAllowedFacetFilters(
-        cfg,
-        c.counterparty.item_domain,
-        c.counterparty.item_type,
-        facetSelections.map((f) => ({ field: f.field, values: f.values }))
-      );
-    } catch {
-      allowed = [];
-    }
-    return stateMatchesFacets(c.counterparty.item_state, allowed);
-  };
-
-  // 3. Counterparty type selection.
-  const selected = candidates.filter(
-    (c) =>
-      passesFacets(c) &&
-      (!filters.counterparty_domain || c.counterparty.item_domain === filters.counterparty_domain) &&
-      (!filters.counterparty_item_type ||
-        c.counterparty.item_type === filters.counterparty_item_type)
-  );
-
-  const types = new Map<string, CounterpartyType>();
-  for (const c of selected) {
-    const t = {
-      network: c.counterparty.item_network,
-      domain: c.counterparty.item_domain,
-      item_type: c.counterparty.item_type,
-    };
-    types.set(typeKey(t), t);
-  }
-  if (types.size > 1) {
-    const list = [...types.values()].sort((a, b) => typeKey(a).localeCompare(typeKey(b)));
+  const selected = selectCandidates(input, candidates);
+  const types = counterpartyTypes(selected);
+  if (types.length > 1) {
     return {
       ok: false,
       status: 400,
@@ -262,19 +342,21 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
       message:
         'These engagements span more than one counterparty type; request one at a time with filters.counterparty_domain',
       details: {
-        counterparty_domains: [...new Set(list.map((t) => t.domain))].sort(),
-        counterparty_types: list,
+        counterparty_domains: [...new Set(types.map((t) => t.domain))].sort((a, b) =>
+          a.localeCompare(b)
+        ),
+        counterparty_types: types,
       },
     };
   }
 
-  const extraColumns = input.include.includes('match_score') ? ['match_score'] : [];
-  const counterparty = [...types.values()][0];
+  const withMatchScore = input.include.includes('match_score');
+  const extraColumns = withMatchScore ? ['match_score'] : [];
+  const counterparty = types[0];
   if (!counterparty) {
     return { ok: true, header: [...FIXED_COLUMNS, ...extraColumns], records: [], counts };
   }
 
-  // 4. Columns from the counterparty schema.
   const cpCfg = input.getNetworkConfig(counterparty.network);
   if (!cpCfg) throw new Error(`network config "${counterparty.network}" unavailable`);
   const schema = getDomainItemSchema(cpCfg, counterparty.domain, counterparty.item_type) as Record<
@@ -292,42 +374,9 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
     };
   }
 
-  // 5. Rows, with the reveal gate per row.
-  const records = selected.map(({ row, counterparty: cp, own, revealStatuses }) => {
-    // Mirrors contact-details: status reveals AND both profiles live. A
-    // non-local own item is treated as live, as there.
-    let revealed =
-      revealStatuses.includes(row.action_status) &&
-      cp.lifecycle_status === 'live' &&
-      (own ? own.lifecycle_status === 'live' : true);
-    let state = cp.item_state;
-    if (revealed) {
-      try {
-        state = input.decrypt(cp);
-      } catch (err) {
-        input.onDecryptError?.(err, cp.item_id);
-        revealed = false;
-      }
-    }
-    if (revealed) counts.revealed_count++;
-    else counts.masked_count++;
-
-    const direction = row.target_item_owner === userId ? 'received' : 'initiated';
-    return [
-      row.action_id,
-      row.action_type,
-      row.action_status,
-      direction,
-      cp.item_id,
-      cp.item_domain,
-      cp.item_type,
-      row.created_at,
-      row.updated_at,
-      revealed,
-      ...(extraColumns.length ? [row.match_score ?? null] : []),
-      ...columns.columns.map((c) => valueAtPath(state, c.path)),
-    ];
-  });
+  const records = selected.map((c) =>
+    buildRecord(input, c, columns.columns, withMatchScore, counts)
+  );
   counts.row_count = records.length;
 
   return {
