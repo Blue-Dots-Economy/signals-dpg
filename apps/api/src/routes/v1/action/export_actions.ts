@@ -12,7 +12,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
 import { buildExport, type ExportItem } from '@/services/action_export/build_export';
-import { csvLine } from '@/services/action_export/csv';
+import { csvLine } from '@/utils/csv';
 import { buildExportFilename } from '@/services/action_export/filename';
 import { formatIsoInZone } from '@/services/action_export/time';
 

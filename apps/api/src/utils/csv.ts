@@ -1,7 +1,8 @@
 /**
- * CSV cell/line encoding for the engagement export (#770): RFC-4180 quoting,
- * `|`-joined primitive arrays (the network's array-cell convention), and
- * spreadsheet formula-injection neutralisation.
+ * The API's one CSV encoder, shared by every CSV download (engagement export
+ * #770, aggregator dashboard export): RFC-4180 quoting, `|`-joined primitive
+ * arrays (the network's array-cell convention), and spreadsheet
+ * formula-injection neutralisation.
  */
 
 // A cell a spreadsheet would evaluate as a formula. Only strings are
