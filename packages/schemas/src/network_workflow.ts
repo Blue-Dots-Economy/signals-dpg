@@ -243,8 +243,28 @@ export const NetworkActionInteractionSchema = z
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
+    // Bulk-export eligibility (#639 / #769). Absent ⇒ this interaction's
+    // engagements cannot be exported (fail-closed). `requester_domains` names
+    // which side(s) may export their counterparty; it never widens disclosure —
+    // the per-row reveal is still gated by `reveals_pii_on_status`.
+    export: z
+      .object({ requester_domains: z.array(z.string().min(1)).min(1) })
+      .strict()
+      .optional(),
   })
   .superRefine((interaction, ctx) => {
+    // A requester must be a party to the engagement: a domain outside the
+    // interaction can never own either side of one of its actions, so naming it
+    // is always a config mistake.
+    for (const [idx, domain] of (interaction.export?.requester_domains ?? []).entries()) {
+      if (domain === interaction.from_domain || domain === interaction.to_domain) continue;
+      ctx.addIssue({
+        code: 'custom',
+        message: `export.requester_domains value "${domain}" is not a party to this interaction (from_domain "${interaction.from_domain}", to_domain "${interaction.to_domain}")`,
+        path: ['export', 'requester_domains', idx],
+      });
+    }
+
     if (interaction.reveals_pii_on_status.length === 0) return;
 
     if (!interaction.event_schema) {
@@ -536,6 +556,36 @@ export function getInteractionPiiRevealStatuses(
   const interaction = getActionInteraction(networkConfig, input);
   return interaction.reveals_pii_on_status;
 }
+
+/**
+ * Domains allowed to bulk-export the counterparty of this interaction's
+ * actions (#769). Empty when the interaction declares no `export` block.
+ *
+ * @throws Error when the network does not declare the interaction — same
+ *   contract as {@link getInteractionPiiRevealStatuses}.
+ */
+export function getInteractionExportRequesterDomains(
+  networkConfig: NetworkConfigDocument,
+  input: {
+    actionType: string;
+    fromNetwork: string;
+    fromDomain: string;
+    fromItemType?: string;
+    toNetwork: string;
+    toDomain: string;
+    toItemType?: string;
+  }
+): readonly string[] {
+  const interaction = getActionInteraction(networkConfig, input);
+  return interaction.export?.requester_domains ?? [];
+}
+
+// Lives in a dependency-free module so the UI can import it too.
+export {
+  getExportableCounterparties,
+  getExportableStatuses,
+  type ExportableCounterparty,
+} from './export_eligibility';
 
 function matchesAllowedItemType(
   allowedItemTypes: string[],

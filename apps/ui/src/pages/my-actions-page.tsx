@@ -2,7 +2,12 @@ import * as React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import type { RJSFSchema } from '@rjsf/utils';
+import {
+  getExportableCounterparties,
+  getExportableStatuses,
+} from '@dpg/schemas/export_eligibility';
 import { useInitiatedActions, useReceivedActions } from '@/hooks/use-actions';
 import { useMyItems } from '@/hooks/use-my-items';
 import { useActiveProfile } from '@/hooks/use-active-profile';
@@ -15,6 +20,14 @@ import { PageShell } from '@/components/layout/page-shell';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
 import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
+import { ExportButtons, type ExportButtonGroup } from '@/components/actions/export-buttons';
+import { pluralizeDomainLabel } from '@/lib/domain-icons';
+import {
+  ActionExportError,
+  exportActions,
+  groupByCounterpartyType,
+  saveBlob,
+} from '@/lib/action-export';
 import {
   ACTION_STATUS_FILTERS,
   FILTER_STATUSES,
@@ -378,8 +391,36 @@ export function MyActionsPage() {
   const initiatedQuery = useInitiatedActions(scopedId, { status, sort, facets, type: actionType });
   const receivedQuery = useReceivedActions(scopedId, { status, sort, facets, type: actionType });
 
-  const handleTabChange = (tab: TabValue) => {
+  // ── Bulk export (#771) ────────────────────────────────────────────────────
+  // Which counterparty domains the viewer's domain may export comes from the
+  // network config (`export.requester_domains`) — none ⇒ no download control.
+  const myDomain = liveItems.find((i) => i.item_id === scopedId)?.item_domain ?? null;
+  const exportableDomains = React.useMemo(
+    () =>
+      network && myDomain
+        ? new Set(getExportableCounterparties(network, myDomain).map((c) => c.domain))
+        : new Set<string>(),
+    [network, myDomain],
+  );
+  // Exportable statuses are the network's reveal statuses for those
+  // interactions (e.g. accepted + completed) — never a hardcoded list.
+  const exportStatuses = React.useMemo(
+    () => (network && myDomain ? getExportableStatuses(network, myDomain) : []),
+    [network, myDomain],
+  );
+  const exportEnabled = exportableDomains.size > 0 && exportStatuses.length > 0;
+  const [exportPending, setExportPending] = React.useState(false);
+
+  // A different profile has different engagements — never carry a selection over.
+  React.useEffect(() => {
     selection.exitSelect();
+  }, [scopedId, selection.exitSelect]);
+
+  const handleTabChange = (tab: TabValue) => {
+    // An accepted selection survives the tab switch so one download can cover
+    // both Sent and Received (#771). A pending selection still clears: its bulk
+    // actions (accept / reject / cancel) are single-tab.
+    if (!(exportEnabled && selection.lockKey === 'accepted')) selection.exitSelect();
     setActiveTab(tab);
   };
 
@@ -427,8 +468,90 @@ export function MyActionsPage() {
   const initiatedTotal = initiatedQuery.data?.pages?.[0]?.meta.total;
   const receivedTotal = receivedQuery.data?.pages?.[0]?.meta.total;
 
-  const sourceActions = activeTab === 'initiated' ? initiatedActions : receivedActions;
-  const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
+  // The selection can span both tabs (#771), so resolve it against both lists.
+  const selectedInitiated = initiatedActions.filter((a) => selection.selected.has(a.action_id));
+  const selectedReceived = receivedActions.filter((a) => selection.selected.has(a.action_id));
+  const selectedActions = [...selectedInitiated, ...selectedReceived];
+  const selectionSplit = { sent: selectedInitiated.length, received: selectedReceived.length };
+
+  const exportableSelected = selectedActions.filter((a) => exportStatuses.includes(a.action_status));
+  // Complete applies only to Received + accepted cards, never to Sent or
+  // already-completed ones.
+  const canComplete = selectedActions.every(
+    (a) => a.ownership_roles.includes('received') && a.action_status === 'accepted',
+  );
+  const selectedGroups = groupByCounterpartyType(exportableSelected).filter((g) =>
+    exportableDomains.has(g.domain),
+  );
+  // A domain that appears with more than one item type is labelled with the
+  // type too, so the two downloads are distinguishable.
+  const domainCounts = new Map<string, number>();
+  for (const g of selectedGroups) domainCounts.set(g.domain, (domainCounts.get(g.domain) ?? 0) + 1);
+  const exportGroups: ExportButtonGroup[] = selectedGroups.map((g) => {
+    const label = pluralizeDomainLabel(g.domain, domains);
+    return {
+      key: g.key,
+      label: (domainCounts.get(g.domain) ?? 0) > 1 ? `${label} (${g.itemType})` : label,
+      count: g.actionIds.length,
+    };
+  });
+
+  // Every loaded card in an exportable status, on both tabs, locked to the
+  // export group so pending cards can't be mixed in afterwards.
+  const handleSelectAllLoaded = () => {
+    const ids = [...initiatedActions, ...receivedActions]
+      .filter((a) => exportStatuses.includes(a.action_status))
+      .map((a) => a.action_id);
+    selection.setSelected(ids, 'accepted');
+  };
+
+  const handleDownload = async (groupKey: string) => {
+    const group = selectedGroups.find((g) => g.key === groupKey);
+    if (!group || !scopedId) return;
+    setExportPending(true);
+    try {
+      const result = await exportActions({
+        filters: {
+          item_id: scopedId,
+          ownership_role: 'all',
+          action_ids: group.actionIds,
+          // Sent too, so a card whose status changed since it was selected is
+          // dropped server-side rather than exported.
+          action_status: exportStatuses,
+          counterparty_domain: group.domain,
+          counterparty_item_type: group.itemType,
+        },
+        projection: { fields: '*' },
+        format: 'csv',
+      });
+      if (result.rowCount === 0) {
+        toast.error(t('actions.export_nothing'));
+        return;
+      }
+      saveBlob(result.blob, result.filename);
+      toast.success(
+        result.skipped > 0
+          ? t('actions.export_done_skipped', { count: result.rowCount, skipped: result.skipped })
+          : t('actions.export_done', { count: result.rowCount }),
+      );
+    } catch (err) {
+      const code = err instanceof ActionExportError ? err.code : '';
+      const messages: Record<string, string> = {
+        EXPORT_TOO_LARGE: t('actions.export_too_large'),
+        EXPORT_IN_PROGRESS: t('actions.export_in_progress'),
+        EXPORT_RATE_LIMITED: t('actions.export_rate_limited'),
+        EXPORT_NOT_ENABLED: t('actions.export_not_enabled'),
+        SERVICE_CALLER_NOT_ALLOWED: t('actions.export_not_enabled'),
+        STATUS_NOT_EXPORTABLE: t('actions.export_status_not_allowed'),
+        MIXED_COUNTERPARTY_TYPES: t('actions.export_mixed_types'),
+        NETWORK_CONFIG_UNAVAILABLE: t('actions.export_unavailable'),
+        EXPORT_RATE_LIMIT_UNAVAILABLE: t('actions.export_unavailable'),
+      };
+      toast.error(messages[code] ?? t('actions.export_failed'));
+    } finally {
+      setExportPending(false);
+    }
+  };
 
   const shellSidebarProps = {
     networks: showNetworkSelector ? allNetworks : [],
@@ -473,6 +596,18 @@ export function MyActionsPage() {
             setBulkStatus(targetStatus);
             setBulkOpen(true);
           }}
+          exportEnabled={exportEnabled}
+          exportStatuses={exportStatuses}
+          canComplete={canComplete}
+          exportControls={
+            <ExportButtons
+              groups={exportGroups}
+              pending={exportPending}
+              onDownload={(key) => void handleDownload(key)}
+            />
+          }
+          onSelectAllLoaded={handleSelectAllLoaded}
+          selectionSplit={selectionSplit}
           toolbarStatus={statusChip}
           toolbarSort={toolbarSort}
           activeFacets={activeFacetsForToolbar}

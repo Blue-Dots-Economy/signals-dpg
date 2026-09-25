@@ -24,6 +24,7 @@ import {
   unknownBindingDomains,
 } from '@dpg/config';
 import v1_routes from '@/routes/v1/v1_routes';
+import { EXPORT_EXPOSED_HEADERS } from '@/services/action_export/headers';
 import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
 import health_routes from '@/routes/health/health_route';
 import { getNetworkConfigs } from '@/network_configs';
@@ -255,6 +256,8 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    // Lets the cross-origin UI read the export filename and counts (#770).
+    exposedHeaders: [...EXPORT_EXPOSED_HEADERS],
   });
 
   // Query string parser - supports bracket notation (e.g. itemState[userId]=value)

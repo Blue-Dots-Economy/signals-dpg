@@ -4,6 +4,7 @@ import type {
   FastifyReply,
 } from 'fastify';
 import { Readable } from 'node:stream';
+import { csvCell } from '@/utils/csv';
 import { db } from '@api/db/postgres/drizzle_config';
 import { item_metrics } from '../../../../db/postgres/schema/metrics.js';
 import { readConfiguredDomains } from '@/utils/org_metadata';
@@ -49,15 +50,6 @@ const COLUMNS = [
 
 const PAGE_SIZE = 5000;
 
-const csv_escape = (v: unknown): string => {
-  if (v === null || v === undefined) return '';
-  let s: string;
-  if (Array.isArray(v)) s = v.join('|');
-  else if (v instanceof Date) s = v.toISOString();
-  else s = String(v);
-  if (/[",\n\r]/.test(s)) return `"${s.replaceAll('"', '""')}"`;
-  return s;
-};
 
 async function* generate_csv(
   aggregator_id: string,
@@ -127,7 +119,7 @@ async function* generate_csv(
         last_received_cancel_at: lastReceived.cancel ?? null,
         actionable_tags: r.actionableTags,
       };
-      yield COLUMNS.map((c) => csv_escape(projected[c])).join(',') + '\n';
+      yield COLUMNS.map((c) => csvCell(projected[c])).join(',') + '\n';
     }
 
     if (rows.length < PAGE_SIZE) break;

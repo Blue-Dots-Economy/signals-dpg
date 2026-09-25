@@ -126,6 +126,59 @@ export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.ext
     .optional(),
 });
 
+/** Request-shape bounds for `POST /api/v1/action/export` (#770 review #7). */
+export const EXPORT_ACTION_IDS_MAX = 10_000;
+export const EXPORT_FACETS_MAX = 20;
+export const EXPORT_FACET_VALUES_MAX = 100;
+
+/**
+ * `POST /api/v1/action/export` body (#770). The filters mirror the owned-action
+ * list filters (minus paging/sort) so "what I see" and "what I export" are the
+ * same row set; `projection` / `include` / `format` carry the wider cases
+ * (field-level export, ranking columns, other formats) without a new API.
+ */
+export const ExportActionsBodySchema = z
+  .object({
+    filters: z
+      .object({
+        action_type: z.array(z.string().min(1)).optional(),
+        action_status: z.array(z.string().min(1)).optional(),
+        ownership_role: ActionOwnershipRoleSchema.default('all'),
+        item_id: z.uuid().optional(),
+        // One file = one counterparty (domain, item_type); these select it when
+        // the caller's rows span more than one.
+        counterparty_domain: z.string().min(1).optional(),
+        counterparty_item_type: z.string().min(1).optional(),
+        // Hard upper bounds so a body can never become an unbounded IN-list or
+        // audit payload; the route additionally enforces EXPORT_MAX_ROWS.
+        action_ids: z.array(z.uuid()).min(1).max(EXPORT_ACTION_IDS_MAX).optional(),
+        facets: z
+          .array(
+            z.object({
+              field: z.string().min(1),
+              values: z.array(z.string()).min(1).max(EXPORT_FACET_VALUES_MAX),
+            })
+          )
+          .max(EXPORT_FACETS_MAX)
+          .optional(),
+        updated_from: z.coerce.date().optional(),
+        updated_to: z.coerce.date().optional(),
+      })
+      .strict()
+      .default({ ownership_role: 'all' }),
+    projection: z
+      .object({
+        fields: z.union([z.literal('*'), z.array(z.string().min(1)).min(1)]),
+      })
+      .strict()
+      .default({ fields: '*' }),
+    include: z.array(z.enum(['match_score'])).default([]),
+    format: z.enum(['csv']).default('csv'),
+  })
+  .strict();
+
+export type ExportActionsBody = z.infer<typeof ExportActionsBodySchema>;
+
 export const FetchOwnedEventsQuerySchema = FetchOwnedRecordsQuerySchemaBase.extend({
   update_count: z.coerce.number().int().nonnegative().optional(),
 });

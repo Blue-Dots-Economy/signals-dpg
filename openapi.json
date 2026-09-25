@@ -2836,6 +2836,172 @@
         }
       }
     },
+    "/api/v1/action/export": {
+      "post": {
+        "tags": [
+          "action"
+        ],
+        "description": "Download the counterparty profiles of the caller’s engagements as CSV (text/csv). Human session only. One counterparty type per file; only statuses the network reveals on are exportable, and private fields are revealed per row under the same gate as contact-details. Row and skip counts are in the X-Export-* response headers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": {
+                    "default": {
+                      "ownership_role": "all"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "action_type": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "action_status": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "ownership_role": {
+                        "default": "all",
+                        "type": "string",
+                        "enum": [
+                          "all",
+                          "initiated",
+                          "received"
+                        ]
+                      },
+                      "item_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "counterparty_domain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "counterparty_item_type": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "action_ids": {
+                        "minItems": 1,
+                        "maxItems": 10000,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "facets": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "field": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "values": {
+                              "minItems": 1,
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "values"
+                          ]
+                        }
+                      },
+                      "updated_from": {},
+                      "updated_to": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "projection": {
+                    "default": {
+                      "fields": "*"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "fields": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "*"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "fields"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "include": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "match_score"
+                      ]
+                    }
+                  },
+                  "format": {
+                    "default": "csv",
+                    "type": "string",
+                    "enum": [
+                      "csv"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/api/v1/event/fetch": {
       "get": {
         "tags": [

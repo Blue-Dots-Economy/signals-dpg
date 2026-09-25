@@ -5,6 +5,7 @@ import { fetch_actions } from '@/routes/v1/action/fetch_actions';
 import { perform_action } from '@/routes/v1/action/perform_action';
 import { update_action_status } from '@/routes/v1/action/update_action_status';
 import { get_action_contact_details } from '@/routes/v1/action/get_action_contact_details';
+import { export_actions } from '@/routes/v1/action/export_actions';
 
 const action_routes: FastifyPluginAsyncZod = async (fastify) => {
   // Order matters: auth_middleware populates `request.user` from the
@@ -24,6 +25,7 @@ const action_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(perform_action);
   fastify.register(update_action_status);
   fastify.register(get_action_contact_details);
+  fastify.register(export_actions);
 };
 
 export default action_routes;

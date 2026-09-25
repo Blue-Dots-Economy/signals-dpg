@@ -168,4 +168,120 @@ describe('ActionList', () => {
     expect(screen.getByText('actions.bulk_reject')).toBeInTheDocument();
     expect(screen.getByText('actions.bulk_accept')).toBeInTheDocument();
   });
+
+  // ── #771: bulk export ────────────────────────────────────────────────────
+  describe('bulk export', () => {
+    const sentAccepted = [makeAction({ action_id: 's1', action_status: 'accepted' })];
+
+    it('accepted cards on Sent are NOT selectable without export', () => {
+      render(<Harness {...baseProps} activeTab="initiated" initiatedActions={sentAccepted} />);
+      expect(screen.queryByText('selection.select')).not.toBeInTheDocument();
+    });
+
+    it('accepted cards on Sent ARE selectable with export; Complete is not offered', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="initiated"
+          initiatedActions={sentAccepted}
+          exportEnabled
+          exportStatuses={['accepted', 'completed']}
+          selectionSplit={{ sent: 1, received: 0 }}
+          canComplete={false}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /s1/ }));
+      expect(screen.getByText('selection.n_selected')).toBeInTheDocument();
+      expect(screen.queryByText('actions.bulk_complete')).not.toBeInTheDocument();
+    });
+
+    it('Received-only accepted selection still offers Complete', async () => {
+      const user = userEvent.setup();
+      const received = [makeAction({ action_id: 'r1', action_status: 'accepted' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          selectionSplit={{ sent: 0, received: 1 }}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /r1/ }));
+      expect(screen.getByText('actions.bulk_complete')).toBeInTheDocument();
+    });
+
+    it('completed cards are selectable when completed is an export status', async () => {
+      const user = userEvent.setup();
+      const received = [makeAction({ action_id: 'c1', action_status: 'completed' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted', 'completed']}
+          canComplete={false}
+        />,
+      );
+      await user.click(screen.getByText('selection.select'));
+      await user.click(screen.getByRole('button', { name: /c1/ }));
+      expect(screen.getByText('selection.n_selected')).toBeInTheDocument();
+      // Already completed → Complete is not offered.
+      expect(screen.queryByText('actions.bulk_complete')).not.toBeInTheDocument();
+    });
+
+    it('completed cards are NOT selectable when completed is not an export status', () => {
+      const received = [makeAction({ action_id: 'c1', action_status: 'completed' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted']}
+        />,
+      );
+      expect(screen.queryByText('selection.select')).not.toBeInTheDocument();
+    });
+
+    it('Export in the toolbar starts selection; only shown when export is enabled', async () => {
+      const user = userEvent.setup();
+      const { rerender } = render(<Harness {...baseProps} receivedActions={sentAccepted} />);
+      expect(screen.queryByText('actions.export_entry')).not.toBeInTheDocument();
+      rerender(
+        <Harness {...baseProps} receivedActions={sentAccepted} exportEnabled exportStatuses={['accepted']} />,
+      );
+      await user.click(screen.getByText('actions.export_entry'));
+      // In select mode the toolbar only offers Cancel selection.
+      expect(screen.getByText('selection.cancel')).toBeInTheDocument();
+      expect(screen.queryByText('actions.export_entry')).not.toBeInTheDocument();
+    });
+
+    it('the download control and Select all loaded live in the bulk bar', async () => {
+      const user = userEvent.setup();
+      const onSelectAllLoaded = vi.fn();
+      const received = [makeAction({ action_id: 'r1', action_status: 'accepted' })];
+      render(
+        <Harness
+          {...baseProps}
+          activeTab="received"
+          receivedActions={received}
+          exportEnabled
+          exportStatuses={['accepted']}
+          exportControls={<button type="button">export-controls</button>}
+          onSelectAllLoaded={onSelectAllLoaded}
+        />,
+      );
+      expect(screen.queryByText('export-controls')).not.toBeInTheDocument();
+      await user.click(screen.getByText('actions.export_entry'));
+      await user.click(screen.getByRole('button', { name: /r1/ }));
+      expect(screen.getByText('export-controls')).toBeInTheDocument();
+      await user.click(screen.getByText('selection.select_all_loaded'));
+      expect(onSelectAllLoaded).toHaveBeenCalled();
+    });
+  });
 });

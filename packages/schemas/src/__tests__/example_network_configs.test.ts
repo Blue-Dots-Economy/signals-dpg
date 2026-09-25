@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   findMetricCategoryAsymmetries,
+  getExportableCounterparties,
   parseNetworkConfigDocument,
 } from '../network_workflow';
 import { parseLocationFields } from '../location_fields';
@@ -34,6 +35,25 @@ describe.each([
       i.reveals_pii_on_status.includes('accepted')
     );
     expect(hasAccepted).toBe(true);
+  });
+
+  // #769: providers may bulk-export both their seeker and provider
+  // counterparties; seekers may not export in v1. Every interaction declares
+  // it, so no direction silently drops out of an export.
+  it('declares bulk-export eligibility on every interaction (#769)', () => {
+    const abs = resolve(__dirname, '../../../..', relPath);
+    const parsed = parseNetworkConfigDocument(JSON.parse(readFileSync(abs, 'utf8')));
+
+    for (const action of Object.values(parsed.actions)) {
+      for (const interaction of action.interactions) {
+        expect(interaction.export?.requester_domains).toEqual(['provider']);
+      }
+    }
+    expect(getExportableCounterparties(parsed, 'provider').map((c) => c.domain)).toEqual([
+      'provider',
+      'seeker',
+    ]);
+    expect(getExportableCounterparties(parsed, 'seeker')).toEqual([]);
   });
 
   // Guards against the metric_categories asymmetry bug: a tracked interaction

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
   ActionSortKeySchema,
@@ -14,6 +14,12 @@ import { getNetworkConfigById } from '@/network_configs';
 import { resolve_display_name } from '@/services/metrics/resolve_display_name';
 import { resolveAllowedFacetFilters, type FacetSelection } from '@/utils/facet_guard';
 import { nearestDistanceMeters } from '@/utils/geo_distance';
+import {
+  buildOwnedActionsWhere,
+  counterpartyItemId,
+  ownItemId,
+  stateMatchesFacets,
+} from '@/services/actions/owned_actions';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 
 type FetchOwnedActionsRequest = FastifyRequest<{
@@ -87,42 +93,13 @@ const fetch_actions_handler = async (
   // fetch across the caller's own actions, not a single-network browse — there
   // is no one network to prune on, so we rely on the owner+status indexes
   // instead of inventing a network param.
-  const conditions = [];
-
-  if (action_id) conditions.push(eq(item_actions.action_id, action_id));
-  if (action_type?.length) conditions.push(inArray(item_actions.action_type, action_type));
-  if (action_status?.length)
-    conditions.push(inArray(item_actions.action_status, action_status));
-
-  if (item_id) {
-    if (ownership_role === 'initiated') {
-      conditions.push(eq(item_actions.source_item_id, item_id));
-    } else if (ownership_role === 'received') {
-      conditions.push(eq(item_actions.target_item_id, item_id));
-    } else {
-      conditions.push(
-        or(
-          eq(item_actions.source_item_id, item_id),
-          eq(item_actions.target_item_id, item_id)
-        )
-      );
-    }
-  }
-
-  if (ownership_role === 'initiated') {
-    conditions.push(eq(item_actions.source_item_owner, userId));
-  } else if (ownership_role === 'received') {
-    conditions.push(eq(item_actions.target_item_owner, userId));
-  } else {
-    conditions.push(
-      or(
-        eq(item_actions.source_item_owner, userId),
-        eq(item_actions.target_item_owner, userId)
-      )
-    );
-  }
-
-  const whereClause = conditions.length ? and(...conditions) : undefined;
+  const whereClause = buildOwnedActionsWhere(userId, {
+    action_id,
+    action_type,
+    action_status,
+    item_id,
+    ownership_role,
+  });
 
   // Sort fast path (#439 Task 6). 'distance' has no SQL-orderable column
   // here — distance is computed at read time from item locations in the
@@ -247,10 +224,8 @@ const fetch_actions_handler = async (
     // own; `myId` is the other side. For 'received' this is source; for
     // 'initiated' it's target; for 'all' this still resolves the non-owned
     // side per row regardless of which query param scoped the fetch.
-    const counterpartyId = (row: OwnedRowIds) =>
-      row.target_item_owner === userId ? row.source_item_id : row.target_item_id;
-    const myId = (row: OwnedRowIds) =>
-      row.target_item_owner === userId ? row.target_item_id : row.source_item_id;
+    const counterpartyId = (row: OwnedRowIds) => counterpartyItemId(row, userId);
+    const myId = (row: OwnedRowIds) => ownItemId(row, userId);
 
     const distanceFor = (row: OwnedRowIds): number | null =>
       nearestDistanceMeters(
@@ -299,19 +274,7 @@ const fetch_actions_handler = async (
       const cMeta = itemMeta.get(counterpartyId(row));
       const allowed = await allowedFacetsFor(cMeta);
       const state = cMeta?.item_state ?? {};
-      return allowed.every(({ field, values }) => {
-        const raw = state[field];
-        let asArray: string[];
-        if (Array.isArray(raw)) {
-          asArray = raw.map(String);
-        } else if (raw == null) {
-          asArray = [];
-        } else {
-          asArray = [String(raw as string | number | boolean)];
-        }
-        const wanted = new Set(values.map(String));
-        return asArray.some((v) => wanted.has(v));
-      });
+      return stateMatchesFacets(state, allowed);
     };
 
     let pageRows = matchingRows;

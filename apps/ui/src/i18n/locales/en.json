@@ -746,5 +746,22 @@
   "auth.toast_signout_incomplete_desc": "We could not reach the server. Close this browser to be sure you are signed out.",
   "auth.oidc_error_cancelled": "The sign-in was cancelled or timed out. Please try again.",
   "auth.session_expired_title": "Session expired",
-  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue."
+  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue.",
+  "actions.export_done_one": "Downloaded {{count}} record",
+  "actions.export_done_other": "Downloaded {{count}} records",
+  "actions.export_done_skipped": "Downloaded {{count}} records · {{skipped}} could not be included",
+  "actions.export_nothing": "None of the selected engagements could be exported",
+  "actions.export_too_large": "Too many records — select fewer and try again",
+  "actions.export_in_progress": "An export is already running — try again shortly",
+  "actions.export_not_enabled": "Export is not available for these engagements",
+  "actions.export_failed": "Could not download the export",
+  "actions.selection_split": "{{sent}} sent · {{received}} received",
+  "actions.export_rate_limited": "Export limit reached — try again in a while",
+  "actions.export_status_not_allowed": "Only accepted or completed engagements can be exported",
+  "actions.export_mixed_types": "Select one profile type at a time to download",
+  "actions.export_unavailable": "Export is temporarily unavailable — try again shortly",
+  "actions.export_entry": "Export",
+  "selection.cancel": "Cancel selection",
+  "selection.select_all_loaded": "Select all loaded",
+  "actions.export_download_type": "Download {{label}} ({{count}})"
 }
