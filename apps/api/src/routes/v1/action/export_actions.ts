@@ -10,7 +10,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
-import { bulk_export_audit, pii_reveal_audit } from '@api/db/postgres/schema';
+import { pii_reveal_audit } from '@api/db/postgres/schema';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
@@ -19,7 +19,6 @@ import { csvLine } from '@/utils/csv';
 import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
 import {
   buildExport,
-  type ExportCounts,
   type ExportItem,
   type ExportReveal,
 } from '@/services/action_export/build_export';
@@ -35,7 +34,9 @@ import { formatIsoInZone } from '@/services/action_export/time';
  * - human callers only (service credentials are refused),
  * - one export at a time per process + a per-user hourly limit across pods,
  * - item ownership, the requester's exportable statuses and domain,
- * - the row cap, and a fail-closed audit (download + one row per reveal).
+ * - the row cap, and a fail-closed audit: one pii_reveal_audit row per
+ *   revealed counterparty, plus a structured `action.export.audit` log line
+ *   per download (export id, requester, filters, counts).
  *
  * The file is built in memory rather than streamed: the row cap bounds it,
  * and the row/skip counts must be sent as headers before the body.
@@ -261,28 +262,39 @@ async function runExport(
   const now = new Date();
   const { counts } = result;
 
-  // Fail closed: an export that cannot be audited is not served (#639 Q5).
+  // Fail closed: revealed personal data that cannot be audited is not served.
   try {
-    await writeExportAudit({
-      exportId,
-      userId,
-      requesterItemId: filters.item_id ?? requester.item_id,
-      filters: { ...filters, action_status: statuses },
-      projection,
-      format,
-      counts,
-      reveals: result.reveals,
-    });
+    await writeRevealAudit(result.reveals, userId);
   } catch (err) {
     request.log.error(
       { err, operation: 'action.export', status: 'failure', export_id: exportId },
-      'Failed to write export audit — export refused'
+      'Failed to write export reveal audit — export refused'
     );
     return reply.code(500).send({
       error: 'EXPORT_AUDIT_FAILED',
       message: 'The export could not be recorded, so it was not served',
     });
   }
+
+  // The download-level audit record (#639 Q5: metadata only) is a structured
+  // log line, not a table. X-Export-Id / the filename carry export_id, so a
+  // file found later traces back to this line.
+  request.log.info(
+    {
+      operation: 'action.export.audit',
+      status: 'success',
+      export_id: exportId,
+      requester_user_id: userId,
+      requester_item_id: filters.item_id ?? requester.item_id,
+      filters: { ...filters, action_status: statuses },
+      projection,
+      format,
+      counterparty_domain: result.counterparty?.domain,
+      latency_ms: Date.now() - started,
+      ...counts,
+    },
+    'engagement export audit'
+  );
 
   // Dates, filename and generated-at in EXPORT_TIMEZONE (default IST), each
   // with its offset. The audit rows stay in UTC.
@@ -301,17 +313,6 @@ async function runExport(
     timeZone,
   });
 
-  request.log.info(
-    {
-      operation: 'action.export',
-      status: 'success',
-      export_id: exportId,
-      latency_ms: Date.now() - started,
-      counterparty_domain: result.counterparty?.domain,
-      ...counts,
-    },
-    'engagement export served'
-  );
 
   return reply
     .code(200)
@@ -420,44 +421,23 @@ async function loadNetworkConfigs(
 }
 
 /**
- * The download row and one pii_reveal_audit row per revealed counterparty,
- * in one transaction — both or neither — so "who has seen this person's
- * data" covers bulk exports exactly as it covers contact-details.
+ * One pii_reveal_audit row per revealed counterparty, in one transaction —
+ * so "who has seen this person's data" covers bulk exports exactly as it
+ * covers contact-details. No-op when nothing was revealed.
  *
  * @throws when the transaction fails; the caller refuses the export.
  */
-async function writeExportAudit(input: {
-  exportId: string;
-  userId: string;
-  requesterItemId: string;
-  filters: Record<string, unknown>;
-  projection: unknown;
-  format: string;
-  counts: ExportCounts;
-  reveals: readonly ExportReveal[];
-}): Promise<void> {
-  const { counts } = input;
+async function writeRevealAudit(
+  reveals: readonly ExportReveal[],
+  viewerUserId: string
+): Promise<void> {
+  if (reveals.length === 0) return;
   await db.transaction(async (tx) => {
-    await tx.insert(bulk_export_audit).values({
-      exportId: input.exportId,
-      requesterUserId: input.userId,
-      requesterItemId: input.requesterItemId,
-      filters: input.filters,
-      projection: input.projection,
-      format: input.format,
-      rowCount: counts.row_count,
-      revealedCount: counts.revealed_count,
-      maskedCount: counts.masked_count,
-      skippedCrossInstance: counts.skipped_cross_instance,
-      skippedMissing: counts.skipped_missing,
-      skippedSelf: counts.skipped_self,
-      skippedNotEnabled: counts.skipped_not_enabled,
-    });
-    for (let i = 0; i < input.reveals.length; i += REVEAL_AUDIT_BATCH) {
+    for (let i = 0; i < reveals.length; i += REVEAL_AUDIT_BATCH) {
       await tx
         .insert(pii_reveal_audit)
         .values(
-          input.reveals.slice(i, i + REVEAL_AUDIT_BATCH).map((r) => revealAuditRow(r, input.userId))
+          reveals.slice(i, i + REVEAL_AUDIT_BATCH).map((r) => revealAuditRow(r, viewerUserId))
         );
     }
   });

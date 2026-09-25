@@ -27,7 +27,7 @@ widening is a request value or a `network.json` entry, not a new API.
 | Q2 | Both incoming and outgoing | API: `ownership_role: all`, counterparty resolved per row (§5.2). UI: selection kept across Sent/Received tabs → one file (§6A) |
 | Q3 | All fields always | `projection.fields: "*"` in v1; field list supported by the contract (§5.1) |
 | Q4 | Future scope | Status filter accepts any status; v1 UI sends `accepted` only |
-| Q5 | Audit metadata only | One `bulk_export_audit` row per download (§7) |
+| Q5 | Audit metadata only | One `action.export.audit` log line per download (§7) |
 | Q6 | Accept | Cross-instance rows skipped and **counted**, never silently dropped (§5.4) |
 | Q7 | Accept the risk | "As of" stamp + `export_id` on every file (§6) |
 | Q8 | CSV only | `format` is an enum with one value `csv` (§5.1) |
@@ -266,7 +266,7 @@ hardcoded `COLUMNS` const.
 Content-Type: text/csv; charset=utf-8
 Content-Disposition: attachment; filename="<filename>"
 Cache-Control: no-store
-X-Export-Id: <bulk_export_audit.export_id>
+X-Export-Id: <export_id of the action.export.audit log line>
 X-Export-Generated-At: <ISO-8601 UTC>
 X-Export-Row-Count: <n>
 X-Export-Skipped-Cross-Instance: <n>
@@ -455,29 +455,20 @@ All strings as new `actions.export_*` i18n keys.
 
 ## 7. Audit
 
-New table `bulk_export_audit` — one row per download (Q5: metadata only):
+No audit table. Two records per download:
 
-| Column | Type |
-|---|---|
-| `export_id` | uuid PK |
-| `requester_user_id` | text |
-| `requester_item_id` | uuid |
-| `filters` | jsonb — the request `filters` as received |
-| `projection` | jsonb |
-| `format` | text |
-| `row_count` | int |
-| `revealed_count` | int |
-| `masked_count` | int |
-| `skipped_cross_instance` | int |
-| `skipped_missing` | int |
-| `skipped_self` | int |
-| `skipped_not_enabled` | int |
-| `created_at` | timestamptz |
-
-`filters`/`projection` as jsonb means new filters or a later per-subject audit
-need no migration. **Fail-closed:** if the audit row cannot be written the file is
-not served (`500 EXPORT_AUDIT_FAILED`). `pii_reveal_audit` (per-subject) is **not** written on this
-path in v1, per Q5.
+1. **Download audit — a structured log line** (#639 Q5: metadata only),
+   `operation: "action.export.audit"`, written after a successful export:
+   `export_id`, `requester_user_id`, `requester_item_id`, `filters` (as
+   applied, including the resolved statuses), `projection`, `format`,
+   `counterparty_domain`, `row_count`, `revealed_count`, `masked_count`,
+   `skipped_*`, `latency_ms`. Never the exported values. `X-Export-Id` and the
+   filename carry `export_id`, so a file found later traces back to its line.
+   Retention follows the platform's log retention.
+2. **Per-person reveal — `pii_reveal_audit`** (the existing table
+   contact-details already writes): one row per revealed counterparty, in one
+   transaction. **Fail-closed:** if it cannot be written the file is not
+   served (`500 EXPORT_AUDIT_FAILED`).
 
 ## 8. Configuration — env
 
@@ -522,13 +513,18 @@ is expensive and is the obvious scraping route.
    (IANA zone, default `Asia/Kolkata`) drives the filename stamp
    (`…_2026-09-25T12-09-43+0530.csv`), the CSV date columns and
    `X-Export-Generated-At`, each with its offset. No network.json change.
-   `bulk_export_audit` stays in UTC.
+   Audit rows and log timestamps stay in UTC.
 
 8. Mixed counterparties: **one file per domain** (product confirmed
    2026-09-25), on the assumption of one schema per domain. The UI shows a
    separate Download button per counterparty domain in the bulk bar. The
    code groups by (domain, item type) as a guard; with one schema per domain
    that is exactly one file per domain.
+
+9. Download audit: **log line only, no table** (product decision
+   2026-09-25). The `bulk_export_audit` table and migration were removed
+   before merge; per-person reveals still go to the existing
+   `pii_reveal_audit`.
 
 ## 11. Delivery (child issues, after approval)
 
@@ -537,7 +533,7 @@ is expensive and is the obvious scraping route.
    bluedots-schemas (blue_dot `up-gzb` / `ka-dhwd` with
    `["provider", "service_provider"]`, purple_dot `alimco` with `["provider"]`).
 2. **api** — shared row-set/counterparty helper; `POST /action/export`;
-   `bulk_export_audit` table + migration; tests (both directions, masked
+   `action.export.audit` log line + per-reveal `pii_reveal_audit`; tests (both directions, masked
    paused row, skips, 403/413/400 paths).
 3. **ui** (§6A) — selection-based Download (disabled at 0 selected);
    accepted cards selectable on the Sent tab; accepted selection kept across

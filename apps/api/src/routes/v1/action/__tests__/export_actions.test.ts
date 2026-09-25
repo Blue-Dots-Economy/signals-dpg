@@ -84,7 +84,7 @@ vi.mock('@/utils/item_decrypt', () => ({
 // records the audit row (or throws when told to).
 const state = {
   selects: [] as unknown[][],
-  audit: [] as Array<Record<string, unknown>>,
+  logs: [] as Array<Record<string, unknown>>,
   revealAudit: [] as Array<Record<string, unknown>>,
   auditThrows: false,
   holdRows: null as Promise<void> | null,
@@ -118,26 +118,18 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
         if (state.holdRows) await state.holdRows;
         return next;
       }),
-    // Audit writes go through a transaction; bulk_export_audit rows carry
-    // `exportId`, pii_reveal_audit rows carry `revealedItemId`.
+    // pii_reveal_audit rows are written in a transaction (both-or-neither).
     transaction: async (fn: (tx: unknown) => Promise<void>) => {
-      const staged: { audit: Array<Record<string, unknown>>; reveal: Array<Record<string, unknown>> } = {
-        audit: [],
-        reveal: [],
-      };
+      const staged: Array<Record<string, unknown>> = [];
       await fn({
         insert: () => ({
           values: async (v: Record<string, unknown> | Array<Record<string, unknown>>) => {
             if (state.auditThrows) throw new Error('audit down');
-            for (const row of Array.isArray(v) ? v : [v]) {
-              if ('exportId' in row) staged.audit.push(row);
-              else staged.reveal.push(row);
-            }
+            staged.push(...(Array.isArray(v) ? v : [v]));
           },
         }),
       });
-      state.audit.push(...staged.audit);
-      state.revealAudit.push(...staged.reveal);
+      state.revealAudit.push(...staged);
     },
   },
 }));
@@ -182,7 +174,13 @@ const itemRow = (id: string, domain: string, st: Record<string, unknown>) => ({
 });
 
 async function buildApp(userId: string | null = ME, role = 'user'): Promise<FastifyInstance> {
-  const app = Fastify().withTypeProvider<ZodTypeProvider>();
+  // Capture structured log lines: the download audit is a log record.
+  const stream = {
+    write: (line: string) => {
+      state.logs.push(JSON.parse(line) as Record<string, unknown>);
+    },
+  };
+  const app = Fastify({ logger: { level: 'info', stream } }).withTypeProvider<ZodTypeProvider>();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   app.addHook('preHandler', async (req) => {
@@ -198,7 +196,7 @@ const post = (app: FastifyInstance, payload: unknown) =>
 
 beforeEach(() => {
   state.selects = [];
-  state.audit = [];
+  state.logs = [];
   state.revealAudit = [];
   state.auditThrows = false;
   state.holdRows = null;
@@ -231,7 +229,7 @@ describe('POST /api/v1/action/export', () => {
     const res = await post(app, {});
     expect(res.statusCode).toBe(413);
     expect(res.json()).toMatchObject({ error: 'EXPORT_TOO_LARGE', details: { max_rows: 2 } });
-    expect(state.audit).toHaveLength(0);
+    expect(auditLogs()).toHaveLength(0);
   });
 
   it('200: CSV body, PII-free filename, X-Export-* headers, one audit row', async () => {
@@ -279,17 +277,23 @@ describe('POST /api/v1/action/export', () => {
     expect(lines[1]).toContain(',2026-09-01T05:30:00+05:30,2026-09-02T05:30:00+05:30,');
     expect(lines[1]).toContain('true,Meera Kumari,Female');
 
-    expect(state.audit).toHaveLength(1);
-    expect(state.audit[0]).toMatchObject({
-      exportId,
-      requesterUserId: ME,
+    // Download audit = one structured log line (no table), tied to the file
+    // by export_id.
+    expect(auditLogs()).toHaveLength(1);
+    expect(auditLogs()[0]).toMatchObject({
+      export_id: exportId,
+      requester_user_id: ME,
+      requester_item_id: 'p-me',
       format: 'csv',
-      rowCount: 1,
-      revealedCount: 1,
-      maskedCount: 0,
+      row_count: 1,
+      revealed_count: 1,
+      masked_count: 0,
+      counterparty_domain: 'seeker',
       filters: { ownership_role: 'all', action_status: ['accepted'] },
       projection: { fields: '*' },
     });
+    // Never the exported values.
+    expect(JSON.stringify(auditLogs()[0])).not.toContain('Meera');
   });
 
   it('a domain with no export entitlement is refused before any rows load', async () => {
@@ -299,7 +303,7 @@ describe('POST /api/v1/action/export', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('EXPORT_NOT_ENABLED');
     expect(state.selects).toHaveLength(0);
-    expect(state.audit).toHaveLength(0);
+    expect(auditLogs()).toHaveLength(0);
   });
 
   it('403 for a caller with no profile at all', async () => {
@@ -331,7 +335,7 @@ describe('POST /api/v1/action/export', () => {
     state.selects = [[requesterRow()], [actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
     const res = await post(app, {});
     expect(res.statusCode).toBe(200);
-    expect(state.audit[0]).toMatchObject({ filters: { action_status: ['accepted'] } });
+    expect(auditLogs()[0]).toMatchObject({ filters: { action_status: ['accepted'] } });
   });
 
   it('413 before any query when action_ids exceed EXPORT_MAX_ROWS', async () => {
@@ -366,7 +370,7 @@ describe('POST /api/v1/action/export', () => {
     ];
     const res = await post(app, {});
     expect(res.statusCode).toBe(200);
-    expect(state.audit).toHaveLength(1);
+    expect(auditLogs()).toHaveLength(1);
     expect(state.revealAudit).toEqual([
       {
         actionId: 'a1',
@@ -388,7 +392,7 @@ describe('POST /api/v1/action/export', () => {
     expect(res.json().error).toBe('EXPORT_AUDIT_FAILED');
     expect(res.body).not.toContain('Meera');
     // Nothing half-written: the transaction commits both or neither.
-    expect(state.audit).toHaveLength(0);
+    expect(auditLogs()).toHaveLength(0);
     expect(state.revealAudit).toHaveLength(0);
   });
 
@@ -409,3 +413,6 @@ describe('POST /api/v1/action/export', () => {
     expect((await post(app, {})).statusCode).toBe(200);
   });
 });
+
+/** The download-level audit log line(s) written by the route. */
+const auditLogs = () => state.logs.filter((l) => l.operation === 'action.export.audit');
