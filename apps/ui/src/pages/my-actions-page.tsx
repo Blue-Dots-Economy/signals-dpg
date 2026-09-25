@@ -20,7 +20,7 @@ import { PageShell } from '@/components/layout/page-shell';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
 import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
-import { ExportMenu, type ExportMenuGroup } from '@/components/actions/export-menu';
+import { ExportButtons, type ExportButtonGroup } from '@/components/actions/export-buttons';
 import { pluralizeDomainLabel } from '@/lib/domain-icons';
 import {
   ActionExportError,
@@ -487,7 +487,7 @@ export function MyActionsPage() {
   // type too, so the two downloads are distinguishable.
   const domainCounts = new Map<string, number>();
   for (const g of selectedGroups) domainCounts.set(g.domain, (domainCounts.get(g.domain) ?? 0) + 1);
-  const exportGroups: ExportMenuGroup[] = selectedGroups.map((g) => {
+  const exportGroups: ExportButtonGroup[] = selectedGroups.map((g) => {
     const label = pluralizeDomainLabel(g.domain, domains);
     return {
       key: g.key,
@@ -600,7 +600,7 @@ export function MyActionsPage() {
           exportStatuses={exportStatuses}
           canComplete={canComplete}
           exportControls={
-            <ExportMenu
+            <ExportButtons
               groups={exportGroups}
               pending={exportPending}
               onDownload={(key) => void handleDownload(key)}

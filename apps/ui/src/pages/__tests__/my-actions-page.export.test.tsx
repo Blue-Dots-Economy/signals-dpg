@@ -235,7 +235,7 @@ describe('MyActionsPage — bulk export', () => {
     expect(selectionRef!.selected.size).toBe(0);
   });
 
-  it('mixed counterparties → one Download with a menu; each item sends its own ids + type', async () => {
+  it('mixed counterparties → a button per type; each sends its own ids + type', async () => {
     received = [act_('r1', 'received', 'seeker'), act_('r2', 'received', 'provider')];
     exportActionsMock.mockResolvedValue({ blob: new Blob(['x']), filename: 'f.csv', exportId: 'e', rowCount: 1, skipped: 0 });
     const user = userEvent.setup();
@@ -243,10 +243,9 @@ describe('MyActionsPage — bulk export', () => {
     await select('r1');
     await act(async () => selectionRef!.toggle('r2', 'accepted'));
 
-    // One Download control with the total; the menu lists one item per type.
-    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
-    expect(await screen.findByRole('menuitem', { name: /Providers/ })).toBeInTheDocument();
-    await user.click(screen.getByRole('menuitem', { name: /Seekers/ }));
+    // A separate button per type.
+    expect(screen.getByRole('button', { name: /export_download_type.*Providers/ })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: /export_download_type.*Seekers/ }));
 
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
     expect(exportActionsMock).toHaveBeenCalledWith({
@@ -273,12 +272,12 @@ describe('MyActionsPage — bulk export', () => {
     await select('r1');
 
     exportActionsMock.mockResolvedValueOnce({ blob: new Blob([]), filename: 'f.csv', exportId: 'e', rowCount: 1, skipped: 2 });
-    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    await user.click(screen.getByRole('button', { name: /export_download_type/ }));
     await waitFor(() => expect(toastMock.success).toHaveBeenCalledWith(expect.stringContaining('export_done_skipped')));
 
     exportActionsMock.mockResolvedValueOnce({ blob: new Blob([]), filename: 'f.csv', exportId: 'e', rowCount: 0, skipped: 1 });
     saveBlobMock.mockClear();
-    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    await user.click(screen.getByRole('button', { name: /export_download_type/ }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_nothing'));
     expect(saveBlobMock).not.toHaveBeenCalled();
   });
@@ -292,7 +291,7 @@ describe('MyActionsPage — bulk export', () => {
     const user = userEvent.setup();
     renderPage();
     await select('r1');
-    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    await user.click(screen.getByRole('button', { name: /export_download_type/ }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
   });
 
@@ -303,7 +302,7 @@ describe('MyActionsPage — bulk export', () => {
     renderPage();
     await select('r1');
     await act(async () => selectionRef!.toggle('r2', 'accepted'));
-    await user.click(screen.getByRole('button', { name: /export_download_count/ }));
+    await user.click(screen.getByRole('button', { name: /export_download_type/ }));
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
     const body = exportActionsMock.mock.calls[0][0] as { filters: { action_ids: string[]; action_status: string[] } };
     expect(body.filters.action_ids).toEqual(['r1', 'r2']);

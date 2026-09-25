@@ -747,7 +747,6 @@
   "auth.oidc_error_cancelled": "The sign-in was cancelled or timed out. Please try again.",
   "auth.session_expired_title": "Session expired",
   "auth.session_expired_desc": "Your session has ended. Please sign in again to continue.",
-  "actions.export_download_count": "Download ({{count}})",
   "actions.export_done_one": "Downloaded {{count}} record",
   "actions.export_done_other": "Downloaded {{count}} records",
   "actions.export_done_skipped": "Downloaded {{count}} records · {{skipped}} could not be included",
@@ -761,8 +760,8 @@
   "actions.export_status_not_allowed": "Only accepted or completed engagements can be exported",
   "actions.export_mixed_types": "Select one profile type at a time to download",
   "actions.export_unavailable": "Export is temporarily unavailable — try again shortly",
-  "actions.export_menu_item": "{{label}} ({{count}})",
   "actions.export_entry": "Export",
   "selection.cancel": "Cancel selection",
-  "selection.select_all_loaded": "Select all loaded"
+  "selection.select_all_loaded": "Select all loaded",
+  "actions.export_download_type": "Download {{label}} ({{count}})"
 }
