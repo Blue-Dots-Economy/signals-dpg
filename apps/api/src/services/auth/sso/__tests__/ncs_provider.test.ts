@@ -166,7 +166,7 @@ describe('NCS provider verify', () => {
 
   it('claim() marks the token used until it expires, and reports a reuse', async () => {
     const l = await link();
-    const result = await provider().verify(l);
+    const result = await provider({ singleUseLinks: true }).verify(l);
     if (!result.ok) throw new Error('expected a verified link');
 
     expect(await result.value.claim()).toBe(true);
@@ -178,8 +178,8 @@ describe('NCS provider verify', () => {
     expect(await result.value.claim()).toBe(false);
   });
 
-  it('with single use off, claim() always succeeds and never touches Redis', async () => {
-    const result = await provider({ singleUseLinks: false }).verify(await link());
+  it('by default (single use off), claim() always succeeds and never touches Redis', async () => {
+    const result = await provider().verify(await link());
     if (!result.ok) throw new Error('expected a verified link');
     expect(await result.value.claim()).toBe(true);
     expect(await result.value.claim()).toBe(true);

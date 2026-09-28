@@ -62,8 +62,8 @@ VITE_SSO_PARTNER_NAME=NCS
 
 Rarely needed (defaults shown): `SSO_OIDC_CLIENT_ID=signals-sso`,
 `SSO_OIDC_IDP_ALIAS=signals-sso`, `SSO_NCS_TIMEOUT_MS=5000`,
-`SSO_NCS_SINGLE_USE_LINKS=true` (each link logs in once; set `false` only if NCS
-reuses one token across clicks).
+`SSO_NCS_SINGLE_USE_LINKS=false` (a link can be reused until it expires; set
+`true` so each link logs in once).
 
 `SSO_NCS_MAPPING`, in words:
 

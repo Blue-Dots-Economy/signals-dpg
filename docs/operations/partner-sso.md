@@ -48,7 +48,7 @@ provider is missing a secret.
 | `SSO_NCS_BASE_URL` | staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod `https://betacloud.ncs.gov.in` |
 | `SSO_NCS_CLIENT_ID` / `SSO_NCS_CLIENT_SECRET` | issued by NCS |
 | `SSO_NCS_TIMEOUT_MS` | default `5000` |
-| `SSO_NCS_SINGLE_USE_LINKS` | default `true` — each link logs in once (`link-reused` after). Set to exactly `false` only if NCS reuses one token across clicks for its whole lifetime; a leaked link then logs in until its `exp` (1 day) |
+| `SSO_NCS_SINGLE_USE_LINKS` | default `false` — NCS reuses one token per user across clicks, so a link logs in as often as needed until its `exp` (1 day); a leaked link does too. Set `true` for replay protection (each link logs in once, `link-reused` after) once NCS mints a fresh token per click |
 | `SSO_NCS_MAPPING` | JSON, below |
 
 ```json
@@ -115,7 +115,7 @@ the same code (never the token):
 |---|---|
 | `link-invalid` | no/malformed `token`, `clientId` not ours, or NCS `validate-token` said no |
 | `link-expired` | past the JWT's `exp` (NCS sets the lifetime; we impose no cap of our own) |
-| `link-reused` | this exact link was already used. A link is only marked used once account linking succeeded, so an NCS or Keycloak outage never burns it |
+| `link-reused` | only with `SSO_NCS_SINGLE_USE_LINKS=true`: this exact link was already used. A link is only marked used once account linking succeeded, so an NCS or Keycloak outage never burns it |
 | `provider-unavailable` | NCS (or Keycloak Admin) down / slow, or rate-limited — retryable with the same link |
 | `account-inactive` | NCS account not `ACTIVE` |
 | `phone-unverified` | NCS hasn't verified the number — no account is created on it or linked to it |
