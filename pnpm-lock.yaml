@@ -146,6 +146,9 @@ importers:
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
+      driver.js:
+        specifier: ^1.8.0
+        version: 1.8.0
       i18next:
         specifier: ^26.4.2
         version: 26.4.2(typescript@7.0.2)
@@ -2822,6 +2825,9 @@ packages:
   dotenv@17.4.2:
     resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
     engines: {node: '>=12'}
+
+  driver.js@1.8.0:
+    resolution: {integrity: sha512-+8/IO7h1v14IzWh2GP60N7T3PFZweXwdn5e5POuxRSBoCYUojsBxzqawPeXh3YZIibRy7EehYNEyxe7slwwtdg==}
 
   drizzle-kit@0.31.10:
     resolution: {integrity: sha512-7OZcmQUrdGI+DUNNsKBn1aW8qSoKuTH7d0mYgSP8bAzdFzKoovxEFnoGQp2dVs82EOJeYycqRtciopszwUf8bw==}
@@ -6611,6 +6617,8 @@ snapshots:
   dom-accessibility-api@0.6.3: {}
 
   dotenv@17.4.2: {}
+
+  driver.js@1.8.0: {}
 
   drizzle-kit@0.31.10:
     dependencies:

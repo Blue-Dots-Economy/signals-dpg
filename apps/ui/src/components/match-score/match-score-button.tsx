@@ -127,6 +127,7 @@ export function MatchScoreButton({
           <Button
             variant="outline"
             size="sm"
+            data-tour="card-match-score"
             onClick={onCalculate}
             disabled={isDisabled}
             className="gap-1.5 min-w-0 max-w-full"

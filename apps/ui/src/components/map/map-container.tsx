@@ -325,6 +325,7 @@ export function MapView({
           variant="outline"
           size="icon"
           className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
+          data-tour="map-maximize"
           onClick={() => setIsMaximized((v) => !v)}
           aria-label={isMaximized ? t('map.minimize') : t('map.maximize')}
           title={isMaximized ? t('map.minimize') : t('map.maximize')}

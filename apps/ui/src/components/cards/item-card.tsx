@@ -252,6 +252,7 @@ export function ItemCard({
           flex-1 so they fill instead. */}
       {actions && (
         <div
+          data-tour="card-actions"
           className={cn(
             'flex flex-wrap items-center justify-between gap-2 px-4 pb-4 pt-2',
             variant === 'popup' &&

@@ -152,6 +152,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             meaningless for a marker layer, and a disabled control invites the
             question rather than answering it. */}
         {!isMap && (
+          <span data-tour="browse-sort" className="inline-flex">
           <SortSelect
             value={props.sort}
             applied={props.sortApplied}
@@ -166,6 +167,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             basis={props.relevanceBasis}
             onChange={props.onSortChange}
           />
+          </span>
         )}
         {/* Area is ABSENT on the map, for the same reason as Sort (spec D26).
             Two independent reasons:
@@ -185,6 +187,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             Only the RADIUS is absent. The source switch that used to live
             inside this control renders below for the map. */}
         {!isMap && (
+          <span data-tour="browse-location" className="inline-flex">
           <LocationSelect
             value={props.area}
             sort={props.sort}
@@ -195,6 +198,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             center={props.defaultCenter}
             onChange={props.onAreaChange}
           />
+          </span>
         )}
         {/* The map keeps the SOURCE half of Location and drops the radius.
             D26's reasoning covered the radius — inert on the map, and
@@ -203,6 +207,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             removing it left the map unable to answer "centre on where I am
             now instead of my profile". Same icon, same slot, same words. */}
         {isMap && (
+          <span data-tour="map-location" className="inline-flex">
           <LocationSourceSelect
             value={props.locationSource}
             effectiveValue={props.effectiveLocationSource}
@@ -210,8 +215,13 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             profileAvailable={props.profileLocationAvailable}
             browserAvailable={props.browserLocationAvailable}
           />
+          </span>
         )}
-        {props.filtersSlot}
+        {props.filtersSlot && (
+          <span data-tour="browse-filters" className="inline-flex">
+            {props.filtersSlot}
+          </span>
+        )}
         </span>
         {props.chips.length > 0 && (
           <AppliedFilterChips chips={props.chips} onRemove={props.onRemoveChip} />

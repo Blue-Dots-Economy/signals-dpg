@@ -818,7 +818,7 @@ export function ProfileFormPage() {
             <p className="text-muted-foreground mt-1">{t('profile.choose_role')}</p>
             <p className="text-sm text-muted-foreground/80 mt-2">{theme.subline}</p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div data-tour="role-picker" className="grid gap-4 sm:grid-cols-2">
             {selectableDomains.map((domain, idx) => {
               const Icon = getDomainIcon(domain.id, network?.id);
               const label = formatDomainLabel(domain.id, [domain]);
@@ -931,7 +931,7 @@ export function ProfileFormPage() {
         {/* Branded hero strip — sits flush above the form Card. This hero heading
             is the page's <h1> now (the app-bar title was dropped to avoid
             duplicating it). Uses the network's primary brand color. */}
-        <div className="relative overflow-hidden rounded-t-xl bg-primary">
+        <div data-tour="profile-hero" className="relative overflow-hidden rounded-t-xl bg-primary">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
           </div>
@@ -972,7 +972,7 @@ export function ProfileFormPage() {
 
             {canImportCredentials && (
               <div className="mb-4">
-                <Button variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
+                <Button data-tour="import-credentials" variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
                   <Wallet className="h-4 w-4" />
                   {t('profile.import_credentials')}
                 </Button>
