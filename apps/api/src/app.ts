@@ -29,6 +29,7 @@ import v1_routes from '@/routes/v1/v1_routes';
 import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
 import health_routes from '@/routes/health/health_route';
 import { getNetworkConfigs } from '@/network_configs';
+import { loadNcsMappingAtBoot } from '@/services/auth/sso/ncs_mapping_boot';
 import {
   clearNetworkSchemaCache,
   refreshConsumedSchemas,
@@ -209,6 +210,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await getSmsTemplates();
 
   const networkConfigs = await getNetworkConfigs();
+
+  // NCS SSO profile mapping: ncs_bluedot_mapping.json beside network.json,
+  // checked against that network config so a bad mapping fails the deploy.
+  await loadNcsMappingAtBoot(networkConfigs);
 
   const networkAllowedOrigins = networkConfigs.flatMap((networkConfig) =>
     getAllowedInstanceOriginsFromNetworkConfig(

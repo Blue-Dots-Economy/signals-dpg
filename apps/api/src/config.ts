@@ -185,6 +185,8 @@ export const ssoConfig = {
     client_secret: sso.SSO_NCS_CLIENT_SECRET ?? '',
     timeout_ms: sso.SSO_NCS_TIMEOUT_MS,
     single_use_links: sso.SSO_NCS_SINGLE_USE_LINKS,
+    /** Raw SSO_NCS_MAPPING, merged over ncs_bluedot_mapping.json at boot. */
+    mapping_raw: sso.SSO_NCS_MAPPING,
     mapping: ssoProviders.includes('ncs')
       ? parseSsoNcsMapping(sso.SSO_NCS_MAPPING)
       : parseSsoNcsMapping('{}'),

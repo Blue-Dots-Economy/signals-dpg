@@ -25,7 +25,10 @@ export interface NcsClientConfig {
   openMs?: number;
 }
 
-const NcsUserSchema = z.object({
+// Loose: the fields below are typed and checked; any other field NCS sends
+// (stateName, districtName, ...) is kept too, so the profile mapping can use
+// it without a code change.
+const NcsUserSchema = z.looseObject({
   userId: z.string().min(1),
   fullName: z.string().nullish(),
   mobileNumber: z.string().nullish(),

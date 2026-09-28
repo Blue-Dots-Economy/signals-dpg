@@ -33,7 +33,28 @@ vi.mock('@/utils/served_domain_guard', () => ({
   resolveServedNetworkForDomain: (...a: unknown[]) => resolveServedNetworkForDomain(...(a as [])),
 }));
 
-const { bootstrapSsoProfile } = await import('../sso_profile_bootstrap.js');
+const SEEKER_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    name: { type: 'string' },
+    phone: { type: 'string' },
+    email: { type: 'string' },
+    location: { type: 'string' },
+    age: { type: 'integer', minimum: 14, maximum: 65 },
+    gender: { type: 'string', enum: ['Male', 'Female', 'Other'] },
+  },
+};
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: async (id: string) => ({
+    id,
+    domains: [{ id: 'seeker', item_schemas: { 'profile_1.0': SEEKER_SCHEMA } }],
+  }),
+}));
+
+const { bootstrapSsoProfile, ageOn, keepValidFields, mapFields } = await import(
+  '../sso_profile_bootstrap.js'
+);
 
 const IDENTITY: SsoIdentity = {
   provider: 'ncs',
@@ -57,6 +78,9 @@ const MAPPING = {
   item_type: 'profile_1.0',
   role_to_domain: { JOBSEEKER: 'seeker' },
   fields: { fullName: 'name', mobileNumber: 'phone', email: 'email', missing: 'nope' },
+  joined_fields: {},
+  value_maps: {},
+  age_from_dob: {},
   feature_routes: {},
 };
 
@@ -66,6 +90,88 @@ beforeEach(() => {
   vi.clearAllMocks();
   countActiveProfiles.mockResolvedValue(0);
   create_profile_item.mockResolvedValue({ item_id: 'item-1' });
+});
+
+describe('mapFields', () => {
+  const withPlace = {
+    ...IDENTITY,
+    attributes: { ...IDENTITY.attributes, districtName: 'Saharanpur', stateName: 'Uttar Pradesh' },
+  };
+
+  it('joins several partner fields into one profile field, in order', async () => {
+    expect(
+      mapFields(withPlace, {
+        fields: { fullName: 'name' },
+        joined_fields: { location: ['districtName', 'stateName'] },
+      })
+    ).toEqual({ name: 'Ameya Kulkarni', location: 'Saharanpur, Uttar Pradesh' });
+  });
+
+  it('skips blank parts and omits the field when every part is blank', async () => {
+    const noDistrict = { ...withPlace, attributes: { ...withPlace.attributes, districtName: '  ' } };
+    expect(
+      mapFields(noDistrict, { fields: {}, joined_fields: { location: ['districtName', 'stateName'] } })
+    ).toEqual({ location: 'Uttar Pradesh' });
+    expect(
+      mapFields(IDENTITY, { fields: {}, joined_fields: { location: ['districtName', 'stateName'] } })
+    ).toEqual({});
+  });
+});
+
+describe('value_maps and age_from_dob', () => {
+  const ncs = {
+    ...IDENTITY,
+    attributes: { ...IDENTITY.attributes, gender: 'FEMALE', dateOfBirth: '2008-09-12' },
+  };
+  const TODAY = new Date(Date.UTC(2026, 8, 28));
+
+  it('translates partner codes and derives age from the date of birth', () => {
+    expect(
+      mapFields(
+        ncs,
+        {
+          fields: { gender: 'gender' },
+          value_maps: { gender: { MALE: 'Male', female: 'Female' } },
+          age_from_dob: { age: 'dateOfBirth' },
+        },
+        TODAY
+      )
+    ).toEqual({ gender: 'Female', age: 18 });
+  });
+
+  it('drops a partner code with no mapping instead of storing it raw', () => {
+    expect(
+      mapFields(
+        { ...ncs, attributes: { ...ncs.attributes, gender: 'UNSPECIFIED' } },
+        { fields: { gender: 'gender' }, value_maps: { gender: { MALE: 'Male' } } },
+        TODAY
+      )
+    ).toEqual({});
+  });
+
+  it('computes whole years, counting the birthday itself', () => {
+    expect(ageOn('2012-09-12', TODAY)).toBe(14);
+    expect(ageOn('2012-09-28', TODAY)).toBe(14);
+    expect(ageOn('2012-09-29', TODAY)).toBe(13);
+    expect(ageOn('2012-02-30', TODAY)).toBeNull();
+    expect(ageOn('12/09/2012', TODAY)).toBeNull();
+    expect(ageOn(undefined, TODAY)).toBeNull();
+  });
+});
+
+describe('keepValidFields', () => {
+  it('keeps valid fields and drops rejected ones, logging names only', () => {
+    const kept = keepValidFields(
+      { name: 'A', age: 12, gender: 'female', location: 'Bijnor, Uttar Pradesh', extra: 'x' },
+      SEEKER_SCHEMA,
+      log
+    );
+    expect(kept).toEqual({ name: 'A', location: 'Bijnor, Uttar Pradesh' });
+    expect(log.warn).toHaveBeenCalledWith(
+      { dropped: ['age', 'gender', 'extra'] },
+      expect.any(String)
+    );
+  });
 });
 
 describe('bootstrapSsoProfile', () => {

@@ -10,4 +10,5 @@ export * from './properties_file_io';
 export * from './secrets';
 export * from './sms_templates_loader';
 export * from './sso_config';
+export * from './sso_mapping_loader';
 export * from './ui_host_bindings';

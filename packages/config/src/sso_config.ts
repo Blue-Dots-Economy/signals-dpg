@@ -40,6 +40,25 @@ export const SsoNcsMappingSchema = z.object({
   /** NCS `data.*` field → profile `item_state` field. */
   fields: z.record(z.string(), z.string()).default({}),
   /**
+   * Profile field → several NCS fields joined with ", " (empty ones skipped),
+   * e.g. `"location": ["districtName", "stateName"]` → "Saharanpur, Uttar
+   * Pradesh". A location field built this way is geocoded like any other, and
+   * the state disambiguates same-named districts.
+   */
+  joined_fields: z.record(z.string(), z.array(z.string()).min(1)).default({}),
+  /**
+   * NCS field → { NCS value → profile value }, applied to `fields` entries,
+   * e.g. `"gender": { "FEMALE": "Female" }`. Matched exactly, then
+   * case-insensitively; a value with no entry is dropped rather than stored
+   * in the partner's own vocabulary.
+   */
+  value_maps: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+  /**
+   * Profile field → NCS date-of-birth field (ISO `YYYY-MM-DD`); the profile
+   * gets the age in whole years at login, e.g. `"age": "dateOfBirth"`.
+   */
+  age_from_dob: z.record(z.string(), z.string()).default({}),
+  /**
    * NCS `featureKey` → UI path. Unknown keys land on `/`. Each value is passed
    * through the API's `safeReturnTo` at use, so an off-origin entry degrades to
    * `/` rather than becoming an open redirect.

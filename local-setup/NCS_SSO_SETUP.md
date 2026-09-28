@@ -65,6 +65,18 @@ Rarely needed (defaults shown): `SSO_OIDC_CLIENT_ID=signals-sso`,
 `SSO_NCS_SINGLE_USE_LINKS=false` (a link can be reused until it expires; set
 `true` so each link logs in once).
 
+**Mapping file instead of the env JSON.** Put `ncs_bluedot_mapping.json` beside
+the `network.json` the API loads, with `role_to_domain`, `fields`,
+`joined_fields` and `feature_routes`; keep only `app_origin` in
+`SSO_NCS_MAPPING` (it wins over the file). The API refuses to start if the
+mapping names a field the profile schema does not have. For NCS's
+`districtName` + `stateName` → `location`:
+`"joined_fields": { "location": ["districtName", "stateName"] }`; for
+`gender: "FEMALE"` → `"Female"`: `"value_maps": { "gender": { "FEMALE": "Female" } }`;
+for `dateOfBirth` → `age`: `"age_from_dob": { "age": "dateOfBirth" }`. Location is
+geocoded only when a geocoder is configured (`GOOGLE_GEOCODING_API_KEY` or
+`PHOTON_URL`).
+
 `SSO_NCS_MAPPING`, in words:
 
 | Key | Meaning |

@@ -1,3 +1,4 @@
+import type { SsoNcsMapping } from '@dpg/config';
 import { ssoConfig } from '@/config';
 import { createNcsClient } from '@/services/auth/sso/ncs_client';
 import { createNcsProvider, NCS_PROVIDER_ID } from '@/services/auth/sso/providers/ncs';
@@ -15,6 +16,19 @@ import type { SsoProvider } from '@/services/auth/sso/types';
  */
 let active: SsoProvider | null | undefined;
 
+/**
+ * The effective NCS mapping — `ncs_bluedot_mapping.json` merged with
+ * SSO_NCS_MAPPING, installed at boot by `installSsoNcsMapping` once the
+ * network config is loaded. Until then (tests, or an instance with SSO off)
+ * the env-only mapping from config.ts.
+ */
+let ncsMapping: SsoNcsMapping = ssoConfig.ncs.mapping;
+
+export function installSsoNcsMapping(mapping: SsoNcsMapping): void {
+  ncsMapping = mapping;
+  active = undefined;
+}
+
 export function getActiveSsoProvider(): SsoProvider | null {
   if (active !== undefined) return active;
   active = null;
@@ -24,7 +38,7 @@ export function getActiveSsoProvider(): SsoProvider | null {
     active = createNcsProvider({
       clientId: ssoConfig.ncs.client_id,
       singleUseLinks: ssoConfig.ncs.single_use_links,
-      mapping: ssoConfig.ncs.mapping,
+      mapping: ncsMapping,
       client: createNcsClient({
         baseUrl: ssoConfig.ncs.base_url,
         clientId: ssoConfig.ncs.client_id,
@@ -38,7 +52,7 @@ export function getActiveSsoProvider(): SsoProvider | null {
 
 /** Profile-bootstrap mapping for a provider, or null when it has none. */
 export function getSsoProfileMapping(providerId: string): SsoProfileMapping | null {
-  return providerId === NCS_PROVIDER_ID ? ssoConfig.ncs.mapping : null;
+  return providerId === NCS_PROVIDER_ID ? ncsMapping : null;
 }
 
 let oidcKeys: OidcKeys | null = null;
@@ -52,5 +66,6 @@ export function getSsoOidcKeys(): OidcKeys {
 /** Test seam. */
 export function resetSsoProviderRegistry(): void {
   active = undefined;
+  ncsMapping = ssoConfig.ncs.mapping;
   oidcKeys = null;
 }

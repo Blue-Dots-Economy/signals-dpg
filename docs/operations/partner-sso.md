@@ -62,10 +62,52 @@ provider is missing a secret.
 }
 ```
 
-- `fields` maps NCS `data.*` fields onto the profile schema. Map only fields the
-  schema declares — the seeker schema is `additionalProperties: false`, so an
-  undeclared target makes the draft-profile create fail (logged, login still
-  succeeds).
+**Mapping file (`ncs_bluedot_mapping.json`).** The mapping normally lives in a
+file beside the instance's `network.json` — the same directory locally
+(`NETWORK_CONFIG_LOCAL_FILE`), the same URL directory remotely — so each
+instance's mapping sits next to the schema it maps into. `SSO_NCS_MAPPING` is
+merged over it (a key set in the env wins), which keeps per-environment values
+such as `app_origin` out of the shared file; with no file, the env alone is
+used, as before.
+
+```json
+{
+  "network": "blue_dot",
+  "item_type": "profile_1.0",
+  "role_to_domain": { "JOBSEEKER": "seeker" },
+  "fields": { "fullName": "name", "mobileNumber": "phone", "gender": "gender" },
+  "value_maps": { "gender": { "MALE": "Male", "FEMALE": "Female", "OTHER": "Other" } },
+  "age_from_dob": { "age": "dateOfBirth" },
+  "joined_fields": { "location": ["districtName", "stateName"] },
+  "feature_routes": { "placement-prep": "/" }
+}
+```
+
+At boot the merged mapping is checked against the served network config: each
+`role_to_domain` domain must be served here, `item_type` must exist in it, and
+every target field (`fields` values and `joined_fields` keys) must be declared
+in that item schema. A mismatch stops the API with a message naming the field —
+at login it would fail every draft-profile create, since seeker schemas are
+`additionalProperties: false`.
+
+- `fields` maps NCS `data.*` fields onto the profile schema. Every field NCS
+  returns is available, not just the ones the client types.
+- `joined_fields` builds one profile field from several NCS fields, joined with
+  `, ` (blank parts skipped). `location: [districtName, stateName]` gives
+  "Saharanpur, Uttar Pradesh"; the location field is then geocoded like any
+  profile create, and the state disambiguates same-named districts.
+- `value_maps` translates an NCS code into the profile's own value, per NCS
+  field (`gender: FEMALE → Female`); matched exactly, then case-insensitively.
+  A code with no entry is dropped, never stored raw. At boot every mapped value
+  must be one of the target field's `enum` values.
+- `age_from_dob` fills an integer field with the age in whole years from an ISO
+  `YYYY-MM-DD` date (`age ← dateOfBirth`).
+- Each mapped value is validated against its own schema property before the
+  create; one the schema rejects (an age outside `minimum`/`maximum`, an
+  unknown enum value) is left out and logged by field name, so it cannot fail
+  the whole draft.
+- Map only fields the schema declares — the seeker schema is
+  `additionalProperties: false`. The boot check above enforces this.
 - `feature_routes` maps NCS `featureKey` to a UI path; unknown keys and
   off-origin values land on `/`.
 - `app_origin` must also be in the CORS allowlist.

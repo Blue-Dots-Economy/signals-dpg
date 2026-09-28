@@ -43,6 +43,19 @@ describe('ncs validateToken', () => {
     });
   });
 
+  it('keeps partner fields beyond the typed ones (stateName, districtName, ...)', async () => {
+    const client = createNcsClient(CONFIG, (async () =>
+      json({
+        status: 'SUCCESS',
+        data: { ...USER, stateId: 9, stateName: 'Uttar Pradesh', districtName: 'Saharanpur' },
+      })) as unknown as typeof fetch);
+    const result = await client.validateToken('t');
+    expect(result).toMatchObject({
+      ok: true,
+      value: { userId: USER.userId, stateId: 9, stateName: 'Uttar Pradesh', districtName: 'Saharanpur' },
+    });
+  });
+
   it('ignores a trailing slash on the configured base URL', async () => {
     const fetchMock = vi.fn(async () => json({ status: 'SUCCESS', statusCode: 200, data: USER }));
     const client = createNcsClient(
