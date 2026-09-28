@@ -10,6 +10,55 @@ import { apiConfig, ssoConfig } from '@/config';
 import { NCS_PROVIDER_ID } from '@/services/auth/sso/providers/ncs';
 import { installSsoNcsMapping } from '@/services/auth/sso/registry';
 
+type ServedBinding = { network: string; domain: string };
+type PropertyMap = Record<string, { enum?: unknown[] }>;
+
+/** Every profile field the mapping writes to. */
+function mappingTargets(mapping: SsoNcsMapping): string[] {
+  return [
+    ...Object.values(mapping.fields),
+    ...Object.keys(mapping.joined_fields),
+    ...Object.keys(mapping.age_from_dob),
+  ];
+}
+
+/** The item schema's properties for one mapped role, or a problem string. */
+function roleProperties(
+  role: string,
+  domain: string,
+  mapping: SsoNcsMapping,
+  networkConfigs: readonly NetworkConfigDocument[],
+  servedDomains: readonly ServedBinding[]
+): { label: string; properties: PropertyMap } | string {
+  const network = mapping.network ?? servedDomains.find((b) => b.domain === domain)?.network;
+  if (!network || !servedDomains.some((b) => b.network === network && b.domain === domain)) {
+    return `role ${role} → domain '${domain}' is not served by this instance`;
+  }
+  const itemSchema = networkConfigs
+    .find((c) => c.id === network)
+    ?.domains.find((d) => d.id === domain)?.item_schemas?.[mapping.item_type] as
+    | { properties?: PropertyMap }
+    | undefined;
+  if (!itemSchema) {
+    return `domain '${network}/${domain}' has no item type '${mapping.item_type}'`;
+  }
+  return { label: `${network}/${domain}/${mapping.item_type}`, properties: itemSchema.properties ?? {} };
+}
+
+/** value_maps results that are not one of the target field's enum values. */
+function valueMapProblems(mapping: SsoNcsMapping, properties: PropertyMap): string[] {
+  const problems: string[] = [];
+  for (const [source, valueMap] of Object.entries(mapping.value_maps)) {
+    const target = mapping.fields[source];
+    const allowed = target ? properties[target]?.enum : undefined;
+    if (!allowed) continue;
+    for (const value of Object.values(valueMap).filter((v) => !allowed.includes(v))) {
+      problems.push(`value_maps.${source} maps to '${value}', not an allowed value of '${target}'`);
+    }
+  }
+  return problems;
+}
+
 /**
  * Check a mapping against the network config this instance serves, so a
  * mapping that names a domain, item type or field the schema does not have
@@ -20,56 +69,23 @@ import { installSsoNcsMapping } from '@/services/auth/sso/registry';
 export function assertNcsMappingMatchesNetwork(
   mapping: SsoNcsMapping,
   networkConfigs: readonly NetworkConfigDocument[],
-  servedDomains: readonly { network: string; domain: string }[]
+  servedDomains: readonly ServedBinding[]
 ): void {
-  const problems: string[] = [];
-  const targets = [
-    ...Object.values(mapping.fields),
-    ...Object.keys(mapping.joined_fields),
-    ...Object.keys(mapping.age_from_dob),
-  ];
-  for (const source of Object.keys(mapping.value_maps)) {
-    if (!Object.hasOwn(mapping.fields, source)) {
-      problems.push(`value_maps.${source} has no matching entry in fields`);
-    }
-  }
+  const problems = Object.keys(mapping.value_maps)
+    .filter((source) => !Object.hasOwn(mapping.fields, source))
+    .map((source) => `value_maps.${source} has no matching entry in fields`);
+  const targets = mappingTargets(mapping);
 
   for (const [role, domain] of Object.entries(mapping.role_to_domain)) {
-    const network =
-      mapping.network ?? servedDomains.find((b) => b.domain === domain)?.network;
-    if (!network || !servedDomains.some((b) => b.network === network && b.domain === domain)) {
-      problems.push(`role ${role} → domain '${domain}' is not served by this instance`);
+    const resolved = roleProperties(role, domain, mapping, networkConfigs, servedDomains);
+    if (typeof resolved === 'string') {
+      problems.push(resolved);
       continue;
     }
-    const domainConfig = networkConfigs
-      .find((c) => c.id === network)
-      ?.domains.find((d) => d.id === domain);
-    const itemSchema = domainConfig?.item_schemas?.[mapping.item_type] as
-      | { properties?: Record<string, unknown> }
-      | undefined;
-    if (!itemSchema) {
-      problems.push(`domain '${network}/${domain}' has no item type '${mapping.item_type}'`);
-      continue;
+    for (const target of targets.filter((t) => !Object.hasOwn(resolved.properties, t))) {
+      problems.push(`field '${target}' is not in ${resolved.label} (role ${role})`);
     }
-    const properties = (itemSchema.properties ?? {}) as Record<string, { enum?: unknown[] }>;
-    for (const target of targets) {
-      if (!Object.hasOwn(properties, target)) {
-        problems.push(
-          `field '${target}' is not in ${network}/${domain}/${mapping.item_type} (role ${role})`
-        );
-      }
-    }
-    for (const [source, valueMap] of Object.entries(mapping.value_maps)) {
-      const allowed = properties[mapping.fields[source] ?? '']?.enum;
-      if (!allowed) continue;
-      for (const value of Object.values(valueMap)) {
-        if (!allowed.includes(value)) {
-          problems.push(
-            `value_maps.${source} maps to '${value}', not an allowed value of '${mapping.fields[source]}'`
-          );
-        }
-      }
-    }
+    problems.push(...valueMapProblems(mapping, resolved.properties));
   }
 
   if (problems.length > 0) {

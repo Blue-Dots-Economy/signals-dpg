@@ -43,12 +43,14 @@ function parseJsonObject(raw: string, where: string): Record<string, unknown> {
 /** URL of the served network's network.json in remote mode, or null. */
 function remoteNetworkUrl(opts: LoadSsoMappingOptions): string | null {
   const networks = (opts.servedDomains ?? []).map((b) => b.network);
-  const urls = opts.remoteUrls
-    ? parseNetworkConfigUrls(opts.remoteUrls)
-    : opts.schemaRegistryUrls
-      ? parseSchemaRegistryUrls(opts.schemaRegistryUrls, networks)
-      : null;
-  if (!urls) return null;
+  let urls: Record<string, string>;
+  if (opts.remoteUrls) {
+    urls = parseNetworkConfigUrls(opts.remoteUrls);
+  } else if (opts.schemaRegistryUrls) {
+    urls = parseSchemaRegistryUrls(opts.schemaRegistryUrls, networks);
+  } else {
+    return null;
+  }
   const network = networks[0];
   return (network && urls[network]) || Object.values(urls)[0] || null;
 }
@@ -92,7 +94,7 @@ export function resolveSsoNcsMapping(
   envRaw: string
 ): SsoNcsMapping {
   const env = parseJsonObject(envRaw || '{}', 'SSO_NCS_MAPPING');
-  const parsed = SsoNcsMappingSchema.safeParse({ ...(file ?? {}), ...env });
+  const parsed = SsoNcsMappingSchema.safeParse({ ...file, ...env });
   if (!parsed.success) {
     throw new ConfigError(`NCS SSO mapping is invalid: ${parsed.error.message}`);
   }
