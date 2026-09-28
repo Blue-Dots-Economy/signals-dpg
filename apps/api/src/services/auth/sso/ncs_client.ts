@@ -67,7 +67,9 @@ export function createNcsClient(
   });
   // A trailing slash on the configured base would give `//api/...`, which NCS
   // answers with a Spring auth error instead of a validate-token envelope.
-  const url = `${config.baseUrl.replace(/\/+$/, '')}/api/integration/validate-token`;
+  let base = config.baseUrl;
+  while (base.endsWith('/')) base = base.slice(0, -1);
+  const url = `${base}/api/integration/validate-token`;
 
   async function call(token: string): Promise<SsoResult<NcsUser>> {
     const res = await fetchImpl(url, {
