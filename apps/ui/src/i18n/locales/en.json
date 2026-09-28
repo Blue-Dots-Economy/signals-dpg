@@ -746,5 +746,12 @@
   "auth.toast_signout_incomplete_desc": "We could not reach the server. Close this browser to be sure you are signed out.",
   "auth.oidc_error_cancelled": "The sign-in was cancelled or timed out. Please try again.",
   "auth.session_expired_title": "Session expired",
-  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue."
+  "auth.session_expired_desc": "Your session has ended. Please sign in again to continue.",
+  "discover.results": "Results",
+  "discover.view_map": "Map",
+  "discover.view_list": "List",
+  "discover.expand_results": "Expand results",
+  "discover.collapse_results": "Collapse results",
+  "filters.show_results": "Show {{count}} results",
+  "menu.preferences": "Preferences"
 }

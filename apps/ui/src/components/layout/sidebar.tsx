@@ -15,8 +15,11 @@ import {
   SidebarMenuItem,
   SidebarHeader,
   SidebarSeparator,
+  useSidebar,
 } from '@/components/ui/sidebar';
 import { SidebarBrandFooter } from './sidebar-brand-footer';
+import { ThemeModeToggle } from './theme-mode-toggle';
+import { LanguageSwitcher } from './language-switcher';
 import { PortalHeader } from './portal-header';
 import { LayoutGrid, Plus, Network, ChevronRight, Activity } from 'lucide-react';
 import { usePendingActionsCount } from '@/hooks/use-actions';
@@ -38,6 +41,13 @@ interface AppSidebarProps {
   /** Hide the Browse (domain selector) group — used on the create/edit form
    * page, where browsing has no meaning. */
   hideBrowse?: boolean;
+  /**
+   * Show a Preferences group (theme + language) while the sidebar is the
+   * mobile sheet. The compact phone top bar (#745) has no room for those two
+   * controls, so the menu is where they live on a phone. Ignored on desktop,
+   * where the top bar still carries them.
+   */
+  showPreferences?: boolean;
 }
 
 import { getDomainIcon, formatDomainLabel } from '@/lib/domain-icons';
@@ -99,9 +109,11 @@ export function AppSidebar({
   onProfilesChanged,
   userSchemas,
   hideBrowse = false,
+  showPreferences = false,
 }: Readonly<AppSidebarProps>) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { isMobile } = useSidebar();
 
   // Group profiles by domain
   const profilesByDomain = myItems.reduce<Record<string, Item[]>>((acc, item) => {
@@ -380,6 +392,18 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        {showPreferences && isMobile && (
+          <>
+            <SidebarSeparator />
+            <SidebarGroup>
+              <SidebarGroupLabel>{t('menu.preferences')}</SidebarGroupLabel>
+              <SidebarGroupContent className="flex items-center gap-2 px-2">
+                <ThemeModeToggle />
+                <LanguageSwitcher />
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
         </nav>
       </SidebarContent>
       <SidebarBrandFooter />

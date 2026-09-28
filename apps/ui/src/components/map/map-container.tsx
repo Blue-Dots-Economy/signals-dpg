@@ -109,6 +109,12 @@ interface MapViewProps {
    * filters by search + fields).
    */
   emptyMessage?: string;
+  /**
+   * Render the maximize toggle. Default true. The phone discovery layout
+   * (#745) turns it off: the map already fills the screen there, and the
+   * fullscreen overlay would cover the results sheet and the chip row.
+   */
+  showMaximize?: boolean;
 }
 
 // Default map view when there is no user location / no profile location.
@@ -174,6 +180,7 @@ export function MapView({
   resolveMarkerImage,
   onViewportChange,
   emptyMessage,
+  showMaximize = true,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
@@ -320,17 +327,19 @@ export function MapView({
       <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">
         {isMaximized && locationSlot}
         {isMaximized && filtersSlot}
-        <Button
-          type="button"
-          variant="outline"
-          size="icon"
-          className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
-          onClick={() => setIsMaximized((v) => !v)}
-          aria-label={isMaximized ? t('map.minimize') : t('map.maximize')}
-          title={isMaximized ? t('map.minimize') : t('map.maximize')}
-        >
-          {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </Button>
+        {showMaximize && (
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
+            onClick={() => setIsMaximized((v) => !v)}
+            aria-label={isMaximized ? t('map.minimize') : t('map.maximize')}
+            title={isMaximized ? t('map.minimize') : t('map.maximize')}
+          >
+            {isMaximized ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </Button>
+        )}
       </div>
       {/* Loading / empty-state overlays (non-blocking, centered) */}
       {(loading || markers.length === 0) && (

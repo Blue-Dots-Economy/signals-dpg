@@ -2,6 +2,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import { useTranslation } from 'react-i18next';
 import { SidebarProvider } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import type { DotNetworkDomain, DotNetworkSchema, ViewMode } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
 import { TopBar } from './top-bar';
@@ -61,6 +62,17 @@ interface PageShellProps {
    * the form scrolls above it — a `sticky` element inside `<main>` floats when
    * the content is shorter than the viewport, which this avoids. */
   footerSlot?: React.ReactNode;
+  /**
+   * The phone discovery layout (#745): a compact top bar (search + menu +
+   * account only) with theme and language moved into the sidebar.
+   */
+  compactTopBar?: boolean;
+  /**
+   * Make `<main>` a non-scrolling, unpadded flex column that its children
+   * fill — for the phone discovery layout, where the map takes the whole area
+   * and the results sheet scrolls itself. Default is the padded scroll area.
+   */
+  fillContent?: boolean;
 }
 
 export function PageShell({
@@ -89,6 +101,8 @@ export function PageShell({
   backLabel,
   hideBrowse,
   footerSlot,
+  compactTopBar = false,
+  fillContent = false,
 }: Readonly<PageShellProps>) {
   const { t } = useTranslation();
 
@@ -115,6 +129,7 @@ export function PageShell({
           onProfilesChanged={onProfilesChanged}
           userSchemas={userSchemas}
           hideBrowse={hideBrowse}
+          showPreferences={compactTopBar}
         />
         <div className="flex h-svh min-w-0 flex-1 flex-col">
           <TopBar
@@ -127,6 +142,7 @@ export function PageShell({
             onSearchChange={onSearchChange}
             viewMode={viewMode}
             onViewModeChange={onViewModeChange}
+            compact={compactTopBar}
           />
           {toolbarSlot && (
             // `flex-none` so it keeps its natural height instead of being
@@ -145,7 +161,12 @@ export function PageShell({
             // are clipped by this scroll container — otherwise they anchor to the
             // initial containing block at their deep flow positions and stretch
             // the document, producing a phantom second (body) scrollbar.
-            className="relative min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
+            className={cn(
+              'relative min-h-0 flex-1',
+              fillContent
+                ? 'flex flex-col overflow-hidden'
+                : 'overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6',
+            )}
           >
             {children}
           </main>

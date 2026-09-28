@@ -10,6 +10,7 @@ import type { DomainOption } from './domain-control';
 import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
 import type { PreferredLocationSource } from '@/hooks/use-user-location';
 import type { ViewMode } from '@/engine/types';
+import { cn } from '@/lib/utils';
 
 export interface BrowseToolbarProps {
   viewMode: ViewMode;
@@ -89,6 +90,13 @@ export interface BrowseToolbarProps {
    * clear-all still has to be reachable then.
    */
   canClearAll: boolean;
+  /**
+   * `'bar'` (default) is the pinned row under the app bar. `'sheet'` is the
+   * second row of the phone results sheet's header (#745): the domain chips
+   * and the count each have their own home there (the chip row and the sheet
+   * header), so this renders only the refine controls and the applied chips.
+   */
+  variant?: 'bar' | 'sheet';
 }
 
 /**
@@ -116,6 +124,7 @@ export interface BrowseToolbarProps {
 export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
   const { t } = useTranslation();
   const isMap = props.viewMode === 'map';
+  const inSheet = props.variant === 'sheet';
 
   return (
     // ONE row, holding everything that scopes or refines the browse: domain on
@@ -124,24 +133,26 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
     // the domain control had briefly moved to a row of its own to sit beside
     // "Search near", and once that toggle was absorbed into Location the row
     // existed for nothing else.
-    <div data-testid="browse-toolbar" className="px-4 py-2 sm:px-6">
+    <div data-testid="browse-toolbar" className={cn(inSheet ? 'py-1' : 'px-4 py-2 sm:px-6')}>
       <div
         data-testid="toolbar-row-2"
         className="flex flex-wrap items-center gap-2"
       >
-        <DomainControl
-          options={props.domainOptions}
-          // The map is multi-domain and takes its own selection; the list is
-          // single-select on the one domain driving its feed (spec D11).
-          mode={isMap ? 'multi' : 'single'}
-          selected={props.selectedDomains}
-          onChange={props.onDomainsChange}
-        />
+        {!inSheet && (
+          <DomainControl
+            options={props.domainOptions}
+            // The map is multi-domain and takes its own selection; the list is
+            // single-select on the one domain driving its feed (spec D11).
+            mode={isMap ? 'multi' : 'single'}
+            selected={props.selectedDomains}
+            onChange={props.onDomainsChange}
+          />
+        )}
         {/* Pushes the controls to the far right — from `sm` up only. On a
             phone the domain control already fills the row, so the spacer flung
             Sort to the right edge of row one while Location and Filters sat at
             the left of row two. */}
-        <span className="hidden flex-1 sm:block" />
+        {!inSheet && <span className="hidden flex-1 sm:block" />}
         {/* Sort, Location and Filters travel as ONE flex item, so when the
             domain control has taken the whole first row they wrap together as
             a single left-aligned cluster instead of Sort staying behind on its
@@ -229,7 +240,7 @@ export function BrowseToolbar(props: Readonly<BrowseToolbarProps>) {
             {t('browse.no_filters')}
           </span>
         )}
-        {props.count !== undefined && (
+        {!inSheet && props.count !== undefined && (
           /* The divider between the filter state and the result count is a
              BORDER on the count itself, not a separate element. They are
              adjacent runs of same-size inline text, so without it the row

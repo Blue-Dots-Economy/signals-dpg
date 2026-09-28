@@ -7,12 +7,19 @@ import { PageShell } from '../page-shell';
 // this file only exercises the shell's own overflow-containment classes and
 // its prop pass-through to TopBar.
 vi.mock('../top-bar', () => ({
-  TopBar: (props: { variant?: string; title?: string }) => (
-    <div data-testid="top-bar" data-variant={props.variant} data-title={props.title} />
+  TopBar: (props: { variant?: string; title?: string; compact?: boolean }) => (
+    <div
+      data-testid="top-bar"
+      data-variant={props.variant}
+      data-title={props.title}
+      data-compact={String(props.compact ?? false)}
+    />
   ),
 }));
 vi.mock('../sidebar', () => ({
-  AppSidebar: () => <div data-testid="app-sidebar" />,
+  AppSidebar: (props: { showPreferences?: boolean }) => (
+    <div data-testid="app-sidebar" data-show-preferences={String(props.showPreferences ?? false)} />
+  ),
 }));
 
 function renderShell() {
@@ -72,5 +79,33 @@ describe('PageShell form variant pass-through', () => {
     expect(bar.getAttribute('data-title')).toBe('Edit Provider Profile');
     expect(screen.getByTestId('app-sidebar')).toBeInTheDocument();
     expect(screen.getByTestId('child')).toBeInTheDocument();
+  });
+});
+
+describe('PageShell phone discovery layout props (#745)', () => {
+  it('makes <main> a non-scrolling, unpadded fill column under fillContent', () => {
+    render(
+      <PageShell domains={[]} selectedDomain={null} onDomainSelect={() => {}} fillContent>
+        <div />
+      </PageShell>,
+    );
+    const main = document.getElementById('main-content');
+    expect(main).toHaveClass('flex', 'flex-col', 'overflow-hidden');
+    expect(main).not.toHaveClass('overflow-y-auto', 'p-4');
+  });
+
+  it('keeps the padded scroll area by default', () => {
+    renderShell();
+    expect(document.getElementById('main-content')).toHaveClass('overflow-y-auto', 'p-4');
+  });
+
+  it('forwards compactTopBar to the top bar and the sidebar preferences', () => {
+    render(
+      <PageShell domains={[]} selectedDomain={null} onDomainSelect={() => {}} compactTopBar>
+        <div />
+      </PageShell>,
+    );
+    expect(screen.getByTestId('top-bar')).toHaveAttribute('data-compact', 'true');
+    expect(screen.getByTestId('app-sidebar')).toHaveAttribute('data-show-preferences', 'true');
   });
 });

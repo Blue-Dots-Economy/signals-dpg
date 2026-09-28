@@ -51,6 +51,13 @@ export interface BrowseFiltersPanelProps {
    * rather than sitting in a row.
    */
   trigger?: 'toolbar' | 'overlay';
+  /**
+   * Live count of results under the current filters. On a phone the sheet
+   * takes the full height and ends in a sticky footer — "Clear all" and
+   * "Show N results", which closes it (#745) — so the viewer sees what the
+   * selection yields before going back to the results. Omitted → "Done".
+   */
+  resultCount?: number;
 }
 
 // ─── Chip toggle button ────────────────────────────────────────────────────────
@@ -125,6 +132,7 @@ export function BrowseFiltersPanel({
   onFieldsChange,
   viewMode = 'map',
   trigger = 'toolbar',
+  resultCount,
 }: Readonly<BrowseFiltersPanelProps>) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -228,7 +236,8 @@ export function BrowseFiltersPanel({
           {t('filters.title')}
         </span>
         <div className="flex items-center gap-2 pointer-coarse:gap-4">
-          {activeCount > 0 && (
+          {/* On a phone Clear all lives in the sheet's footer instead. */}
+          {activeCount > 0 && !isMobile && (
             <button
               type="button"
               onClick={handleClearAll}
@@ -259,7 +268,12 @@ export function BrowseFiltersPanel({
       </div>
 
       {/* ── Scrollable filter groups ────────────────────────────────────────── */}
-      <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
+      <div
+        className={cn(
+          'space-y-5 overflow-y-auto px-4 py-4',
+          isMobile ? 'min-h-0 flex-1' : 'max-h-[75dvh]',
+        )}
+      >
         {enumFilterFields.map((field) => {
           const fieldSelected = selectedFields[field.key] ?? [];
 
@@ -313,6 +327,7 @@ export function BrowseFiltersPanel({
           open={open}
           onOpenChange={setOpen}
           contentClassName="p-0"
+          drawerClassName="h-[92dvh] data-[vaul-drawer-direction=bottom]:max-h-[92dvh]"
           showCloseButton={false}
         >
           {/* Radix's underlying Dialog requires an accessible name; the visible
@@ -321,6 +336,21 @@ export function BrowseFiltersPanel({
               visually-hidden title rather than duplicating visible text. */}
           <DrawerTitle className="sr-only">{t('filters.title')}</DrawerTitle>
           {panelBody}
+          <div className="flex flex-none items-center gap-3 border-t border-border bg-background px-4 py-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearAll}
+              disabled={activeCount === 0}
+            >
+              {t('filters.clear_all')}
+            </Button>
+            <Button type="button" className="flex-1" onClick={() => setOpen(false)}>
+              {resultCount === undefined
+                ? t('selection.done')
+                : t('filters.show_results', { count: resultCount })}
+            </Button>
+          </div>
         </ResponsiveDialog>
       </>
     );

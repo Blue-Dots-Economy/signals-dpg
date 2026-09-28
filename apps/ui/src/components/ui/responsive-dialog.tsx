@@ -11,6 +11,10 @@ export interface ResponsiveDialogProps {
   children: React.ReactNode;
   // forwarded to DialogContent on desktop; ignored by the Drawer body
   contentClassName?: string;
+  // forwarded to the mobile DrawerContent; ignored by the desktop Dialog.
+  // Merged last, so a `data-[vaul-drawer-direction=bottom]:max-h-*` here
+  // overrides the drawer's default 80dvh cap.
+  drawerClassName?: string;
   // Accessible name for the MOBILE Drawer only. vaul bundles its own
   // @radix-ui/react-dialog instance, so a child DialogTitle (from this repo's
   // `dialog.tsx`, a DIFFERENT module instance) registers with the wrong React
@@ -46,6 +50,7 @@ export function ResponsiveDialog({
   onOpenChange,
   children,
   contentClassName,
+  drawerClassName,
   title,
   showCloseButton = true,
   dismissible = true,
@@ -58,7 +63,7 @@ export function ResponsiveDialog({
     return (
       <Drawer open={open} onOpenChange={onOpenChange} dismissible={dismissible}>
         <DrawerContent
-          className="max-h-[90dvh] overflow-hidden p-0"
+          className={cn('max-h-[90dvh] overflow-hidden p-0', drawerClassName)}
           onInteractOutside={onInteractOutside}
           onEscapeKeyDown={onEscapeKeyDown}
         >

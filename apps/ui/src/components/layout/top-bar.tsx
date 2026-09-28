@@ -30,6 +30,13 @@ interface TopBarProps {
   onSearchChange?: (value: string) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  /**
+   * The phone discovery layout (#745): search takes row one beside the
+   * hamburger and the account control, and nothing else. The Map/List toggle
+   * moves to the results sheet's header, and Language + Theme move into the
+   * sidebar's Preferences group — so the bar never wraps to a second row.
+   */
+  compact?: boolean;
 }
 
 function NotificationBell() {
@@ -65,6 +72,7 @@ export function TopBar({
   onSearchChange,
   viewMode,
   onViewModeChange,
+  compact = false,
 }: Readonly<TopBarProps>) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -110,7 +118,7 @@ export function TopBar({
               // actually used. Signed out those two are present and it does
               // not fit — then it keeps its own full-width line rather than
               // shrinking to an unusable stub.
-              isAuthenticated ? 'flex-1' : 'order-last w-full',
+              isAuthenticated || compact ? 'flex-1' : 'order-last w-full',
             )}
           >
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -126,7 +134,7 @@ export function TopBar({
         </>
       )}
       <div className="ml-auto flex items-center gap-2">
-        {variant === 'browse' && (
+        {variant === 'browse' && !compact && (
           <ToggleGroup
             type="single"
             value={viewMode}
@@ -146,7 +154,9 @@ export function TopBar({
         {/* On mobile, Language + Theme move into the avatar dropdown once the
             user is signed in (there's no dropdown to move them into for the
             logged-out case, so they stay inline there). */}
-        <div className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}>
+        <div
+          className={cn('flex items-center gap-2', (isAuthenticated || compact) && 'hidden md:flex')}
+        >
           {/* `compact` renders the switcher icon-only below sm and shows the
               language label from sm up. On the logged-out mobile bar (where the
               controls stay inline) this frees the ~90px "English" label so the
@@ -172,7 +182,7 @@ export function TopBar({
               className="gap-2"
             >
               <LogIn className="h-4 w-4" />
-              <span className="hidden sm:inline">{t('common.login')}</span>
+              <span className={compact ? 'sr-only' : 'hidden sm:inline'}>{t('common.login')}</span>
             </Button>
           )
         )}

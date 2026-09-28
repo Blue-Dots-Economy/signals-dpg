@@ -35,6 +35,11 @@ import { SEARCH_AREA_MIN_ZOOM } from '@/lib/map-caps';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
+import { DomainChipRow } from '@/components/discovery/mobile/domain-chip-row';
+import { ResultsSheet, type SheetSnap } from '@/components/discovery/mobile/results-sheet';
+import { ResultsSheetHeader } from '@/components/discovery/mobile/results-sheet-header';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { cn } from '@/lib/utils';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { BulkSingleError } from '@/lib/bulk';
@@ -113,6 +118,8 @@ import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+
+type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['children']>[0];
 
 /**
  * True when the map covers so much longitude that "zoom out" is not a usable
@@ -626,6 +633,23 @@ export function HomePage() {
   const [viewMode, setViewMode] = React.useState<ViewMode>(
     (searchParams.get('view') as ViewMode) ?? resolveDefaultViewMode()
   );
+  // Phone discovery layout (#745): the map is always on screen and the list
+  // lives in a bottom sheet. The sheet's position IS the view mode — peek is
+  // `map`, half and full are `list` — so `?view=`, deep links and every
+  // existing `handleViewModeChange` caller keep working unchanged.
+  const isMobile = useIsMobile();
+  const [sheetSnap, setSheetSnap] = React.useState<SheetSnap>(() =>
+    viewMode === 'list' ? 'full' : 'peek',
+  );
+  // Follow view-mode changes from anywhere ("Search this area", the toggle):
+  // map → peek; list from peek → full. A drag to half is already list and
+  // stays where it was released.
+  React.useEffect(() => {
+    setSheetSnap((current) => {
+      if (viewMode === 'map') return 'peek';
+      return current === 'peek' ? 'full' : current;
+    });
+  }, [viewMode]);
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     searchParams.get('domain')
   );
@@ -1792,6 +1816,41 @@ export function HomePage() {
     });
   };
 
+  // Phone results sheet (#745): a drag or the expand button moves the sheet,
+  // and crossing between peek and half/full is a view-mode change.
+  const handleSheetSnapChange = (next: SheetSnap) => {
+    setSheetSnap(next);
+    const mode: ViewMode = next === 'peek' ? 'map' : 'list';
+    if (mode !== viewMode) handleViewModeChange(mode);
+  };
+
+  // Phone domain chips (#745): ONE selection drives both the map and the list,
+  // since both are on screen at once. `null` is "All" — offered on the map
+  // only, because the list is single-domain (#644); the list keeps its
+  // current domain then.
+  //
+  // One `setSearchParams` for the whole change: calling `handleDomainSelect`
+  // and `handleMapDomainsChange` back to back would issue two updates, and the
+  // second would be built from params that do not include the first.
+  const handleDomainChipSelect = (domainId: string | null) => {
+    if (domainId === null) {
+      handleMapDomainsChange([]);
+      return;
+    }
+    setSelectedDomain(domainId);
+    setMapSelectedDomains([domainId]);
+    // Same reset as `handleDomainSelect`: the facet fields are per-domain.
+    setMapSelectedFields({});
+    setSearchParams((prev) => {
+      prev.set('domain', domainId);
+      prev.set('map_domains', domainId);
+      for (const key of [...prev.keys()]) {
+        if (key.startsWith('f_')) prev.delete(key);
+      }
+      return prev;
+    });
+  };
+
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
@@ -2121,11 +2180,13 @@ export function HomePage() {
     />
   );
 
-  const renderBrowseToolbar = () =>
+  const renderBrowseToolbar = (variant: 'bar' | 'sheet' = 'bar') =>
     network ? (
       <BrowseToolbar
+        variant={variant}
         viewMode={viewMode}
-        filtersSlot={listFiltersPanel}
+        // In the phone sheet the Filters trigger sits in the sheet header.
+        filtersSlot={variant === 'sheet' ? undefined : listFiltersPanel}
         domainOptions={domainOptions}
         selectedDomains={toolbarSelectedDomains}
         onDomainsChange={(next) => {
@@ -2219,8 +2280,354 @@ export function HomePage() {
       selectedFields={mapSelectedFields}
       onFieldsChange={handleMapFieldsChange}
       viewMode={viewMode}
+      // The phone sheet's "Show N results" footer.
+      resultCount={contentLoading ? undefined : contentCount}
     />
   );
+
+  // The results area, as render FUNCTIONS of `triggerAction` (the
+  // `ActionHandler` render prop) rather than inline branches: desktop shows ONE
+  // of the list or the map, the phone layout (#745) shows BOTH — the map full
+  // screen and the list in the results sheet over it.
+  const renderListContent = (triggerAction: TriggerAction) => (
+    <>
+      {/* Federation-degradation indicator (#203 §6): some peer instances
+          didn't answer in time on at least one loaded page, so the list
+          feed (single-domain or, on the "All" tab, at least one visible
+          domain) is known-partial. Mirrors the map's `mapMarkers.partial`
+          banner (P4) — same styling, in-flow above the grid instead of
+          `fixed` (the list has no maximize overlay to sit above). */}
+      {listPartial && (
+        <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+          {t('home.list_partial')}
+        </p>
+      )}
+      {/* List note (#394): the list always calls discover now (profile
+          anchor + resolved viewer location when available), so this
+          explains what's driving the results — relevance-to-profile,
+          proximity, both, or (when the discover BFF fell back to
+          native — signals-search unreachable/unconfigured/timed out)
+          that ranking itself is temporarily unavailable. Exactly one
+          variant renders at a time; see `resolveListNote`. */}
+      {/* #644: one domain is always selected — the "All" tab and its
+          client-merged, client-re-sorted union are gone (spec D8).
+          Paged infinite scroll (§5.1), rendered in the SERVER's order
+          for whichever sort was applied; no client-side re-sort. */}
+    <>
+      {/* No "Showing N of M" here. The toolbar above already states
+          the total for the active filters, and the list is infinite
+          scroll — so "shown" is just "however far you happen to have
+          scrolled", which tells the reader nothing and duplicated a
+          count sitting ~40px away. */}
+      {/* The list note and bulk-select share ONE line: the note is
+          short and left-aligned, the button is right-aligned, and
+          stacking them left an empty band between the filter bar and
+          the cards.
+
+          Bulk-select sits over the CONTENT rather than in the filter
+          bar because it acts ON the results instead of choosing
+          them. `items-baseline` so the button does not drag the
+          note's text off the line, and the row is skipped entirely
+          when neither part is present.
+
+          The note is suppressed on an empty list — it would falsely
+          imply results are shown; `BrowseEmptyState` carries the
+          radius-aware explanation there instead. Suppressed during
+          loading too (contentCount 0), where the skeleton shows. */}
+      {(listNoteText || browseSelectButton) && (
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="min-w-0 text-xs text-muted-foreground">{listNoteText}</p>
+          {browseSelectButton}
+        </div>
+      )}
+      <CardGrid
+        schema={activeSchema!}
+        schemaName={selectedDomain ?? undefined}
+        schemaDescription={currentDomainLabel}
+        cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
+        items={singleDomainCards}
+        fullItems={singleDomainItems}
+        actions={actions}
+        onAction={(itemId, _type, actionSchema) => {
+          triggerAction(_type, actionSchema, itemId);
+        }}
+        // #644: `selectedDomain === null` is the transient state before the
+        // default-domain effect resolves one. The feed is disabled then, so
+        // isLoading is false and the grid would flash "no listings".
+        loading={singleDomainList.isLoading || selectedDomain === null}
+        emptyState={
+          <BrowseEmptyState
+            search={search}
+            signedIn={Boolean(user)}
+            hasProfile={Boolean(myItem)}
+            networkId={selectedNetworkId ?? ''}
+            domainLabel={currentDomainLabel ?? 'items'}
+            hasLocation={hasLocation}
+            distanceMeters={listDistanceMeters}
+            locationSource={resolvedLocationSource}
+          />
+        }
+        localItem={myItem}
+        networkId={network?.id}
+        selectedDomain={selectedDomain}
+        openActionItemIds={openActionItemIds}
+        openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
+        selection={browseSelection}
+        // #646 C1: each card's pill shows whatever drove its
+        // position, keyed off what the SERVER actually applied.
+        sortApplied={listSortApplied}
+        relevanceBasis={relevanceBasis}
+      />
+      <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
+    </>
+      {browseSelection.selectMode && (() => {
+        const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
+        const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
+        return (
+          <>
+            <BulkActionBar
+              count={browseSelection.selected.size}
+              onClear={browseSelection.clear}
+            >
+              <button
+                type="button"
+                disabled={!connectAction || bulkConnectBusy}
+                onClick={() => setBulkConnectOpen(true)}
+                className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
+              >
+                {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
+              </button>
+            </BulkActionBar>
+            {connectAction && (
+              <ActionModal
+                open={bulkConnectOpen}
+                onOpenChange={(open) => !open && setBulkConnectOpen(false)}
+                actionSchema={connectAction}
+                loading={bulkConnectBusy}
+                onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
+              />
+            )}
+          </>
+        );
+      })()}
+    </>
+  );
+
+  const renderMapContent = (triggerAction: TriggerAction) => (
+    <div className="relative h-full">
+      <MapErrorBoundary>
+      <MapView
+        schema={activeSchema!}
+        resolveMarkerLabel={resolveMarkerLabel}
+        items={mapItems}
+        // Phone (#745): fill the area under the chips; no maximize — the map
+        // is already the whole screen and fullscreen would cover the sheet.
+        heightClassName={isMobile ? 'h-full' : undefined}
+        showMaximize={!isMobile}
+        focusPoint={userLocation}
+        focusNonce={recenterNonce}
+        closePopupNonce={closePopupNonce}
+        selfLocation={userLocation}
+        filtersSlot={filtersPanel}
+        locationSlot={mapLocationControl}
+        onViewportChange={setMapViewport}
+        emptyMessage={t(
+          mapEmptyMessageKey({
+            isError: mapMarkers.isError,
+            wideViewport: isWideViewport(mapViewport),
+          }),
+        )}
+        renderPopup={(marker) => {
+          // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+          const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+          const sourceMarker = mapMarkers.markers.find(
+            (m) =>
+              m.item_id === baseItemId &&
+              (!marker.domain || m.item_domain === marker.domain),
+          );
+          const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+          const connectAction = domainActions[0];
+          const markerDomain = marker.domain
+            ? network?.domains.find((d) => d.id === marker.domain)
+            : undefined;
+          const markerSchema = markerDomain?.item_schemas
+            ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+            : activeSchema;
+          // Domain's item type (e.g. `job_posting_1.0`) for the by-id
+          // detail fetch — slim markers don't carry it.
+          const markerItemType = markerDomain?.item_schemas
+            ? Object.keys(markerDomain.item_schemas)[0]
+            : undefined;
+          return (
+            <MarkerDetailPopup
+              networkId={network?.id ?? null}
+              marker={marker}
+              sourceMarker={sourceMarker}
+              itemType={markerItemType}
+              schema={markerSchema}
+              cardConfig={markerDomain?.card}
+              localItem={myItem}
+              connectAction={connectAction}
+              connectDisabled={openActionItemIds.has(baseItemId)}
+              connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
+              onConnect={(itemId) => {
+                // Close the marker popup first so it doesn't cover
+                // the consent modal the action is about to open.
+                setClosePopupNonce((n) => n + 1);
+                if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
+              }}
+              onItemResolved={setMapDetailItem}
+            />
+          );
+        }}
+      />
+      </MapErrorBoundary>
+      {/* "Search this area" — the dense-map escape hatch #644
+          describes, placed where you need it.
+
+          The Area control lives in the LIST view, so without this
+          the only way to apply a viewport was to leave the map,
+          open a dropdown, and pick "the area shown on the map"
+          about a map no longer on screen. The realistic sequence is
+          the opposite: the pill says "1500+ in this area — zoom
+          in", you are already at max zoom, and you want the full
+          list FOR THAT AREA.
+
+          Sends the bounds and switches view in one action. */}
+      {mapViewport?.minLat !== undefined &&
+        mapViewport.minLng !== undefined &&
+        mapViewport.maxLat !== undefined &&
+        mapViewport.maxLng !== undefined &&
+        // Zoomed in enough for "this area" to mean something, AND
+        // searching it would actually change the result — either the
+        // map cannot draw everything in view, or there are matching
+        // items outside it. Gating on `truncated` alone made this
+        // unreachable: it needs >500 markers in one viewport, so a
+        // network with tens of items never qualified.
+        //
+        // Compared against `mappable`, NOT `total`: `total` counts
+        // items with no coordinates at all, and those can never be
+        // inside ANY viewport. Against `total`, a single
+        // un-geocoded item made "items exist outside the view"
+        // permanently true, so the button was offered at every zoom
+        // above the floor forever — which is how it turned up over a
+        // whole-city view with two listings.
+        (mapViewport.zoom ?? 0) >= SEARCH_AREA_MIN_ZOOM &&
+        (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) &&
+        // Phone: the map stays mounted under the raised sheet, where this has
+        // nothing to sit over.
+        (!isMobile || viewMode === 'map') && (
+          <div
+            className={cn(
+              'pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4',
+              // Above the count pill, which sits above the sheet's peek. The
+              // z drop matters as much as the offset: `z-[2100]` exists to
+              // clear the desktop map's maximize overlay, and on a phone it
+              // also floated this over the Filters drawer and the menu. Just
+              // above the sheet (`z-30`) is all a phone needs.
+              isMobile && 'bottom-[9.5rem] z-[31]',
+            )}
+          >
+            <button
+              type="button"
+              data-testid="search-this-area"
+              onClick={() => {
+                setArea({
+                  mode: 'viewport',
+                  bounds: {
+                    minLat: mapViewport.minLat!,
+                    minLng: mapViewport.minLng!,
+                    maxLat: mapViewport.maxLat!,
+                    maxLng: mapViewport.maxLng!,
+                  },
+                });
+                handleViewModeChange('list');
+              }}
+              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-xs font-semibold shadow-lg pointer-coarse:min-h-11 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <List className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t('home.search_this_area')}
+            </button>
+          </div>
+        )}
+      {/* The VIEWPORT count, for every visitor. The toolbar above
+          states the filter total instead (N5), so this is the only
+          place the "how many are in this area" number appears —
+          which is why it is no longer gated on being signed out.
+          `fixed` + high z-index so it stays above the map's own
+          maximize overlay (z-[2000]). */}
+      {(!isMobile || viewMode === 'map') && (
+        <MapCountPill
+          total={mapMarkers.total}
+          shown={mapItems.length}
+          truncated={mapMarkers.truncated}
+          // Phone: clear the results sheet's peek (~5.5rem), and sit just
+          // above the sheet rather than above every drawer (see "Search
+          // this area" above).
+          className={isMobile ? 'bottom-[6.5rem] z-[31]' : undefined}
+        />
+      )}
+      {/* Federation-degradation indicator (#203 §6): some peer instances
+          didn't answer in time, so the viewport marker set is known-partial.
+          `fixed` (not `absolute`) so it stays visible above the map's own
+          maximize overlay (z-[1000]) in both normal and maximized mode. */}
+      {mapMarkers.partial && (!isMobile || viewMode === 'map') && (
+        <div
+          className={cn(
+            'pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4',
+            // Phone: below the top bar AND the domain chip row, and under
+            // any drawer (see "Search this area" above).
+            isMobile && 'top-32 z-[31]',
+          )}
+        >
+          <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
+            {t('home.map_partial')}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  const renderMobileResults = (triggerAction: TriggerAction) => (
+    <>
+      <div className="relative min-h-0 flex-1">{renderMapContent(triggerAction)}</div>
+      <ResultsSheet
+        snap={sheetSnap}
+        onSnapChange={handleSheetSnapChange}
+        header={
+          <ResultsSheetHeader
+            viewMode={viewMode}
+            onViewModeChange={handleViewModeChange}
+            count={contentLoading ? undefined : contentCount}
+            filtersSlot={listFiltersPanel}
+            // The map's one location control (where it centres). The list's
+            // Sort and Location sit in the sheet body's first row instead.
+            extraSlot={viewMode === 'map' ? mapLocationControl : undefined}
+          />
+        }
+      >
+        {viewMode === 'list' && renderBrowseToolbar('sheet')}
+        {renderListContent(triggerAction)}
+      </ResultsSheet>
+    </>
+  );
+
+  // Phone (#745): the chip row replaces the browse toolbar under the top bar.
+  // Omitted with a single browsable domain — there is nothing to pick.
+  const renderMobileChipRow = () =>
+    domainOptions.length > 1 ? (
+      <DomainChipRow
+        options={domainOptions}
+        selected={viewMode === 'map' ? mapSelectedDomains : toolbarSelectedDomains}
+        showAll={viewMode === 'map'}
+        onSelect={handleDomainChipSelect}
+      />
+    ) : undefined;
+
+  const renderResults = (triggerAction: TriggerAction) => {
+    if (isMobile) return renderMobileResults(triggerAction);
+    return viewMode === 'list' ? renderListContent(triggerAction) : renderMapContent(triggerAction);
+  };
 
   return (
     <>
@@ -2255,21 +2662,25 @@ export function HomePage() {
       onSearchChange={setSearch}
       viewMode={viewMode}
       onViewModeChange={handleViewModeChange}
-      toolbarSlot={
-        renderBrowseToolbar()
-      }
+      compactTopBar={isMobile}
+      fillContent={isMobile}
+      toolbarSlot={isMobile ? renderMobileChipRow() : renderBrowseToolbar()}
     >
-      {renderPageHeader()}
-      {showLocationBanner && (
-        <EnableLocationBanner
-          onEnable={() => void browserLocation.request()}
-          blocked={geoPermission === 'denied'}
-          title={t('home.location_off_title')}
-          body={t('home.location_off_body')}
-          blockedBody={t('home.location_blocked_body')}
-          cta={t('home.location_enable_cta')}
-        />
-      )}
+      {/* Phone: <main> is a non-scrolling column the map fills, so the
+          banners above it get their own padded, fixed-height slot. */}
+      <div className={cn(isMobile && 'flex-none px-4 pt-3 empty:hidden')}>
+        {renderPageHeader()}
+        {showLocationBanner && (
+          <EnableLocationBanner
+            onEnable={() => void browserLocation.request()}
+            blocked={geoPermission === 'denied'}
+            title={t('home.location_off_title')}
+            body={t('home.location_off_body')}
+            blockedBody={t('home.location_blocked_body')}
+            cta={t('home.location_enable_cta')}
+          />
+        )}
+      </div>
       <ActionHandler
           // Minor on a guardian-gated domain → confirm before the guardian OTP
           // is dispatched (server issues it on the first submit).
@@ -2355,274 +2766,7 @@ export function HomePage() {
             });
           }}
         >
-          {(triggerAction) =>
-            viewMode === 'list' ? (
-              <>
-                {/* Federation-degradation indicator (#203 §6): some peer instances
-                    didn't answer in time on at least one loaded page, so the list
-                    feed (single-domain or, on the "All" tab, at least one visible
-                    domain) is known-partial. Mirrors the map's `mapMarkers.partial`
-                    banner (P4) — same styling, in-flow above the grid instead of
-                    `fixed` (the list has no maximize overlay to sit above). */}
-                {listPartial && (
-                  <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
-                    {t('home.list_partial')}
-                  </p>
-                )}
-                {/* List note (#394): the list always calls discover now (profile
-                    anchor + resolved viewer location when available), so this
-                    explains what's driving the results — relevance-to-profile,
-                    proximity, both, or (when the discover BFF fell back to
-                    native — signals-search unreachable/unconfigured/timed out)
-                    that ranking itself is temporarily unavailable. Exactly one
-                    variant renders at a time; see `resolveListNote`. */}
-                {/* #644: one domain is always selected — the "All" tab and its
-                    client-merged, client-re-sorted union are gone (spec D8).
-                    Paged infinite scroll (§5.1), rendered in the SERVER's order
-                    for whichever sort was applied; no client-side re-sort. */}
-              <>
-                {/* No "Showing N of M" here. The toolbar above already states
-                    the total for the active filters, and the list is infinite
-                    scroll — so "shown" is just "however far you happen to have
-                    scrolled", which tells the reader nothing and duplicated a
-                    count sitting ~40px away. */}
-                {/* The list note and bulk-select share ONE line: the note is
-                    short and left-aligned, the button is right-aligned, and
-                    stacking them left an empty band between the filter bar and
-                    the cards.
-
-                    Bulk-select sits over the CONTENT rather than in the filter
-                    bar because it acts ON the results instead of choosing
-                    them. `items-baseline` so the button does not drag the
-                    note's text off the line, and the row is skipped entirely
-                    when neither part is present.
-
-                    The note is suppressed on an empty list — it would falsely
-                    imply results are shown; `BrowseEmptyState` carries the
-                    radius-aware explanation there instead. Suppressed during
-                    loading too (contentCount 0), where the skeleton shows. */}
-                {(listNoteText || browseSelectButton) && (
-                  <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-                    <p className="min-w-0 text-xs text-muted-foreground">{listNoteText}</p>
-                    {browseSelectButton}
-                  </div>
-                )}
-                <CardGrid
-                  schema={activeSchema!}
-                  schemaName={selectedDomain ?? undefined}
-                  schemaDescription={currentDomainLabel}
-                  cardConfig={network?.domains.find((d) => d.id === selectedDomain)?.card}
-                  items={singleDomainCards}
-                  fullItems={singleDomainItems}
-                  actions={actions}
-                  onAction={(itemId, _type, actionSchema) => {
-                    triggerAction(_type, actionSchema, itemId);
-                  }}
-                  // #644: `selectedDomain === null` is the transient state before the
-                  // default-domain effect resolves one. The feed is disabled then, so
-                  // isLoading is false and the grid would flash "no listings".
-                  loading={singleDomainList.isLoading || selectedDomain === null}
-                  emptyState={
-                    <BrowseEmptyState
-                      search={search}
-                      signedIn={Boolean(user)}
-                      hasProfile={Boolean(myItem)}
-                      networkId={selectedNetworkId ?? ''}
-                      domainLabel={currentDomainLabel ?? 'items'}
-                      hasLocation={hasLocation}
-                      distanceMeters={listDistanceMeters}
-                      locationSource={resolvedLocationSource}
-                    />
-                  }
-                  localItem={myItem}
-                  networkId={network?.id}
-                  selectedDomain={selectedDomain}
-                  openActionItemIds={openActionItemIds}
-                  openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
-                  selection={browseSelection}
-                  // #646 C1: each card's pill shows whatever drove its
-                  // position, keyed off what the SERVER actually applied.
-                  sortApplied={listSortApplied}
-                  relevanceBasis={relevanceBasis}
-                />
-                <div ref={singleDomainSentinelRef} aria-hidden="true" className="h-px w-full" />
-              </>
-                {browseSelection.selectMode && (() => {
-                  const lockDomain = browseSelection.lockKey ?? selectedDomain ?? '';
-                  const connectAction = lockDomain ? getActionsForDomain(lockDomain)[0] : undefined;
-                  return (
-                    <>
-                      <BulkActionBar
-                        count={browseSelection.selected.size}
-                        onClear={browseSelection.clear}
-                      >
-                        <button
-                          type="button"
-                          disabled={!connectAction || bulkConnectBusy}
-                          onClick={() => setBulkConnectOpen(true)}
-                          className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
-                        >
-                          {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
-                        </button>
-                      </BulkActionBar>
-                      {connectAction && (
-                        <ActionModal
-                          open={bulkConnectOpen}
-                          onOpenChange={(open) => !open && setBulkConnectOpen(false)}
-                          actionSchema={connectAction}
-                          loading={bulkConnectBusy}
-                          onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
-                        />
-                      )}
-                    </>
-                  );
-                })()}
-              </>
-            ) : (
-              <div className="relative h-full">
-                <MapErrorBoundary>
-                <MapView
-                  schema={activeSchema!}
-                  resolveMarkerLabel={resolveMarkerLabel}
-                  items={mapItems}
-                  focusPoint={userLocation}
-                  focusNonce={recenterNonce}
-                  closePopupNonce={closePopupNonce}
-                  selfLocation={userLocation}
-                  filtersSlot={filtersPanel}
-                  locationSlot={mapLocationControl}
-                  onViewportChange={setMapViewport}
-                  emptyMessage={t(
-                    mapEmptyMessageKey({
-                      isError: mapMarkers.isError,
-                      wideViewport: isWideViewport(mapViewport),
-                    }),
-                  )}
-                  renderPopup={(marker) => {
-                    // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
-                    const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
-                    const sourceMarker = mapMarkers.markers.find(
-                      (m) =>
-                        m.item_id === baseItemId &&
-                        (!marker.domain || m.item_domain === marker.domain),
-                    );
-                    const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
-                    const connectAction = domainActions[0];
-                    const markerDomain = marker.domain
-                      ? network?.domains.find((d) => d.id === marker.domain)
-                      : undefined;
-                    const markerSchema = markerDomain?.item_schemas
-                      ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
-                      : activeSchema;
-                    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
-                    // detail fetch — slim markers don't carry it.
-                    const markerItemType = markerDomain?.item_schemas
-                      ? Object.keys(markerDomain.item_schemas)[0]
-                      : undefined;
-                    return (
-                      <MarkerDetailPopup
-                        networkId={network?.id ?? null}
-                        marker={marker}
-                        sourceMarker={sourceMarker}
-                        itemType={markerItemType}
-                        schema={markerSchema}
-                        cardConfig={markerDomain?.card}
-                        localItem={myItem}
-                        connectAction={connectAction}
-                        connectDisabled={openActionItemIds.has(baseItemId)}
-                        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
-                        onConnect={(itemId) => {
-                          // Close the marker popup first so it doesn't cover
-                          // the consent modal the action is about to open.
-                          setClosePopupNonce((n) => n + 1);
-                          if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
-                        }}
-                        onItemResolved={setMapDetailItem}
-                      />
-                    );
-                  }}
-                />
-                </MapErrorBoundary>
-                {/* "Search this area" — the dense-map escape hatch #644
-                    describes, placed where you need it.
-                    
-                    The Area control lives in the LIST view, so without this
-                    the only way to apply a viewport was to leave the map,
-                    open a dropdown, and pick "the area shown on the map"
-                    about a map no longer on screen. The realistic sequence is
-                    the opposite: the pill says "1500+ in this area — zoom
-                    in", you are already at max zoom, and you want the full
-                    list FOR THAT AREA.
-                    
-                    Sends the bounds and switches view in one action. */}
-                {mapViewport?.minLat !== undefined &&
-                  mapViewport.minLng !== undefined &&
-                  mapViewport.maxLat !== undefined &&
-                  mapViewport.maxLng !== undefined &&
-                  // Zoomed in enough for "this area" to mean something, AND
-                  // searching it would actually change the result — either the
-                  // map cannot draw everything in view, or there are matching
-                  // items outside it. Gating on `truncated` alone made this
-                  // unreachable: it needs >500 markers in one viewport, so a
-                  // network with tens of items never qualified.
-                  //
-                  // Compared against `mappable`, NOT `total`: `total` counts
-                  // items with no coordinates at all, and those can never be
-                  // inside ANY viewport. Against `total`, a single
-                  // un-geocoded item made "items exist outside the view"
-                  // permanently true, so the button was offered at every zoom
-                  // above the floor forever — which is how it turned up over a
-                  // whole-city view with two listings.
-                  (mapViewport.zoom ?? 0) >= SEARCH_AREA_MIN_ZOOM &&
-                  (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) && (
-                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4">
-                      <button
-                        type="button"
-                        data-testid="search-this-area"
-                        onClick={() => {
-                          setArea({
-                            mode: 'viewport',
-                            bounds: {
-                              minLat: mapViewport.minLat!,
-                              minLng: mapViewport.minLng!,
-                              maxLat: mapViewport.maxLat!,
-                              maxLng: mapViewport.maxLng!,
-                            },
-                          });
-                          handleViewModeChange('list');
-                        }}
-                        className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3.5 py-2 text-xs font-semibold shadow-lg pointer-coarse:min-h-11 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <List className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                        {t('home.search_this_area')}
-                      </button>
-                    </div>
-                  )}
-                {/* The VIEWPORT count, for every visitor. The toolbar above
-                    states the filter total instead (N5), so this is the only
-                    place the "how many are in this area" number appears —
-                    which is why it is no longer gated on being signed out.
-                    `fixed` + high z-index so it stays above the map's own
-                    maximize overlay (z-[2000]). */}
-                <MapCountPill
-                  total={mapMarkers.total}
-                  shown={mapItems.length}
-                  truncated={mapMarkers.truncated}
-                />
-                {/* Federation-degradation indicator (#203 §6): some peer instances
-                    didn't answer in time, so the viewport marker set is known-partial.
-                    `fixed` (not `absolute`) so it stays visible above the map's own
-                    maximize overlay (z-[1000]) in both normal and maximized mode. */}
-                {mapMarkers.partial && (
-                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
-                    <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
-                      {t('home.map_partial')}
-                    </p>
-                  </div>
-                )}
-              </div>
-            )
-          }
+          {(triggerAction) => renderResults(triggerAction)}
         </ActionHandler>
     </PageShell>
     {renderU18GuardianFlowModal()}

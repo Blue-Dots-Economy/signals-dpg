@@ -101,4 +101,4 @@ so the two products don't diverge.
 
 ## Largest files (candidates for splitting if you're touching them heavily)
 
-`pages/home-page.tsx` (~1370 lines — filters, map/list toggle, domain tabs, search all in one page), `pages/profile-form-page.tsx` (~670 lines), `components/forms/schema-form.tsx` (~500 lines). Not broken, just large — expect to spend time finding the right spot before editing rather than assuming a small, focused file.
+`pages/home-page.tsx` (~2800 lines — filters, map/list toggle, domain control, search, and the phone discovery layout's chip row + results sheet (#745, `components/discovery/mobile/`) all in one page), `pages/profile-form-page.tsx` (~670 lines), `components/forms/schema-form.tsx` (~500 lines). Not broken, just large — expect to spend time finding the right spot before editing rather than assuming a small, focused file.

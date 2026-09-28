@@ -146,3 +146,30 @@ describe('TopBar search row placement on mobile', () => {
     }
   });
 });
+
+describe('TopBar — compact phone discovery bar (#745)', () => {
+  it('drops the view toggle and the inline Language/Theme pair', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
+    renderBar({ compact: true });
+
+    expect(screen.queryByRole('radio', { name: /map view/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId('lang').parentElement).toHaveClass('hidden', 'md:flex');
+  });
+
+  it('keeps the search on row one even when signed out', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
+    renderBar({ compact: true });
+
+    const cls = document.querySelector('input[type="search"]')?.parentElement?.className ?? '';
+    expect(cls).toContain('flex-1');
+    expect(cls).not.toContain('order-last');
+  });
+
+  it('shrinks Login to an icon that keeps its accessible name', () => {
+    mockUseAuth.mockReturnValue({ isAuthenticated: false, isLoading: false });
+    renderBar({ compact: true });
+
+    expect(screen.getByRole('button', { name: 'Login' })).toBeInTheDocument();
+    expect(screen.getByText('Login')).toHaveClass('sr-only');
+  });
+});

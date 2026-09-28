@@ -562,6 +562,12 @@ describe('MapView — loading, empty state and maximize', () => {
     expect(screen.queryByRole('button', { name: 'Filters slot' })).not.toBeInTheDocument();
   });
 
+  // #745: the phone layout's map already fills the screen.
+  it('omits the maximize toggle when showMaximize is false', () => {
+    render(<MapView schema={NAME_SCHEMA} items={[]} showMaximize={false} />);
+    expect(screen.queryByRole('button', { name: 'Maximize map' })).not.toBeInTheDocument();
+  });
+
   it('reveals the location slot only while maximized, like the filters slot', async () => {
     // The map's location-source control lives in the page header, which
     // fullscreen covers — so without this slot the map loses its one location
@@ -1036,5 +1042,40 @@ describe('BrowseFiltersPanel — mobile bottom sheet', () => {
     expect(
       screen.getByRole('button', { name: 'Filter by Looking For: Job' }),
     ).toBeInTheDocument();
+  });
+
+  // #745: the phone sheet ends in the prototype's sticky footer.
+  it('ends in a Clear all / "Show N results" footer that closes the sheet', async () => {
+    const onFieldsChange = vi.fn();
+    const { baseElement } = render(
+      <BrowseFiltersPanel
+        domains={[SEEKER, JOB_PROVIDER]}
+        selectedFields={{ looking_for: ['Job'] }}
+        onFieldsChange={onFieldsChange}
+        resultCount={38}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+
+    // One Clear all on a phone — the header copy moves to the footer.
+    const clearButtons = screen.getAllByRole('button', { name: 'Clear all' });
+    expect(clearButtons).toHaveLength(1);
+    fireEvent.click(clearButtons[0]);
+    expect(onFieldsChange).toHaveBeenCalledWith({});
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show 38 results' }));
+    await waitFor(() =>
+      expect(baseElement.querySelector('[data-slot="drawer-content"][data-state="open"]')).toBeFalsy(),
+    );
+  });
+
+  it('falls back to "Done" while the count is unknown, and disables an empty Clear all', () => {
+    render(
+      <BrowseFiltersPanel domains={[SEEKER, JOB_PROVIDER]} selectedFields={{}} onFieldsChange={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open filters' }));
+
+    expect(screen.getByRole('button', { name: 'Done' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear all' })).toBeDisabled();
   });
 });

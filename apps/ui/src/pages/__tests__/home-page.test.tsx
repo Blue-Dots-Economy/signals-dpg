@@ -204,6 +204,7 @@ const state = {
   locationSource: 'none' as 'profile' | 'browser' | 'none',
   browserSupported: false,
   browserStatus: 'idle' as 'idle' | 'loading' | 'error' | 'success',
+  isMobile: false,
 };
 
 const browseCalls: BrowseCall[] = [];
@@ -273,6 +274,12 @@ vi.mock('@/hooks/use-match-score', () => ({
     recalculate: async () => {},
     clearCache: () => {},
   }),
+}));
+
+// Off by default, so every suite below renders the desktop layout; the phone
+// discovery layout (#745) suite flips it.
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => state.isMobile,
 }));
 
 vi.mock('@/hooks/use-geolocation-permission', () => ({
@@ -562,6 +569,7 @@ beforeEach(() => {
   state.locationSource = 'none';
   state.browserSupported = false;
   state.browserStatus = 'idle';
+  state.isMobile = false;
 });
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -1310,5 +1318,105 @@ describe('HomePage — clear-all only offers what the view applies', () => {
     renderHome('/?view=map&domain=provider&f_gender=female');
 
     expect(await screen.findByRole('button', { name: /clear all/i })).toBeInTheDocument();
+  });
+});
+
+describe('HomePage — phone discovery layout (#745)', () => {
+  const sheet = () => screen.getByRole('region', { name: 'Results' });
+  const chips = () => screen.getByRole('group', { name: 'Domain' });
+
+  beforeEach(() => {
+    state.isMobile = true;
+  });
+
+  it('shows the map, the chip row and the results sheet instead of the toolbar', async () => {
+    signedInSeeker();
+    renderHome();
+
+    expect(screen.getByTestId('map-view')).toBeInTheDocument();
+    expect(sheet()).toHaveAttribute('data-snap', 'peek');
+    expect(screen.queryByTestId('browse-toolbar')).not.toBeInTheDocument();
+    // The top bar's own map/list toggle moved into the sheet header.
+    expect(screen.queryByRole('radio', { name: 'Map view' })).not.toBeInTheDocument();
+    expect(within(chips()).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true');
+    // Both views are on screen: the list is already rendered inside the sheet.
+    expect(await findCard('Acme Welding')).toBeInTheDocument();
+  });
+
+  it('raises the sheet and switches to the list from the header toggle', async () => {
+    signedInSeeker();
+    renderHome();
+
+    await userEvent.click(within(sheet()).getByRole('button', { name: 'List view' }));
+
+    expect(url()).toContain('view=list');
+    expect(sheet()).toHaveAttribute('data-snap', 'full');
+    expect(within(sheet()).getByRole('button', { name: 'List view' })).toHaveAttribute('aria-pressed', 'true');
+    // The list is single-domain, so "All" is a map-only chip.
+    expect(within(chips()).queryByRole('button', { name: 'All' })).not.toBeInTheDocument();
+    // Sort and Location ride in the sheet once raised.
+    expect(within(sheet()).getByTestId('browse-toolbar')).toBeInTheDocument();
+
+    await userEvent.click(within(sheet()).getByRole('button', { name: 'Map view' }));
+
+    expect(url()).toContain('view=map');
+    expect(sheet()).toHaveAttribute('data-snap', 'peek');
+  });
+
+  it('opens a ?view=list deep link with the sheet fully raised', () => {
+    signedInSeeker();
+    renderHome('/?view=list');
+
+    expect(sheet()).toHaveAttribute('data-snap', 'full');
+  });
+
+  it('expands from the handle button', async () => {
+    signedInSeeker();
+    renderHome();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Expand results' }));
+
+    expect(sheet()).toHaveAttribute('data-snap', 'full');
+    expect(url()).toContain('view=list');
+    expect(screen.getByRole('button', { name: 'Collapse results' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('drives the map AND the list from one chip tap', async () => {
+    signedInSeeker();
+    renderHome();
+
+    await userEvent.click(within(chips()).getByRole('button', { name: /^mentors?$/i }));
+
+    expect(url()).toContain('domain=mentor');
+    expect(url()).toContain('map_domains=mentor');
+    await waitFor(() => expect(lastMarkerCall().domainIds).toEqual(['mentor']));
+    expect(browsedDomains()).toContain('mentor');
+
+    await userEvent.click(within(chips()).getByRole('button', { name: 'All' }));
+
+    expect(url()).not.toContain('map_domains');
+    await waitFor(() => expect(lastMarkerCall().domainIds).toEqual(['provider', 'mentor']));
+  });
+
+  it('keeps the search box and the chips outside any aria-hidden or inert subtree', () => {
+    signedInSeeker();
+    renderHome();
+
+    for (const el of [screen.getByRole('searchbox'), chips()]) {
+      expect(el.closest('[aria-hidden="true"]')).toBeNull();
+      expect(el.closest('[inert]')).toBeNull();
+    }
+    // The off-screen list at peek is the part that IS inert.
+    expect(screen.getByTestId('results-sheet-body')).toHaveAttribute('inert');
+  });
+
+  it('leaves the desktop layout untouched when not on a phone', () => {
+    state.isMobile = false;
+    signedInSeeker();
+    renderHome();
+
+    expect(screen.queryByRole('region', { name: 'Results' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('browse-toolbar')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Map view' })).toBeInTheDocument();
   });
 });
