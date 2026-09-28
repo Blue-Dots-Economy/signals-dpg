@@ -43,6 +43,17 @@ describe('ncs validateToken', () => {
     });
   });
 
+  it('ignores a trailing slash on the configured base URL', async () => {
+    const fetchMock = vi.fn(async () => json({ status: 'SUCCESS', statusCode: 200, data: USER }));
+    const client = createNcsClient(
+      { ...CONFIG, baseUrl: 'https://ncs.example.gov.in/' },
+      fetchMock as unknown as typeof fetch
+    );
+    await client.validateToken('t');
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe('https://ncs.example.gov.in/api/integration/validate-token');
+  });
+
   it('maps a FAILURE body to link-invalid', async () => {
     const client = createNcsClient(
       CONFIG,
