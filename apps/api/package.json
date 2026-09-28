@@ -22,6 +22,7 @@
     "db:backfill:lifecycle:dev": "tsx src/scripts/backfill_lifecycle.ts",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
+    "sso:mapping:check": "tsx scripts/check_ncs_mapping.ts",
     "keycloak:migrate:users": "tsx scripts/migrate_users_to_keycloak.ts",
     "keycloak:create:admin": "tsx scripts/create_admin_user.ts",
     "db:backfill:consent": "tsx scripts/backfill_demote_consentless.ts",

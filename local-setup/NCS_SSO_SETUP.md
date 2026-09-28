@@ -185,6 +185,29 @@ failure is on the Bluedots side. `User not found with ID …` means the token
 was issued by a different NCS environment than the one you are validating
 against.
 
+**Checking the mapping without logging in.** Save a `validate-token` response
+(or just its `data` object) to a file and dry-run it — same code as a real
+login: the mapping file + `SSO_NCS_MAPPING`, the boot check against
+`network.json`, field mapping, per-field schema validation, the go-live
+decision and geocoding. Nothing is written.
+
+```bash
+pnpm --filter api sso:mapping:check ncs-response.json            # add --no-geocode to skip lat/lng
+```
+
+```
+check:    ✅ mapping matches the network config
+profile:  blue_dot/seeker/profile_1.0 (role JOBSEEKER)
+  ✅ name                 "SAMEEKSHA VARSHNEY"
+  ✅ gender               "Female"
+  ✅ age                  14
+  ✅ location             "Bijnor, Uttar Pradesh"
+  ❌ …                    (a value the schema rejects, or a code with no value_maps entry)
+go-live:  gates [schema_required], required [name, phone]
+  → live at login
+geocode:  29.4074203, 78.4821406
+```
+
 ## 7. Windows checklist
 
 Everything above works on Windows with Docker Desktop. These are the things

@@ -1,0 +1,29 @@
+{
+  "network": "blue_dot",
+  "item_type": "profile_1.0",
+  "role_to_domain": {
+    "JOBSEEKER": "seeker"
+  },
+  "fields": {
+    "fullName": "name",
+    "mobileNumber": "phone",
+    "gender": "gender"
+  },
+  "value_maps": {
+    "gender": {
+      "MALE": "Male",
+      "FEMALE": "Female",
+      "OTHER": "Other",
+      "TRANSGENDER": "Other"
+    }
+  },
+  "age_from_dob": {
+    "age": "dateOfBirth"
+  },
+  "joined_fields": {
+    "location": ["districtName", "stateName"]
+  },
+  "feature_routes": {
+    "placement-prep": "/"
+  }
+}
