@@ -48,6 +48,12 @@ interface MarkerPopupCardProps {
   cardConfig?: DotCardConfig | null;
   /** Network domains config — enables display labels (e.g. `provider` → "Service Provider"). Passed by callers that already have query context; cluster popups omit it and fall back to title-case. */
   domains?: ReadonlyArray<{ id: string; label?: string }> | null;
+  /**
+   * `'popup'` (default) is the compact card sized for a map bubble. `'list'`
+   * is the full-size browse card, for the phone map's bottom sheet, which has
+   * the room — and should match the list view it sits over.
+   */
+  cardVariant?: 'popup' | 'list';
 }
 
 export function MarkerPopupCard({
@@ -62,6 +68,7 @@ export function MarkerPopupCard({
   schema,
   cardConfig,
   domains,
+  cardVariant = 'popup',
 }: Readonly<MarkerPopupCardProps>) {
   const { t } = useTranslation();
   const precisionInfo = getPrecisionInfo(marker.precision);
@@ -130,7 +137,7 @@ export function MarkerPopupCard({
   return (
     <>
       <ItemCard
-        variant="popup"
+        variant={cardVariant}
         className="shadow-none"
         schema={schema}
         cardConfig={cardConfig}
