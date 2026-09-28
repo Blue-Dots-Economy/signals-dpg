@@ -9,9 +9,10 @@ draft profile pre-filled from their partner details. No OTP, no login screen.
 ## How it works, in one paragraph
 
 The partner redirects the browser to `GET /api/v1/auth/sso/login?token=<JWT>&clientId=<ours>`
-(optionally `&featureKey=<key>`). The Signals API checks the link completely
-(HS256 signature with our Client Secret, `clientId` is ours, the JWT's own
-expiry, single use, and the partner's own `validate-token` API), decides which Bluedots
+(optionally `&featureKey=<key>`). The token is opaque to us — NCS signs it with
+a key of its own — so the Signals API checks `clientId` is ours, the JWT's
+expiry (decoded, unverified), single use, and, authoritatively, the partner's
+own `validate-token` API (called with an HMAC keyed by our Client Secret), decides which Bluedots
 account this person is (by verified mobile number), and hands the browser to
 Keycloak with `kc_idp_hint=signals-sso`. That identity provider **is the Signals
 API** (`/api/v1/auth/sso/oidc/*`), so Keycloak immediately gets back a signed
@@ -111,7 +112,7 @@ the same code (never the token):
 
 | reason | Meaning |
 |---|---|
-| `link-invalid` | no/malformed `token`, `clientId` not ours, bad signature, or NCS said no |
+| `link-invalid` | no/malformed `token`, `clientId` not ours, or NCS `validate-token` said no |
 | `link-expired` | past the JWT's `exp` (NCS sets the lifetime; we impose no cap of our own) |
 | `link-reused` | this exact link was already used. A link is only marked used once account linking succeeded, so an NCS or Keycloak outage never burns it |
 | `provider-unavailable` | NCS (or Keycloak Admin) down / slow, or rate-limited — retryable with the same link |

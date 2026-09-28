@@ -1,4 +1,4 @@
-import { errors as joseErrors, jwtVerify } from 'jose';
+import { decodeJwt } from 'jose';
 import type { SsoNcsMapping } from '@dpg/config';
 import { safeReturnTo } from '@/services/auth/oidc_flow_state';
 import type { NcsClient, NcsUser } from '@/services/auth/sso/ncs_client';
@@ -15,19 +15,23 @@ import { normalizeIndianMobile } from '@/utils/phone';
  * National Career Service (NCS) partner link.
  *
  * NCS redirects the browser with
- *   ?token=<JWT HS256>&clientId=<our client id>[&featureKey=<key>]
- * where the JWT is keyed with the Client Secret NCS issued us.
+ *   ?token=<JWT>&clientId=<our client id>[&featureKey=<key>]
  *
- * Checks run cheapest first, so a forged link costs microseconds and never
- * reaches NCS or Redis:
+ * The token is opaque to us. NCS signs it with a key of its own that we do not
+ * hold, so its signature is not checked here: NCS validate-token (called with
+ * an HMAC keyed by our Client Secret) is the authentication. The JWT is only
+ * decoded, unverified, to turn away an obviously dead link before calling NCS.
+ *
+ * Checks, cheapest first:
  *   1. shape + length, clientId is ours   (link-invalid)
- *   2. JWT signature, exp, iat            (link-invalid / link-expired)
+ *   2. decodes as a JWT with exp and iat  (link-invalid / link-expired)
  *   3. NCS validate-token                 (link-invalid / provider-unavailable)
  *   4. account ACTIVE, usable mobile      (account-inactive / link-invalid)
  *
- * The link lifetime is whatever NCS puts in `exp` (currently days, not
- * minutes). There is deliberately no cap of our own: validate-token is the
- * authoritative check, and single use bounds a leaked link to one login.
+ * So a forged link does reach NCS; the per-IP rate limit on /sso/login and the
+ * NCS client's circuit breaker bound that. The link lifetime is whatever NCS
+ * puts in `exp` (1 day in production); there is deliberately no cap of our
+ * own, and single use bounds a leaked link to one login.
  *
  * Single use (link-reused) is not checked here: `verify` returns a `claim()`
  * that /sso/login calls last, after the Keycloak account lookup too. So if NCS
@@ -44,7 +48,6 @@ const CLOCK_TOLERANCE_SECONDS = 30;
 
 export interface NcsProviderDeps {
   clientId: string;
-  clientSecret: string;
   client: NcsClient;
   mapping: SsoNcsMapping;
   /** Clock seam for tests. */
@@ -67,29 +70,27 @@ const invalid = (detail: string): SsoResult<never> => ({
 
 export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
   const now = deps.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
-  const secretKey = new TextEncoder().encode(deps.clientSecret);
 
-  async function verifyJwt(
-    token: string
-  ): Promise<SsoResult<{ exp: number }>> {
-    const nowS = now();
+  /**
+   * Unverified read of exp/iat. Only a pre-filter and the single-use TTL; the
+   * claim is reached only after NCS has accepted the token, so by then these
+   * are NCS's own values.
+   */
+  function readJwtTimes(token: string): SsoResult<{ exp: number }> {
+    let payload: ReturnType<typeof decodeJwt>;
     try {
-      const { payload } = await jwtVerify(token, secretKey, {
-        algorithms: ['HS256'],
-        clockTolerance: CLOCK_TOLERANCE_SECONDS,
-        currentDate: new Date(nowS * 1000),
-        requiredClaims: ['exp', 'iat'],
-      });
-      const exp = payload.exp as number;
-      const iat = payload.iat as number;
-      if (iat > nowS + CLOCK_TOLERANCE_SECONDS) return invalid('JWT issued in the future');
-      return { ok: true, value: { exp } };
-    } catch (err) {
-      if (err instanceof joseErrors.JWTExpired) {
-        return { ok: false, reason: 'link-expired' };
-      }
-      return invalid(err instanceof Error ? err.message : 'JWT verification failed');
+      payload = decodeJwt(token);
+    } catch {
+      return invalid('token is not a JWT');
     }
+    const { exp, iat } = payload;
+    if (typeof exp !== 'number' || typeof iat !== 'number') {
+      return invalid('JWT has no exp or iat');
+    }
+    const nowS = now();
+    if (exp < nowS - CLOCK_TOLERANCE_SECONDS) return { ok: false, reason: 'link-expired' };
+    if (iat > nowS + CLOCK_TOLERANCE_SECONDS) return invalid('JWT issued in the future');
+    return { ok: true, value: { exp } };
   }
 
   function toIdentity(user: NcsUser, phone: string): SsoIdentity {
@@ -120,7 +121,7 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
         return invalid('clientId does not match');
       }
 
-      const jwt = await verifyJwt(token);
+      const jwt = readJwtTimes(token);
       if (!jwt.ok) return jwt;
 
       const validated = await deps.client.validateToken(token);

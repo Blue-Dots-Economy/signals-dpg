@@ -45,7 +45,6 @@ const validateToken = vi.fn();
 function provider() {
   return createNcsProvider({
     clientId: CLIENT_ID,
-    clientSecret: SECRET,
     client: { validateToken },
     mapping: {
       item_type: 'profile_1.0',
@@ -112,15 +111,31 @@ describe('NCS provider verify', () => {
     expect(validateToken).not.toHaveBeenCalled();
   });
 
-  it('rejects a JWT signed with another secret', async () => {
-    const result = await provider().verify(await link({ secret: 'x'.repeat(64) }));
+  it('does not check the signature — a JWT signed with a key we lack still goes to NCS', async () => {
+    const l = await link({ secret: 'x'.repeat(64) });
+    expect((await provider().verify(l)).ok).toBe(true);
+    expect(validateToken).toHaveBeenCalledWith(l.token);
+  });
+
+  it('rejects a token that is not a JWT without calling NCS', async () => {
+    const result = await provider().verify({ token: 'not-a-jwt' });
     expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
     expect(validateToken).not.toHaveBeenCalled();
   });
 
-  it('rejects an expired link as link-expired', async () => {
+  it('rejects a JWT without exp or iat without calling NCS', async () => {
+    const token = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).sign(
+      new TextEncoder().encode(SECRET)
+    );
+    const result = await provider().verify({ token });
+    expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
+    expect(validateToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects an expired link as link-expired without calling NCS', async () => {
     const result = await provider().verify(await link({ iat: NOW_S - 400, exp: NOW_S - 100 }));
     expect(result).toMatchObject({ ok: false, reason: 'link-expired' });
+    expect(validateToken).not.toHaveBeenCalled();
   });
 
   it('rejects a link issued in the future', async () => {
@@ -131,15 +146,6 @@ describe('NCS provider verify', () => {
   it('accepts a long-lived link — NCS owns the lifetime', async () => {
     const result = await provider().verify(await link({ exp: NOW_S + 7 * 24 * 3600 }));
     expect(result.ok).toBe(true);
-  });
-
-  it('rejects a JWT that is not HS256', async () => {
-    const { token } = await link();
-    const [, payload, sig] = token.split('.');
-    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
-    const result = await provider().verify({ token: `${header}.${payload}.${sig}` });
-    expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
-    expect(validateToken).not.toHaveBeenCalled();
   });
 
   it('passes NCS refusals through', async () => {
