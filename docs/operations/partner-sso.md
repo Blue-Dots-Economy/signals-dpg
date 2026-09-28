@@ -8,9 +8,10 @@ draft profile pre-filled from their partner details. No OTP, no login screen.
 
 ## How it works, in one paragraph
 
-The partner redirects the browser to `GET /api/v1/auth/sso/login` with a signed
-link. The Signals API checks the link completely (signature, 5-minute expiry,
-single use, and the partner's own `validate-token` API), decides which Bluedots
+The partner redirects the browser to `GET /api/v1/auth/sso/login?token=<JWT>&clientId=<ours>`
+(optionally `&featureKey=<key>`). The Signals API checks the link completely
+(HS256 signature with our Client Secret, `clientId` is ours, the JWT's own
+expiry, single use, and the partner's own `validate-token` API), decides which Bluedots
 account this person is (by verified mobile number), and hands the browser to
 Keycloak with `kc_idp_hint=signals-sso`. That identity provider **is the Signals
 API** (`/api/v1/auth/sso/oidc/*`), so Keycloak immediately gets back a signed
@@ -110,8 +111,8 @@ the same code (never the token):
 
 | reason | Meaning |
 |---|---|
-| `link-invalid` | malformed, bad signature, or NCS said no |
-| `link-expired` | past the 5-minute lifetime |
+| `link-invalid` | no/malformed `token`, `clientId` not ours, bad signature, or NCS said no |
+| `link-expired` | past the JWT's `exp` (NCS sets the lifetime; we impose no cap of our own) |
 | `link-reused` | this exact link was already used. A link is only marked used once account linking succeeded, so an NCS or Keycloak outage never burns it |
 | `provider-unavailable` | NCS (or Keycloak Admin) down / slow, or rate-limited — retryable with the same link |
 | `account-inactive` | NCS account not `ACTIVE` |
@@ -131,7 +132,8 @@ A throwaway setup that leaves the regular dev stack alone:
    `SSO_API_INTERNAL_BASE_URL=http://host.docker.internal:2799`), then
    `apply-user-profile.sh` and `apply-sso-idp.sh` with `KC_URL=http://localhost:8089`.
 2. A stub for NCS `validate-token` (checks the HMAC, answers from fixtures) and a
-   script that builds NCS-style links (HS256 JWT + CryptoJS `sig`) with the same secret.
+   script that builds NCS-style links (HS256 JWT) with the same secret. (Verified with
+   the original `userName`/`sig`/`expiry` link format; NCS has since moved to `token`/`clientId`.)
 3. The API on `:2799` (`AUTH_PROVIDER=keycloak`, `SELF_SIGNUP_MODE=gated`, SSO vars
    pointing at the stub) and the UI on `:5174` with `VITE_API_URL=http://localhost:2799`.
 

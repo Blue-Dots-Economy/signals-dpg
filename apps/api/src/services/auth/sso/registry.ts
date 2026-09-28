@@ -22,6 +22,7 @@ export function getActiveSsoProvider(): SsoProvider | null {
 
   if (ssoConfig.providers[0] === NCS_PROVIDER_ID) {
     active = createNcsProvider({
+      clientId: ssoConfig.ncs.client_id,
       clientSecret: ssoConfig.ncs.client_secret,
       mapping: ssoConfig.ncs.mapping,
       client: createNcsClient({

@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { SignJWT } from 'jose';
 
 const claimPartnerToken = vi.fn(async (..._a: unknown[]) => true);
@@ -16,39 +15,18 @@ const { createNcsProvider } = await import('../providers/ncs.js');
 const SECRET = 'n'.repeat(64);
 const NOW_S = 1_790_230_400;
 
-function cryptoJsEncrypt(text: string, passphrase: string): string {
-  const salt = randomBytes(8);
-  let derived = Buffer.alloc(0);
-  let block = Buffer.alloc(0);
-  while (derived.length < 48) {
-    block = createHash('md5')
-      .update(Buffer.concat([block, Buffer.from(passphrase), salt]))
-      .digest();
-    derived = Buffer.concat([derived, block]);
-  }
-  const c = createCipheriv('aes-256-cbc', derived.subarray(0, 32), derived.subarray(32, 48));
-  return Buffer.concat([
-    Buffer.from('Salted__'),
-    salt,
-    c.update(text, 'utf8'),
-    c.final(),
-  ]).toString('base64');
-}
+const CLIENT_ID = 'bluedotsso-test';
 
 async function link(opts: { iat?: number; exp?: number; secret?: string } = {}) {
   const iat = opts.iat ?? NOW_S - 10;
-  const exp = opts.exp ?? iat + 300;
-  const userName = await new SignJWT({ userName: 'dge-mole_ameya@gmail.com' })
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+  const exp = opts.exp ?? iat + 600_000;
+  const token = await new SignJWT({ role: 'JOBSEEKER', token_type: 'PARTNER_SSO' })
+    .setProtectedHeader({ alg: 'HS256' })
+    .setSubject('c88f0ddf-4a9f-4cd2-8592-4df23a800dc3')
     .setIssuedAt(iat)
     .setExpirationTime(exp)
     .sign(new TextEncoder().encode(opts.secret ?? SECRET));
-  return {
-    userName,
-    sig: cryptoJsEncrypt(`dge-mole_ameya@gmail.com`, SECRET),
-    expiry: `${exp}.288`,
-    featureKey: 'placement-prep',
-  };
+  return { token, clientId: CLIENT_ID, featureKey: 'placement-prep' };
 }
 
 const NCS_USER = {
@@ -66,6 +44,7 @@ const validateToken = vi.fn();
 
 function provider() {
   return createNcsProvider({
+    clientId: CLIENT_ID,
     clientSecret: SECRET,
     client: { validateToken },
     mapping: {
@@ -110,18 +89,23 @@ describe('NCS provider verify', () => {
     });
   });
 
-  it('calls NCS with the userName JWT as the token', async () => {
+  it('calls NCS with the link token', async () => {
     const l = await link();
     await provider().verify(l);
-    expect(validateToken).toHaveBeenCalledWith(l.userName);
+    expect(validateToken).toHaveBeenCalledWith(l.token);
+  });
+
+  it('accepts a link without clientId or featureKey', async () => {
+    const { token } = await link();
+    expect(await provider().verify({ token })).toMatchObject({ ok: true, value: { returnTo: '/' } });
   });
 
   it.each([
-    ['missing userName', { userName: undefined }],
-    ['missing sig', { sig: undefined }],
-    ['missing expiry', { expiry: undefined }],
-    ['array param', { userName: ['a', 'b'] }],
-    ['oversized param', { sig: 'x'.repeat(5000) }],
+    ['missing token', { token: undefined }],
+    ['array token', { token: ['a', 'b'] }],
+    ['oversized token', { token: 'x'.repeat(5000) }],
+    ['another partner clientId', { clientId: 'someone-else' }],
+    ['array clientId', { clientId: [CLIENT_ID, CLIENT_ID] }],
   ])('rejects %s without calling NCS', async (_label, override) => {
     const result = await provider().verify({ ...(await link()), ...override });
     expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
@@ -144,22 +128,18 @@ describe('NCS provider verify', () => {
     expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
   });
 
-  it('rejects a link valid for longer than the maximum lifetime', async () => {
-    const result = await provider().verify(await link({ iat: NOW_S - 10, exp: NOW_S + 3600 }));
-    expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
+  it('accepts a long-lived link — NCS owns the lifetime', async () => {
+    const result = await provider().verify(await link({ exp: NOW_S + 7 * 24 * 3600 }));
+    expect(result.ok).toBe(true);
   });
 
-  it('rejects a sig that does not decrypt with the secret', async () => {
-    const l = await link();
-    const result = await provider().verify({ ...l, sig: cryptoJsEncrypt('x', 'other') });
+  it('rejects a JWT that is not HS256', async () => {
+    const { token } = await link();
+    const [, payload, sig] = token.split('.');
+    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+    const result = await provider().verify({ token: `${header}.${payload}.${sig}` });
     expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
     expect(validateToken).not.toHaveBeenCalled();
-  });
-
-  it('rejects an expiry that disagrees with the JWT', async () => {
-    const l = await link();
-    const result = await provider().verify({ ...l, expiry: '1' });
-    expect(result).toMatchObject({ ok: false, reason: 'link-invalid' });
   });
 
   it('passes NCS refusals through', async () => {
@@ -183,9 +163,9 @@ describe('NCS provider verify', () => {
     if (!result.ok) throw new Error('expected a verified link');
 
     expect(await result.value.claim()).toBe(true);
-    expect(claimPartnerToken).toHaveBeenCalledWith('ncs', l.userName, expect.any(Number));
+    expect(claimPartnerToken).toHaveBeenCalledWith('ncs', l.token, expect.any(Number));
     const ttl = claimPartnerToken.mock.calls[0]?.[2] as number;
-    expect(ttl).toBeGreaterThanOrEqual(290);
+    expect(ttl).toBeGreaterThanOrEqual(599_990);
 
     claimPartnerToken.mockResolvedValue(false);
     expect(await result.value.claim()).toBe(false);

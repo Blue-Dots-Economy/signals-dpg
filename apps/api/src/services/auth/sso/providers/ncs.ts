@@ -9,24 +9,25 @@ import type {
   SsoResult,
   SsoVerifiedLink,
 } from '@/services/auth/sso/types';
-import { decryptCryptoJsAes } from '@/utils/cryptojs_aes';
 import { normalizeIndianMobile } from '@/utils/phone';
 
 /**
  * National Career Service (NCS) partner link.
  *
  * NCS redirects the browser with
- *   ?userName=<JWT HS256>&sig=<CryptoJS AES>&expiry=<epoch.ms>&featureKey=<key>
- * where both the JWT and `sig` are keyed with the Client Secret NCS issued us.
+ *   ?token=<JWT HS256>&clientId=<our client id>[&featureKey=<key>]
+ * where the JWT is keyed with the Client Secret NCS issued us.
  *
  * Checks run cheapest first, so a forged link costs microseconds and never
  * reaches NCS or Redis:
- *   1. shape + length                     (link-invalid)
- *   2. JWT signature, exp, iat, lifetime  (link-invalid / link-expired)
- *   3. sig decrypts with the secret       (link-invalid)
- *   4. expiry param agrees with JWT exp   (link-invalid)
- *   5. NCS validate-token                 (link-invalid / provider-unavailable)
- *   6. account ACTIVE, usable mobile      (account-inactive / link-invalid)
+ *   1. shape + length, clientId is ours   (link-invalid)
+ *   2. JWT signature, exp, iat            (link-invalid / link-expired)
+ *   3. NCS validate-token                 (link-invalid / provider-unavailable)
+ *   4. account ACTIVE, usable mobile      (account-inactive / link-invalid)
+ *
+ * The link lifetime is whatever NCS puts in `exp` (currently days, not
+ * minutes). There is deliberately no cap of our own: validate-token is the
+ * authoritative check, and single use bounds a leaked link to one login.
  *
  * Single use (link-reused) is not checked here: `verify` returns a `claim()`
  * that /sso/login calls last, after the Keycloak account lookup too. So if NCS
@@ -40,10 +41,9 @@ export const NCS_PROVIDER_ID = 'ncs';
 const MAX_PARAM_LENGTH = 4096;
 /** Allowed clock skew between NCS and us. */
 const CLOCK_TOLERANCE_SECONDS = 30;
-/** NCS links live 5 minutes; refuse anything claiming to live much longer. */
-const MAX_LINK_LIFETIME_SECONDS = 10 * 60;
 
 export interface NcsProviderDeps {
+  clientId: string;
   clientSecret: string;
   client: NcsClient;
   mapping: SsoNcsMapping;
@@ -71,7 +71,7 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
 
   async function verifyJwt(
     token: string
-  ): Promise<SsoResult<{ userName: string; exp: number }>> {
+  ): Promise<SsoResult<{ exp: number }>> {
     const nowS = now();
     try {
       const { payload } = await jwtVerify(token, secretKey, {
@@ -83,11 +83,7 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
       const exp = payload.exp as number;
       const iat = payload.iat as number;
       if (iat > nowS + CLOCK_TOLERANCE_SECONDS) return invalid('JWT issued in the future');
-      if (exp - iat > MAX_LINK_LIFETIME_SECONDS) return invalid('JWT lifetime too long');
-      if (typeof payload.userName !== 'string' || payload.userName === '') {
-        return invalid('JWT has no userName claim');
-      }
-      return { ok: true, value: { userName: payload.userName, exp } };
+      return { ok: true, value: { exp } };
     } catch (err) {
       if (err instanceof joseErrors.JWTExpired) {
         return { ok: false, reason: 'link-expired' };
@@ -116,25 +112,16 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
     appOrigin: deps.mapping.app_origin,
 
     async verify(query) {
-      const token = stringParam(query, 'userName');
-      const sig = stringParam(query, 'sig');
-      const expiry = stringParam(query, 'expiry');
-      if (!token || !sig || !expiry) return invalid('missing or malformed parameters');
+      const token = stringParam(query, 'token');
+      if (!token) return invalid('missing or malformed token parameter');
+      // Optional on the link; when present it must name us, so a link NCS
+      // minted for another partner is refused before it reaches NCS.
+      if (query.clientId !== undefined && query.clientId !== deps.clientId) {
+        return invalid('clientId does not match');
+      }
 
       const jwt = await verifyJwt(token);
       if (!jwt.ok) return jwt;
-
-      // The plaintext's exact contents are an open question with NCS (spec
-      // §11.1). Decrypting at all proves the sender holds the Client Secret;
-      // NCS validate-token below is the authoritative check.
-      if (decryptCryptoJsAes(sig, deps.clientSecret) === null) {
-        return invalid('sig does not decrypt with the client secret');
-      }
-
-      const expirySeconds = Number.parseFloat(expiry);
-      if (!Number.isFinite(expirySeconds) || Math.abs(expirySeconds - jwt.value.exp) > 1) {
-        return invalid('expiry does not match the JWT');
-      }
 
       const validated = await deps.client.validateToken(token);
       if (!validated.ok) return validated;
