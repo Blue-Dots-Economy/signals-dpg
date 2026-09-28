@@ -48,6 +48,7 @@ provider is missing a secret.
 | `SSO_NCS_BASE_URL` | staging `https://ncsapi.centralindia.cloudapp.azure.com`, prod `https://betacloud.ncs.gov.in` |
 | `SSO_NCS_CLIENT_ID` / `SSO_NCS_CLIENT_SECRET` | issued by NCS |
 | `SSO_NCS_TIMEOUT_MS` | default `5000` |
+| `SSO_NCS_SINGLE_USE_LINKS` | default `true` — each link logs in once (`link-reused` after). Set to exactly `false` only if NCS reuses one token across clicks for its whole lifetime; a leaked link then logs in until its `exp` (1 day) |
 | `SSO_NCS_MAPPING` | JSON, below |
 
 ```json

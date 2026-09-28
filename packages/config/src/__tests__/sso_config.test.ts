@@ -23,6 +23,16 @@ describe('SsoSecretsSchema', () => {
     expect(parsed.SSO_OIDC_CLIENT_ID).toBe('signals-sso');
     expect(parsed.SSO_NCS_TIMEOUT_MS).toBe(5000);
     expect(parsed.SSO_NCS_MAPPING).toBe('{}');
+    expect(parsed.SSO_NCS_SINGLE_USE_LINKS).toBe(true);
+  });
+
+  it('turns single-use links off only for an explicit false', () => {
+    const parse = (v: string) => SsoSecretsSchema.parse({ SSO_NCS_SINGLE_USE_LINKS: v });
+    expect(parse('false').SSO_NCS_SINGLE_USE_LINKS).toBe(false);
+    expect(parse(' FALSE ').SSO_NCS_SINGLE_USE_LINKS).toBe(false);
+    expect(parse('true').SSO_NCS_SINGLE_USE_LINKS).toBe(true);
+    expect(parse('flase').SSO_NCS_SINGLE_USE_LINKS).toBe(true);
+    expect(parse('0').SSO_NCS_SINGLE_USE_LINKS).toBe(true);
   });
 });
 

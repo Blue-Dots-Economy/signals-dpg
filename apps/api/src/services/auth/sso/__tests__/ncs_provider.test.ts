@@ -42,8 +42,9 @@ const NCS_USER = {
 
 const validateToken = vi.fn();
 
-function provider() {
+function provider(opts: { singleUseLinks?: boolean } = {}) {
   return createNcsProvider({
+    ...opts,
     clientId: CLIENT_ID,
     client: { validateToken },
     mapping: {
@@ -175,6 +176,14 @@ describe('NCS provider verify', () => {
 
     claimPartnerToken.mockResolvedValue(false);
     expect(await result.value.claim()).toBe(false);
+  });
+
+  it('with single use off, claim() always succeeds and never touches Redis', async () => {
+    const result = await provider({ singleUseLinks: false }).verify(await link());
+    if (!result.ok) throw new Error('expected a verified link');
+    expect(await result.value.claim()).toBe(true);
+    expect(await result.value.claim()).toBe(true);
+    expect(claimPartnerToken).not.toHaveBeenCalled();
   });
 
   it('refuses an inactive NCS account', async () => {

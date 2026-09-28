@@ -33,6 +33,9 @@ import { normalizeIndianMobile } from '@/utils/phone';
  * puts in `exp` (1 day in production); there is deliberately no cap of our
  * own, and single use bounds a leaked link to one login.
  *
+ * Single use is on unless SSO_NCS_SINGLE_USE_LINKS=false (for a partner that
+ * hands out one token per user per day); off, `claim()` always succeeds.
+ *
  * Single use (link-reused) is not checked here: `verify` returns a `claim()`
  * that /sso/login calls last, after the Keycloak account lookup too. So if NCS
  * or Keycloak is briefly down, the user can retry the same link instead of
@@ -48,6 +51,8 @@ const CLOCK_TOLERANCE_SECONDS = 30;
 
 export interface NcsProviderDeps {
   clientId: string;
+  /** Claim each link once (default). Off only for a partner that reuses tokens. */
+  singleUseLinks?: boolean;
   client: NcsClient;
   mapping: SsoNcsMapping;
   /** Clock seam for tests. */
@@ -70,6 +75,7 @@ const invalid = (detail: string): SsoResult<never> => ({
 
 export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
   const now = deps.nowSeconds ?? (() => Math.floor(Date.now() / 1000));
+  const singleUse = deps.singleUseLinks ?? true;
 
   /**
    * Unverified read of exp/iat. Only a pre-filter and the single-use TTL; the
@@ -146,11 +152,13 @@ export function createNcsProvider(deps: NcsProviderDeps): SsoProvider {
         ...(deps.mapping.app_origin ? { appOrigin: deps.mapping.app_origin } : {}),
         // Remembered until the link could no longer verify anyway.
         claim: () =>
-          claimPartnerToken(
-            NCS_PROVIDER_ID,
-            token,
-            Math.max(1, jwt.value.exp - now() + CLOCK_TOLERANCE_SECONDS)
-          ),
+          singleUse
+            ? claimPartnerToken(
+                NCS_PROVIDER_ID,
+                token,
+                Math.max(1, jwt.value.exp - now() + CLOCK_TOLERANCE_SECONDS)
+              )
+            : Promise.resolve(true),
       };
       return { ok: true, value: link };
     },

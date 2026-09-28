@@ -173,6 +173,13 @@ export const SsoSecretsSchema = z.object({
   SSO_NCS_CLIENT_ID: z.string().optional(),
   SSO_NCS_CLIENT_SECRET: z.string().optional(),
   SSO_NCS_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  // A partner link logs in once (replay protection). Set to exactly `false`
+  // only if the partner reuses one token across clicks for its whole lifetime;
+  // then a leaked link logs in until it expires. Anything else keeps it on.
+  SSO_NCS_SINGLE_USE_LINKS: z
+    .string()
+    .default('true')
+    .transform((val) => val.trim().toLowerCase() !== 'false'),
   // JSON: role → domain, NCS field → profile field, featureKey → UI route.
   // Parsed by parseSsoNcsMapping().
   SSO_NCS_MAPPING: z.string().default('{}'),
