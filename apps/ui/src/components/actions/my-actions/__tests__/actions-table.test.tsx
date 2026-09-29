@@ -176,17 +176,9 @@ describe('ActionsTable — rows', () => {
 });
 
 describe('ActionsTable — selection bar', () => {
-  const exportMenu: BulkCommand = {
-    id: 'export',
-    label: 'Export',
-    count: 3,
-    tone: 'primary',
-    onClick: vi.fn(),
-    menu: [
-      { id: 'seeker', label: 'Seekers (2)', onClick: vi.fn() },
-      { id: 'all', label: 'All — 2 files', onClick: vi.fn(), divider: true },
-    ],
-  };
+  const exportSeekers: BulkCommand = { id: 'export:seeker', label: 'Export seekers', count: 3, tone: 'primary', onClick: vi.fn() };
+  const exportAll: BulkCommand = { id: 'export:sp', label: 'Export service providers', count: 1, hideCount: true, tone: 'primary', onClick: vi.fn() };
+
 
   it('shows only applicable commands, the note, select-all and clear', async () => {
     const accept: BulkCommand = { id: 'accept', label: 'Accept', count: 1, tone: 'accept', onClick: vi.fn() };
@@ -195,7 +187,8 @@ describe('ActionsTable — selection bar', () => {
       rows: [row('a1'), row('a2')],
       total: 20,
       selected: new Set(['a1']),
-      bulkCommands: [accept, reject, exportMenu],
+      bulkCommands: [accept, reject, exportSeekers, exportAll],
+      selectionNoteDetail: '1 not exportable — only accepted or completed',
       selectionNote: '1 not exportable',
     });
     const bar = screen.getByRole('region', { name: 'Selection' });
@@ -204,9 +197,11 @@ describe('ActionsTable — selection bar', () => {
     expect(within(bar).getByText(/1 not exportable/)).toBeInTheDocument();
     await userEvent.click(within(bar).getByRole('button', { name: 'Accept (1)' }));
     expect(accept.onClick).toHaveBeenCalled();
-    await userEvent.click(within(bar).getByRole('button', { name: /^Export \(3\)/ }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Seekers (2)' }));
-    expect(exportMenu.menu![0].onClick).toHaveBeenCalled();
+    await userEvent.click(within(bar).getByRole('button', { name: 'Export seekers (3)' }));
+    expect(exportSeekers.onClick).toHaveBeenCalled();
+    // A count the page cannot know is left off the label.
+    expect(within(bar).getByRole('button', { name: 'Export service providers' })).toBeInTheDocument();
+    expect(within(bar).getByText(/1 not exportable/)).toHaveAttribute('title', '1 not exportable — only accepted or completed');
     await userEvent.click(within(bar).getByRole('button', { name: 'Select all 20' }));
     expect(handlers.onSelectAll).toHaveBeenCalled();
     await userEvent.click(within(bar).getByRole('button', { name: 'Clear selection' }));

@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { format, isToday, isYesterday } from 'date-fns';
 import {
   AlertCircle,
-  ChevronDown,
   ArrowDownLeft,
   ArrowUpRight,
   ChevronLeft,
@@ -43,8 +42,6 @@ export interface BulkCommand {
   onClick: () => void;
   /** Show the label without "(count)" — for a count the page cannot know yet. */
   hideCount?: boolean;
-  /** When set, the button opens this menu instead (e.g. one export per type). */
-  menu?: Array<{ id: string; label: string; onClick: () => void; divider?: boolean }>;
 }
 
 interface Labels {
@@ -82,6 +79,8 @@ interface ActionsTableProps extends Labels {
   bulkCommands: BulkCommand[];
   /** Why some of the selection is left out of an action, e.g. not exportable. */
   selectionNote?: string;
+  /** The longer explanation of `selectionNote`, shown on hover. */
+  selectionNoteDetail?: string;
   onCommand: (action: Action, command: RowCommand) => void;
   /**
    * What to say when there are no rows. Defaults to the "no match — loosen
@@ -195,9 +194,14 @@ const FLEX_MIN = 120;
 const NAME_MIN = 170;
 
 const toneClass: Record<BulkCommand['tone'], string> = {
-  accept: 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/90',
-  reject: 'border-red-200 bg-background text-red-600 hover:bg-red-50',
-  primary: 'border-primary bg-primary text-primary-foreground hover:bg-primary/90',
+  // Each tone restates its dark-mode colours: the outline variant sets its own
+  // `dark:` border/background, which would otherwise win and grey these out.
+  accept:
+    'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/90 dark:border-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-600/90 dark:hover:text-white',
+  reject:
+    'border-red-200 bg-background text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300',
+  primary:
+    'border-primary bg-primary text-primary-foreground hover:bg-primary/90 dark:border-primary dark:bg-primary dark:hover:bg-primary/90 dark:hover:text-primary-foreground',
   neutral: 'bg-background',
 };
 
@@ -355,44 +359,32 @@ function SelectionBar(props: Readonly<ActionsTableProps>) {
           {t('my_actions.select_all_n', 'Select all {{total}}', { total })}
         </button>
       ) : null}
-      {props.selectionNote ? (
-        <span className="text-xs text-muted-foreground">· {props.selectionNote}</span>
-      ) : null}
-      <span className="flex-1" />
-      {commands.map((b) =>
-        b.menu ? (
-          <DropdownMenu key={b.id}>
-            <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className={`h-8 gap-1 ${toneClass[b.tone]}`}>
-                {b.label} ({b.count})
-                <ChevronDown className="h-3.5 w-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              {b.menu.map((m) => (
-                <React.Fragment key={m.id}>
-                  {m.divider ? <DropdownMenuSeparator /> : null}
-                  <DropdownMenuItem onSelect={m.onClick}>{m.label}</DropdownMenuItem>
-                </React.Fragment>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          <Button key={b.id} size="sm" variant="outline" className={`h-8 ${toneClass[b.tone]}`} onClick={b.onClick}>
-            {b.hideCount ? b.label : `${b.label} (${b.count})`}
-          </Button>
-        ),
-      )}
+      {/* Clear sits with the count, so the commands on the right can wrap
+          without pushing it onto a line of its own. */}
       <Button
         variant="ghost"
         size="sm"
         onClick={props.onClearSelection}
         aria-label={t('my_actions.clear_selection', 'Clear selection')}
-        className="h-8 gap-1 text-muted-foreground"
+        className="h-7 gap-1 px-2 text-xs text-muted-foreground"
       >
-        <X className="h-4 w-4" />
+        <X className="h-3.5 w-3.5" />
         {t('my_actions.clear', 'Clear')}
       </Button>
+      {props.selectionNote ? (
+        <span className="text-xs text-muted-foreground" title={props.selectionNoteDetail}>
+          · {props.selectionNote}
+        </span>
+      ) : null}
+      {/* The commands keep together on the right; when they do not fit they
+          wrap as a group, still right-aligned. */}
+      <div className="ml-auto flex flex-wrap justify-end gap-2">
+        {commands.map((b) => (
+          <Button key={b.id} size="sm" variant="outline" className={`h-8 ${toneClass[b.tone]}`} onClick={b.onClick}>
+            {b.hideCount ? b.label : `${b.label} (${b.count})`}
+          </Button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -789,7 +781,7 @@ function ActionCell({ text, type }: Readonly<{ text: string; type: string }>) {
 
 function DirectionCell({ received }: Readonly<{ received: boolean }>) {
   const { t } = useTranslation();
-  const tone = received ? 'text-primary' : 'text-amber-600';
+  const tone = received ? 'text-primary' : 'text-amber-600 dark:text-amber-400';
   const dot = received ? 'bg-primary' : 'bg-amber-600';
   return (
     <div className={`flex items-center gap-1.5 px-3 text-[13px] font-semibold ${tone}`}>
@@ -847,7 +839,7 @@ function RowMenu({
         {items.map((m, i) => (
           <React.Fragment key={m.c}>
             {i === splitAt && i > 0 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem onSelect={() => onCommand(m.c)} className={m.danger ? 'text-red-600' : ''}>
+            <DropdownMenuItem onSelect={() => onCommand(m.c)} className={m.danger ? 'text-red-600 dark:text-red-400' : ''}>
               {m.label}
             </DropdownMenuItem>
           </React.Fragment>
@@ -866,8 +858,8 @@ function ReviewStrip({
   const { t } = useTranslation();
   const summary = Object.entries(action.counterparty?.column_fields ?? {});
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
-      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-amber-700">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
+      <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-amber-700 dark:text-amber-400">
         <AlertCircle className="h-3.5 w-3.5" />
         {t('my_actions.needs_review', 'Needs your review')}
       </span>
@@ -887,7 +879,7 @@ function ReviewStrip({
         <Button variant="outline" size="sm" className="h-8" onClick={() => onCommand('view_profile')}>
           {t('actions.btn_view_profile', 'View profile')}
         </Button>
-        <Button variant="outline" size="sm" className="h-8 text-red-600" onClick={() => onCommand('rejected')}>
+        <Button variant="outline" size="sm" className="h-8 text-red-600 dark:text-red-400" onClick={() => onCommand('rejected')}>
           {t('actions.btn_reject', 'Reject')}
         </Button>
         <Button size="sm" className="h-8" onClick={() => onCommand('accepted')}>

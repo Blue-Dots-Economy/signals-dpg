@@ -433,8 +433,10 @@ export function MyActionsPage() {
 
   const notExportable = allMatching ? 0 : pickedRows.length - exportableCount;
   let selectionNote: string | undefined;
+  let selectionNoteDetail: string | undefined;
   if (canExport && exportableCount > 0 && notExportable > 0) {
-    selectionNote = t('my_actions.note_not_exportable', '{{count}} not exportable — only accepted or completed', {
+    selectionNote = t('my_actions.note_not_exportable_short', '{{count}} not exportable', { count: notExportable });
+    selectionNoteDetail = t('my_actions.note_not_exportable', '{{count}} not exportable — only accepted or completed', {
       count: notExportable,
     });
   }
@@ -606,6 +608,7 @@ export function MyActionsPage() {
           onClearSelection={clearSelection}
           bulkCommands={selectionSize > 0 ? bulkCommands : []}
           selectionNote={selectionNote}
+          selectionNoteDetail={selectionNoteDetail}
           onCommand={onCommand}
         />
       </div>

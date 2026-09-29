@@ -178,7 +178,7 @@ export function MyActionsToolbar({
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={t('my_actions.search_placeholder', 'Search name or job…')}
-          className="h-8 border-0 px-0 shadow-none focus-visible:ring-0"
+          className="h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
         />
         {q ? (
           <button type="button" onClick={() => setQ('')} aria-label={t('my_actions.clear_search', 'Clear search')}>

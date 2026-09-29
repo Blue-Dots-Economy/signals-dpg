@@ -362,6 +362,7 @@
   "my_actions.no_results": "0 results",
   "my_actions.not_scored": "Not scored",
   "my_actions.note_not_exportable": "{{count}} not exportable — only accepted or completed",
+  "my_actions.note_not_exportable_short": "{{count}} not exportable",
   "my_actions.of_total": "of {{total}}",
   "my_actions.pagination": "Pagination",
   "my_actions.prev_page": "Previous page",

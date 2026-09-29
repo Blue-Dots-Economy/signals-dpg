@@ -316,6 +316,7 @@
   "my_actions.no_results": "0 परिणाम",
   "my_actions.not_scored": "स्कोर नहीं",
   "my_actions.note_not_exportable": "{{count}} निर्यात योग्य नहीं — केवल स्वीकृत या पूर्ण",
+  "my_actions.note_not_exportable_short": "{{count}} निर्यात योग्य नहीं",
   "my_actions.of_total": "{{total}} में से",
   "my_actions.pagination": "पेज",
   "my_actions.prev_page": "पिछला पेज",

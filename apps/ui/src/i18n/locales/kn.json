@@ -316,6 +316,7 @@
   "my_actions.no_results": "0 ಫಲಿತಾಂಶಗಳು",
   "my_actions.not_scored": "ಸ್ಕೋರ್ ಇಲ್ಲ",
   "my_actions.note_not_exportable": "{{count}} ರಫ್ತು ಮಾಡಲಾಗದು — ಸ್ವೀಕರಿಸಿದ ಅಥವಾ ಪೂರ್ಣಗೊಂಡವು ಮಾತ್ರ",
+  "my_actions.note_not_exportable_short": "{{count}} ರಫ್ತು ಮಾಡಲಾಗದು",
   "my_actions.of_total": "{{total}} ರಲ್ಲಿ",
   "my_actions.pagination": "ಪುಟಗಳು",
   "my_actions.prev_page": "ಹಿಂದಿನ ಪುಟ",

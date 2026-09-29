@@ -40,23 +40,23 @@ type StatusStyleShape = {
 // state reads consistently across networks. Labels are i18n keys; the
 // component resolves them via t() so non-English locales render correctly.
 const statusStyles: Record<string, StatusStyleShape> = {
-  created: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
-  pending: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  created: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  pending: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
   // Still waiting on the receiver, like `created` — own labels, pending colour.
-  submitted: { labelKey: 'actions.status_pill_submitted', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
-  invited: { labelKey: 'actions.status_pill_invited', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  submitted: { labelKey: 'actions.status_pill_submitted', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  invited: { labelKey: 'actions.status_pill_invited', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
   new: { labelKey: 'actions.status_pill_new', cls: 'bg-primary/10 text-primary', dot: 'bg-primary', icon: <Sparkles className="h-3 w-3" /> },
-  accepted: { labelKey: 'actions.status_pill_accepted', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
-  completed: { labelKey: 'actions.status_pill_completed', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
-  rejected: { labelKey: 'actions.status_pill_rejected', cls: 'bg-red-50 text-red-700', dot: 'bg-red-500', icon: <X className="h-3 w-3" /> },
-  cancelled: { labelKey: 'actions.status_pill_cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
+  accepted: { labelKey: 'actions.status_pill_accepted', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
+  completed: { labelKey: 'actions.status_pill_completed', cls: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
+  rejected: { labelKey: 'actions.status_pill_rejected', cls: 'bg-red-50 text-red-700 dark:bg-red-500/15 dark:text-red-300', dot: 'bg-red-500', icon: <X className="h-3 w-3" /> },
+  cancelled: { labelKey: 'actions.status_pill_cancelled', cls: 'bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
 };
 
 export function getStatusStyle(status: string): StatusStyleShape {
   return (
     statusStyles[status] ?? {
       labelKey: null,
-      cls: 'bg-slate-100 text-slate-600',
+      cls: 'bg-slate-100 text-slate-600 dark:bg-slate-500/20 dark:text-slate-300',
       dot: 'bg-slate-400',
       icon: null,
     }
