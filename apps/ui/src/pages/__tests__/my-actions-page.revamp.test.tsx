@@ -287,11 +287,10 @@ describe('MyActionsPage — revamp', () => {
     total = 3;
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
-    // Two counterparty types → a menu: one line per type, plus all files.
-    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
-    expect(await screen.findByRole('menuitem', { name: 'Seekers (1)' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Service Providers (1)' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('menuitem', { name: 'All — 2 files' }));
+    // Two counterparty types → one button (and one file) per type; no "all".
+    expect(screen.queryByRole('button', { name: /^Export all/ })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export service providers (1)' }));
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(2));
     const bodies = exportActionsMock.mock.calls.map((c) => c[0].filters);
     expect(bodies.map((f) => [f.counterparty_domain, f.action_ids])).toEqual([
@@ -386,22 +385,21 @@ describe('MyActionsPage — export paths', () => {
     await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
   });
 
-  it('"Select all N" exports by filter, one request per exportable counterparty type', async () => {
+  it('"Select all N" shows one uncounted button per exportable type, exporting by filter', async () => {
     rows = [accepted('a1')];
     total = 30;
     renderPage('/my-actions?q=asha');
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
     await userEvent.click(screen.getByRole('button', { name: 'Select all 30' }));
-    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'All — 2 files' }));
-    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(2));
-    const filters = exportActionsMock.mock.calls.map((c) => c[0].filters);
-    expect(filters.map((f) => f.counterparty_domain)).toEqual(['seeker', 'service_provider']);
-    expect(filters[0]).toMatchObject({ q: 'asha', action_status: ['accepted', 'completed'] });
-    expect(filters[0].action_ids).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Export service providers' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers' }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
+    const [filters] = exportActionsMock.mock.calls.map((c) => c[0].filters);
+    expect(filters).toMatchObject({ counterparty_domain: 'seeker', q: 'asha', action_status: ['accepted', 'completed'] });
+    expect(filters.action_ids).toBeUndefined();
   });
 
-  it('select-all splits a mixed-type refusal per type, and one failure does not cancel the rest', async () => {
+  it('select-all splits a mixed-type refusal into one file per type', async () => {
     const { ActionExportError } = await import('@/lib/action-export');
     rows = [accepted('a1')];
     total = 30;
@@ -416,14 +414,12 @@ describe('MyActionsPage — export paths', () => {
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
     await userEvent.click(screen.getByRole('button', { name: 'Select all 30' }));
-    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'All — 2 files' }));
-    // seeker (mixed → split into 2), then service_provider: 4 requests in all.
-    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(4));
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers' }));
+    // Mixed → re-issued per type; the second one fails, the first still saves.
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(3));
     const filters = exportActionsMock.mock.calls.map((c) => c[0].filters);
     expect(filters[1]).toMatchObject({ counterparty_network: 'blue_dot', counterparty_item_type: 'profile_1.0' });
     expect(filters[2]).toMatchObject({ counterparty_network: 'yellow_dot' });
-    expect(filters[3]).toMatchObject({ counterparty_domain: 'service_provider' });
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
     expect(toastMock.success).toHaveBeenCalled();
   });

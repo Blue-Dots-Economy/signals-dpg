@@ -294,8 +294,6 @@
   "my_actions.dir_sent": "भेजे गए",
   "my_actions.empty_body": "कोई फ़िल्टर हटाकर या खोज साफ़ करके देखें।",
   "my_actions.empty_title": "कोई कार्रवाई मेल नहीं खाती",
-  "my_actions.export": "निर्यात करें",
-  "my_actions.export_all_files": "सभी — {{count}} फ़ाइलें",
   "my_actions.export_profile": "प्रोफ़ाइल निर्यात करें",
   "my_actions.export_type": "{{type}} निर्यात करें",
   "my_actions.exporting": "निर्यात हो रहा है…",

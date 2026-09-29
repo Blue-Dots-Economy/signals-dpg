@@ -294,8 +294,6 @@
   "my_actions.dir_sent": "ಕಳುಹಿಸಿದ",
   "my_actions.empty_body": "ಫಿಲ್ಟರ್ ತೆಗೆದು ಅಥವಾ ಹುಡುಕಾಟ ತೆರವುಗೊಳಿಸಿ ನೋಡಿ.",
   "my_actions.empty_title": "ಯಾವುದೇ ಕ್ರಿಯೆ ಹೊಂದುತ್ತಿಲ್ಲ",
-  "my_actions.export": "ರಫ್ತು ಮಾಡಿ",
-  "my_actions.export_all_files": "ಎಲ್ಲಾ — {{count}} ಫೈಲ್‌ಗಳು",
   "my_actions.export_profile": "ಪ್ರೊಫೈಲ್ ರಫ್ತು ಮಾಡಿ",
   "my_actions.export_type": "{{type}} ರಫ್ತು ಮಾಡಿ",
   "my_actions.exporting": "ರಫ್ತು ಆಗುತ್ತಿದೆ…",

@@ -340,8 +340,6 @@
   "my_actions.dir_sent": "Sent",
   "my_actions.empty_body": "Try removing a filter or clearing the search.",
   "my_actions.empty_title": "No actions match",
-  "my_actions.export": "Export",
-  "my_actions.export_all_files": "All — {{count}} files",
   "my_actions.export_profile": "Export profile",
   "my_actions.export_type": "Export {{type}}",
   "my_actions.exporting": "Exporting…",

@@ -41,6 +41,8 @@ export interface BulkCommand {
   count: number;
   tone: 'accept' | 'reject' | 'primary' | 'neutral';
   onClick: () => void;
+  /** Show the label without "(count)" — for a count the page cannot know yet. */
+  hideCount?: boolean;
   /** When set, the button opens this menu instead (e.g. one export per type). */
   menu?: Array<{ id: string; label: string; onClick: () => void; divider?: boolean }>;
 }
@@ -377,7 +379,7 @@ function SelectionBar(props: Readonly<ActionsTableProps>) {
           </DropdownMenu>
         ) : (
           <Button key={b.id} size="sm" variant="outline" className={`h-8 ${toneClass[b.tone]}`} onClick={b.onClick}>
-            {b.label} ({b.count})
+            {b.hideCount ? b.label : `${b.label} (${b.count})`}
           </Button>
         ),
       )}

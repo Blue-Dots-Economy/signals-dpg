@@ -406,36 +406,23 @@ export function MyActionsPage() {
   const respondable = pickedRows.filter((a) => needsResponse(a, pending));
   let exportableCount = pickedRows.filter((a) => viewExportStatuses.includes(a.action_status)).length;
   if (allMatching) exportableCount = viewExportStatuses.length > 0 ? (counts?.ready_to_export ?? 0) : 0;
-  const exportCommand = (): BulkCommand => {
-    const targets = exportTargets();
-    const plural = (d: string) => pluralizeDomainLabel(d, domains);
-    const base = { id: 'export', tone: 'primary' as const, count: exporting ? 0 : exportableCount };
-    if (exporting) return { ...base, label: t('my_actions.exporting', 'Exporting…'), onClick: () => {} };
-    if (targets.length === 1) {
-      return {
-        ...base,
-        label: t('my_actions.export_type', 'Export {{type}}', { type: plural(targets[0].domain).toLowerCase() }),
-        onClick: () => void runExports([targets[0].filters]),
-      };
+  // One button per counterparty type the selection holds ("Export seekers
+  // (9)", "Export service providers (1)") — each downloads its own file, so
+  // the caller picks the one they need. Under "select all" the per-type
+  // counts are not known, so those buttons show no number.
+  const exportCommands = (): BulkCommand[] => {
+    if (exporting) {
+      return [{ id: 'export', label: t('my_actions.exporting', 'Exporting…'), count: 1, hideCount: true, tone: 'primary', onClick: () => {} }];
     }
-    return {
-      ...base,
-      label: t('my_actions.export', 'Export'),
-      onClick: () => void runExports(targets.map((x) => x.filters)),
-      menu: [
-        ...targets.map((x) => ({
-          id: x.key,
-          label: x.count == null ? plural(x.domain) : `${plural(x.domain)} (${x.count})`,
-          onClick: () => void runExports([x.filters]),
-        })),
-        {
-          id: 'all',
-          label: t('my_actions.export_all_files', 'All — {{count}} files', { count: targets.length }),
-          onClick: () => void runExports(targets.map((x) => x.filters)),
-          divider: true,
-        },
-      ],
-    };
+    const plural = (d: string) => pluralizeDomainLabel(d, domains).toLowerCase();
+    return exportTargets().map((x) => ({
+      id: `export:${x.key}`,
+      label: t('my_actions.export_type', 'Export {{type}}', { type: plural(x.domain) }),
+      count: x.count ?? (exportableCount > 0 ? 1 : 0),
+      hideCount: x.count == null,
+      tone: 'primary',
+      onClick: () => void runExports([x.filters]),
+    }));
   };
 
   // Selection only when some bulk command can apply to this caller: they may
@@ -466,11 +453,7 @@ export function MyActionsPage() {
       tone: 'reject',
       onClick: () => setBulk({ actions: respondable, status: 'rejected' }),
     },
-    ...(canExport
-      ? [
-          exportCommand(),
-        ]
-      : []),
+    ...(canExport ? exportCommands() : []),
   ];
 
   const onCommand = (action: Action, command: RowCommand) => {
