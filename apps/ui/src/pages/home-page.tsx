@@ -2289,11 +2289,6 @@ export function HomePage() {
     );
   };
 
-  // The map's fixed overlays ("Search this area", the count pill, the partial
-  // banner) sit at z-[2100] to clear the maximized map, which also puts them
-  // over the marker sheet (z-[1200]) — so they step aside while it is open.
-  const markerSheetOpen = isMobile && sheetMarker !== null;
-
   // The sheet's heading: the item's configured title once its detail has
   // loaded (`onItemResolved` lifts it into `mapDetailItem`), the marker's
   // generic label until then.
@@ -2643,9 +2638,9 @@ export function HomePage() {
                   // above the floor forever — which is how it turned up over a
                   // whole-city view with two listings.
                   (mapViewport.zoom ?? 0) >= SEARCH_AREA_MIN_ZOOM &&
-                  (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) &&
-                  !markerSheetOpen && (
-                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4">
+                  (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) && (
+                    // Hidden while any modal is open — see MapCountPill.
+                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                       <button
                         type="button"
                         data-testid="search-this-area"
@@ -2674,19 +2669,17 @@ export function HomePage() {
                     which is why it is no longer gated on being signed out.
                     `fixed` + high z-index so it stays above the map's own
                     maximize overlay (z-[2000]). */}
-                {!markerSheetOpen && (
-                  <MapCountPill
-                    total={mapMarkers.total}
-                    shown={mapItems.length}
-                    truncated={mapMarkers.truncated}
-                  />
-                )}
+                <MapCountPill
+                  total={mapMarkers.total}
+                  shown={mapItems.length}
+                  truncated={mapMarkers.truncated}
+                />
                 {/* Federation-degradation indicator (#203 §6): some peer instances
                     didn't answer in time, so the viewport marker set is known-partial.
                     `fixed` (not `absolute`) so it stays visible above the map's own
                     maximize overlay (z-[1000]) in both normal and maximized mode. */}
-                {mapMarkers.partial && !markerSheetOpen && (
-                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                {mapMarkers.partial && (
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                     <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                       {t('home.map_partial')}
                     </p>
