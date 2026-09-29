@@ -170,7 +170,14 @@ vi.mock('sonner', () => ({ toast: toastMock }));
 const exportActionsMock = vi.fn();
 vi.mock('@/lib/action-export', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/lib/action-export')>();
-  return { ...real, exportActions: (...a: unknown[]) => exportActionsMock(...a), saveBlob: vi.fn() };
+  const send = (...a: unknown[]) => exportActionsMock(...a);
+  return {
+    ...real,
+    exportActions: send,
+    runExportRequests: (reqs: Parameters<typeof real.runExportRequests>[0], onFile: Parameters<typeof real.runExportRequests>[1]) =>
+      real.runExportRequests(reqs, onFile, send as typeof real.exportActions),
+    saveBlob: vi.fn(),
+  };
 });
 
 const { MyActionsPage } = await import('../my-actions-page');

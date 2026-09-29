@@ -23,6 +23,7 @@ const {
   exportActions,
   saveBlob,
   ActionExportError,
+  runExportRequests,
 } = await import('../action-export');
 
 const action = (
@@ -207,5 +208,42 @@ describe('saveBlob', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('runExportRequests', () => {
+  const ok = (rowCount: number) => ({ blob: new Blob(), filename: 'f.xlsx', exportId: 'e', rowCount, skipped: 1 });
+  const f = (domain: string) => ({ ownership_role: 'all' as const, counterparty_domain: domain });
+
+  it('runs every file, skips empty ones, and keeps going after a failure', async () => {
+    const send = vi.fn(async (b: { filters: { counterparty_domain?: string } }) => {
+      if (b.filters.counterparty_domain === 'bad') throw new ActionExportError('x', 413, 'EXPORT_TOO_LARGE');
+      return ok(b.filters.counterparty_domain === 'empty' ? 0 : 2);
+    });
+    const onFile = vi.fn();
+    const out = await runExportRequests([f('a'), f('bad'), f('empty'), f('b')], onFile, send);
+    expect(send).toHaveBeenCalledTimes(4);
+    expect(onFile).toHaveBeenCalledTimes(2);
+    expect(out).toMatchObject({ exported: 4, skipped: 2 });
+    expect((out.failure as InstanceType<typeof ActionExportError>).code).toBe('EXPORT_TOO_LARGE');
+  });
+
+  it('re-issues a mixed-type request once per named type, but never splits one already typed', async () => {
+    const types = [
+      { network: 'n1', domain: 'provider', item_type: 't1' },
+      { network: 'n1', domain: 'provider', item_type: 't2' },
+    ];
+    const send = vi.fn(async (b: { filters: { counterparty_item_type?: string } }) => {
+      if (!b.filters.counterparty_item_type || b.filters.counterparty_item_type === 'stuck') {
+        throw new ActionExportError('mixed', 400, 'MIXED_COUNTERPARTY_TYPES', types);
+      }
+      return ok(1);
+    });
+    const out = await runExportRequests([f('provider')], vi.fn(), send);
+    expect(send.mock.calls.map((c) => c[0].filters.counterparty_item_type)).toEqual([undefined, 't1', 't2']);
+    expect(out.failure).toBeNull();
+
+    const stuck = await runExportRequests([{ ...f('provider'), counterparty_item_type: 'stuck' }], vi.fn(), send);
+    expect((stuck.failure as InstanceType<typeof ActionExportError>).code).toBe('MIXED_COUNTERPARTY_TYPES');
   });
 });

@@ -15,7 +15,6 @@ import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
-import { getNetworkConfigById } from '@/network_configs';
 import { resolve_display_name } from '@/services/metrics/resolve_display_name';
 import {
   resolveAllowedFacetFields,

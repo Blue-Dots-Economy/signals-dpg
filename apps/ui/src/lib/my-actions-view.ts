@@ -314,3 +314,31 @@ export function pageList(page: number, pages: number): Array<number | '…'> {
   }
   return out;
 }
+
+/**
+ * The first-use ("no actions yet") message key and English fallback, worded
+ * for the action types the network actually has.
+ */
+export function firstUseCopy(types: readonly string[]): [key: string, fallback: string] {
+  const apply = types.includes('apply');
+  const connect = types.includes('connect');
+  const tail = 'What you send and what you receive shows up here.';
+  if (apply && connect) {
+    return ['my_actions.first_use_body_apply_connect', `Apply or connect with someone on the map. ${tail}`];
+  }
+  if (connect) return ['my_actions.first_use_body_connect', `Connect with someone on the map. ${tail}`];
+  if (apply) return ['my_actions.first_use_body_apply', `Apply to an opportunity on the map. ${tail}`];
+  return ['my_actions.first_use_body', `Find someone on the map and reach out. ${tail}`];
+}
+
+/**
+ * The statuses a view can export: its status filter narrowed to the
+ * exportable ones, or every exportable status when it has none. Empty means
+ * the view shows nothing exportable — never widen that to "all".
+ */
+export function viewExportableStatuses(
+  filterStatuses: readonly string[],
+  exportable: readonly string[],
+): string[] {
+  return filterStatuses.length > 0 ? filterStatuses.filter((s) => exportable.includes(s)) : [...exportable];
+}

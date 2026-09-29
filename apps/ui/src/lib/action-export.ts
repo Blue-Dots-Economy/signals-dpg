@@ -204,3 +204,53 @@ export function saveBlob(blob: Blob, filename: string): void {
     setTimeout(() => URL.revokeObjectURL(url), REVOKE_DELAY_MS);
   }
 }
+
+export interface ExportRunOutcome {
+  /** Rows written across every file. */
+  exported: number;
+  /** Rows the server left out (cross-instance, deleted, not enabled, self). */
+  skipped: number;
+  /** The first request that failed, if any; the others still ran. */
+  failure: unknown;
+}
+
+/**
+ * Runs export requests one file at a time. Each stands alone: one failing
+ * does not cancel the rest. A request the server finds spanning several
+ * counterparty types (MIXED_COUNTERPARTY_TYPES — e.g. "select all" over a
+ * domain with two item types) is re-issued once per type it names.
+ */
+export async function runExportRequests(
+  requests: ReadonlyArray<ExportActionsBody['filters']>,
+  onFile: (result: ExportActionsResult) => void,
+  send: (body: ExportActionsBody) => Promise<ExportActionsResult> = exportActions,
+): Promise<ExportRunOutcome> {
+  const outcome: ExportRunOutcome = { exported: 0, skipped: 0, failure: null };
+  const queue = [...requests];
+  for (let filters = queue.shift(); filters; filters = queue.shift()) {
+    try {
+      const result = await send({ filters, projection: { fields: '*' }, format: 'xlsx' });
+      if (result.rowCount === 0) continue;
+      onFile(result);
+      outcome.exported += result.rowCount;
+      outcome.skipped += result.skipped;
+    } catch (err) {
+      const perType = splitMixedRequest(filters, err);
+      if (perType.length > 0) queue.unshift(...perType);
+      else outcome.failure ??= err;
+    }
+  }
+  return outcome;
+}
+
+/** One request per type a MIXED_COUNTERPARTY_TYPES refusal names; else none. */
+function splitMixedRequest(filters: ExportActionsBody['filters'], err: unknown): ExportActionsBody['filters'][] {
+  if (!(err instanceof ActionExportError) || err.code !== 'MIXED_COUNTERPARTY_TYPES') return [];
+  if (filters.counterparty_item_type) return []; // already one type: nothing to split
+  return err.counterpartyTypes.map((ct) => ({
+    ...filters,
+    counterparty_network: ct.network,
+    counterparty_domain: ct.domain,
+    counterparty_item_type: ct.item_type,
+  }));
+}

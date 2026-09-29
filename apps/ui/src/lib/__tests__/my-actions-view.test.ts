@@ -199,3 +199,20 @@ describe('small helpers', () => {
     expect(toFetchQuery(EMPTY_FILTER, []).include).toEqual([]);
   });
 });
+
+describe('first-use copy and exportable view statuses', () => {
+  it('words the first-use message for the network’s action types', async () => {
+    const { firstUseCopy } = await import('../my-actions-view');
+    expect(firstUseCopy(['apply', 'connect'])[0]).toBe('my_actions.first_use_body_apply_connect');
+    expect(firstUseCopy(['connect'])[0]).toBe('my_actions.first_use_body_connect');
+    expect(firstUseCopy(['apply'])[0]).toBe('my_actions.first_use_body_apply');
+    expect(firstUseCopy([])[0]).toBe('my_actions.first_use_body');
+  });
+
+  it('narrows a status filter to exportable statuses, never widening an empty result', async () => {
+    const { viewExportableStatuses } = await import('../my-actions-view');
+    expect(viewExportableStatuses([], ['accepted', 'completed'])).toEqual(['accepted', 'completed']);
+    expect(viewExportableStatuses(['accepted', 'created'], ['accepted', 'completed'])).toEqual(['accepted']);
+    expect(viewExportableStatuses(['rejected'], ['accepted'])).toEqual([]);
+  });
+});

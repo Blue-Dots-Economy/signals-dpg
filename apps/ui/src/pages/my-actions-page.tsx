@@ -30,8 +30,8 @@ import {
 import { ActionsTable, type BulkCommand, type RowCommand } from '@/components/actions/my-actions/actions-table';
 import {
   ActionExportError,
-  exportActions,
   groupByCounterpartyType,
+  runExportRequests,
   saveBlob,
   type ExportActionsBody,
 } from '@/lib/action-export';
@@ -41,6 +41,7 @@ import {
   activeFilterCount,
   applySavedView,
   currentSavedView,
+  firstUseCopy,
   needsResponse,
   parseFilter,
   pendingStatuses,
@@ -49,6 +50,7 @@ import {
   sidesOf,
   statusOptions as buildStatusOptions,
   toFetchQuery,
+  viewExportableStatuses,
   withoutFacetValue,
   writeFilter,
   type MyActionsFilter,
@@ -337,46 +339,11 @@ export function MyActionsPage() {
   // ── Export ─────────────────────────────────────────────────────────────────
   const [exporting, setExporting] = React.useState(false);
   const exportErrorMessage = (err: unknown) => exportErrorText(err, t);
-  /**
-   * One file per counterparty type. Each request stands alone: one failing
-   * does not cancel the rest. A request the server finds spanning several
-   * types (MIXED_COUNTERPARTY_TYPES — e.g. "select all" over a domain with
-   * two item types) is re-issued once per type it names.
-   */
+  /** One file per counterparty type (see runExportRequests); then one summary toast. */
   const runExports = async (requests: Array<ExportActionsBody['filters']>) => {
     setExporting(true);
-    let exported = 0;
-    let skipped = 0;
-    let failure: unknown = null;
-    const queue = [...requests];
     try {
-      for (let filters = queue.shift(); filters; filters = queue.shift()) {
-        try {
-          const result = await exportActions({ filters, projection: { fields: '*' }, format: 'xlsx' });
-          if (result.rowCount === 0) continue;
-          saveBlob(result.blob, result.filename);
-          exported += result.rowCount;
-          skipped += result.skipped;
-        } catch (err) {
-          const split =
-            err instanceof ActionExportError &&
-            err.code === 'MIXED_COUNTERPARTY_TYPES' &&
-            !filters.counterparty_item_type &&
-            err.counterpartyTypes.length > 0;
-          if (split) {
-            queue.unshift(
-              ...err.counterpartyTypes.map((ct) => ({
-                ...filters,
-                counterparty_network: ct.network,
-                counterparty_domain: ct.domain,
-                counterparty_item_type: ct.item_type,
-              })),
-            );
-          } else {
-            failure ??= err;
-          }
-        }
-      }
+      const { exported, skipped, failure } = await runExportRequests(requests, (r) => saveBlob(r.blob, r.filename));
       if (failure) toast.error(exportErrorMessage(failure));
       if (exported > 0) {
         toast.success(
@@ -391,11 +358,7 @@ export function MyActionsPage() {
       setExporting(false);
     }
   };
-  // The statuses this view can export: its own status filter narrowed to the
-  // exportable ones, or every exportable status when it has none. Empty means
-  // the view shows nothing exportable — never widen that to "all".
-  const viewExportStatuses =
-    filter.statuses.length > 0 ? filter.statuses.filter((s) => exportStatuses.includes(s)) : exportStatuses;
+  const viewExportStatuses = viewExportableStatuses(filter.statuses, exportStatuses);
   const baseExportFilters = (): ExportActionsBody['filters'] => ({
     ownership_role: query.ownership_role ?? 'all',
     // The picked profiles, else every live one — so the server scopes the
@@ -558,18 +521,11 @@ export function MyActionsPage() {
   // point them at where actions start (the map) instead of "loosen the
   // filters". Worded for the action types this network actually has.
   const nothingFiltered = activeFilterCount(filter) === 0 && !filter.q.trim() && filter.profiles.length === 0;
-  let firstUseBody = t('my_actions.first_use_body', 'Find someone on the map and reach out. What you send and what you receive shows up here.');
-  if (types.includes('apply') && types.includes('connect')) {
-    firstUseBody = t('my_actions.first_use_body_apply_connect', 'Apply or connect with someone on the map. What you send and what you receive shows up here.');
-  } else if (types.includes('connect')) {
-    firstUseBody = t('my_actions.first_use_body_connect', 'Connect with someone on the map. What you send and what you receive shows up here.');
-  } else if (types.includes('apply')) {
-    firstUseBody = t('my_actions.first_use_body_apply', 'Apply to an opportunity on the map. What you send and what you receive shows up here.');
-  }
+  const [firstUseKey, firstUseFallback] = firstUseCopy(types);
   const emptyState = nothingFiltered
     ? {
         title: t('my_actions.first_use_title', 'No actions yet'),
-        body: firstUseBody,
+        body: t(firstUseKey, firstUseFallback),
         action: { label: t('my_actions.go_to_map', 'Go to the map'), onClick: () => navigate(mapUrl) },
       }
     : undefined;
