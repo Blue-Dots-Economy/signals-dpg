@@ -73,9 +73,13 @@ export function filenameFromContentDisposition(header: string | undefined): stri
 export interface ExportActionsBody {
   filters: {
     item_id?: string;
+    item_ids?: string[];
     ownership_role: 'all' | 'initiated' | 'received';
     action_ids?: string[];
+    action_type?: string[];
     action_status?: string[];
+    q?: string;
+    facets?: Array<{ domain?: string; field: string; values: string[] }>;
     counterparty_domain?: string;
     counterparty_item_type?: string;
   };

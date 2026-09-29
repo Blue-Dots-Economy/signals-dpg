@@ -42,6 +42,9 @@ type StatusStyleShape = {
 const statusStyles: Record<string, StatusStyleShape> = {
   created: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
   pending: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  // Still waiting on the receiver, like `created` — own labels, pending colour.
+  submitted: { labelKey: null, cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
+  invited: { labelKey: null, cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
   new: { labelKey: 'actions.status_pill_new', cls: 'bg-primary/10 text-primary', dot: 'bg-primary', icon: <Sparkles className="h-3 w-3" /> },
   accepted: { labelKey: 'actions.status_pill_accepted', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <Check className="h-3 w-3" /> },
   completed: { labelKey: 'actions.status_pill_completed', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500', icon: <CheckCircle2 className="h-3 w-3" /> },
@@ -49,7 +52,7 @@ const statusStyles: Record<string, StatusStyleShape> = {
   cancelled: { labelKey: 'actions.status_pill_cancelled', cls: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400', icon: <AlertCircle className="h-3 w-3" /> },
 };
 
-function getStatusStyle(status: string): StatusStyleShape {
+export function getStatusStyle(status: string): StatusStyleShape {
   return (
     statusStyles[status] ?? {
       labelKey: null,
