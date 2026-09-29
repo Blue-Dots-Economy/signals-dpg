@@ -269,10 +269,10 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
 
   if (isMobile) {
     return (
-      <div className="flex flex-col overflow-hidden rounded-xl border bg-card">
+      <div data-tour="action-table" data-loaded={props.isLoading ? undefined : 'true'} className="flex flex-col overflow-hidden rounded-xl border bg-card">
         {selectable && selected.size > 0 ? <SelectionBar {...props} /> : null}
         {selectable ? (
-          <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+          <div data-tour="action-select" className="flex items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
             <SelectBox
               on={allOnPage}
               partial={someOnPage}
@@ -292,7 +292,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
     selectWidth + NAME_MIN + 56 + visible.reduce((n, c) => n + (COLUMN_WIDTH[c] ?? FLEX_MIN), 0);
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-xl border bg-card">
+    <div data-tour="action-table" data-loaded={props.isLoading ? undefined : 'true'} className="flex flex-col overflow-hidden rounded-xl border bg-card">
       {selectable && selected.size > 0 ? <SelectionBar {...props} /> : null}
 
       <div className="overflow-x-auto">
@@ -309,7 +309,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
             <tr className="h-10">
               <th scope="col" className="text-center">
                 {selectable ? (
-                  <span className="flex justify-center">
+                  <span data-tour="action-select" className="flex justify-center">
                     <SelectBox
                       on={allOnPage}
                       partial={someOnPage}
@@ -858,7 +858,9 @@ function ReviewStrip({
   const { t } = useTranslation();
   const summary = Object.entries(action.counterparty?.column_fields ?? {});
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
+    <div
+      data-tour="action-review"
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5 dark:border-amber-500/30 dark:bg-amber-500/10">
       <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-amber-700 dark:text-amber-400">
         <AlertCircle className="h-3.5 w-3.5" />
         {t('my_actions.needs_review', 'Needs your review')}

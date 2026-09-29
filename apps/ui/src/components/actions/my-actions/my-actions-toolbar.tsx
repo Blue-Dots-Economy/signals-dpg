@@ -171,7 +171,7 @@ export function MyActionsToolbar({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <label className="flex h-9 min-w-[220px] flex-1 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground sm:flex-none sm:basis-72">
+      <label data-tour="action-search" className="flex h-9 min-w-[220px] flex-1 items-center gap-2 rounded-md border bg-background px-3 text-muted-foreground sm:flex-none sm:basis-72">
         <Search className="h-4 w-4 shrink-0" />
         <span className="sr-only">{t('my_actions.search_label', 'Search')}</span>
         <Input
@@ -223,6 +223,7 @@ export function MyActionsToolbar({
         <PopoverTrigger asChild>
           <TriggerButton
             label={t('my_actions.filter', 'Filter')}
+            data-tour="action-filter"
             value={nFilters > 0 ? String(nFilters) : undefined}
             active={nFilters > 0}
           />
@@ -291,6 +292,7 @@ export function MyActionsToolbar({
         <DropdownMenuTrigger asChild>
           <TriggerButton
             label={t('my_actions.sort', 'Sort')}
+            data-tour="action-sort"
             value={sortLabel[filter.sort]}
             active={filter.sort !== 'recent'}
           />
@@ -335,6 +337,7 @@ export function MyActionsToolbar({
         <DropdownMenuTrigger asChild>
           <TriggerButton
             label={t('my_actions.views', 'Views')}
+            data-tour="action-views"
             value={views.find((v) => v.id === savedView)?.label ?? t('my_actions.view_custom', 'Custom')}
             active={savedView !== 'all'}
           />

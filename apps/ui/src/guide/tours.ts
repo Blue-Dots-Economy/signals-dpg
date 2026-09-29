@@ -199,61 +199,63 @@ const MY_ACTIONS_TOUR: GuideTour = {
   title: 'Manage your requests',
   path: '/my-actions',
   matches: (p) => p.startsWith('/my-actions'),
+  // The rows (review strip, checkboxes) render after the list loads; wait for
+  // them, or the later steps settle on the table's loading skeleton.
+  readyWhen: '[data-tour="action-table"][data-loaded="true"]',
   requiresAuth: true,
   steps: [
     {
-      element: '[data-tour="action-tabs"]',
+      element: ['[data-tour="action-views"]', '[data-tour="action-table"]'],
       keep: true,
-      title: 'Initiated and received',
-      description: `Every request you send or receive lives here.
+      title: 'One list, sent and received',
+      description: `Every request you send or receive is in this one list; the <b>Direction</b> column says which.
+        <b>Views</b> jump to a ready-made list, each with its count:
         <ul>
-          <li><b>Initiated</b>: requests you made to others.</li>
-          <li><b>Received</b>: requests others made to you.</li>
-        </ul>
-        The number on each tab shows how many there are.`,
-    },
-    {
-      element: '[data-testid="sort-trigger"]',
-      title: 'Sort',
-      description: `
-        <ul>
-          <li><b>Match score</b>: best fit with your profile first.</li>
-          <li><b>Newest</b>: most recent first (the default).</li>
-          <li><b>Oldest</b>: longest-waiting first, handy for clearing a backlog.</li>
-          <li><b>Distance</b>: closest to you first.</li>
+          <li><b>Needs my response</b>: requests waiting for your reply.</li>
+          <li><b>Ready to export</b>: accepted or completed ones.</li>
+          <li><b>Sent by me</b>: requests you made.</li>
         </ul>`,
     },
     {
-      element: '[data-testid="filters-button"]',
-      title: 'Filter and refresh',
+      element: ['[data-tour="action-filter"]', '[data-tour="action-search"]'],
+      title: 'Search, filter and sort',
       description: `
         <ul>
-          <li><b>Status</b>: Pending (waiting for a reply), Accepted (includes completed), Rejected (includes cancelled).</li>
-          <li><b>Action type</b> and <b>profile fields</b> such as skills or location.</li>
-          <li>Applied filters show as chips; remove with × or Clear. <b>Refresh</b> on the right fetches the latest status.</li>
+          <li><b>Search</b> by name: only names you can already see match.</li>
+          <li><b>Filter</b> by direction, status, action type and profile fields such as education or skills. Applied filters show as chips; remove one with ×.</li>
+          <li><b>Sort</b> by updated, match score or distance, or click a column heading. <b>Columns</b> hides the ones you don't need.</li>
         </ul>`,
     },
     {
-      element: ['[data-tour="action-list"]', '[data-tour="action-tabs"]'],
+      element: '[data-tour="action-table"]',
       keep: true,
       title: 'Reading a request',
-      description: `Each card is one request: who it is with, what it is for, and its status.
+      description: `Each row is one request: who it is with, what it is for, its status and which of your profiles it belongs to.
         <ul>
-          <li><b>Match score</b>: how well they fit your profile, 0–100%, worked out when the request was made. “Not scored yet” means it is still being calculated.</li>
+          <li><b>Match score</b>: how well they fit your profile. “Not scored” means it has not been worked out.</li>
           <li><b>Distance</b>: how far away they are.</li>
-          <li>Contact details are revealed only after a request is accepted.</li>
+          <li>Names and contact details show only once a request is accepted.</li>
         </ul>`,
     },
     {
-      element: '[data-tour="action-respond"]',
+      element: ['[data-tour="action-review"]', '[data-tour="action-table"]'],
       keep: true,
       title: 'Respond',
-      description: `
+      description: `A request waiting for your reply shows <b>Needs your review</b> with a few details about them.
         <ul>
-          <li><b>View profile</b>: see the other person’s details.</li>
-          <li><b>Received</b>: Accept or Decline; once accepted, mark it Complete.</li>
-          <li><b>Initiated</b>: Cancel if you no longer need it.</li>
+          <li><b>Accept</b> or <b>Reject</b> it, or <b>View profile</b> first.</li>
+          <li>The <b>⋯</b> menu on each row has the rest: withdraw a request you sent, mark one complete, export a profile.</li>
         </ul>`,
+    },
+    {
+      element: ['[data-tour="action-select"]', '[data-tour="action-table"]'],
+      title: 'Act on many at once',
+      description: `Tick rows (or <b>Select all</b>) to act on them together:
+        <ul>
+          <li><b>Accept</b> or <b>Reject</b> every waiting request you picked.</li>
+          <li><b>Export seekers</b>, <b>Export service providers</b>…: one Excel file per type, for accepted or completed requests.</li>
+        </ul>
+        No checkboxes means there is nothing you can do in bulk yet.`,
     },
   ],
 };
