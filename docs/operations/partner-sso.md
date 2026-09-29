@@ -50,6 +50,7 @@ provider is missing a secret.
 | `SSO_NCS_TIMEOUT_MS` | default `5000` |
 | `SSO_NCS_SINGLE_USE_LINKS` | default `false` — NCS reuses one token per user across clicks, so a link logs in as often as needed until its `exp` (1 day); a leaked link does too. Set `true` for replay protection (each link logs in once, `link-reused` after) once NCS mints a fresh token per click |
 | `SSO_NCS_MAPPING` | JSON, below |
+| `SSO_NCS_APPLY_URL_TEMPLATE` | default `https://ncs.gov.in/job-listing/applying/{ncsJobId}`. A signed-in seeker's **Apply** on a provider opens this URL in a new tab instead of the in-app flow, `{ncsJobId}` filled from that provider profile field (URL-encoded, `https` only). No action is recorded in Signals. Providers without the field keep the in-app flow. Set another URL to override; set it empty to turn the redirect off |
 
 ```json
 {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SsoSecretsSchema } from '../secrets.js';
+import { DEFAULT_NCS_APPLY_URL_TEMPLATE, SsoSecretsSchema } from '../secrets.js';
 import {
   assertSsoConfigured,
   parseSsoNcsMapping,
@@ -24,6 +24,13 @@ describe('SsoSecretsSchema', () => {
     expect(parsed.SSO_NCS_TIMEOUT_MS).toBe(5000);
     expect(parsed.SSO_NCS_MAPPING).toBe('{}');
     expect(parsed.SSO_NCS_SINGLE_USE_LINKS).toBe(false);
+    expect(parsed.SSO_NCS_APPLY_URL_TEMPLATE).toBe(DEFAULT_NCS_APPLY_URL_TEMPLATE);
+  });
+
+  it('keeps an overridden or emptied apply URL template as given', () => {
+    const parse = (v: string) => SsoSecretsSchema.parse({ SSO_NCS_APPLY_URL_TEMPLATE: v });
+    expect(parse('https://x.test/{id}').SSO_NCS_APPLY_URL_TEMPLATE).toBe('https://x.test/{id}');
+    expect(parse('').SSO_NCS_APPLY_URL_TEMPLATE).toBe('');
   });
 
   it('turns single-use links on only for an explicit true', () => {

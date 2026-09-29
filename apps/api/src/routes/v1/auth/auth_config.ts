@@ -1,6 +1,6 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { authConfig, keycloakConfig } from '@/config';
+import { authConfig, keycloakConfig, ssoConfig } from '@/config';
 
 const KeycloakPublicConfig = z.object({
   /** Browser-facing Keycloak base URL. */
@@ -10,6 +10,9 @@ const KeycloakPublicConfig = z.object({
   clientId: z.string(),
 });
 
+const EXTERNAL_APPLY_ACTION_TYPE = 'apply';
+
+const ExternalApplyConfig = z.object({ actionType: z.string(), urlTemplate: z.string() });
 const AuthConfigResponse = z.object({
   selfSignupAllowed: z.boolean(),
   loginChannels: z.array(z.enum(['email', 'phone'])),
@@ -24,6 +27,8 @@ const AuthConfigResponse = z.object({
    * own `/.well-known/openid-configuration` is unauthenticated too).
    */
   keycloak: KeycloakPublicConfig.nullable(),
+  /** Partner-portal Apply redirect (SSO_NCS_APPLY_URL_TEMPLATE); null = in-app. */
+  externalApply: ExternalApplyConfig.nullable(),
 });
 
 /**
@@ -67,6 +72,12 @@ export const auth_config: FastifyPluginAsyncZod = async function (fastify) {
                 clientId: keycloakConfig.ui_client_id,
               }
             : null,
+        externalApply: ssoConfig.ncs.apply_url_template
+          ? {
+              actionType: EXTERNAL_APPLY_ACTION_TYPE,
+              urlTemplate: ssoConfig.ncs.apply_url_template,
+            }
+          : null,
       });
     },
   });

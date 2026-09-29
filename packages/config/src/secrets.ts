@@ -153,6 +153,8 @@ export const KeycloakSecretsSchema = z.object({
  * empty, every /api/v1/auth/sso route answers 404. assertSsoConfigured
  * (sso_config.ts) makes the provider's secrets required once it is listed.
  */
+export const DEFAULT_NCS_APPLY_URL_TEMPLATE = 'https://ncs.gov.in/job-listing/applying/{ncsJobId}';
+
 export const SsoSecretsSchema = z.object({
   // Comma-separated provider ids. Only `ncs` exists today. The id never appears
   // in a public URL — it only selects which adapter /sso/login runs.
@@ -184,6 +186,9 @@ export const SsoSecretsSchema = z.object({
   // JSON: role → domain, NCS field → profile field, featureKey → UI route.
   // Parsed by parseSsoNcsMapping().
   SSO_NCS_MAPPING: z.string().default('{}'),
+  // Seeker Apply opens this URL instead of the in-app flow, `{field}` filled
+  // from the provider profile. Override to change; set empty to turn off.
+  SSO_NCS_APPLY_URL_TEMPLATE: z.string().default(DEFAULT_NCS_APPLY_URL_TEMPLATE),
 });
 
 /**
