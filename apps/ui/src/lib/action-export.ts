@@ -13,6 +13,8 @@ const apiClient = createApiClient();
 export interface ExportableAction {
   action_id: string;
   ownership_roles: ('initiated' | 'received')[];
+  source_item_network: string;
+  target_item_network: string;
   source_item_domain: string;
   target_item_domain: string;
   source_item_type: string;
@@ -28,6 +30,15 @@ export function counterpartyDomainOf(
     : action.target_item_domain;
 }
 
+/** Network of the side the caller does NOT own. */
+export function counterpartyNetworkOf(
+  action: Pick<ExportableAction, 'ownership_roles' | 'source_item_network' | 'target_item_network'>,
+): string {
+  return action.ownership_roles.includes('received')
+    ? action.source_item_network
+    : action.target_item_network;
+}
+
 /** Item type of the side the caller does NOT own. */
 export function counterpartyItemTypeOf(
   action: Pick<ExportableAction, 'ownership_roles' | 'source_item_type' | 'target_item_type'>,
@@ -38,26 +49,28 @@ export function counterpartyItemTypeOf(
 }
 
 export interface CounterpartyGroup {
-  /** Stable id of the group: `<domain>::<itemType>`. */
+  /** Stable id of the group: `<network>::<domain>::<itemType>`. */
   key: string;
+  network: string;
   domain: string;
   itemType: string;
   actionIds: string[];
 }
 
 /**
- * One group per counterparty (domain, item type), sorted. The server returns
- * one counterparty (domain, item type) per file, so each group is exactly one
- * download — grouping by domain alone would send a mixed-type request the
+ * One group per counterparty (network, domain, item type), sorted — the same
+ * key the server uses for "one counterparty type per file", so each group is
+ * exactly one download. A coarser key would send a mixed-type request the
  * server refuses (MIXED_COUNTERPARTY_TYPES).
  */
 export function groupByCounterpartyType(actions: readonly ExportableAction[]): CounterpartyGroup[] {
   const groups = new Map<string, CounterpartyGroup>();
   for (const a of actions) {
+    const network = counterpartyNetworkOf(a);
     const domain = counterpartyDomainOf(a);
     const itemType = counterpartyItemTypeOf(a);
-    const key = `${domain}::${itemType}`;
-    const g = groups.get(key) ?? { key, domain, itemType, actionIds: [] };
+    const key = `${network}::${domain}::${itemType}`;
+    const g = groups.get(key) ?? { key, network, domain, itemType, actionIds: [] };
     g.actionIds.push(a.action_id);
     groups.set(key, g);
   }
@@ -80,6 +93,7 @@ export interface ExportActionsBody {
     action_status?: string[];
     q?: string;
     facets?: Array<{ domain?: string; field: string; values: string[] }>;
+    counterparty_network?: string;
     counterparty_domain?: string;
     counterparty_item_type?: string;
   };
@@ -96,12 +110,21 @@ export interface ExportActionsResult {
   skipped: number;
 }
 
+/** A counterparty type named by a MIXED_COUNTERPARTY_TYPES refusal. */
+export interface ExportCounterpartyType {
+  network: string;
+  domain: string;
+  item_type: string;
+}
+
 /** Typed failure of an export request; `status` 0 means no response. */
 export class ActionExportError extends Error {
   constructor(
     message: string,
     readonly status: number,
     readonly code: string,
+    /** For MIXED_COUNTERPARTY_TYPES: the types to request one at a time. */
+    readonly counterpartyTypes: ExportCounterpartyType[] = [],
   ) {
     super(message);
     this.name = 'ActionExportError';
@@ -121,7 +144,11 @@ async function toExportError(err: unknown): Promise<ActionExportError> {
   const response = (err as ErrorLike)?.response;
   if (!response) return new ActionExportError('Network error', 0, 'NETWORK_ERROR');
   // responseType 'blob' also applies to error bodies — read the JSON back out.
-  let body: { error?: string; message?: string } = {};
+  let body: {
+    error?: string;
+    message?: string;
+    details?: { counterparty_types?: ExportCounterpartyType[] };
+  } = {};
   try {
     const data = response.data;
     const text = data instanceof Blob ? await data.text() : JSON.stringify(data ?? {});
@@ -133,6 +160,7 @@ async function toExportError(err: unknown): Promise<ActionExportError> {
     body.message ?? `HTTP error ${response.status}`,
     response.status,
     body.error ?? 'INTERNAL_SERVER_ERROR',
+    body.details?.counterparty_types ?? [],
   );
 }
 

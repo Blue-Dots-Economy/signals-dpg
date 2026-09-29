@@ -165,8 +165,12 @@ export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.ext
     .transform((v) => asArray(v) ?? []),
 });
 
-/** Request-shape bounds for `POST /api/v1/action/export` (#770 review #7). */
-export const EXPORT_ACTION_IDS_MAX = 10_000;
+/**
+ * Request-shape bounds for `POST /api/v1/action/export` (#770 review #7).
+ * `EXPORT_ACTION_IDS_MAX` is the hard ceiling of one export; the configured
+ * `EXPORT_MAX_ROWS` (checked by the route, 413) may be set up to it.
+ */
+export const EXPORT_ACTION_IDS_MAX = 50_000;
 export const EXPORT_FACETS_MAX = 20;
 export const EXPORT_FACET_VALUES_MAX = 100;
 
@@ -181,13 +185,17 @@ export const ExportActionsBodySchema = z
     filters: z
       .object({
         action_type: z.array(z.string().min(1)).optional(),
-        action_status: z.array(z.string().min(1)).optional(),
+        // Omitted = every exportable status. An empty list is refused rather
+        // than read as "all": a view filtered to non-exportable statuses must
+        // never widen into an export of every revealed engagement.
+        action_status: z.array(z.string().min(1)).min(1).optional(),
         ownership_role: ActionOwnershipRoleSchema.default('all'),
         item_id: z.uuid().optional(),
         item_ids: z.array(z.uuid()).min(1).max(ACTION_ITEM_IDS_MAX).optional(),
         q: z.string().trim().min(1).max(ACTION_SEARCH_MAX).optional(),
-        // One file = one counterparty (domain, item_type); these select it when
+        // One file = one counterparty (network, domain, item_type); these select it when
         // the caller's rows span more than one.
+        counterparty_network: z.string().min(1).optional(),
         counterparty_domain: z.string().min(1).optional(),
         counterparty_item_type: z.string().min(1).optional(),
         // Hard upper bounds so a body can never become an unbounded IN-list or

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ExportActionsBodySchema } from '../api/action_schemas';
+import { EXPORT_ACTION_IDS_MAX, ExportActionsBodySchema } from '../api/action_schemas';
 
 // #770: POST /api/v1/action/export request body.
 
@@ -49,6 +49,7 @@ describe('ExportActionsBodySchema', () => {
 
   it.each([
     ['csv, no longer offered', { format: 'csv' }],
+    ['empty status list', { filters: { action_status: [] } }],
     ['empty field list', { projection: { fields: [] } }],
     ['non-uuid action id', { filters: { action_ids: ['nope'] } }],
     ['empty action_ids', { filters: { action_ids: [] } }],
@@ -59,7 +60,7 @@ describe('ExportActionsBodySchema', () => {
     ['unknown filter key', { filters: { status: 'accepted' } }],
     [
       'too many action_ids',
-      { filters: { action_ids: Array.from({ length: 10_001 }, () => UUID) } },
+      { filters: { action_ids: Array.from({ length: EXPORT_ACTION_IDS_MAX + 1 }, () => UUID) } },
     ],
     [
       'too many facets',

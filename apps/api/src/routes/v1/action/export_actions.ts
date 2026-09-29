@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
   ExportActionsBodySchema,
@@ -25,6 +25,7 @@ import {
 } from '@/services/action_export/build_export';
 import { buildExportFilename } from '@/services/action_export/filename';
 import { formatIsoInZone } from '@/services/action_export/time';
+import { memoizeNetworkConfigs } from '@/utils/network_config_memo';
 import { humanizeKey } from '@/services/action_export/columns';
 import { buildExportWorkbook, XLSX_CONTENT_TYPE } from '@/services/action_export/xlsx';
 
@@ -84,7 +85,7 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
   // An integrating DPG's service identity (x-api-key / client-credentials)
   // owns no engagements of its own; exporting on a provider's behalf is not
   // offered, so refuse it outright rather than serving an empty file.
-  if (request.user?.role === 'service') {
+  if (isServiceCaller(request)) {
     return reply.code(403).send({
       error: 'SERVICE_CALLER_NOT_ALLOWED',
       message: 'Bulk export is available to signed-in participants only',
@@ -96,7 +97,17 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
       message: 'An export is already running for this user; try again when it finishes',
     });
   }
+  // Claimed before the first await, so a double-click cannot slip a second
+  // export in while the rate-limit check is in flight.
+  inFlight.add(userId);
+  try {
+    return await limitedExport(request, reply, userId);
+  } finally {
+    inFlight.delete(userId);
+  }
+};
 
+async function limitedExport(request: ExportRequest, reply: FastifyReply, userId: string) {
   // Cross-pod per-user limit. Fails CLOSED: this route bulk-decrypts PII, so
   // an unavailable limiter must not turn into an unlimited one.
   try {
@@ -118,7 +129,6 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
     });
   }
 
-  inFlight.add(userId);
   const started = Date.now();
   try {
     return await runExport(request, reply, userId, started);
@@ -131,17 +141,35 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
       error: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to export actions',
     });
-  } finally {
-    inFlight.delete(userId);
   }
-};
+}
+
+/**
+ * An integrating DPG's machine identity rather than a signed-in person: an
+ * `x-api-key` caller, or a Keycloak client-credentials token (the only path
+ * that sets `service_client_id`). Deliberately NOT `user.role` — the service
+ * marker is `member.role = 'service'`, which `request.user` does not carry.
+ */
+/** The filters minus the free-text search, for logging. */
+function withoutSearch<F extends { q?: string }>(filters: F): Omit<F, 'q'> {
+  const { q: _q, ...rest } = filters;
+  return rest;
+}
+
+function isServiceCaller(request: FastifyRequest): boolean {
+  return typeof request.headers['x-api-key'] === 'string' || Boolean(request.service_client_id);
+}
 
 /**
  * The caller's own profile the export is scoped to: `item_id` when given
- * (must be theirs), otherwise their first profile (one domain per user).
+ * (must be theirs), otherwise their oldest profile that is not retired, a
+ * live one first — a retired profile's network rules must not decide the
+ * export (one domain per user, so the domain is the same either way).
  */
 async function resolveRequesterItem(userId: string, itemId: string | undefined) {
-  const where = itemId ? eq(items.item_id, itemId) : eq(items.created_by, userId);
+  const where = itemId
+    ? eq(items.item_id, itemId)
+    : and(eq(items.created_by, userId), ne(items.lifecycle_status, 'retired'));
   const [row] = await db
     .select({
       item_id: items.item_id,
@@ -151,7 +179,7 @@ async function resolveRequesterItem(userId: string, itemId: string | undefined) 
     })
     .from(items)
     .where(where)
-    .orderBy(asc(items.created_at))
+    .orderBy(desc(sql`${items.lifecycle_status} = 'live'`), asc(items.created_at))
     .limit(1);
   return row;
 }
@@ -233,6 +261,21 @@ async function runExport(
     requesterConfig
   );
 
+  // One decrypt per item: the search name check and the row itself both read
+  // the merged state, and an item often appears on several rows. A failure
+  // is not cached — each caller handles (and logs) its own.
+  const decrypted = new Map<string, Record<string, unknown>>();
+  const decrypt = (it: ExportItem): Record<string, unknown> => {
+    const hit = decrypted.get(it.item_id);
+    if (hit) return hit;
+    const merged = decryptItemPrivate({
+      item_state: it.item_state,
+      item_private_state: it.item_private_state,
+    }).mergedState;
+    decrypted.set(it.item_id, merged);
+    return merged;
+  };
+
   const result = buildExport({
     userId,
     currentInstanceUrl: getCurrentApiBaseUrl(),
@@ -242,25 +285,26 @@ async function runExport(
     filters,
     projection,
     include,
-    decrypt: (it) =>
-      decryptItemPrivate({ item_state: it.item_state, item_private_state: it.item_private_state })
-        .mergedState,
+    decrypt,
     visibleName: (it, revealed) => {
       const cfg = configs.get(it.item_network);
       let schema: Record<string, unknown> = {};
       try {
         if (cfg) schema = getDomainItemSchema(cfg, it.item_domain, it.item_type) as Record<string, unknown>;
-      } catch {
-        schema = {};
+      } catch (err) {
+        // Unknown domain / type: no name fields known, so the name stays
+        // masked and cannot match a search.
+        request.log.warn(
+          { err, item_id: it.item_id, domain: it.item_domain, item_type: it.item_type },
+          'item schema unavailable for export search — name treated as masked'
+        );
       }
       return visibleItemName({
         itemId: it.item_id,
         schema,
         publicState: it.item_state,
         revealed,
-        decrypt: () =>
-          decryptItemPrivate({ item_state: it.item_state, item_private_state: it.item_private_state })
-            .mergedState,
+        decrypt: () => decrypt(it),
       });
     },
     onDecryptError: (err, itemId) =>
@@ -305,7 +349,9 @@ async function runExport(
       export_id: exportId,
       requester_user_id: userId,
       requester_item_id: filters.item_id ?? requester.item_id,
-      filters: { ...filters, action_status: statuses },
+      // `q` is a free-text name search — personal data, never logged; only
+      // whether one was applied.
+      filters: { ...withoutSearch(filters), action_status: statuses, has_search: Boolean(filters.q) },
       projection,
       format,
       counterparty_domain: result.counterparty?.domain,
@@ -439,17 +485,12 @@ async function loadNetworkConfigs(
   knownId: string,
   knownConfig: NetworkConfigDocument
 ): Promise<Map<string, NetworkConfigDocument | null>> {
-  const configs = new Map<string, NetworkConfigDocument | null>([[knownId, knownConfig]]);
-  for (const network of new Set(networkIds)) {
-    if (configs.has(network)) continue;
-    try {
-      configs.set(network, await getNetworkConfigById(network));
-    } catch (err) {
-      request.log.error({ err, network }, 'network config unavailable for export');
-      configs.set(network, null);
-    }
-  }
-  return configs;
+  const load = memoizeNetworkConfigs(
+    (err, network) => request.log.error({ err, network }, 'network config unavailable for export'),
+    { id: knownId, config: knownConfig }
+  );
+  const ids = [...new Set([knownId, ...networkIds])];
+  return new Map(await Promise.all(ids.map(async (id) => [id, await load(id)] as const)));
 }
 
 /**

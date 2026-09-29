@@ -100,6 +100,19 @@ describe('ActionsTable — states', () => {
     expect(handlers.onRetry).toHaveBeenCalled();
   });
 
+  it('shows the first-use message and its call to action when given', async () => {
+    const onClick = vi.fn();
+    renderTable({
+      rows: [],
+      total: 0,
+      emptyState: { title: 'No actions yet', body: 'Apply or connect on the map.', action: { label: 'Go to the map', onClick } },
+    });
+    expect(screen.getByText('No actions yet')).toBeInTheDocument();
+    expect(screen.queryByText('No actions match')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Go to the map' }));
+    expect(onClick).toHaveBeenCalled();
+  });
+
   it('explains an empty result', () => {
     renderTable({ rows: [], total: 0 });
     expect(screen.getByText('No actions match')).toBeInTheDocument();

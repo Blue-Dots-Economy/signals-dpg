@@ -2,6 +2,7 @@ import {
   getDomainItemSchema,
   getInteractionExportRequesterDomains,
   getInteractionPiiRevealStatuses,
+  interactionInputOf,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
 import {
@@ -100,6 +101,7 @@ export interface BuildExportInput {
   /** Pre-resolved network configs; null when unavailable. */
   getNetworkConfig: (networkId: string) => NetworkConfigDocument | null;
   filters: {
+    counterparty_network?: string;
     counterparty_domain?: string;
     counterparty_item_type?: string;
     facets?: ReadonlyArray<{ domain?: string; field: string; values: string[] }>;
@@ -185,18 +187,6 @@ interface Candidate {
 
 const typeKey = (t: CounterpartyType) => `${t.network}::${t.domain}::${t.item_type}`;
 
-function interactionInput(row: ExportActionRow) {
-  return {
-    actionType: row.action_type,
-    fromNetwork: row.source_item_network,
-    fromDomain: row.source_item_domain,
-    fromItemType: row.source_item_type,
-    toNetwork: row.target_item_network,
-    toDomain: row.target_item_domain,
-    toItemType: row.target_item_type,
-  };
-}
-
 const emptyCounts = (): ExportCounts => ({
   row_count: 0,
   revealed_count: 0,
@@ -224,8 +214,8 @@ function interactionRules(input: BuildExportInput, row: ExportActionRow): Intera
   try {
     return {
       ok: true,
-      requesters: getInteractionExportRequesterDomains(cfg, interactionInput(row)),
-      revealStatuses: getInteractionPiiRevealStatuses(cfg, interactionInput(row)),
+      requesters: getInteractionExportRequesterDomains(cfg, interactionInputOf(row)),
+      revealStatuses: getInteractionPiiRevealStatuses(cfg, interactionInputOf(row)),
     };
   } catch (err) {
     input.onRuleError?.(err, row.action_id);
@@ -319,7 +309,9 @@ function passesFacets(input: BuildExportInput, c: Candidate): boolean {
       c.counterparty.item_type,
       facetsForDomain(selections, c.counterparty.item_domain)
     );
-  } catch {
+  } catch (err) {
+    // No resolvable facet fields: nothing can match (fail closed), but say so.
+    input.onRuleError?.(err, `facets:${c.counterparty.item_domain}/${c.counterparty.item_type}`);
     allowed = [];
   }
   return stateMatchesFacets(c.counterparty.item_state, allowed);
@@ -334,24 +326,37 @@ function revealGate(c: Candidate): boolean {
   );
 }
 
-/** Search on names the caller may already see; a masked name never matches. */
+/**
+ * Search on names the caller already sees in the list; a masked name never
+ * matches. The name rule is the list's (fetch_actions `visibleName`): a
+ * private name counts once this row's status reveals it and THAT profile is
+ * live — for either side — so a search selects the same rows here as on the
+ * page. What the file then reveals is still `revealGate`, which is stricter.
+ */
 function passesSearch(input: BuildExportInput, c: Candidate): boolean {
   const q = input.filters.q;
   if (!q) return true;
   if (!input.visibleName) return false; // fail closed: no name rule, no match
+  const nameShown = (item: ExportItem) =>
+    c.revealStatuses.includes(c.row.action_status) && item.lifecycle_status === 'live';
   return matchesActionSearch(q, [
-    input.visibleName(c.counterparty, revealGate(c)),
-    c.own ? input.visibleName(c.own, false) : null,
+    input.visibleName(c.counterparty, nameShown(c.counterparty)),
+    c.own ? input.visibleName(c.own, nameShown(c.own)) : null,
   ]);
 }
 
-/** Step 2: facets, search, plus the requested counterparty domain / item type. */
+/** Step 2: facets, search, plus the requested counterparty network / domain / item type. */
 function selectCandidates(input: BuildExportInput, candidates: Candidate[]): Candidate[] {
-  const { counterparty_domain: domain, counterparty_item_type: itemType } = input.filters;
+  const {
+    counterparty_network: network,
+    counterparty_domain: domain,
+    counterparty_item_type: itemType,
+  } = input.filters;
   return candidates.filter(
     (c) =>
       passesFacets(input, c) &&
       passesSearch(input, c) &&
+      (!network || c.counterparty.item_network === network) &&
       (!domain || c.counterparty.item_domain === domain) &&
       (!itemType || c.counterparty.item_type === itemType)
   );
@@ -448,7 +453,7 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
       status: 400,
       error: 'MIXED_COUNTERPARTY_TYPES',
       message:
-        'These engagements span more than one counterparty type; request one at a time with filters.counterparty_domain',
+        'These engagements span more than one counterparty type; request one at a time with filters.counterparty_network, counterparty_domain and counterparty_item_type (see details.counterparty_types)',
       details: {
         counterparty_domains: [...new Set(types.map((t) => t.domain))].sort((a, b) =>
           a.localeCompare(b)

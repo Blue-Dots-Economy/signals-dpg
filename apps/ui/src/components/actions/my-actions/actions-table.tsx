@@ -81,6 +81,37 @@ interface ActionsTableProps extends Labels {
   /** Why some of the selection is left out of an action, e.g. not exportable. */
   selectionNote?: string;
   onCommand: (action: Action, command: RowCommand) => void;
+  /**
+   * What to say when there are no rows. Defaults to the "no match — loosen
+   * the filters" copy; the page passes a first-use message when nothing is
+   * filtered and the caller simply has no actions yet.
+   */
+  emptyState?: EmptyStateCopy;
+}
+
+export interface EmptyStateCopy {
+  title: string;
+  body: string;
+  /** Optional call to action, e.g. "Go to the map". */
+  action?: { label: string; onClick: () => void };
+}
+
+/** The no-rows message; used by the table and the phone card list. */
+function EmptyMessage({ copy }: Readonly<{ copy: EmptyStateCopy | undefined }>) {
+  const { t } = useTranslation();
+  const title = copy?.title ?? t('my_actions.empty_title', 'No actions match');
+  const body = copy?.body ?? t('my_actions.empty_body', 'Try removing a filter or clearing the search.');
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <p className="font-semibold">{title}</p>
+      <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+      {copy?.action ? (
+        <Button size="sm" className="mt-3" onClick={copy.action.onClick}>
+          {copy.action.label}
+        </Button>
+      ) : null}
+    </div>
+  );
 }
 
 type Translate = (key: string, fallback: string, opts?: Record<string, unknown>) => string;
@@ -151,7 +182,7 @@ function HeaderCell({
   );
 }
 const FLEX_MIN = 120;
-const NAME_MIN = 180;
+const NAME_MIN = 220;
 
 const toneClass: Record<BulkCommand['tone'], string> = {
   accept: 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/90',
@@ -381,12 +412,7 @@ function TableBody(props: Readonly<ActionsTableProps & { visible: ColumnId[]; co
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-1">
-                <p className="font-semibold">{t('my_actions.empty_title', 'No actions match')}</p>
-                <p className="text-sm text-muted-foreground">
-                  {t('my_actions.empty_body', 'Try removing a filter or clearing the search.')}
-                </p>
-              </div>
+              <EmptyMessage copy={props.emptyState} />
             )}
           </td>
         </tr>
@@ -517,11 +543,8 @@ function CardList(props: Readonly<ActionsTableProps>) {
   }
   if (props.rows.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-1 px-6 py-12 text-center">
-        <p className="font-semibold">{t('my_actions.empty_title', 'No actions match')}</p>
-        <p className="text-sm text-muted-foreground">
-          {t('my_actions.empty_body', 'Try removing a filter or clearing the search.')}
-        </p>
+      <div className="px-6 py-12 text-center">
+        <EmptyMessage copy={props.emptyState} />
       </div>
     );
   }
@@ -568,7 +591,9 @@ function ActionCard({
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate font-semibold">{name}</p>
+            <p className="line-clamp-2 break-words font-semibold" title={name}>
+              {name}
+            </p>
             <p className="text-xs text-muted-foreground">
               {labels.domainLabel(sides.other.domain)} · {labels.profileLabel(sides.mine.itemId)}
             </p>
@@ -688,7 +713,10 @@ function ActionRow({ action: a, visible, colCount, selected, review, exportable,
               {name.charAt(0).toUpperCase()}
             </div>
             <div className="flex min-w-0 flex-col">
-              <span className="truncate font-medium">{name}</span>
+              {/* Up to two lines, then an ellipsis; the full name on hover. */}
+              <span className="line-clamp-2 break-words font-medium leading-snug" title={name}>
+                {name}
+              </span>
               <span className="text-xs text-muted-foreground">{labels.domainLabel(sides.other.domain)}</span>
             </div>
           </div>

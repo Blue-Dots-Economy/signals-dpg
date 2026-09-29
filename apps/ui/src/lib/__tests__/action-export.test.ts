@@ -32,9 +32,13 @@ const action = (
   tgt: string,
   srcType = 'profile_1.0',
   tgtType = 'profile_1.0',
+  srcNet = 'blue_dot',
+  tgtNet = 'blue_dot',
 ) => ({
   action_id: id,
   ownership_roles: roles,
+  source_item_network: srcNet,
+  target_item_network: tgtNet,
   source_item_domain: src,
   target_item_domain: tgt,
   source_item_type: srcType,
@@ -61,8 +65,20 @@ describe('groupByCounterpartyType', () => {
       action('a3', ['initiated'], 'service_provider', 'seeker'),
     ]);
     expect(groups).toEqual([
-      { key: 'provider::job_posting_1.0', domain: 'provider', itemType: 'job_posting_1.0', actionIds: ['a2'] },
-      { key: 'seeker::profile_1.0', domain: 'seeker', itemType: 'profile_1.0', actionIds: ['a1', 'a3'] },
+      {
+        key: 'blue_dot::provider::job_posting_1.0',
+        network: 'blue_dot',
+        domain: 'provider',
+        itemType: 'job_posting_1.0',
+        actionIds: ['a2'],
+      },
+      {
+        key: 'blue_dot::seeker::profile_1.0',
+        network: 'blue_dot',
+        domain: 'seeker',
+        itemType: 'profile_1.0',
+        actionIds: ['a1', 'a3'],
+      },
     ]);
   });
 
@@ -71,7 +87,18 @@ describe('groupByCounterpartyType', () => {
       action('a1', ['received'], 'provider', 'seeker', 'job_posting_1.0'),
       action('a2', ['received'], 'provider', 'seeker', 'training_1.0'),
     ]);
-    expect(groups.map((g) => g.key)).toEqual(['provider::job_posting_1.0', 'provider::training_1.0']);
+    expect(groups.map((g) => g.key)).toEqual([
+      'blue_dot::provider::job_posting_1.0',
+      'blue_dot::provider::training_1.0',
+    ]);
+  });
+
+  it('splits the same domain and type from two networks — the server key', () => {
+    const groups = groupByCounterpartyType([
+      action('a1', ['received'], 'seeker', 'provider', 'profile_1.0', 'job_posting_1.0', 'blue_dot'),
+      action('a2', ['received'], 'seeker', 'provider', 'profile_1.0', 'job_posting_1.0', 'yellow_dot'),
+    ]);
+    expect(groups.map((g) => g.network)).toEqual(['blue_dot', 'yellow_dot']);
   });
 
   it('empty selection → no groups', () => {
@@ -137,6 +164,17 @@ describe('exportActions', () => {
     expect(err).toBeInstanceOf(ActionExportError);
     const e = err as InstanceType<typeof ActionExportError>;
     expect([e.status, e.code, e.message]).toEqual([413, 'EXPORT_TOO_LARGE', 'too many']);
+  });
+
+  it('carries the counterparty types of a MIXED_COUNTERPARTY_TYPES refusal', async () => {
+    const types = [{ network: 'blue_dot', domain: 'provider', item_type: 'job_posting_1.0' }];
+    const errBlob = new Blob(
+      [JSON.stringify({ error: 'MIXED_COUNTERPARTY_TYPES', message: 'mixed', details: { counterparty_types: types } })],
+      { type: 'application/json' },
+    );
+    failWith = { isAxiosError: true, response: { status: 400, data: errBlob } };
+    const err = (await exportActions(body).catch((e: unknown) => e)) as InstanceType<typeof ActionExportError>;
+    expect(err.counterpartyTypes).toEqual(types);
   });
 
   it('a network failure becomes a typed error with no status', async () => {

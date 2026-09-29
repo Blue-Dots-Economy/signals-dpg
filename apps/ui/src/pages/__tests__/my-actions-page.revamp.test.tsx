@@ -293,6 +293,22 @@ describe('MyActionsPage — revamp', () => {
   });
 });
 
+describe('MyActionsPage — empty states', () => {
+  it('with nothing filtered and no actions, points to the map', async () => {
+    renderPage('/my-actions');
+    expect(await screen.findByText('No actions yet')).toBeInTheDocument();
+    expect(screen.getByText(/Apply or connect with someone on the map/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Go to the map' }));
+    await waitFor(() => expect(location).toContain('view=map'));
+  });
+
+  it('with a filter on, says nothing matches instead', async () => {
+    renderPage('/my-actions?status=accepted');
+    expect(await screen.findByText('No actions match')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Go to the map' })).toBeNull();
+  });
+});
+
 describe('MyActionsPage — back', () => {
   it('goes to the map view when the tab opened on My Actions (no in-app history)', async () => {
     renderPage('/my-actions');
@@ -350,6 +366,54 @@ describe('MyActionsPage — export paths', () => {
     expect(filters.map((f) => f.counterparty_domain)).toEqual(['seeker', 'service_provider']);
     expect(filters[0]).toMatchObject({ q: 'asha', action_status: ['accepted', 'completed'] });
     expect(filters[0].action_ids).toBeUndefined();
+  });
+
+  it('select-all splits a mixed-type refusal per type, and one failure does not cancel the rest', async () => {
+    const { ActionExportError } = await import('@/lib/action-export');
+    rows = [accepted('a1')];
+    total = 30;
+    exportActionsMock
+      .mockRejectedValueOnce(
+        new ActionExportError('mixed', 400, 'MIXED_COUNTERPARTY_TYPES', [
+          { network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0' },
+          { network: 'yellow_dot', domain: 'seeker', item_type: 'profile_1.0' },
+        ]),
+      )
+      .mockRejectedValueOnce(new ActionExportError('too big', 413, 'EXPORT_TOO_LARGE'));
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Select all 30' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'All — 2 files' }));
+    // seeker (mixed → split into 2), then service_provider: 4 requests in all.
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(4));
+    const filters = exportActionsMock.mock.calls.map((c) => c[0].filters);
+    expect(filters[1]).toMatchObject({ counterparty_network: 'blue_dot', counterparty_item_type: 'profile_1.0' });
+    expect(filters[2]).toMatchObject({ counterparty_network: 'yellow_dot' });
+    expect(filters[3]).toMatchObject({ counterparty_domain: 'service_provider' });
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
+    expect(toastMock.success).toHaveBeenCalled();
+  });
+
+  it('a view filtered to non-exportable statuses offers no export at all', async () => {
+    rows = [row('r1', { action_status: 'rejected' })];
+    total = 30;
+    renderPage('/my-actions?status=rejected');
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Select all 30' }));
+    expect(screen.queryByRole('button', { name: /^Export/ })).toBeNull();
+    expect(exportActionsMock).not.toHaveBeenCalled();
+  });
+
+  it('sends the live profiles as item_ids when none is picked', async () => {
+    rows = [accepted('a1')];
+    total = 1;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalled());
+    expect(exportActionsMock.mock.calls[0][0].filters.item_ids?.length).toBeGreaterThan(0);
   });
 
   it('a failed export shows the mapped message; an empty one says so', async () => {

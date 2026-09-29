@@ -38,6 +38,7 @@ import {
 import {
   actionStatuses,
   actionTypes,
+  activeFilterCount,
   applySavedView,
   currentSavedView,
   needsResponse,
@@ -336,41 +337,74 @@ export function MyActionsPage() {
   // ── Export ─────────────────────────────────────────────────────────────────
   const [exporting, setExporting] = React.useState(false);
   const exportErrorMessage = (err: unknown) => exportErrorText(err, t);
-  /** One file per counterparty type; returns rows exported. */
+  /**
+   * One file per counterparty type. Each request stands alone: one failing
+   * does not cancel the rest. A request the server finds spanning several
+   * types (MIXED_COUNTERPARTY_TYPES — e.g. "select all" over a domain with
+   * two item types) is re-issued once per type it names.
+   */
   const runExports = async (requests: Array<ExportActionsBody['filters']>) => {
     setExporting(true);
     let exported = 0;
     let skipped = 0;
+    let failure: unknown = null;
+    const queue = [...requests];
     try {
-      for (const filters of requests) {
-        const result = await exportActions({ filters, projection: { fields: '*' }, format: 'xlsx' });
-        if (result.rowCount === 0) continue;
-        saveBlob(result.blob, result.filename);
-        exported += result.rowCount;
-        skipped += result.skipped;
+      for (let filters = queue.shift(); filters; filters = queue.shift()) {
+        try {
+          const result = await exportActions({ filters, projection: { fields: '*' }, format: 'xlsx' });
+          if (result.rowCount === 0) continue;
+          saveBlob(result.blob, result.filename);
+          exported += result.rowCount;
+          skipped += result.skipped;
+        } catch (err) {
+          const split =
+            err instanceof ActionExportError &&
+            err.code === 'MIXED_COUNTERPARTY_TYPES' &&
+            !filters.counterparty_item_type &&
+            err.counterpartyTypes.length > 0;
+          if (split) {
+            queue.unshift(
+              ...err.counterpartyTypes.map((ct) => ({
+                ...filters,
+                counterparty_network: ct.network,
+                counterparty_domain: ct.domain,
+                counterparty_item_type: ct.item_type,
+              })),
+            );
+          } else {
+            failure ??= err;
+          }
+        }
       }
-      if (exported === 0) toast.error(t('actions.export_nothing'));
-      else
+      if (failure) toast.error(exportErrorMessage(failure));
+      if (exported > 0) {
         toast.success(
           skipped > 0
             ? t('actions.export_done_skipped', { count: exported, skipped })
             : t('actions.export_done', { count: exported }),
         );
-    } catch (err) {
-      toast.error(exportErrorMessage(err));
+      } else if (!failure) {
+        toast.error(t('actions.export_nothing'));
+      }
     } finally {
       setExporting(false);
     }
   };
+  // The statuses this view can export: its own status filter narrowed to the
+  // exportable ones, or every exportable status when it has none. Empty means
+  // the view shows nothing exportable — never widen that to "all".
+  const viewExportStatuses =
+    filter.statuses.length > 0 ? filter.statuses.filter((s) => exportStatuses.includes(s)) : exportStatuses;
   const baseExportFilters = (): ExportActionsBody['filters'] => ({
     ownership_role: query.ownership_role ?? 'all',
-    item_ids: query.item_ids,
+    // The picked profiles, else every live one — so the server scopes the
+    // export by the profiles this page lists, not an older or retired one.
+    item_ids: query.item_ids ?? (liveItems.length > 0 ? liveItems.slice(0, 50).map((i) => i.item_id) : undefined),
     action_type: Array.isArray(query.action_type) ? query.action_type : undefined,
     // Only exportable statuses; a row whose status changed since it was shown
     // is dropped server-side instead of exported.
-    action_status: (filter.statuses.length > 0 ? filter.statuses : exportStatuses).filter((s) =>
-      exportStatuses.includes(s),
-    ),
+    action_status: viewExportStatuses,
     q: query.q,
     facets: query.facets,
   });
@@ -379,6 +413,7 @@ export function MyActionsPage() {
   // providers + seekers (network.json `export.requester_domains`). Each is one
   // file; "all" runs them in turn.
   const exportTargets = (): Array<{ key: string; domain: string; count?: number; filters: ExportActionsBody['filters'] }> => {
+    if (viewExportStatuses.length === 0) return [];
     if (allMatching) {
       return [...exportableDomains].sort((a, b) => a.localeCompare(b)).map((domain) => ({
         key: domain,
@@ -386,7 +421,7 @@ export function MyActionsPage() {
         filters: { ...baseExportFilters(), counterparty_domain: domain },
       }));
     }
-    const exportable = [...picked.values()].filter((a) => exportStatuses.includes(a.action_status));
+    const exportable = [...picked.values()].filter((a) => viewExportStatuses.includes(a.action_status));
     return groupByCounterpartyType(exportable)
       .filter((g) => exportableDomains.has(g.domain))
       .map((g) => ({
@@ -396,6 +431,7 @@ export function MyActionsPage() {
         filters: {
           ...baseExportFilters(),
           action_ids: g.actionIds,
+          counterparty_network: g.network,
           counterparty_domain: g.domain,
           counterparty_item_type: g.itemType,
         },
@@ -405,9 +441,8 @@ export function MyActionsPage() {
   // ── Bulk commands (counts reflect what each would act on) ──────────────────
   const pickedRows = [...picked.values()];
   const respondable = pickedRows.filter((a) => needsResponse(a, pending));
-  const exportableCount = allMatching
-    ? (counts?.ready_to_export ?? 0)
-    : pickedRows.filter((a) => exportStatuses.includes(a.action_status)).length;
+  let exportableCount = pickedRows.filter((a) => viewExportStatuses.includes(a.action_status)).length;
+  if (allMatching) exportableCount = viewExportStatuses.length > 0 ? (counts?.ready_to_export ?? 0) : 0;
   const exportCommand = (): BulkCommand => {
     const targets = exportTargets();
     const plural = (d: string) => pluralizeDomainLabel(d, domains);
@@ -506,11 +541,32 @@ export function MyActionsPage() {
   // opened here — after login, a pasted or refreshed URL) the map view.
   // History index, not `location.key`: filter changes replace the URL, which
   // mints a new key without adding anything to go back to.
+  const mapUrl = `/?network=${encodeURIComponent(targetNetworkId ?? '')}&view=map`;
   const handleBack = () => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
     if (idx > 0) navigate(-1);
-    else navigate(`/?network=${encodeURIComponent(targetNetworkId ?? '')}&view=map`);
+    else navigate(mapUrl);
   };
+
+  // Nothing filtered and still no rows: the caller has no actions yet, so
+  // point them at where actions start (the map) instead of "loosen the
+  // filters". Worded for the action types this network actually has.
+  const nothingFiltered = activeFilterCount(filter) === 0 && !filter.q.trim() && filter.profiles.length === 0;
+  let firstUseBody = t('my_actions.first_use_body', 'Find someone on the map and reach out. What you send and what you receive shows up here.');
+  if (types.includes('apply') && types.includes('connect')) {
+    firstUseBody = t('my_actions.first_use_body_apply_connect', 'Apply or connect with someone on the map. What you send and what you receive shows up here.');
+  } else if (types.includes('connect')) {
+    firstUseBody = t('my_actions.first_use_body_connect', 'Connect with someone on the map. What you send and what you receive shows up here.');
+  } else if (types.includes('apply')) {
+    firstUseBody = t('my_actions.first_use_body_apply', 'Apply to an opportunity on the map. What you send and what you receive shows up here.');
+  }
+  const emptyState = nothingFiltered
+    ? {
+        title: t('my_actions.first_use_title', 'No actions yet'),
+        body: firstUseBody,
+        action: { label: t('my_actions.go_to_map', 'Go to the map'), onClick: () => navigate(mapUrl) },
+      }
+    : undefined;
 
   // ── Sidebar (profile switch still sets the shared active profile) ──────────
   const handleActiveProfileChange = (id: string) => {
@@ -577,6 +633,7 @@ export function MyActionsPage() {
         />
 
         <ActionsTable
+          emptyState={emptyState}
           rows={rows}
           total={total}
           page={filter.page}

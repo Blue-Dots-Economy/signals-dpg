@@ -9,8 +9,9 @@ import z, {
   getDomainItemSchema,
   getInteractionPiiRevealStatuses,
   getInteractionColumnFields,
+  interactionInputOf,
 } from '@dpg/schemas';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -34,6 +35,7 @@ import {
 import { countOwnedActionsForViews } from '@/services/actions/owned_action_counts';
 import { PRIVATE_NAME_FIELDS } from '@/services/actions/visible_name';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { memoizeNetworkConfigs } from '@/utils/network_config_memo';
 
 type FetchOwnedActionsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchOwnedActionsQuerySchema>;
@@ -213,7 +215,7 @@ const fetch_actions_handler = async (
     //   the already-masked value is used.
     // - `meta` (item_state + item_locations) is the non-PII facet/geo
     //   projection Task 7 filters and sorts on — never the masked name.
-    const { names: resolvedNames, meta: itemMeta } = await resolveItemNames(matchingRows);
+    const { names: resolvedNames, meta: itemMeta } = await resolveItemNames(matchingRows, request.log);
 
     // Pre-resolve reveals_pii_on_status per action row. Mirrors the gate used
     // by /api/v1/action/:id/contact-details so the list view never reveals a
@@ -221,23 +223,9 @@ const fetch_actions_handler = async (
     // back to an empty set (mask), matching the contact-details fail-closed
     // posture. Shared with the Task 7 facet-schema lookup below — both key off
     // network id.
-    const networkConfigCache = new Map<
-      string,
-      Awaited<ReturnType<typeof getNetworkConfigById>> | null
-    >();
-    const getNetworkConfigCached = async (network: string) => {
-      if (networkConfigCache.has(network)) {
-        return networkConfigCache.get(network) ?? null;
-      }
-      try {
-        const cfg = await getNetworkConfigById(network);
-        networkConfigCache.set(network, cfg);
-        return cfg;
-      } catch {
-        networkConfigCache.set(network, null);
-        return null;
-      }
-    };
+    const getNetworkConfigCached = memoizeNetworkConfigs((err, network) =>
+      request.log.warn({ err, network }, 'network config unavailable in fetch_actions — masking'),
+    );
 
     // The counterparty is whichever side of the action the caller does NOT
     // own; `myId` is the other side. For 'received' this is source; for
@@ -304,15 +292,7 @@ const fetch_actions_handler = async (
       try {
         const cfg = await getNetworkConfigCached(row.target_item_network);
         if (cfg) {
-          statuses = getInteractionPiiRevealStatuses(cfg, {
-            actionType: row.action_type,
-            fromNetwork: row.source_item_network,
-            fromDomain: row.source_item_domain,
-            fromItemType: row.source_item_type,
-            toNetwork: row.target_item_network,
-            toDomain: row.target_item_domain,
-            toItemType: row.target_item_type,
-          });
+          statuses = getInteractionPiiRevealStatuses(cfg, interactionInputOf(row));
         }
       } catch (err) {
         request.log.warn(
@@ -442,15 +422,7 @@ const fetch_actions_handler = async (
         if (cfg && counterpartyCfg) {
           const fields = getInteractionColumnFields(
             cfg,
-            {
-              actionType: row.action_type,
-              fromNetwork: row.source_item_network,
-              fromDomain: row.source_item_domain,
-              fromItemType: row.source_item_type,
-              toNetwork: row.target_item_network,
-              toDomain: row.target_item_domain,
-              toItemType: row.target_item_type,
-            },
+            interactionInputOf(row),
             counterpartyId(row) === row.source_item_id ? 'from' : 'to',
           );
           // Only declared, non-private fields ever leave the server, whatever
@@ -611,7 +583,8 @@ type ResolvedName =
  * distance sort/display read, never the masked name.
  */
 async function resolveItemNames(
-  rows: ActionRow[]
+  rows: ActionRow[],
+  log: FastifyBaseLogger,
 ): Promise<{ names: Map<string, ResolvedName>; meta: Map<string, ItemMeta> }> {
   const names = new Map<string, ResolvedName>();
   const meta = new Map<string, ItemMeta>();
@@ -637,21 +610,10 @@ async function resolveItemNames(
     .from(items)
     .where(inArray(items.item_id, [...ids]));
 
-  const configCache = new Map<
-    string,
-    Awaited<ReturnType<typeof getNetworkConfigById>> | null
-  >();
-  const getConfig = async (network: string) => {
-    if (configCache.has(network)) return configCache.get(network) ?? null;
-    try {
-      const cfg = await getNetworkConfigById(network);
-      configCache.set(network, cfg);
-      return cfg;
-    } catch {
-      configCache.set(network, null);
-      return null;
-    }
-  };
+  // A missing config leaves the item unnamed (masked), never an error.
+  const getConfig = memoizeNetworkConfigs((err, network) =>
+    log.warn({ err, network }, 'network config unavailable while resolving action names'),
+  );
 
   for (const item of itemRows) {
     const cfg = await getConfig(item.item_network);

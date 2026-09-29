@@ -91,10 +91,12 @@ const state = {
   holdRows: null as Promise<void> | null,
   rateCount: 1,
   rateThrows: false,
+  holdRate: null as Promise<void> | null,
 };
 
 vi.mock('@/utils/rate_window', () => ({
   incrWithinWindow: vi.fn(async () => {
+    if (state.holdRate) await state.holdRate;
     if (state.rateThrows) throw new Error('redis down');
     return state.rateCount;
   }),
@@ -174,7 +176,11 @@ const itemRow = (id: string, domain: string, st: Record<string, unknown>) => ({
   lifecycle_status: 'live',
 });
 
-async function buildApp(userId: string | null = ME, role = 'user'): Promise<FastifyInstance> {
+async function buildApp(
+  userId: string | null = ME,
+  role = 'user',
+  serviceClientId?: string
+): Promise<FastifyInstance> {
   // Capture structured log lines: the download audit is a log record.
   const stream = {
     write: (line: string) => {
@@ -186,6 +192,7 @@ async function buildApp(userId: string | null = ME, role = 'user'): Promise<Fast
   app.setSerializerCompiler(serializerCompiler);
   app.addHook('preHandler', async (req) => {
     if (userId) (req as unknown as { user: { id: string; role: string } }).user = { id: userId, role };
+    if (serviceClientId) req.service_client_id = serviceClientId;
   });
   await app.register(export_actions, { prefix: '/api/v1/action' });
   await app.ready();
@@ -330,11 +337,30 @@ describe('POST /api/v1/action/export', () => {
     expect((await post(app, {})).json().error).toBe('EXPORT_NOT_ENABLED');
   });
 
-  it('403 SERVICE_CALLER_NOT_ALLOWED for a service identity (API key / client credentials)', async () => {
-    const app = await buildApp('svc-user', 'service');
+  it('403 SERVICE_CALLER_NOT_ALLOWED for an x-api-key caller, whatever its user.role', async () => {
+    // user.role is 'user' — the service marker is member.role, never on request.user.
+    const app = await buildApp('svc-user', 'user');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/action/export',
+      headers: { 'x-api-key': 'k' },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('SERVICE_CALLER_NOT_ALLOWED');
+  });
+
+  it('403 SERVICE_CALLER_NOT_ALLOWED for a client-credentials token', async () => {
+    const app = await buildApp('svc-user', 'user', 'aggregator-dpg');
     const res = await post(app, {});
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('SERVICE_CALLER_NOT_ALLOWED');
+  });
+
+  it('400 for an empty status list — never read as "every exportable status"', async () => {
+    const app = await buildApp();
+    const res = await post(app, { filters: { action_status: [] } });
+    expect(res.statusCode).toBe(400);
   });
 
   it('400 STATUS_NOT_EXPORTABLE when asking for a status the network does not reveal on', async () => {
@@ -414,6 +440,21 @@ describe('POST /api/v1/action/export', () => {
     expect(state.revealAudit).toHaveLength(0);
   });
 
+  it('429 for a double-click that lands while the rate-limit check is in flight', async () => {
+    const app = await buildApp();
+    let release!: () => void;
+    state.holdRate = new Promise<void>((r) => (release = r));
+    state.selects = [[requesterRow()], []];
+    const first = post(app, {});
+    await new Promise((r) => setTimeout(r, 10));
+    const second = await post(app, {});
+    expect(second.statusCode).toBe(429);
+    expect(second.json().error).toBe('EXPORT_IN_PROGRESS');
+    state.holdRate = null;
+    release();
+    expect((await first).statusCode).toBe(200);
+  });
+
   it('429 while the same user already has an export running', async () => {
     const app = await buildApp();
     let release!: () => void;
@@ -469,6 +510,16 @@ describe('POST /api/v1/action/export — My Actions filters', () => {
     const res = await post(app, { filters: { q: 'meera', action_status: ['accepted'] } });
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-export-row-count']).toBe('1');
+  });
+
+  it('never logs the search text in the audit line', async () => {
+    const app = await buildApp();
+    state.selects = rowsFor();
+    const res = await post(app, { filters: { q: 'meera', action_status: ['accepted'] } });
+    expect(res.statusCode).toBe(200);
+    const line = auditLogs()[0];
+    expect(line).toMatchObject({ filters: { has_search: true } });
+    expect(JSON.stringify(line)).not.toContain('meera');
   });
 
   it('q that matches no visible name exports nothing', async () => {

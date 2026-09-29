@@ -511,6 +511,41 @@ export function parseNetworkConfigDocument(
   return NetworkConfigSchema.parse(input);
 }
 
+/** Which interaction of a network an action is: its type and both sides. */
+export interface ActionInteractionInput {
+  actionType: string;
+  fromNetwork: string;
+  fromDomain: string;
+  fromItemType?: string;
+  toNetwork: string;
+  toDomain: string;
+  toItemType?: string;
+}
+
+/** The sides of a stored `item_actions` row, as the interaction lookups read them. */
+export interface ActionRowSides {
+  action_type: string;
+  source_item_network: string;
+  source_item_domain: string;
+  source_item_type: string;
+  target_item_network: string;
+  target_item_domain: string;
+  target_item_type: string;
+}
+
+/** The interaction lookup input for a stored action row. */
+export function interactionInputOf(row: ActionRowSides): ActionInteractionInput {
+  return {
+    actionType: row.action_type,
+    fromNetwork: row.source_item_network,
+    fromDomain: row.source_item_domain,
+    fromItemType: row.source_item_type,
+    toNetwork: row.target_item_network,
+    toDomain: row.target_item_domain,
+    toItemType: row.target_item_type,
+  };
+}
+
 export function getActionInteraction(
   networkConfig: NetworkConfigDocument,
   input: {

@@ -1,6 +1,6 @@
 import { count } from 'drizzle-orm';
 import { item_actions } from '@dpg/database';
-import { getActionInteraction, type NetworkConfigDocument } from '@dpg/schemas';
+import { getActionInteraction, interactionInputOf, type NetworkConfigDocument } from '@dpg/schemas';
 import { db } from '@api/db/postgres/drizzle_config';
 import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
 
@@ -49,15 +49,7 @@ interface CountGroup {
 
 /** The status-dependent views one group counts toward, per its interaction. */
 function addStatusViews(counts: OwnedActionViewCounts, g: CountGroup, cfg: NetworkConfigDocument): void {
-  const interaction = getActionInteraction(cfg, {
-    actionType: g.action_type,
-    fromNetwork: g.source_item_network,
-    fromDomain: g.source_item_domain,
-    fromItemType: g.source_item_type,
-    toNetwork: g.target_item_network,
-    toDomain: g.target_item_domain,
-    toItemType: g.target_item_type,
-  });
+  const interaction = getActionInteraction(cfg, interactionInputOf(g));
   if (g.received && (interaction.metric_categories?.create ?? []).includes(g.action_status)) {
     counts.needs_response += g.n;
   }
