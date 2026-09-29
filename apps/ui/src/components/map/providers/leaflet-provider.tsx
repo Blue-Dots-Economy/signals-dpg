@@ -380,6 +380,7 @@ export function LeafletMapProvider({
   closePopupNonce,
   selfLocation,
   renderPopup,
+  showPopup = true,
   resolveIcon,
   onViewportChange,
 }: MapProviderProps) {
@@ -478,13 +479,15 @@ export function LeafletMapProvider({
                 click: () => onMarkerClick?.(marker.id),
               }}
             >
-              <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
-                {renderPopup ? (
-                  renderPopup(marker)
-                ) : (
-                  <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-                )}
-              </Popup>
+              {showPopup && (
+                <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
+                  {renderPopup ? (
+                    renderPopup(marker)
+                  ) : (
+                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
+                  )}
+                </Popup>
+              )}
             </Marker>
           );
         })}

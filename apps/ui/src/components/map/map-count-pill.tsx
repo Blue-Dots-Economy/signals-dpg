@@ -52,7 +52,14 @@ export function MapCountPill({ total, shown, truncated }: Readonly<MapCountPillP
   // near-background pill washed out against the light map). The over-dense
   // variant leads with a zoom-in icon to read as an actionable hint.
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4">
+    // `in-data-[scroll-locked]:hidden` — the pill sits at z-[2100] to stay above
+    // the maximized map (z-[2000]), which also lifts it over every dialog and
+    // bottom sheet (z-[1200]): it floated across the Connect sheet's Confirm
+    // button on a phone (#745). Radix/vaul mark <body> with
+    // `data-scroll-locked` while any modal is open, so hide it then. The map's
+    // other fixed overlays ("Search this area", the partial banner) carry the
+    // same class.
+    <div className="pointer-events-none fixed bottom-6 left-1/2 z-[2100] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
       <div className="flex items-center gap-1.5 rounded-full bg-slate-900/95 px-3.5 py-2 text-xs font-semibold text-white shadow-lg ring-1 ring-white/20 backdrop-blur-sm">
         {truncated && <ZoomIn className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
         {label}
