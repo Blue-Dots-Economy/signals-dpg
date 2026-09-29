@@ -73,3 +73,20 @@ export function filenameStamp(at: Date, timeZone: string): string {
   const p = zonedParts(at, timeZone);
   return `${p.date}T${p.time.replaceAll(':', '-')}${offsetSuffix(p.offsetMinutes, '')}`;
 }
+
+/**
+ * `at` shifted so its UTC fields read as the wall-clock time in `timeZone`.
+ * Spreadsheet dates carry no zone, and the xlsx writer takes a Date's UTC
+ * fields, so this is how a cell shows 15:53 for 10:23Z in Asia/Kolkata.
+ */
+export function wallClockInZone(at: Date, timeZone: string): Date {
+  return new Date(at.getTime() + zonedParts(at, timeZone).offsetMinutes * 60_000);
+}
+
+/** Short zone name for a column heading: `IST`, `UTC`, or `GMT+x`. */
+export function zoneAbbreviation(at: Date, timeZone: string): string {
+  const name = new Intl.DateTimeFormat('en-IN', { timeZone, timeZoneName: 'short' })
+    .formatToParts(at)
+    .find((p) => p.type === 'timeZoneName')?.value;
+  return name ?? timeZone;
+}

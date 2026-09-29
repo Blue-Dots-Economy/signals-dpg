@@ -16,7 +16,6 @@ import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { incrWithinWindow } from '@/utils/rate_window';
-import { csvLine } from '@/utils/csv';
 import { buildOwnedActionsWhere, scopedItemIds } from '@/services/actions/owned_actions';
 import { visibleItemName } from '@/services/actions/visible_name';
 import {
@@ -26,9 +25,11 @@ import {
 } from '@/services/action_export/build_export';
 import { buildExportFilename } from '@/services/action_export/filename';
 import { formatIsoInZone } from '@/services/action_export/time';
+import { humanizeKey } from '@/services/action_export/columns';
+import { buildExportWorkbook, XLSX_CONTENT_TYPE } from '@/services/action_export/xlsx';
 
 /**
- * `POST /api/v1/action/export` (#770) — CSV of the caller's engagement
+ * `POST /api/v1/action/export` (#770) — Excel file of the caller's engagement
  * COUNTERPARTIES, one counterparty type per file. Thin I/O shell around
  * `buildExport`, which owns the per-row export rules; this handler enforces
  * everything that needs I/O, so no rule depends on the UI:
@@ -50,8 +51,6 @@ type ExportRequest = FastifyRequest<{ Body: z.infer<typeof ExportActionsBodySche
 // below is the cross-pod limit.
 const inFlight = new Set<string>();
 
-// Excel opens BOM-less UTF-8 CSV as a legacy code page, garbling non-Latin names.
-const UTF8_BOM = '﻿';
 const RATE_WINDOW_SEC = 3600;
 // Keeps each pii_reveal_audit INSERT well under Postgres' 65535-parameter cap.
 const REVEAL_AUDIT_BATCH = 1000;
@@ -64,7 +63,7 @@ export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
     schema: {
       tags: ['action'],
       description:
-        'Download the counterparty profiles of the caller’s engagements as CSV (text/csv). ' +
+        'Download the counterparty profiles of the caller’s engagements as an Excel workbook (.xlsx). ' +
         'Human session only. One counterparty type per file; only statuses the network ' +
         'reveals on are exportable, and private fields are revealed per row under the same ' +
         'gate as contact-details. Row and skip counts are in the X-Export-* response headers.',
@@ -320,10 +319,14 @@ async function runExport(
   // with its offset. The audit rows stay in UTC.
   const timeZone = apiConfig.export_timezone;
   const formatDate = (d: Date) => formatIsoInZone(d, timeZone);
-  const body =
-    UTF8_BOM +
-    csvLine(result.header, formatDate) +
-    result.records.map((rec) => csvLine(rec, formatDate)).join('');
+  const body = await buildExportWorkbook({
+    header: result.header,
+    labels: result.labels,
+    records: result.records,
+    sheetName: humanizeKey(result.counterparty?.domain ?? 'export'),
+    timeZone,
+    now,
+  });
   const filename = buildExportFilename({
     network: result.counterparty?.network,
     counterpartyDomain: result.counterparty?.domain,
@@ -336,7 +339,7 @@ async function runExport(
 
   return reply
     .code(200)
-    .header('Content-Type', 'text/csv; charset=utf-8')
+    .header('Content-Type', XLSX_CONTENT_TYPE)
     .header('Content-Disposition', `attachment; filename="${filename}"`)
     .header('Cache-Control', 'no-store')
     .header('X-Export-Id', exportId)

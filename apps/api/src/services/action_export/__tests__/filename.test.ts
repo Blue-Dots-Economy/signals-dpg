@@ -5,7 +5,7 @@ const now = new Date('2026-09-24T10:15:00.123Z');
 const exportId = '3f9a1c2e-1111-4000-8000-000000000000';
 
 describe('buildExportFilename', () => {
-  it('network_domain_status_exportid8_ts.csv, UTC, no colons', () => {
+  it('network_domain_status_exportid8_ts.xlsx, UTC, no colons', () => {
     expect(
       buildExportFilename({
         network: 'purple_dot',
@@ -15,7 +15,7 @@ describe('buildExportFilename', () => {
         now,
         timeZone: 'UTC',
       })
-    ).toBe('purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.csv');
+    ).toBe('purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.xlsx');
   });
 
   it('joins several statuses and uses "all" when unfiltered', () => {
@@ -29,7 +29,7 @@ describe('buildExportFilename', () => {
   it('falls back when no counterparty type was resolved (empty export)', () => {
     expect(
       buildExportFilename({ network: undefined, counterpartyDomain: undefined, statuses: [], exportId, now, timeZone: 'UTC' })
-    ).toBe('export_none_all_3f9a1c2e_2026-09-24T10-15-00Z.csv');
+    ).toBe('export_none_all_3f9a1c2e_2026-09-24T10-15-00Z.xlsx');
   });
 
   it('strips anything outside [A-Za-z0-9_-] from each part', () => {
@@ -42,7 +42,7 @@ describe('buildExportFilename', () => {
         now,
         timeZone: 'UTC',
       })
-    ).toBe('a-b_c-d_x-y_3f9a1c2e_2026-09-24T10-15-00Z.csv');
+    ).toBe('a-b_c-d_x-y_3f9a1c2e_2026-09-24T10-15-00Z.xlsx');
   });
 
   it('uses EXPORT_TIMEZONE with a compact offset (IST)', () => {
@@ -55,6 +55,6 @@ describe('buildExportFilename', () => {
         now,
         timeZone: 'Asia/Kolkata',
       })
-    ).toBe('blue_dot_seeker_accepted-completed_3f9a1c2e_2026-09-24T15-45-00+0530.csv');
+    ).toBe('blue_dot_seeker_accepted-completed_3f9a1c2e_2026-09-24T15-45-00+0530.xlsx');
   });
 });

@@ -215,7 +215,7 @@ export const ExportActionsBodySchema = z
       .strict()
       .default({ fields: '*' }),
     include: z.array(z.enum(['match_score'])).default([]),
-    format: z.enum(['csv']).default('csv'),
+    format: z.enum(['xlsx']).default('xlsx'),
   })
   .strict();
 

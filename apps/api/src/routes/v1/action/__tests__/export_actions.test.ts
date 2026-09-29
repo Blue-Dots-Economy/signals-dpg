@@ -1,3 +1,4 @@
+import readXlsxFile from 'read-excel-file/node';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import {
@@ -210,9 +211,9 @@ describe('POST /api/v1/action/export', () => {
     expect((await post(app, {})).statusCode).toBe(401);
   });
 
-  it('400 on an invalid body', async () => {
+  it('400 on an invalid body — CSV is no longer offered', async () => {
     const app = await buildApp();
-    expect((await post(app, { format: 'xlsx' })).statusCode).toBe(400);
+    expect((await post(app, { format: 'csv' })).statusCode).toBe(400);
   });
 
   it('403 when item_id is not the caller’s', async () => {
@@ -232,7 +233,7 @@ describe('POST /api/v1/action/export', () => {
     expect(auditLogs()).toHaveLength(0);
   });
 
-  it('200: CSV body, PII-free filename, X-Export-* headers, one audit row', async () => {
+  it('200: Excel workbook, PII-free filename, X-Export-* headers, one audit row', async () => {
     const app = await buildApp();
     state.selects = [
       [requesterRow()],
@@ -245,12 +246,14 @@ describe('POST /api/v1/action/export', () => {
     const res = await post(app, { filters: { action_status: ['accepted'] } });
 
     expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8');
+    expect(res.headers['content-type']).toBe(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
     expect(res.headers['cache-control']).toBe('no-store');
     const exportId = res.headers['x-export-id'] as string;
     expect(exportId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.headers['content-disposition']).toMatch(
-      new RegExp(`^attachment; filename="net1_seeker_accepted_${exportId.slice(0, 8)}_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\+0530\\.csv"$`)
+      new RegExp(`^attachment; filename="net1_seeker_accepted_${exportId.slice(0, 8)}_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\+0530\\.xlsx"$`)
     );
     expect(res.headers['content-disposition']).not.toContain('Meera');
     expect(res.headers['x-export-row-count']).toBe('1');
@@ -267,15 +270,30 @@ describe('POST /api/v1/action/export', () => {
     }
     expect(exposed).toContain('content-disposition');
 
-    const lines = res.body.replace(/^﻿/, '').split('\r\n');
-    expect(res.body.startsWith('﻿')).toBe(true); // Excel reads UTF-8 names correctly
-    expect(lines[0]).toBe(
-      'action_id,action_type,action_status,direction,counterparty_item_id,counterparty_domain,counterparty_item_type,created_at,updated_at,pii_revealed,beneficiary_name,gender'
-    );
-    expect(lines[1]).toContain('a1,connect,accepted,received,s-a1,seeker,profile_1');
-    // Dates in EXPORT_TIMEZONE (IST), with the offset.
-    expect(lines[1]).toContain(',2026-09-01T05:30:00+05:30,2026-09-02T05:30:00+05:30,');
-    expect(lines[1]).toContain('true,Meera Kumari,Female');
+    const [sheet] = await readXlsxFile(res.rawPayload);
+    expect(sheet.sheet).toBe('Seeker');
+    // Plain-word headings: fixed labels, then the schema titles (or a
+    // humanised key) — never snake_case or camelCase keys.
+    expect(sheet.data[0]).toEqual([
+      'Action ID',
+      'Action',
+      'Status',
+      'Direction',
+      'Profile ID',
+      'Profile role',
+      'Profile type',
+      'Created (IST)',
+      'Updated (IST)',
+      'Contact details shared',
+      'Beneficiary Name',
+      'Gender',
+    ]);
+    const [, row] = sheet.data;
+    expect(row.slice(0, 7)).toEqual(['a1', 'Connect', 'Accepted', 'Received', 's-a1', 'Seeker', 'profile_1']);
+    // Real dates, shown at the EXPORT_TIMEZONE (IST) wall-clock time.
+    expect((row[7] as unknown as Date).toISOString()).toBe('2026-09-01T05:30:00.000Z');
+    expect((row[8] as unknown as Date).toISOString()).toBe('2026-09-02T05:30:00.000Z');
+    expect(row.slice(9)).toEqual(['Yes', 'Meera Kumari', 'Female']);
 
     // Download audit = one structured log line (no table), tied to the file
     // by export_id.
@@ -284,7 +302,7 @@ describe('POST /api/v1/action/export', () => {
       export_id: exportId,
       requester_user_id: ME,
       requester_item_id: 'p-me',
-      format: 'csv',
+      format: 'xlsx',
       row_count: 1,
       revealed_count: 1,
       masked_count: 0,

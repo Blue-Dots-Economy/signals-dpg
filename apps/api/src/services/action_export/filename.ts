@@ -26,5 +26,5 @@ export function buildExportFilename(input: {
     part(status),
     input.exportId.slice(0, 8),
     ts,
-  ].join('_') + '.csv';
+  ].join('_') + '.xlsx';
 }

@@ -196,7 +196,7 @@ beforeEach(() => {
   total = 0;
   queries.length = 0;
   vi.clearAllMocks();
-  exportActionsMock.mockResolvedValue({ blob: new Blob(), filename: 'f.csv', rowCount: 1, skipped: 0, exportId: 'x' });
+  exportActionsMock.mockResolvedValue({ blob: new Blob(), filename: 'f.xlsx', rowCount: 1, skipped: 0, exportId: 'x' });
 });
 
 describe('MyActionsPage — revamp', () => {
@@ -361,7 +361,7 @@ describe('MyActionsPage — export paths', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
     await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
-    exportActionsMock.mockResolvedValueOnce({ blob: new Blob(), filename: 'f.csv', rowCount: 0, skipped: 0 });
+    exportActionsMock.mockResolvedValueOnce({ blob: new Blob(), filename: 'f.xlsx', rowCount: 0, skipped: 0 });
     await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_nothing'));
   });

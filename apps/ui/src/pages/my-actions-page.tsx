@@ -343,7 +343,7 @@ export function MyActionsPage() {
     let skipped = 0;
     try {
       for (const filters of requests) {
-        const result = await exportActions({ filters, projection: { fields: '*' }, format: 'csv' });
+        const result = await exportActions({ filters, projection: { fields: '*' }, format: 'xlsx' });
         if (result.rowCount === 0) continue;
         saveBlob(result.blob, result.filename);
         exported += result.rowCount;

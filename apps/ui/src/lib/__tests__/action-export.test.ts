@@ -82,17 +82,17 @@ describe('groupByCounterpartyType', () => {
 describe('filenameFromContentDisposition', () => {
   it('reads a quoted filename', () => {
     expect(
-      filenameFromContentDisposition('attachment; filename="purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.csv"'),
-    ).toBe('purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.csv');
+      filenameFromContentDisposition('attachment; filename="purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.xlsx"'),
+    ).toBe('purple_dot_seeker_accepted_3f9a1c2e_2026-09-24T10-15-00Z.xlsx');
   });
 
   it('falls back when missing or unparsable', () => {
-    expect(filenameFromContentDisposition(undefined)).toBe('export.csv');
-    expect(filenameFromContentDisposition('attachment')).toBe('export.csv');
+    expect(filenameFromContentDisposition(undefined)).toBe('export.xlsx');
+    expect(filenameFromContentDisposition('attachment')).toBe('export.xlsx');
   });
 
   it('strips path separators from a hostile filename', () => {
-    expect(filenameFromContentDisposition('attachment; filename="../../x.csv"')).toBe('.._.._x.csv');
+    expect(filenameFromContentDisposition('attachment; filename="../../x.xlsx"')).toBe('.._.._x.xlsx');
   });
 });
 
@@ -106,7 +106,7 @@ describe('exportActions', () => {
       counterparty_domain: 'seeker',
     },
     projection: { fields: '*' as const },
-    format: 'csv' as const,
+    format: 'xlsx' as const,
   };
 
   it('POSTs the body as a blob request and returns file + counts', async () => {
@@ -114,7 +114,7 @@ describe('exportActions', () => {
     post.mockResolvedValue({
       data: blob,
       headers: {
-        'content-disposition': 'attachment; filename="f.csv"',
+        'content-disposition': 'attachment; filename="f.xlsx"',
         'x-export-id': 'e1',
         'x-export-row-count': '3',
         'x-export-skipped-cross-instance': '1',
@@ -125,7 +125,7 @@ describe('exportActions', () => {
     });
     const res = await exportActions(body);
     expect(post).toHaveBeenCalledWith('/api/v1/action/export', body, { responseType: 'blob' });
-    expect(res).toEqual({ blob, filename: 'f.csv', exportId: 'e1', rowCount: 3, skipped: 3 });
+    expect(res).toEqual({ blob, filename: 'f.xlsx', exportId: 'e1', rowCount: 3, skipped: 3 });
   });
 
   it('turns an error response (blob body) into a typed error', async () => {
@@ -157,7 +157,7 @@ describe('saveBlob', () => {
 
     vi.useFakeTimers();
     try {
-      saveBlob(new Blob(['x']), 'f.csv');
+      saveBlob(new Blob(['x']), 'f.xlsx');
 
       expect(create).toHaveBeenCalled();
       expect(click).toHaveBeenCalled();

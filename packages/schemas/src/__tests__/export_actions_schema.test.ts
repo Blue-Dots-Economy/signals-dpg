@@ -6,13 +6,13 @@ import { ExportActionsBodySchema } from '../api/action_schemas';
 const UUID = '3f9a1c2e-0000-4000-8000-000000000001';
 
 describe('ExportActionsBodySchema', () => {
-  it('defaults an empty body to all-roles, all fields, csv', () => {
+  it('defaults an empty body to all-roles, all fields, xlsx', () => {
     const parsed = ExportActionsBodySchema.parse({});
     expect(parsed).toEqual({
       filters: { ownership_role: 'all' },
       projection: { fields: '*' },
       include: [],
-      format: 'csv',
+      format: 'xlsx',
     });
   });
 
@@ -26,7 +26,7 @@ describe('ExportActionsBodySchema', () => {
         counterparty_domain: 'seeker',
       },
       projection: { fields: '*' },
-      format: 'csv',
+      format: 'xlsx',
     });
     expect(parsed.filters.counterparty_domain).toBe('seeker');
     expect(parsed.filters.action_ids).toEqual([UUID]);
@@ -48,7 +48,7 @@ describe('ExportActionsBodySchema', () => {
   });
 
   it.each([
-    ['unknown format', { format: 'xlsx' }],
+    ['csv, no longer offered', { format: 'csv' }],
     ['empty field list', { projection: { fields: [] } }],
     ['non-uuid action id', { filters: { action_ids: ['nope'] } }],
     ['empty action_ids', { filters: { action_ids: [] } }],

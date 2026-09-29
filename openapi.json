@@ -2961,7 +2961,7 @@
         "tags": [
           "action"
         ],
-        "description": "Download the counterparty profiles of the caller’s engagements as CSV (text/csv). Human session only. One counterparty type per file; only statuses the network reveals on are exportable, and private fields are revealed per row under the same gate as contact-details. Row and skip counts are in the X-Export-* response headers.",
+        "description": "Download the counterparty profiles of the caller’s engagements as an Excel workbook (.xlsx). Human session only. One counterparty type per file; only statuses the network reveals on are exportable, and private fields are revealed per row under the same gate as contact-details. Row and skip counts are in the X-Export-* response headers.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3111,10 +3111,10 @@
                     }
                   },
                   "format": {
-                    "default": "csv",
+                    "default": "xlsx",
                     "type": "string",
                     "enum": [
-                      "csv"
+                      "xlsx"
                     ]
                   }
                 },

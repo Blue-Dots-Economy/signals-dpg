@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { formatIsoInZone, filenameStamp, isValidTimeZone } from '../time';
+import {
+  formatIsoInZone,
+  filenameStamp,
+  isValidTimeZone,
+  wallClockInZone,
+  zoneAbbreviation,
+} from '../time';
 
 // #771 follow-up: EXPORT_TIMEZONE — export timestamps in a configured zone,
 // always carrying their offset so they stay unambiguous.
@@ -50,5 +56,19 @@ describe('isValidTimeZone', () => {
     expect(isValidTimeZone('Asia/Kolkata')).toBe(true);
     expect(isValidTimeZone('IST+5')).toBe(false);
     expect(isValidTimeZone('')).toBe(false);
+  });
+});
+
+describe('wallClockInZone / zoneAbbreviation', () => {
+  it('shifts a date to the wall-clock time of the zone', () => {
+    const at = new Date('2026-09-01T00:00:00Z');
+    expect(wallClockInZone(at, 'Asia/Kolkata').toISOString()).toBe('2026-09-01T05:30:00.000Z');
+    expect(wallClockInZone(at, 'UTC').toISOString()).toBe('2026-09-01T00:00:00.000Z');
+  });
+
+  it('names the zone briefly', () => {
+    const at = new Date('2026-09-01T00:00:00Z');
+    expect(zoneAbbreviation(at, 'Asia/Kolkata')).toBe('IST');
+    expect(zoneAbbreviation(at, 'UTC')).toBe('UTC');
   });
 });

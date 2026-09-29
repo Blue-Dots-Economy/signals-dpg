@@ -16,7 +16,7 @@ import { resolveProfileColumns, valueAtPath, type ProfileColumn } from './column
 
 /**
  * Pure core of `POST /api/v1/action/export` (#770): turns the caller's action
- * rows plus the items they touch into one CSV table of COUNTERPARTY profiles.
+ * rows plus the items they touch into one table of COUNTERPARTY profiles.
  *
  * It owns every rule of the export — eligibility (`export.requester_domains`),
  * counterparty resolution, the per-row PII reveal gate (mirrors
@@ -38,6 +38,24 @@ export const FIXED_COLUMNS = [
   'updated_at',
   'pii_revealed',
 ] as const;
+
+/**
+ * Headings of the fixed columns in the file — plain words, the way the My
+ * Actions page names them, never the snake_case keys.
+ */
+export const COLUMN_LABELS: Record<(typeof FIXED_COLUMNS)[number] | 'match_score', string> = {
+  action_id: 'Action ID',
+  action_type: 'Action',
+  action_status: 'Status',
+  direction: 'Direction',
+  counterparty_item_id: 'Profile ID',
+  counterparty_domain: 'Profile role',
+  counterparty_item_type: 'Profile type',
+  created_at: 'Created',
+  updated_at: 'Updated',
+  pii_revealed: 'Contact details shared',
+  match_score: 'Match score',
+};
 
 /** The `item_actions` fields the export reads. */
 export interface ExportActionRow {
@@ -137,7 +155,10 @@ export type BuildExportResult =
       ok: true;
       /** Undefined only when no row survived (header = fixed columns). */
       counterparty?: CounterpartyType;
+      /** Column keys (fixed keys, then profile `parent.child` keys). */
       header: string[];
+      /** Heading of each column, in `header` order. */
+      labels: string[];
       records: unknown[][];
       counts: ExportCounts;
       /** Every row whose private fields were decrypted into the file. */
@@ -347,7 +368,7 @@ function counterpartyTypes(selected: Candidate[]): CounterpartyType[] {
 }
 
 /**
- * Step 5: one CSV record, with the reveal gate applied. Mirrors
+ * Step 5: one export record, with the reveal gate applied. Mirrors
  * contact-details: status reveals AND both profiles live (a non-local own
  * item counts as live). A failed decrypt exports the row masked.
  */
@@ -438,12 +459,13 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
   }
 
   const withMatchScore = input.include.includes('match_score');
-  const extraColumns = withMatchScore ? ['match_score'] : [];
+  const extraColumns: Array<'match_score'> = withMatchScore ? ['match_score'] : [];
   const counterparty = types[0];
   if (!counterparty) {
     return {
       ok: true,
       header: [...FIXED_COLUMNS, ...extraColumns],
+      labels: [...FIXED_COLUMNS, ...extraColumns].map((k) => COLUMN_LABELS[k]),
       records: [],
       counts,
       reveals: [],
@@ -484,6 +506,10 @@ export function buildExport(input: BuildExportInput): BuildExportResult {
     ok: true,
     counterparty,
     header: [...FIXED_COLUMNS, ...extraColumns, ...columns.columns.map((c) => c.header)],
+    labels: [
+      ...[...FIXED_COLUMNS, ...extraColumns].map((k) => COLUMN_LABELS[k]),
+      ...columns.columns.map((c) => c.label),
+    ],
     records,
     counts,
     reveals,

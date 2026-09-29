@@ -3,7 +3,7 @@ import { createApiClient } from './api-client';
 /**
  * Client side of the engagement bulk export (#771): groups a My Actions
  * selection by counterparty type, calls `POST /api/v1/action/export`, and
- * saves the returned CSV. The server applies every rule (eligibility, reveal
+ * saves the returned Excel file. The server applies every rule (eligibility, reveal
  * gate, skips); this only shapes the request and reports the outcome.
  */
 
@@ -67,7 +67,7 @@ export function groupByCounterpartyType(actions: readonly ExportableAction[]): C
 /** Filename from a `Content-Disposition` header, path separators neutralised. */
 export function filenameFromContentDisposition(header: string | undefined): string {
   const match = header?.match(/filename="([^"]+)"/);
-  return match ? match[1].replaceAll(/[/\\]/g, '_') : 'export.csv';
+  return match ? match[1].replaceAll(/[/\\]/g, '_') : 'export.xlsx';
 }
 
 export interface ExportActionsBody {
@@ -84,7 +84,7 @@ export interface ExportActionsBody {
     counterparty_item_type?: string;
   };
   projection: { fields: '*' | string[] };
-  format: 'csv';
+  format: 'xlsx';
 }
 
 export interface ExportActionsResult {

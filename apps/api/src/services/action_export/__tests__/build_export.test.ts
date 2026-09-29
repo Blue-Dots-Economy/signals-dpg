@@ -181,6 +181,10 @@ describe('buildExport — counterparty and columns', () => {
       'gender',
       'looking_for',
     ]);
+    // One plain-word heading per column, never a snake_case key.
+    expect(r.labels).toHaveLength(r.header.length);
+    expect(r.labels.slice(0, 3)).toEqual(['Action ID', 'Action', 'Status']);
+    expect(r.labels.every((l) => !/_|[a-z][A-Z]/.test(l))).toBe(true);
     expect(r.records.map((rec) => rec[col(r, 'counterparty_item_id')])).toEqual(['s-a', 's-b']);
     expect(r.records.map((rec) => rec[col(r, 'direction')])).toEqual(['received', 'initiated']);
   });
@@ -195,6 +199,7 @@ describe('buildExport — counterparty and columns', () => {
       buildExport(input({ rows: [row(seekerA, myProvider)], include: ['match_score'] }))
     );
     expect(r.header[FIXED_COLUMNS.length]).toBe('match_score');
+    expect(r.labels[FIXED_COLUMNS.length]).toBe('Match score');
     expect(r.records[0][FIXED_COLUMNS.length]).toBe(0.81);
   });
 
@@ -217,6 +222,7 @@ describe('buildExport — counterparty and columns', () => {
   it('empty row set → fixed columns only, no counterparty', () => {
     const r = okOf(buildExport(input({ rows: [] })));
     expect(r.header).toEqual([...FIXED_COLUMNS]);
+    expect(r.labels).toHaveLength(FIXED_COLUMNS.length);
     expect(r.records).toEqual([]);
     expect(r.counterparty).toBeUndefined();
   });

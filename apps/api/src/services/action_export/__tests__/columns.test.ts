@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveProfileColumns, valueAtPath } from '../columns';
+import { humanizeKey, resolveProfileColumns, valueAtPath } from '../columns';
 
 const schema = {
   type: 'object',
@@ -14,17 +14,38 @@ const schema = {
   },
 };
 
+describe('humanizeKey', () => {
+  it('turns snake_case and camelCase keys into words', () => {
+    expect(humanizeKey('service_cities')).toBe('Service Cities');
+    expect(humanizeKey('nameOfLastRoleHeld')).toBe('Name Of Last Role Held');
+    expect(humanizeKey('item2Type')).toBe('Item2 Type');
+  });
+});
+
 describe('resolveProfileColumns', () => {
+  it('labels a column with the schema title the UI shows, nested as Parent – Child', () => {
+    const r = resolveProfileColumns(
+      {
+        properties: {
+          workExperience: { type: 'string', title: 'Work experience' },
+          guardian: { type: 'object', title: 'Guardian', properties: { phone: { type: 'string', title: ' Phone ' } } },
+        },
+      },
+      '*'
+    );
+    expect(r.ok && r.columns.map((c) => c.label)).toEqual(['Work experience', 'Guardian – Phone']);
+  });
+
   it('"*" → every property in schema order, nested objects flattened', () => {
     const r = resolveProfileColumns(schema, '*');
     expect(r).toEqual({
       ok: true,
       columns: [
-        { header: 'beneficiary_name', path: ['beneficiary_name'] },
-        { header: 'mobile_number', path: ['mobile_number'] },
-        { header: 'guardian.name', path: ['guardian', 'name'] },
-        { header: 'guardian.phone', path: ['guardian', 'phone'] },
-        { header: 'looking_for', path: ['looking_for'] },
+        { header: 'beneficiary_name', label: 'Beneficiary Name', path: ['beneficiary_name'] },
+        { header: 'mobile_number', label: 'Mobile Number', path: ['mobile_number'] },
+        { header: 'guardian.name', label: 'Guardian – Name', path: ['guardian', 'name'] },
+        { header: 'guardian.phone', label: 'Guardian – Phone', path: ['guardian', 'phone'] },
+        { header: 'looking_for', label: 'Looking For', path: ['looking_for'] },
       ],
     });
   });
@@ -56,7 +77,7 @@ describe('resolveProfileColumns', () => {
       { type: 'object', properties: { meta: { type: 'object' } } },
       '*'
     );
-    expect(r.ok && r.columns).toEqual([{ header: 'meta', path: ['meta'] }]);
+    expect(r.ok && r.columns).toEqual([{ header: 'meta', label: 'Meta', path: ['meta'] }]);
   });
 
   it('a schema with no properties yields no profile columns', () => {
