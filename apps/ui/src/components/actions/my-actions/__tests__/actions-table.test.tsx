@@ -160,6 +160,12 @@ describe('ActionsTable — rows', () => {
     expect(handlers.onCommand).toHaveBeenLastCalledWith(expect.objectContaining({ action_id: 'r1' }), 'export');
   });
 
+  it('hides every checkbox when nothing can be selected', () => {
+    renderTable({ rows: [row('a1', { ownership_roles: ['initiated'] })], selectable: false });
+    expect(screen.queryByRole('button', { name: 'Select page' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Select A\*\*\*/ })).toBeNull();
+  });
+
   it('selects a row and the page', async () => {
     renderTable({ rows: [row('a1'), row('a2')], total: 2 });
     await userEvent.click(screen.getAllByRole('button', { name: /^Select A\*\*\*/ })[0]);
@@ -235,6 +241,12 @@ describe('ActionsTable — phones', () => {
     expect(handlers.onCommand).toHaveBeenCalledWith(expect.objectContaining({ action_id: 'a1' }), 'accepted');
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
     expect(handlers.onTogglePage).toHaveBeenCalledWith(['a1', 'a2'], true);
+  });
+
+  it('phone cards drop the checkboxes when nothing can be selected', () => {
+    renderTable({ rows: [row('a1')], selectable: false });
+    expect(screen.queryByRole('button', { name: 'Select page' })).toBeNull();
+    expect(screen.getAllByRole('listitem')).toHaveLength(1);
   });
 
   it('phone states: loading, error, empty', async () => {

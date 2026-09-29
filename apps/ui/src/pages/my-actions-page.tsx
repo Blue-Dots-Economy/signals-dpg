@@ -475,6 +475,12 @@ export function MyActionsPage() {
     };
   };
 
+  // Selection only when some bulk command can apply to this caller: they may
+  // export, or they have received requests waiting on a reply (Accept /
+  // Reject). A seeker with only sent applications gets no checkboxes.
+  const selectable =
+    canExport || (counts?.needs_response ?? 0) > 0 || rows.some((a) => needsResponse(a, pending));
+
   const notExportable = allMatching ? 0 : pickedRows.length - exportableCount;
   let selectionNote: string | undefined;
   if (canExport && exportableCount > 0 && notExportable > 0) {
@@ -634,6 +640,7 @@ export function MyActionsPage() {
 
         <ActionsTable
           emptyState={emptyState}
+          selectable={selectable}
           rows={rows}
           total={total}
           page={filter.page}

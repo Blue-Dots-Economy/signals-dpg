@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -46,9 +46,10 @@ const network = {
   },
 } as unknown as DotNetworkSchema;
 
-const myItem = (id: string, name: string) =>
-  ({ item_id: id, item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_state: { name }, lifecycle_status: 'live' }) as unknown as Item;
-const items = [myItem('p1', 'ABC ltd'), myItem('p2', 'Test Nest')];
+const myItem = (id: string, name: string, domain = 'provider') =>
+  ({ item_id: id, item_network: 'blue_dot', item_domain: domain, item_type: 'profile_1.0', item_state: { name }, lifecycle_status: 'live' }) as unknown as Item;
+const providerItems = [myItem('p1', 'ABC ltd'), myItem('p2', 'Test Nest')];
+let items = providerItems;
 
 const row = (id: string, over: Partial<Action> = {}): Action =>
   ({
@@ -77,12 +78,13 @@ const row = (id: string, over: Partial<Action> = {}): Action =>
 
 let rows: Action[] = [];
 let total = 0;
+let needsCount = 1;
 const queries: FetchMyActionsQuery[] = [];
 vi.mock('@/hooks/use-actions', () => ({
   useOwnedActionsPage: (q: FetchMyActionsQuery) => {
     queries.push(q);
     return {
-      data: { actions: rows, meta: { total, limit: q.limit, offset: q.offset, counts: { all: total, needs_response: 1, ready_to_export: 2, sent: 0 } } },
+      data: { actions: rows, meta: { total, limit: q.limit, offset: q.offset, counts: { all: total, needs_response: needsCount, ready_to_export: 2, sent: 0 } } },
       isLoading: false,
       isError: false,
       isFetching: false,
@@ -290,6 +292,30 @@ describe('MyActionsPage — revamp', () => {
       ['service_provider', ['a2']],
     ]);
     expect(bodies[0].action_status).toEqual(['accepted', 'completed']);
+  });
+});
+
+describe('MyActionsPage — selection', () => {
+  afterEach(() => {
+    items = providerItems;
+    needsCount = 1;
+  });
+
+  it('a seeker (no export) with only sent applications gets no checkboxes', async () => {
+    items = [myItem('s1', 'Asha', 'seeker')];
+    needsCount = 0;
+    rows = [row('a1', { ownership_roles: ['initiated'], source_item_id: 's1', source_item_domain: 'seeker', target_item_domain: 'provider' })];
+    total = 1;
+    renderPage();
+    expect(await screen.findByText('You applied')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Select page' })).toBeNull();
+  });
+
+  it('a provider (can export) keeps selection', async () => {
+    rows = [row('a1', { action_status: 'accepted' })];
+    total = 1;
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Select page' })).toBeInTheDocument();
   });
 });
 

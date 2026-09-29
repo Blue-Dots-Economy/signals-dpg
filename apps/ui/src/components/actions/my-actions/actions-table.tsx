@@ -87,6 +87,12 @@ interface ActionsTableProps extends Labels {
    * filtered and the caller simply has no actions yet.
    */
   emptyState?: EmptyStateCopy;
+  /**
+   * Whether rows can be selected. False when no bulk command could ever apply
+   * to this caller (e.g. a seeker who cannot export and has nothing to answer):
+   * checkboxes that lead nowhere are hidden. Default true.
+   */
+  selectable?: boolean;
 }
 
 export interface EmptyStateCopy {
@@ -116,14 +122,16 @@ function EmptyMessage({ copy }: Readonly<{ copy: EmptyStateCopy | undefined }>) 
 
 type Translate = (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 
+// Name is the one flexible column (it takes whatever width is left); every
+// other column is sized to its content so it never hoards spare space.
 const COLUMN_WIDTH: Record<ColumnId, number | undefined> = {
-  action: undefined, // flexible
-  direction: 120,
-  status: 120,
-  profile: 130,
+  action: 170,
+  direction: 105,
+  status: 115,
+  profile: 140,
   match: 110,
-  distance: 96,
-  updated: 150,
+  distance: 80,
+  updated: 120,
 };
 const RIGHT_ALIGNED = new Set<ColumnId>(['match', 'distance', 'updated']);
 
@@ -159,7 +167,7 @@ function HeaderCell({
   const s = headerSort(column, sort);
   if (!s) {
     return (
-      <th scope="col" className={`px-3 font-semibold ${right ? 'text-right' : ''}`}>
+      <th scope="col" className={`whitespace-nowrap px-3 font-semibold ${right ? 'text-right' : ''}`}>
         {label}
       </th>
     );
@@ -167,7 +175,7 @@ function HeaderCell({
   let ariaSort: 'ascending' | 'descending' | undefined;
   if (s.active) ariaSort = s.arrow === '▲' ? 'ascending' : 'descending';
   return (
-    <th scope="col" aria-sort={ariaSort} className={`px-3 font-semibold ${right ? 'text-right' : ''}`}>
+    <th scope="col" aria-sort={ariaSort} className={`whitespace-nowrap px-3 font-semibold ${right ? 'text-right' : ''}`}>
       <button
         type="button"
         onClick={() => onSort(s.next)}
@@ -182,7 +190,7 @@ function HeaderCell({
   );
 }
 const FLEX_MIN = 120;
-const NAME_MIN = 220;
+const NAME_MIN = 170;
 
 const toneClass: Record<BulkCommand['tone'], string> = {
   accept: 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/90',
@@ -233,6 +241,7 @@ function SelectBox({
 export function ActionsTable(props: Readonly<ActionsTableProps>) {
   const { t } = useTranslation();
   const { rows, selected, columns } = props;
+  const selectable = props.selectable ?? true;
 
   const pageIds = rows.map((r) => r.action_id);
   const pageSelected = pageIds.filter((id) => selected.has(id)).length;
@@ -255,32 +264,35 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
   if (isMobile) {
     return (
       <div className="flex flex-col overflow-hidden rounded-xl border bg-card">
-        {selected.size > 0 ? <SelectionBar {...props} /> : null}
-        <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
-          <SelectBox
-            on={allOnPage}
-            partial={someOnPage}
-            label={t('my_actions.select_page', 'Select page')}
-            onClick={() => props.onTogglePage(pageIds, !allOnPage)}
-          />
-          {t('my_actions.select_page', 'Select page')}
-        </div>
+        {selectable && selected.size > 0 ? <SelectionBar {...props} /> : null}
+        {selectable ? (
+          <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+            <SelectBox
+              on={allOnPage}
+              partial={someOnPage}
+              label={t('my_actions.select_page', 'Select page')}
+              onClick={() => props.onTogglePage(pageIds, !allOnPage)}
+            />
+            {t('my_actions.select_page', 'Select page')}
+          </div>
+        ) : null}
         <CardList {...props} />
         <Pagination {...props} />
       </div>
     );
   }
+  const selectWidth = selectable ? 44 : 16;
   const minWidth =
-    44 + NAME_MIN + 56 + visible.reduce((n, c) => n + (COLUMN_WIDTH[c] ?? FLEX_MIN), 0);
+    selectWidth + NAME_MIN + 56 + visible.reduce((n, c) => n + (COLUMN_WIDTH[c] ?? FLEX_MIN), 0);
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border bg-card">
-      {selected.size > 0 ? <SelectionBar {...props} /> : null}
+      {selectable && selected.size > 0 ? <SelectionBar {...props} /> : null}
 
       <div className="overflow-x-auto">
         <table className="w-full table-fixed border-collapse text-sm" style={{ minWidth }}>
           <colgroup>
-            <col style={{ width: 44 }} />
+            <col style={{ width: selectWidth }} />
             <col style={{ minWidth: NAME_MIN }} />
             {visible.map((c) => (
               <col key={c} style={COLUMN_WIDTH[c] ? { width: COLUMN_WIDTH[c] } : undefined} />
@@ -290,14 +302,16 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
           <thead className="border-b bg-muted/40 text-left text-xs font-semibold text-muted-foreground">
             <tr className="h-10">
               <th scope="col" className="text-center">
-                <span className="flex justify-center">
-                  <SelectBox
-                    on={allOnPage}
-                    partial={someOnPage}
-                    label={t('my_actions.select_page', 'Select page')}
-                    onClick={() => props.onTogglePage(pageIds, !allOnPage)}
-                  />
-                </span>
+                {selectable ? (
+                  <span className="flex justify-center">
+                    <SelectBox
+                      on={allOnPage}
+                      partial={someOnPage}
+                      label={t('my_actions.select_page', 'Select page')}
+                      onClick={() => props.onTogglePage(pageIds, !allOnPage)}
+                    />
+                  </span>
+                ) : null}
               </th>
               <th scope="col" className="px-3 font-semibold">
                 {t('my_actions.col_name', 'Name')}
@@ -427,6 +441,7 @@ function TableBody(props: Readonly<ActionsTableProps & { visible: ColumnId[]; co
           action={a}
           visible={props.visible}
           colCount={colCount}
+          selectable={props.selectable ?? true}
           selected={props.selected.has(a.action_id)}
           review={needsResponse(a, props.pendingStatuses)}
           exportable={props.canExport && props.exportStatuses.includes(a.action_status)}
@@ -554,6 +569,7 @@ function CardList(props: Readonly<ActionsTableProps>) {
         <ActionCard
           key={a.action_id}
           action={a}
+          selectable={props.selectable ?? true}
           selected={props.selected.has(a.action_id)}
           review={needsResponse(a, props.pendingStatuses)}
           exportable={props.canExport && props.exportStatuses.includes(a.action_status)}
@@ -568,6 +584,7 @@ function CardList(props: Readonly<ActionsTableProps>) {
 
 function ActionCard({
   action: a,
+  selectable,
   selected,
   review,
   exportable,
@@ -585,13 +602,15 @@ function ActionCard({
         review ? 'shadow-[inset_3px_0_0_theme(colors.amber.500)]' : ''
       }`}
     >
-      <div className="pt-1">
-        <SelectBox on={selected} label={t('my_actions.select_row', 'Select {{name}}', { name })} onClick={onToggle} />
-      </div>
+      {selectable ? (
+        <div className="pt-1">
+          <SelectBox on={selected} label={t('my_actions.select_row', 'Select {{name}}', { name })} onClick={onToggle} />
+        </div>
+      ) : null}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="line-clamp-2 break-words font-semibold" title={name}>
+            <p className="truncate font-semibold" title={name}>
               {name}
             </p>
             <p className="text-xs text-muted-foreground">
@@ -628,6 +647,7 @@ interface ActionRowProps {
   action: Action;
   visible: ColumnId[];
   colCount: number;
+  selectable: boolean;
   selected: boolean;
   review: boolean;
   exportable: boolean;
@@ -676,7 +696,18 @@ function rowMenu(
   ];
 }
 
-function ActionRow({ action: a, visible, colCount, selected, review, exportable, labels, onToggle, onCommand }: Readonly<ActionRowProps>) {
+function ActionRow({
+  action: a,
+  visible,
+  colCount,
+  selectable,
+  selected,
+  review,
+  exportable,
+  labels,
+  onToggle,
+  onCommand,
+}: Readonly<ActionRowProps>) {
   const { t } = useTranslation();
   const sides = sidesOf(a);
   const hasName = !!sides.other.name && sides.other.name !== sides.other.itemId;
@@ -703,9 +734,11 @@ function ActionRow({ action: a, visible, colCount, selected, review, exportable,
     <>
       <tr className={`${review ? '' : 'border-b'} ${edge} ${selected ? 'bg-primary/5' : 'hover:bg-muted/40'}`}>
         <td className="h-[52px]">
-          <span className="flex justify-center">
-            <SelectBox on={selected} label={t('my_actions.select_row', 'Select {{name}}', { name })} onClick={onToggle} />
-          </span>
+          {selectable ? (
+            <span className="flex justify-center">
+              <SelectBox on={selected} label={t('my_actions.select_row', 'Select {{name}}', { name })} onClick={onToggle} />
+            </span>
+          ) : null}
         </td>
         <td>
           <div className="flex min-w-0 items-center gap-2.5 px-3">
@@ -713,8 +746,8 @@ function ActionRow({ action: a, visible, colCount, selected, review, exportable,
               {name.charAt(0).toUpperCase()}
             </div>
             <div className="flex min-w-0 flex-col">
-              {/* Up to two lines, then an ellipsis; the full name on hover. */}
-              <span className="line-clamp-2 break-words font-medium leading-snug" title={name}>
+              {/* One line; the full name on hover when it does not fit. */}
+              <span className="truncate font-medium" title={name}>
                 {name}
               </span>
               <span className="text-xs text-muted-foreground">{labels.domainLabel(sides.other.domain)}</span>
