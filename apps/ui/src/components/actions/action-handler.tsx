@@ -84,7 +84,7 @@ export function ActionHandler({
   onActionSubmit,
   guardianConfirmRequired,
   resolveExternalUrl,
-}: ActionHandlerProps) {
+}: Readonly<ActionHandlerProps>) {
   const { t } = useTranslation();
   const { signOut } = useAuth();
   const [activeAction, setActiveAction] = React.useState<{

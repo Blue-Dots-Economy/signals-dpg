@@ -8058,13 +8058,31 @@
                         "clientId"
                       ],
                       "additionalProperties": false
+                    },
+                    "externalApply": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "urlTemplate": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "actionType",
+                        "urlTemplate"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "selfSignupAllowed",
                     "loginChannels",
                     "authProvider",
-                    "keycloak"
+                    "keycloak",
+                    "externalApply"
                   ],
                   "additionalProperties": false
                 }

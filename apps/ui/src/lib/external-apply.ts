@@ -9,7 +9,7 @@ import * as React from 'react';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import type { ExternalApplyConfig } from '@/lib/auth-api';
 
-const PLACEHOLDER = /\{([A-Za-z0-9_]+)\}/;
+const PLACEHOLDER = /\{(\w+)\}/;
 
 /** The partner URL, or null when the action stays in-app. The value is URI-encoded. */
 export function buildExternalApplyUrl(
@@ -17,7 +17,7 @@ export function buildExternalApplyUrl(
   actionType: string,
   itemState: Record<string, unknown> | null | undefined
 ): string | null {
-  if (!config || config.actionType !== actionType || !itemState) return null;
+  if (config?.actionType !== actionType || !itemState) return null;
   const match = PLACEHOLDER.exec(config.urlTemplate);
   if (!match) return null;
 
