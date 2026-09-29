@@ -80,12 +80,16 @@ function cellFor(key: string, value: unknown, timeZone: string): Cell {
   return valueCell(value);
 }
 
+/** Approximate displayed text of a cell, for sizing its column. */
 function cellText(cell: Cell): string {
   if (cell === null || cell === undefined) return '';
-  if (typeof cell === 'object' && !(cell instanceof Date) && 'value' in cell) {
-    return cell.value instanceof Date ? DATE_FORMAT : String(cell.value ?? '');
+  const value = typeof cell === 'object' && !(cell instanceof Date) ? cell.value : cell;
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return DATE_FORMAT;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
   }
-  return String(cell);
+  return '';
 }
 
 /** A tab name Excel accepts: no `[]:*?/\`, at most 31 characters. */
