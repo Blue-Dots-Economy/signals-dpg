@@ -75,6 +75,7 @@ function meToUser(me: MeResponse): User {
     banExpires: null,
     createdAt: now,
     updatedAt: now,
+    firstLogin: me.first_login,
   };
 }
 

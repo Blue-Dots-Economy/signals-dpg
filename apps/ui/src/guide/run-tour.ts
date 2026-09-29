@@ -79,16 +79,18 @@ async function waitForAnyAnchor(tour: GuideTour): Promise<void> {
   while (Date.now() - startedAt < WAIT_MS) {
     if (selectors.every(isVisible)) return;
     if (Date.now() - startedAt > GRACE_MS && selectors.some(isVisible)) return;
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await sleep(POLL_MS); // NOSONAR — polling: each check must wait for the last
   }
 }
 
 async function waitFor(check: () => boolean, ms: number): Promise<void> {
   const startedAt = Date.now();
   while (!check() && Date.now() - startedAt < ms) {
-    await new Promise((r) => setTimeout(r, POLL_MS));
+    await sleep(POLL_MS); // NOSONAR — polling: each check must wait for the last
   }
 }
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function firstVisible(element: string | string[] | undefined): string | undefined {
   return [element ?? []].flat().find(isVisible);

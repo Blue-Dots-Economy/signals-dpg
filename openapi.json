@@ -8408,13 +8408,17 @@
                     "role": {
                       "nullable": true,
                       "type": "string"
+                    },
+                    "first_login": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "email",
                     "name",
-                    "role"
+                    "role",
+                    "first_login"
                   ],
                   "additionalProperties": false
                 }

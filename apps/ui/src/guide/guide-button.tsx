@@ -24,9 +24,12 @@ export function GuideButton() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
-  const available = TOURS.filter((tour) => !tour.requiresAuth || isAuthenticated);
+  const available = React.useMemo(
+    () => TOURS.filter((tour) => !tour.requiresAuth || isAuthenticated),
+    [isAuthenticated],
+  );
   const here = available.filter((tour) => tour.matches(pathname, searchParams));
   const elsewhere = available.filter((tour) => !tour.matches(pathname, searchParams));
 
@@ -62,13 +65,19 @@ export function GuideButton() {
     if (tour && !isTourRunning()) start(tour);
   }, [requested, pathname, searchParams, setSearchParams, start]);
 
-  // First visit: play the page's auto-start tour once. Skipped under test
-  // runners and browser automation, where an overlay would block the run.
+  // Auto-play, once per tour. Signed in, only in the person's FIRST session
+  // in the app (`/auth/me` first_login — decided per account on the server,
+  // so a new phone does not replay them, and someone a voice call or an
+  // aggregator signed up still gets them on their first real visit); each
+  // page's tour then plays as they reach it. Signed out, a page's auto-start
+  // tour plays once per browser. Skipped under test runners and browser
+  // automation, where an overlay would block the run.
+  const firstLogin = isAuthenticated && user?.firstLogin === true;
   React.useEffect(() => {
     if (requested || import.meta.env.MODE === 'test' || navigator.webdriver) return;
-    const tour = TOURS.find((t) => t.autoStart && t.matches(pathname, searchParams));
+    const tour = autoStartTour(available, pathname, searchParams, { isAuthenticated, firstLogin });
     if (tour && !hasSeenTour(tour.id) && !isTourRunning()) start(tour);
-  }, [pathname, searchParams, requested, start]);
+  }, [pathname, searchParams, requested, start, available, isAuthenticated, firstLogin]);
 
   const label = t('guide.menu', 'Help and tours');
 
@@ -124,4 +133,18 @@ function TourItem({ tour, onSelect }: Readonly<{ tour: GuideTour; onSelect: (t: 
       {tour.title}
     </DropdownMenuItem>
   );
+}
+
+/**
+ * The tour to play by itself on this page, if any: signed out, a tour marked
+ * `autoStart`; signed in, the page's tour — but only in a first-login session.
+ */
+export function autoStartTour(
+  tours: readonly GuideTour[],
+  pathname: string,
+  params: URLSearchParams,
+  who: { isAuthenticated: boolean; firstLogin: boolean },
+): GuideTour | undefined {
+  if (who.isAuthenticated && !who.firstLogin) return undefined;
+  return tours.find((t) => (who.isAuthenticated || t.autoStart) && t.matches(pathname, params));
 }
