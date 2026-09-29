@@ -12,6 +12,7 @@ import {
   OptionalSchemaRegistrySecretsSchema,
   PiiCryptoSecretsSchema,
   SignalsSearchSecretsSchema,
+  SsoSecretsSchema,
 } from '@dpg/config';
 
 export function loadEnv() {
@@ -32,6 +33,7 @@ export function loadEnv() {
   const piiCrypto = PiiCryptoSecretsSchema.parse(process.env);
   const geocoding = GeocodingSecretsSchema.parse(process.env);
   const signalsSearch = SignalsSearchSecretsSchema.parse(process.env);
+  const sso = SsoSecretsSchema.parse(process.env);
   return {
     instance,
     api,
@@ -45,5 +47,6 @@ export function loadEnv() {
     piiCrypto,
     geocoding,
     signalsSearch,
+    sso,
   };
 }

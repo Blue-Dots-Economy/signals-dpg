@@ -8058,13 +8058,31 @@
                         "clientId"
                       ],
                       "additionalProperties": false
+                    },
+                    "externalApply": {
+                      "nullable": true,
+                      "type": "object",
+                      "properties": {
+                        "actionType": {
+                          "type": "string"
+                        },
+                        "urlTemplate": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "actionType",
+                        "urlTemplate"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
                     "selfSignupAllowed",
                     "loginChannels",
                     "authProvider",
-                    "keycloak"
+                    "keycloak",
+                    "externalApply"
                   ],
                   "additionalProperties": false
                 }
@@ -8567,6 +8585,67 @@
                   },
                   "required": [
                     "code",
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/sso/login": {
+      "get": {
+        "summary": "Partner-portal SSO entry point",
+        "tags": [
+          "auth"
+        ],
+        "parameters": [
+          {
+            "schema": "object",
+            "in": "query",
+            "name": "type"
+          },
+          {
+            "schema": {},
+            "in": "query",
+            "name": "additionalProperties"
+          }
+        ],
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirect (Location header).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ],
+                  "description": "Redirect (Location header)."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
                     "error",
                     "message"
                   ],

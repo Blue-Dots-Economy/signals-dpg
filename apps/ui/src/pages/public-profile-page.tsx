@@ -40,6 +40,7 @@ import { ThemeModeToggle } from '@/components/layout/theme-mode-toggle';
 import { UserMenu } from '@/components/auth/user-menu';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useExternalApply } from '@/lib/external-apply';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -219,6 +220,12 @@ function ProfileActionRow({
     recalculate,
   } = useMatchScore({ localItem: activeItem, networkItem: item });
 
+  const externalApply = useExternalApply(!!user);
+  const resolveExternalUrl = React.useCallback(
+    (type: string) => externalApply(type, item.item_state),
+    [externalApply, item.item_state],
+  );
+
   const actions = React.useMemo(
     () => getActionsForDomain(net, activeItem?.item_domain ?? '', viewedDomain),
     [net, activeItem?.item_domain, viewedDomain],
@@ -337,6 +344,7 @@ function ProfileActionRow({
     <>
       <ActionHandler
         onActionSubmit={onActionSubmit}
+        resolveExternalUrl={resolveExternalUrl}
         // Parity with home-page: only confirm-before-OTP when the viewer is
         // actually a minor AND their active-profile domain requires guardian
         // consent — an adult on such a domain gets no extra dialog.

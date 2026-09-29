@@ -287,6 +287,33 @@ async function resolveProfileLimit(
 }
 
 /**
+ * How many non-retired items of this type the user holds in this
+ * network+domain — the population the profile cap counts (#737). Filters on
+ * `item_network` + `item_domain`, so the planner prunes to one partition.
+ */
+export async function countActiveProfiles(
+  exec: DbOrTx,
+  params: Pick<
+    CreateItemServiceParams,
+    'created_by' | 'item_network' | 'item_domain' | 'item_type'
+  >,
+): Promise<number> {
+  const [row] = await exec
+    .select({ n: count() })
+    .from(items)
+    .where(
+      and(
+        eq(items.created_by, params.created_by),
+        eq(items.item_network, params.item_network),
+        eq(items.item_domain, params.item_domain),
+        eq(items.item_type, params.item_type),
+        ne(items.lifecycle_status, 'retired'),
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+/**
  * Enforce the per-user profile cap atomically, inside the caller's transaction.
  * Mirrors assertWardLimitWithLock: a transaction-scoped advisory lock keyed on
  * the (user, network, domain, item_type) scope serializes concurrent creates so
@@ -335,20 +362,7 @@ async function assertProfileLimit(
   const scope = `${params.created_by}:${params.item_network}:${params.item_domain}:${params.item_type}`;
   await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scope}))`);
 
-  const [row] = await exec
-    .select({ n: count() })
-    .from(items)
-    .where(
-      and(
-        eq(items.created_by, params.created_by),
-        eq(items.item_network, params.item_network),
-        eq(items.item_domain, params.item_domain),
-        eq(items.item_type, params.item_type),
-        ne(items.lifecycle_status, 'retired'),
-      ),
-    );
-
-  if ((row?.n ?? 0) >= limit) {
+  if ((await countActiveProfiles(exec, params)) >= limit) {
     throw new ItemServiceError(
       409,
       'PROFILE_LIMIT_REACHED',

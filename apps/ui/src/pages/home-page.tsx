@@ -113,6 +113,7 @@ import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { useExternalApply } from '@/lib/external-apply';
 
 /**
  * True when the map covers so much longitude that "zoom out" is not a usable
@@ -1345,6 +1346,18 @@ export function HomePage() {
     });
   }, [singleDomainList.items, singleDomainList.sortApplied, localProfileItemIds, browseCoords]);
 
+  // Same target lookup as onActionSubmit below.
+  const externalApply = useExternalApply(!!user);
+  const resolveExternalUrl = React.useCallback(
+    (type: string, targetItemId: string) => {
+      const target =
+        singleDomainItems.find((i) => i.item_id === targetItemId) ??
+        (mapDetailItem?.item_id === targetItemId ? mapDetailItem : undefined);
+      return externalApply(type, target?.item_state);
+    },
+    [externalApply, singleDomainItems, mapDetailItem]
+  );
+
   // Single-domain: bottom sentinel advances the paged fetch. Server already
   // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
   // (`useLoadMoreSentinel` reads the callback through a ref, so passing the
@@ -2271,6 +2284,7 @@ export function HomePage() {
         />
       )}
       <ActionHandler
+          resolveExternalUrl={resolveExternalUrl}
           // Minor on a guardian-gated domain → confirm before the guardian OTP
           // is dispatched (server issues it on the first submit).
           guardianConfirmRequired={

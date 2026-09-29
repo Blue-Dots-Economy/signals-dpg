@@ -147,6 +147,51 @@ export const KeycloakSecretsSchema = z.object({
 });
 
 /**
+ * Partner-portal single sign-on (docs/superpowers/specs/2026-09-24-external-idp-bridge-ncs-sso-design.md).
+ *
+ * Every field is optional or defaulted so SSO lands inert: with SSO_PROVIDERS
+ * empty, every /api/v1/auth/sso route answers 404. assertSsoConfigured
+ * (sso_config.ts) makes the provider's secrets required once it is listed.
+ */
+export const DEFAULT_NCS_APPLY_URL_TEMPLATE = 'https://ncs.gov.in/job-listing/applying/{ncsJobId}';
+
+export const SsoSecretsSchema = z.object({
+  // Comma-separated provider ids. Only `ncs` exists today. The id never appears
+  // in a public URL — it only selects which adapter /sso/login runs.
+  SSO_PROVIDERS: z.string().default(''),
+  // PKCS#8 PEM, EC P-256. Signs the id_tokens Keycloak reads from
+  // /sso/oidc/token. Whoever holds it can log in as any SSO user, so it lives
+  // in the secret store alongside the realm keys.
+  SSO_OIDC_SIGNING_KEY: z.string().optional(),
+  // The client Keycloak's `signals-sso` identity provider authenticates as.
+  SSO_OIDC_CLIENT_ID: z.string().default('signals-sso'),
+  // Alias of that identity provider in the Keycloak realm — the `kc_idp_hint`
+  // value and part of the broker redirect URI. Must equal the init script's
+  // SSO_OIDC_IDP_ALIAS (infra/keycloak/init/apply-sso-idp.sh).
+  SSO_OIDC_IDP_ALIAS: z.string().min(1).default('signals-sso'),
+  SSO_OIDC_CLIENT_SECRET: z.string().optional(),
+  // NCS partner integration. Client ID + secret are issued by NCS per partner.
+  SSO_NCS_BASE_URL: z.string().optional(),
+  SSO_NCS_CLIENT_ID: z.string().optional(),
+  SSO_NCS_CLIENT_SECRET: z.string().optional(),
+  SSO_NCS_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  // Off by default: NCS reuses one token per user across clicks for its whole
+  // lifetime (1 day), so a leaked link logs in until it expires. Set to `true`
+  // for replay protection (each link logs in once) once the partner mints a
+  // fresh token per click.
+  SSO_NCS_SINGLE_USE_LINKS: z
+    .string()
+    .default('false')
+    .transform((val) => val.trim().toLowerCase() === 'true'),
+  // JSON: role → domain, NCS field → profile field, featureKey → UI route.
+  // Parsed by parseSsoNcsMapping().
+  SSO_NCS_MAPPING: z.string().default('{}'),
+  // Seeker Apply opens this URL instead of the in-app flow, `{field}` filled
+  // from the provider profile. Override to change; set empty to turn off.
+  SSO_NCS_APPLY_URL_TEMPLATE: z.string().default(DEFAULT_NCS_APPLY_URL_TEMPLATE),
+});
+
+/**
  * Startup guard for the removed `dual` provider.
  *
  * `AUTH_PROVIDER` no longer accepts `dual`, so an instance still configured with

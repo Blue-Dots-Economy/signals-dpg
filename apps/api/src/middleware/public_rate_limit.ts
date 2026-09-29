@@ -17,11 +17,15 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
  * @param name - Bucket name; also the log tag. Keep it route-shaped.
  * @param maxPerWindow - Requests allowed per IP per window.
  * @param windowSec - Window length in seconds.
+ * @param onLimited - Reply for a limited request. Default: 429 JSON. A route a
+ *   browser navigates to (not an XHR) passes a redirect here, so a person gets
+ *   a page rather than a JSON blob.
  */
 export function public_rate_limit(
   name: string,
   maxPerWindow: number,
-  windowSec = 60
+  windowSec = 60,
+  onLimited?: (request: FastifyRequest, reply: FastifyReply) => FastifyReply
 ) {
   return async function public_rate_limit_preHandler(
     request: FastifyRequest,
@@ -41,6 +45,7 @@ export function public_rate_limit(
         windowSec
       );
       if (count > maxPerWindow) {
+        if (onLimited) return onLimited(request, reply);
         return reply.code(429).send({
           error: 'RATE_LIMITED',
           message: 'Too many requests; please try again later.',

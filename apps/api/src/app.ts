@@ -29,6 +29,7 @@ import v1_routes from '@/routes/v1/v1_routes';
 import { requestIdOptions, registerRequestIdEcho } from '@/request_id';
 import health_routes from '@/routes/health/health_route';
 import { getNetworkConfigs } from '@/network_configs';
+import { loadNcsMappingAtBoot } from '@/services/auth/sso/ncs_mapping_boot';
 import {
   clearNetworkSchemaCache,
   refreshConsumedSchemas,
@@ -36,6 +37,7 @@ import {
 import { getEmailMessages } from '@/notifications/email/messages';
 import { getSmsTemplates } from '@/notifications/sms/templates';
 import { registerRawBodyCapture } from '@/plugins/raw_body';
+import { reqLogSerializer } from '@/utils/log_redaction';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -64,6 +66,13 @@ const PUBLIC_OPERATION_URLS = new Set([
   '/api/v1/auth/session/login',
   '/api/v1/auth/session/callback',
   '/api/v1/auth/session/logout',
+  // Partner-portal SSO. /login is where the partner redirects the browser; the
+  // /oidc routes are the identity provider Keycloak talks to (client-secret
+  // authenticated at /token, not user-authenticated).
+  '/api/v1/auth/sso/login',
+  '/api/v1/auth/sso/oidc/authorize',
+  '/api/v1/auth/sso/oidc/token',
+  '/api/v1/auth/sso/oidc/jwks',
 ]);
 
 // Operations guarded by peer_instance_guard (inter-instance HMAC) instead of
@@ -138,7 +147,9 @@ const documentAuthTransform: typeof baseJsonSchemaTransform = (data) => {
  */
 export async function buildApp(): Promise<FastifyInstance> {
   const app = fastify({
-    logger: true,
+    // Default logger, except the request URL: auth-route query strings carry
+    // credentials (partner SSO links, OIDC codes) and must not reach the logs.
+    logger: { serializers: { req: reqLogSerializer } },
     trustProxy: true,
     // Correlation id: honour + length-cap an inbound `x-request-id`, mint one
     // when absent, log it as `reqId` (see @/request_id).
@@ -199,6 +210,10 @@ export async function buildApp(): Promise<FastifyInstance> {
   await getSmsTemplates();
 
   const networkConfigs = await getNetworkConfigs();
+
+  // NCS SSO profile mapping: ncs_bluedot_mapping.json beside network.json,
+  // checked against that network config so a bad mapping fails the deploy.
+  await loadNcsMappingAtBoot(networkConfigs);
 
   const networkAllowedOrigins = networkConfigs.flatMap((networkConfig) =>
     getAllowedInstanceOriginsFromNetworkConfig(
