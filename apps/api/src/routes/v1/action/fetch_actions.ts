@@ -432,10 +432,10 @@ const fetch_actions_handler = async (
 
     await resolveRevealStatuses(pageRows);
 
-    const summaryFor = async (row: typeof matchingRows[number]) => {
+    const counterpartyFor = async (row: typeof matchingRows[number]) => {
       const cMeta = itemMeta.get(counterpartyId(row));
       if (!cMeta) return null;
-      let summary: Record<string, unknown> = {};
+      let values: Record<string, unknown> = {};
       try {
         const cfg = await getNetworkConfigCached(row.target_item_network);
         const counterpartyCfg = await getNetworkConfigCached(cMeta.item_network);
@@ -454,14 +454,14 @@ const fetch_actions_handler = async (
             counterpartyId(row) === row.source_item_id ? 'from' : 'to',
           );
           // Only declared, non-private fields ever leave the server, whatever
-          // the config lists — so the summary carries no personal data.
+          // the config lists — so the values carry no personal data.
           const allowed = resolveAllowedFacetFields(
             getDomainItemSchema(counterpartyCfg, cMeta.item_domain, cMeta.item_type) as Record<
               string,
               unknown
             >,
           );
-          summary = Object.fromEntries(
+          values = Object.fromEntries(
             fields
               .filter((f) => allowed.has(f) && cMeta.item_state[f] != null && cMeta.item_state[f] !== '')
               .map((f) => [f, cMeta.item_state[f]]),
@@ -470,19 +470,19 @@ const fetch_actions_handler = async (
       } catch (err) {
         request.log.warn(
           { err, action_id: row.action_id },
-          'summary field resolution failed in fetch_actions — empty summary',
+          'column field resolution failed in fetch_actions — no column values',
         );
       }
       return {
         network: cMeta.item_network,
         domain: cMeta.item_domain,
         item_type: cMeta.item_type,
-        summary,
+        column_fields: values,
       };
     };
-    const summaries = includes.includes('counterparty_summary')
+    const counterparties = includes.includes('column_fields')
       ? new Map(
-          await Promise.all(pageRows.map(async (r) => [r.action_id, await summaryFor(r)] as const)),
+          await Promise.all(pageRows.map(async (r) => [r.action_id, await counterpartyFor(r)] as const)),
         )
       : null;
 
@@ -537,7 +537,7 @@ const fetch_actions_handler = async (
         // distance_m is computed at read time (#439 Task 7) from item
         // locations — null when either side has none.
         distance_m: distanceByActionId.get(row.action_id) ?? null,
-        ...(summaries ? { counterparty: summaries.get(row.action_id) ?? null } : {}),
+        ...(counterparties ? { counterparty: counterparties.get(row.action_id) ?? null } : {}),
       })),
     });
   } catch (err) {

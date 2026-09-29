@@ -118,7 +118,7 @@ export const ActionFacetSelectionSchema = z.object({
 });
 
 /** Extra, opt-in parts of the owned-action list response. */
-export const ActionFetchIncludeSchema = z.enum(['counts', 'counterparty_summary']);
+export const ActionFetchIncludeSchema = z.enum(['counts', 'column_fields']);
 
 // Profiles to scope to: a repeated `item_ids` query param or a single value.
 /** A single value or an array → an array; absent stays absent. */
@@ -243,7 +243,7 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   // item locations, so it only ever appears on the response row.
   match_score: z.number().nullable().optional(),
   distance_m: z.number().nullable().optional(),
-  // `include=counterparty_summary` only: which kind of item the counterparty
+  // `include=column_fields` only: which kind of item the counterparty
   // is, plus the interaction's `column_fields` for it — non-private fields
   // only, so it carries no personal data at any status.
   counterparty: z
@@ -251,7 +251,7 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
       network: z.string(),
       domain: z.string(),
       item_type: z.string(),
-      summary: z.record(z.string(), z.unknown()),
+      column_fields: z.record(z.string(), z.unknown()),
     })
     .nullable()
     .optional(),

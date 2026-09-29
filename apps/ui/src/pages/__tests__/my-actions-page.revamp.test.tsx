@@ -71,7 +71,7 @@ const row = (id: string, over: Partial<Action> = {}): Action =>
     requirements_snapshot: {},
     match_score: 8.2,
     distance_m: 2300,
-    counterparty: { network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0', summary: { educationCategory: '12th' } },
+    counterparty: { network: 'blue_dot', domain: 'seeker', item_type: 'profile_1.0', column_fields: { educationCategory: '12th' } },
     ...over,
   }) as unknown as Action;
 
@@ -211,7 +211,7 @@ describe('MyActionsPage — revamp', () => {
       q: 'meera',
       limit: 25,
       offset: 25,
-      include: ['counts', 'counterparty_summary'],
+      include: ['counts', 'column_fields'],
     });
   });
 

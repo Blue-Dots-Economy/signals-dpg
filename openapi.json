@@ -1158,7 +1158,7 @@
                   "type": "string",
                   "enum": [
                     "counts",
-                    "counterparty_summary"
+                    "column_fields"
                   ]
                 },
                 {
@@ -1167,7 +1167,7 @@
                     "type": "string",
                     "enum": [
                       "counts",
-                      "counterparty_summary"
+                      "column_fields"
                     ]
                   }
                 }
@@ -1463,7 +1463,7 @@
                               "item_type": {
                                 "type": "string"
                               },
-                              "summary": {
+                              "column_fields": {
                                 "type": "object",
                                 "additionalProperties": {}
                               }
@@ -1472,7 +1472,7 @@
                               "network",
                               "domain",
                               "item_type",
-                              "summary"
+                              "column_fields"
                             ],
                             "additionalProperties": false
                           }

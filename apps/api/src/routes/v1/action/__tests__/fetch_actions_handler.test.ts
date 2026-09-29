@@ -774,9 +774,9 @@ describe('fetch_actions_handler — failures', () => {
   });
 });
 
-// --- My Actions revamp: search, counterparty summary ------------------------
+// --- My Actions revamp: search, counterparty column fields ------------------------
 // The caller owns the provider (target); the counterparty is the seeker, whose
-// name is private. Search/summary rows go through the enriched path: rows
+// name is private. Search/column-field rows go through the enriched path: rows
 // query, then items query (no count query).
 describe('fetch_actions_handler — search on unmasked names only', () => {
   const received = (status: string) =>
@@ -810,8 +810,8 @@ describe('fetch_actions_handler — search on unmasked names only', () => {
   });
 });
 
-describe('fetch_actions_handler — include=counterparty_summary', () => {
-  it('returns only the interaction summary fields the schema declares non-private', async () => {
+describe('fetch_actions_handler — include=column_fields', () => {
+  it('returns only the interaction column fields the schema declares non-private', async () => {
     getNetworkConfigById.mockResolvedValue({
       ...NETWORK_CONFIG,
       domains: [
@@ -845,13 +845,13 @@ describe('fetch_actions_handler — include=counterparty_summary', () => {
       [seekerItem({ item_state: { beneficiary_name: 'M***', gender: 'Female' } }), providerItem()],
     );
 
-    const reply = await call({ include: ['counterparty_summary'] });
+    const reply = await call({ include: ['column_fields'] });
 
     expect(bodyOf(reply).actions[0].counterparty).toEqual({
       network: 'test_net',
       domain: 'seeker',
       item_type: 'profile_1.0',
-      summary: { gender: 'Female' },
+      column_fields: { gender: 'Female' },
     });
   });
 

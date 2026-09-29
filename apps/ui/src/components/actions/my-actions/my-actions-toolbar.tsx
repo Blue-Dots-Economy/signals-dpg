@@ -19,6 +19,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import type { EnumFilterField } from '@/lib/enum-filters';
 import {
   activeFilterCount,
+  toggleStatusOption,
+  type StatusOption,
   type ActionSortKey,
   type Direction,
   type MyActionsFilter,
@@ -54,8 +56,8 @@ interface MyActionsToolbarProps {
   filter: MyActionsFilter;
   onChange: (next: MyActionsFilter) => void;
   profiles: ProfileOption[];
-  statuses: string[];
-  statusLabel: (status: string) => string;
+  /** Status filter options (pending statuses grouped), already labelled. */
+  statusOptions: Array<StatusOption & { label: string }>;
   types: string[];
   facetGroups: FacetGroup[];
   columns: Record<ColumnId, boolean>;
@@ -102,8 +104,7 @@ export function MyActionsToolbar({
   filter,
   onChange,
   profiles,
-  statuses,
-  statusLabel,
+  statusOptions,
   types,
   facetGroups,
   columns,
@@ -127,7 +128,7 @@ export function MyActionsToolbar({
   }, [q, filter, onChange]);
 
   const set = (patch: Partial<MyActionsFilter>) => onChange({ ...filter, ...patch, page: 1 });
-  const nFilters = activeFilterCount(filter);
+  const nFilters = activeFilterCount(filter, statusOptions);
   const facetValues = (domain: string, field: string) =>
     filter.facets.find((f) => f.domain === domain && f.field === field)?.values ?? [];
   const toggleFacet = (domain: string, field: string, value: string) => {
@@ -235,13 +236,13 @@ export function MyActionsToolbar({
             ))}
           </FilterSection>
           <FilterSection title={t('my_actions.filter_status', 'Status')}>
-            {statuses.map((s) => (
+            {statusOptions.map((o) => (
               <Choice
-                key={s}
-                checked={filter.statuses.includes(s)}
-                onChange={() => set({ statuses: toggle(filter.statuses, s) })}
+                key={o.id}
+                checked={o.statuses.every((s) => filter.statuses.includes(s))}
+                onChange={() => set({ statuses: toggleStatusOption(filter.statuses, o) })}
               >
-                {statusLabel(s)}
+                {o.label}
               </Choice>
             ))}
           </FilterSection>

@@ -12,8 +12,11 @@ import {
   pageList,
   parseFilter,
   pendingStatuses,
+  selectedStatusOptions,
   sidesOf,
+  statusOptions,
   toFetchQuery,
+  toggleStatusOption,
   withoutFacetValue,
   writeFilter,
 } from '../my-actions-view';
@@ -77,7 +80,7 @@ describe('toFetchQuery', () => {
     const q = toFetchQuery({ ...EMPTY_FILTER, direction: 'sent', page: 2, per: 25, q: '  asha ' });
     expect(q).toMatchObject({ ownership_role: 'initiated', limit: 25, offset: 25, q: 'asha' });
     expect(q.item_ids).toBeUndefined();
-    expect(q.include).toEqual(['counts', 'counterparty_summary']);
+    expect(q.include).toEqual(['counts', 'column_fields']);
   });
 });
 
@@ -110,6 +113,29 @@ describe('network vocabulary and saved views', () => {
         facets: [{ domain: 'd', field: 'f', values: ['1', '2'] }],
       }),
     ).toBe(5);
+  });
+});
+
+describe('status options', () => {
+  const options = statusOptions(['created', 'invited', 'accepted', 'rejected'], ['created', 'invited', 'pending']);
+
+  it('folds the pending statuses into one option, first', () => {
+    expect(options).toEqual([
+      { id: 'pending', statuses: ['created', 'invited'] },
+      { id: 'accepted', statuses: ['accepted'] },
+      { id: 'rejected', statuses: ['rejected'] },
+    ]);
+    expect(statusOptions(['accepted'], ['created'])).toEqual([{ id: 'accepted', statuses: ['accepted'] }]);
+  });
+
+  it('toggles a whole option; partly ticked turns fully on', () => {
+    expect(toggleStatusOption(['created'], options[0])).toEqual(['created', 'invited']);
+    expect(toggleStatusOption(['created', 'invited', 'accepted'], options[0])).toEqual(['accepted']);
+  });
+
+  it('reports touched options and keeps statuses no option covers', () => {
+    expect(selectedStatusOptions(['invited', 'odd'], options).map((o) => o.id)).toEqual(['pending', 'odd']);
+    expect(activeFilterCount({ ...EMPTY_FILTER, statuses: ['created', 'invited', 'accepted'] }, options)).toBe(2);
   });
 });
 

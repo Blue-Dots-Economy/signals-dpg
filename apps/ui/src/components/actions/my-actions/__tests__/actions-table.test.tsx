@@ -39,7 +39,7 @@ const row = (id: string, over: Partial<Action> = {}): Action =>
     requirements_snapshot: {},
     match_score: 7.5,
     distance_m: 1200,
-    counterparty: { network: 'n', domain: 'seeker', item_type: 't', summary: { gender: 'Female', langs: ['Hindi', 'English'] } },
+    counterparty: { network: 'n', domain: 'seeker', item_type: 't', column_fields: { gender: 'Female', langs: ['Hindi', 'English'] } },
     ...over,
   }) as unknown as Action;
 

@@ -43,11 +43,15 @@ import {
   needsResponse,
   parseFilter,
   pendingStatuses,
+  PENDING_OPTION,
+  selectedStatusOptions,
   sidesOf,
+  statusOptions as buildStatusOptions,
   toFetchQuery,
   withoutFacetValue,
   writeFilter,
   type MyActionsFilter,
+  type StatusOption,
   type SavedViewId,
 } from '@/lib/my-actions-view';
 import type { Action } from '@/lib/action-api';
@@ -218,6 +222,14 @@ export function MyActionsPage() {
       return key ? t(key) : humanizeKey(s);
     },
     [t],
+  );
+  const statusOptions = React.useMemo(
+    () =>
+      buildStatusOptions(statuses, pending).map((o) => ({
+        ...o,
+        label: o.id === PENDING_OPTION ? t('actions.status_pill_pending') : statusLabel(o.id),
+      })),
+    [statuses, pending, statusLabel, t],
   );
   const domainLabel = React.useCallback((d: string) => formatDomainLabel(d, domains), [domains]);
 
@@ -543,8 +555,7 @@ export function MyActionsPage() {
           filter={filter}
           onChange={setFilter}
           profiles={profileOptions}
-          statuses={statuses}
-          statusLabel={statusLabel}
+          statusOptions={statusOptions}
           types={types}
           facetGroups={facetGroups}
           columns={columns}
@@ -559,6 +570,7 @@ export function MyActionsPage() {
         <ActiveChips
           filter={filter}
           onChange={setFilter}
+          statusOptions={statusOptions}
           statusLabel={statusLabel}
           profileLabel={profileLabel}
           fieldLabel={fieldLabel}
@@ -626,12 +638,14 @@ export function MyActionsPage() {
 function ActiveChips({
   filter,
   onChange,
+  statusOptions,
   statusLabel,
   profileLabel,
   fieldLabel,
 }: Readonly<{
   filter: MyActionsFilter;
   onChange: (f: MyActionsFilter) => void;
+  statusOptions: Array<StatusOption & { label: string }>;
   statusLabel: (s: string) => string;
   profileLabel: (id: string) => string;
   fieldLabel: (domain: string, field: string) => string;
@@ -657,11 +671,12 @@ function ActiveChips({
           },
         ]
       : []),
-    ...filter.statuses.map((s) => ({
-      key: `s:${s}`,
+    // One chip per status option, so the grouped "Pending" is one chip.
+    ...selectedStatusOptions(filter.statuses, statusOptions).map((o) => ({
+      key: `s:${o.id}`,
       group: t('my_actions.filter_status', 'Status'),
-      label: statusLabel(s),
-      remove: () => ({ ...filter, statuses: filter.statuses.filter((x) => x !== s) }),
+      label: statusOptions.find((x) => x.id === o.id)?.label ?? statusLabel(o.id),
+      remove: () => ({ ...filter, statuses: filter.statuses.filter((x) => !o.statuses.includes(x)) }),
     })),
     ...filter.types.map((ty) => ({
       key: `t:${ty}`,

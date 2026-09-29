@@ -801,7 +801,7 @@ function ReviewStrip({
   onCommand,
 }: Readonly<{ action: Action; sides: ActionSides; labels: Labels; onCommand: (c: RowCommand) => void }>) {
   const { t } = useTranslation();
-  const summary = Object.entries(action.counterparty?.summary ?? {});
+  const summary = Object.entries(action.counterparty?.column_fields ?? {});
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
       <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-bold text-amber-700">

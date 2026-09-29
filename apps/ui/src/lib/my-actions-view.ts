@@ -109,7 +109,7 @@ const OWNERSHIP_ROLE: Record<Direction, NonNullable<FetchMyActionsQuery['ownersh
 /** Filter → `GET /action/fetch` query. */
 export function toFetchQuery(
   f: MyActionsFilter,
-  include: FetchMyActionsQuery['include'] = ['counts', 'counterparty_summary'],
+  include: FetchMyActionsQuery['include'] = ['counts', 'column_fields'],
 ): FetchMyActionsQuery {
   return {
     ownership_role: OWNERSHIP_ROLE[f.direction],
@@ -139,9 +139,9 @@ export function withoutFacetValue(
 }
 
 /** Number of active filters, for the Filter button badge (profiles/search excluded). */
-export function activeFilterCount(f: MyActionsFilter): number {
+export function activeFilterCount(f: MyActionsFilter, statusOptions: readonly StatusOption[] = []): number {
   return (
-    f.statuses.length +
+    selectedStatusOptions(f.statuses, statusOptions).length +
     f.types.length +
     (f.direction === 'all' ? 0 : 1) +
     f.facets.reduce((n, facet) => n + facet.values.length, 0)
@@ -171,6 +171,44 @@ export function pendingStatuses(network: DotNetworkSchema | null | undefined): s
   const out = new Set<string>();
   for (const i of interactions(network)) for (const s of i.metric_categories?.create ?? []) out.add(s);
   return [...out];
+}
+
+/** One entry in the Status filter: a single status, or the pending group. */
+export interface StatusOption {
+  id: string;
+  statuses: string[];
+}
+
+/** Id of the grouped "Pending" status option. */
+export const PENDING_OPTION = 'pending';
+
+/**
+ * Status filter options. Every status still waiting on the receiver
+ * (created, submitted, invited…) folds into one "Pending" option — they mean
+ * the same thing to the person filtering — and the rest stay one per status.
+ */
+export function statusOptions(statuses: readonly string[], pending: readonly string[]): StatusOption[] {
+  const grouped = statuses.filter((s) => pending.includes(s));
+  const rest = statuses.filter((s) => !pending.includes(s)).map((s) => ({ id: s, statuses: [s] }));
+  return grouped.length > 0 ? [{ id: PENDING_OPTION, statuses: grouped }, ...rest] : rest;
+}
+
+/**
+ * The options a status selection touches. A status no option covers (e.g.
+ * set by hand in the URL) counts as its own option, so nothing is hidden.
+ */
+export function selectedStatusOptions(selected: readonly string[], options: readonly StatusOption[]): StatusOption[] {
+  const touched = options.filter((o) => o.statuses.some((s) => selected.includes(s)));
+  const covered = new Set(options.flatMap((o) => o.statuses));
+  return [...touched, ...selected.filter((s) => !covered.has(s)).map((s) => ({ id: s, statuses: [s] }))];
+}
+
+/** Ticks or unticks a whole option. Partly ticked counts as unticked. */
+export function toggleStatusOption(selected: readonly string[], option: StatusOption): string[] {
+  const on = option.statuses.every((s) => selected.includes(s));
+  return on
+    ? selected.filter((s) => !option.statuses.includes(s))
+    : [...selected, ...option.statuses.filter((s) => !selected.includes(s))];
 }
 
 /** Action types the network declares (e.g. apply, connect). */

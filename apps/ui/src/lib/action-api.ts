@@ -163,7 +163,7 @@ export interface FetchMyActionsQuery {
   /** Search on unmasked names only (see the server's `q`). */
   q?: string;
   /** Opt-in response parts. */
-  include?: Array<'counts' | 'counterparty_summary'>;
+  include?: Array<'counts' | 'column_fields'>;
   // #439: server-side sort key. Defaults to 'recent' server-side when omitted.
   sort?: 'recent' | 'oldest' | 'match_score' | 'distance';
   // #439: non-PII item_state facet selections (OR within a field, AND across
@@ -212,12 +212,12 @@ export interface Action {
   // distance, or the score service wasn't consulted for this row).
   match_score?: number | null;
   distance_m?: number | null;
-  /** `include=counterparty_summary` only — non-private fields, no personal data. */
+  /** `include=column_fields` only — non-private fields, no personal data. */
   counterparty?: {
     network: string;
     domain: string;
     item_type: string;
-    summary: Record<string, unknown>;
+    column_fields: Record<string, unknown>;
   } | null;
 }
 

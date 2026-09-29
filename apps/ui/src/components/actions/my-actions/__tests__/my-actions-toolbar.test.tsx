@@ -31,8 +31,10 @@ function renderToolbar(filter: Partial<MyActionsFilter> = {}) {
         { id: 'p1', label: 'ABC ltd' },
         { id: 'p2', label: 'Test Nest' },
       ]}
-      statuses={['created', 'accepted']}
-      statusLabel={(s) => (s === 'created' ? 'Pending' : 'Accepted')}
+      statusOptions={[
+        { id: 'pending', statuses: ['created', 'invited'], label: 'Pending' },
+        { id: 'accepted', statuses: ['accepted'], label: 'Accepted' },
+      ]}
       types={['apply', 'connect']}
       facetGroups={[
         { domain: 'seeker', domainLabel: 'Seekers', fields: [{ key: 'gender', label: 'Gender', options: ['Male', 'Female'], isArray: false }] },
@@ -82,11 +84,28 @@ describe('MyActionsToolbar', () => {
     await userEvent.click(await screen.findByLabelText('Received'));
     expect(last().direction).toBe('received');
     await userEvent.click(screen.getByLabelText('Pending'));
-    expect(last().statuses).toEqual(['created']);
+    expect(last().statuses).toEqual(['created', 'invited']);
     await userEvent.click(screen.getByLabelText('Connect'));
     expect(last().types).toEqual(['connect']);
     await userEvent.click(screen.getByLabelText('Female'));
     expect(last().facets).toEqual([{ domain: 'seeker', field: 'gender', values: ['Female'] }]);
+  });
+
+  it('shows grouped pending statuses as one option, ticked only when all are on', async () => {
+    renderToolbar({ statuses: ['created'] });
+    await userEvent.click(screen.getByRole('button', { name: /^Filter/ }));
+    const pending = await screen.findByLabelText('Pending');
+    expect(pending).not.toBeChecked();
+    await userEvent.click(pending);
+    expect(last().statuses).toEqual(['created', 'invited']);
+  });
+
+  it('unticks the whole pending group and counts it as one filter', async () => {
+    renderToolbar({ statuses: ['created', 'invited'] });
+    expect(screen.getByRole('button', { name: /^Filter\s*1/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /^Filter/ }));
+    await userEvent.click(await screen.findByLabelText('Pending'));
+    expect(last().statuses).toEqual([]);
   });
 
   it('removes a schema field value when unticked, and clears every filter', async () => {
