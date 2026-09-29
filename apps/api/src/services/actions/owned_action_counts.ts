@@ -33,6 +33,47 @@ interface CountOptions {
  * A group whose interaction cannot be resolved still counts toward `all` /
  * `sent`, never toward the status-dependent views (fail closed).
  */
+interface CountGroup {
+  action_type: string;
+  action_status: string;
+  source_item_network: string;
+  source_item_domain: string;
+  source_item_type: string;
+  target_item_network: string;
+  target_item_domain: string;
+  target_item_type: string;
+  initiated: boolean;
+  received: boolean;
+  n: number;
+}
+
+/** The status-dependent views one group counts toward, per its interaction. */
+function addStatusViews(counts: OwnedActionViewCounts, g: CountGroup, cfg: NetworkConfigDocument): void {
+  const interaction = getActionInteraction(cfg, {
+    actionType: g.action_type,
+    fromNetwork: g.source_item_network,
+    fromDomain: g.source_item_domain,
+    fromItemType: g.source_item_type,
+    toNetwork: g.target_item_network,
+    toDomain: g.target_item_domain,
+    toItemType: g.target_item_type,
+  });
+  if (g.received && (interaction.metric_categories?.create ?? []).includes(g.action_status)) {
+    counts.needs_response += g.n;
+  }
+  const requesters = interaction.export?.requester_domains ?? [];
+  const mySides = [
+    ...(g.received ? [g.target_item_domain] : []),
+    ...(g.initiated ? [g.source_item_domain] : []),
+  ];
+  if (
+    mySides.some((d) => requesters.includes(d)) &&
+    interaction.reveals_pii_on_status.includes(g.action_status)
+  ) {
+    counts.ready_to_export += g.n;
+  }
+}
+
 export async function countOwnedActionsForViews(
   userId: string,
   opts: CountOptions
@@ -77,41 +118,17 @@ export async function countOwnedActionsForViews(
 
   const counts: OwnedActionViewCounts = { all: 0, needs_response: 0, ready_to_export: 0, sent: 0 };
   for (const row of groups) {
-    const g = {
+    const g: CountGroup = {
       ...row,
+      n: Number(row.n),
       initiated: row.source_item_owner === userId,
       received: row.target_item_owner === userId,
     };
-    const n = Number(g.n);
-    counts.all += n;
-    if (g.initiated) counts.sent += n;
-
+    counts.all += g.n;
+    if (g.initiated) counts.sent += g.n;
     try {
       const cfg = await opts.getNetworkConfig(g.target_item_network);
-      if (!cfg) continue;
-      const interaction = getActionInteraction(cfg, {
-        actionType: g.action_type,
-        fromNetwork: g.source_item_network,
-        fromDomain: g.source_item_domain,
-        fromItemType: g.source_item_type,
-        toNetwork: g.target_item_network,
-        toDomain: g.target_item_domain,
-        toItemType: g.target_item_type,
-      });
-      if (g.received && (interaction.metric_categories?.create ?? []).includes(g.action_status)) {
-        counts.needs_response += n;
-      }
-      const requesters = interaction.export?.requester_domains ?? [];
-      const mySides = [
-        ...(g.received ? [g.target_item_domain] : []),
-        ...(g.initiated ? [g.source_item_domain] : []),
-      ];
-      if (
-        mySides.some((d) => requesters.includes(d)) &&
-        interaction.reveals_pii_on_status.includes(g.action_status)
-      ) {
-        counts.ready_to_export += n;
-      }
+      if (cfg) addStatusViews(counts, g, cfg);
     } catch (err) {
       opts.onError?.(err);
     }

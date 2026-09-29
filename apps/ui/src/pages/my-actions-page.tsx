@@ -45,6 +45,7 @@ import {
   pendingStatuses,
   sidesOf,
   toFetchQuery,
+  withoutFacetValue,
   writeFilter,
   type MyActionsFilter,
   type SavedViewId,
@@ -69,6 +70,24 @@ function findTitleField(schema: RJSFSchema | undefined): string | null {
   return Object.keys(schema.properties)[0] ?? null;
 }
 
+/** Export error code → the message shown to the user. */
+const EXPORT_ERROR_KEYS: Record<string, string> = {
+  EXPORT_TOO_LARGE: 'actions.export_too_large',
+  EXPORT_IN_PROGRESS: 'actions.export_in_progress',
+  EXPORT_RATE_LIMITED: 'actions.export_rate_limited',
+  EXPORT_NOT_ENABLED: 'actions.export_not_enabled',
+  SERVICE_CALLER_NOT_ALLOWED: 'actions.export_not_enabled',
+  STATUS_NOT_EXPORTABLE: 'actions.export_status_not_allowed',
+  MIXED_COUNTERPARTY_TYPES: 'actions.export_mixed_types',
+  NETWORK_CONFIG_UNAVAILABLE: 'actions.export_unavailable',
+  EXPORT_RATE_LIMIT_UNAVAILABLE: 'actions.export_unavailable',
+};
+
+function exportErrorText(err: unknown, t: (key: string) => string): string {
+  const code = err instanceof ActionExportError ? err.code : '';
+  return t(EXPORT_ERROR_KEYS[code] ?? 'actions.export_failed');
+}
+
 function loadColumns(): Record<ColumnId, boolean> {
   const all = Object.fromEntries(COLUMN_IDS.map((c) => [c, true])) as Record<ColumnId, boolean>;
   try {
@@ -80,20 +99,12 @@ function loadColumns(): Record<ColumnId, boolean> {
 }
 
 /**
- * My Actions (revamp): one table of the caller's sent and received actions
- * across their profiles — search, schema-driven filters, saved views, sort,
- * columns, pagination, bulk respond and export. Filter state lives in the URL.
+ * Which network My Actions shows: the served one, else `?network=`, else the
+ * one last used elsewhere (localStorage), else the first configured.
  */
-export function MyActionsPage() {
-  const navigate = useNavigate();
-  const { t } = useTranslation();
-  const queryClient = useQueryClient();
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  // ── Network resolution (unchanged from the pre-revamp page) ─────────────
+function useMyActionsNetwork(networkFromUrl: string | null) {
   const configuredNetworkIds = React.useMemo(() => parseNetworkIds(import.meta.env.VITE_NETWORK_ID), []);
   const servedScope = React.useMemo(() => getServedScope(), []);
-  const networkFromUrl = searchParams.get('network');
   const storedNetworkId = React.useMemo(() => {
     try {
       return localStorage.getItem(ACTIVE_NETWORK_STORAGE_KEY);
@@ -119,7 +130,6 @@ export function MyActionsPage() {
     return availableNetworkIds[0] ?? null;
   }, [servedScope?.network, availableNetworkIds, networkFromUrl, storedNetworkId]);
   const { data: network } = useResolvedNetwork(targetNetworkId);
-  const domains = network?.domains ?? [];
   const allNetworks = React.useMemo(() => {
     if (!networksData) return [];
     return configuredNetworkIds.length > 0
@@ -127,6 +137,24 @@ export function MyActionsPage() {
       : networksData;
   }, [networksData, configuredNetworkIds]);
   const showNetworkSelector = !servedScope && allNetworks.length > 1;
+
+  return { availableNetworkIds, targetNetworkId, network, allNetworks, showNetworkSelector };
+}
+
+/**
+ * My Actions (revamp): one table of the caller's sent and received actions
+ * across their profiles — search, schema-driven filters, saved views, sort,
+ * columns, pagination, bulk respond and export. Filter state lives in the URL.
+ */
+export function MyActionsPage() {
+  const navigate = useNavigate();
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const { availableNetworkIds, targetNetworkId, network, allNetworks, showNetworkSelector } =
+    useMyActionsNetwork(searchParams.get('network'));
+  const domains = network?.domains ?? [];
 
   // ── The caller's profiles ────────────────────────────────────────────────
   const { data: myItems, isLoading: myItemsLoading } = useMyItems(network ?? null);
@@ -295,21 +323,7 @@ export function MyActionsPage() {
 
   // ── Export ─────────────────────────────────────────────────────────────────
   const [exporting, setExporting] = React.useState(false);
-  const exportErrorMessage = (err: unknown) => {
-    const code = err instanceof ActionExportError ? err.code : '';
-    const messages: Record<string, string> = {
-      EXPORT_TOO_LARGE: t('actions.export_too_large'),
-      EXPORT_IN_PROGRESS: t('actions.export_in_progress'),
-      EXPORT_RATE_LIMITED: t('actions.export_rate_limited'),
-      EXPORT_NOT_ENABLED: t('actions.export_not_enabled'),
-      SERVICE_CALLER_NOT_ALLOWED: t('actions.export_not_enabled'),
-      STATUS_NOT_EXPORTABLE: t('actions.export_status_not_allowed'),
-      MIXED_COUNTERPARTY_TYPES: t('actions.export_mixed_types'),
-      NETWORK_CONFIG_UNAVAILABLE: t('actions.export_unavailable'),
-      EXPORT_RATE_LIMIT_UNAVAILABLE: t('actions.export_unavailable'),
-    };
-    return messages[code] ?? t('actions.export_failed');
-  };
+  const exportErrorMessage = (err: unknown) => exportErrorText(err, t);
   /** One file per counterparty type; returns rows exported. */
   const runExports = async (requests: Array<ExportActionsBody['filters']>) => {
     setExporting(true);
@@ -604,14 +618,7 @@ function ActiveChips({
         key: `f:${f.domain}.${f.field}:${v}`,
         group: fieldLabel(f.domain, f.field),
         label: v,
-        remove: () => ({
-          ...filter,
-          facets: filter.facets
-            .map((x) =>
-              x.domain === f.domain && x.field === f.field ? { ...x, values: x.values.filter((y) => y !== v) } : x,
-            )
-            .filter((x) => x.values.length > 0),
-        }),
+        remove: () => withoutFacetValue(filter, f.domain, f.field, v),
       })),
     ),
   ];

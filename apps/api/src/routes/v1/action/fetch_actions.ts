@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { asc, desc, inArray, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
   ActionFacetSelectionSchema,

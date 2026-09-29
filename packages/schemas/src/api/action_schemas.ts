@@ -121,10 +121,16 @@ export const ActionFacetSelectionSchema = z.object({
 export const ActionFetchIncludeSchema = z.enum(['counts', 'counterparty_summary']);
 
 // Profiles to scope to: a repeated `item_ids` query param or a single value.
+/** A single value or an array → an array; absent stays absent. */
+function asArray<T>(v: T | T[] | undefined): T[] | undefined {
+  if (v === undefined) return undefined;
+  return Array.isArray(v) ? v : [v];
+}
+
 const ItemIdsParam = z
   .union([z.uuid(), z.array(z.uuid()).max(ACTION_ITEM_IDS_MAX)])
   .optional()
-  .transform((v) => (v === undefined ? undefined : Array.isArray(v) ? v : [v]));
+  .transform(asArray);
 
 const FetchOwnedRecordsQuerySchemaBase = z.object({
   action_id: z.uuid().optional(),
@@ -156,7 +162,7 @@ export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.ext
   include: z
     .union([ActionFetchIncludeSchema, z.array(ActionFetchIncludeSchema)])
     .optional()
-    .transform((v) => (v === undefined ? [] : Array.isArray(v) ? v : [v])),
+    .transform((v) => asArray(v) ?? []),
 });
 
 /** Request-shape bounds for `POST /api/v1/action/export` (#770 review #7). */

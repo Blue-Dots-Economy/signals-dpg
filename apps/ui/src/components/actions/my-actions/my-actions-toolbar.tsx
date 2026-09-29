@@ -158,12 +158,11 @@ export function MyActionsToolbar({
     received: t('my_actions.dir_received', 'Received'),
     sent: t('my_actions.dir_sent', 'Sent'),
   };
-  const profileValue =
-    filter.profiles.length === 0
-      ? t('my_actions.profiles_all', 'All')
-      : filter.profiles.length === 1
-        ? (profiles.find((p) => p.id === filter.profiles[0])?.label ?? '1')
-        : String(filter.profiles.length);
+  let profileValue = String(filter.profiles.length);
+  if (filter.profiles.length === 0) profileValue = t('my_actions.profiles_all', 'All');
+  else if (filter.profiles.length === 1) {
+    profileValue = profiles.find((p) => p.id === filter.profiles[0])?.label ?? '1';
+  }
 
   return (
     <div className="flex flex-wrap items-center gap-2">

@@ -81,9 +81,8 @@ export function parseFilter(params: URLSearchParams): MyActionsFilter {
 /** Filter → URL, keeping unrelated params (network, …) and omitting defaults. */
 export function writeFilter(prev: URLSearchParams, f: MyActionsFilter): URLSearchParams {
   const next = new URLSearchParams(prev);
-  for (const key of [...next.keys()]) {
-    if (key.startsWith('f_')) next.delete(key);
-  }
+  const staleFacetKeys = Array.from(next.keys()).filter((key) => key.startsWith('f_'));
+  staleFacetKeys.forEach((key) => next.delete(key));
   const set = (key: string, value: string, isDefault: boolean) =>
     isDefault ? next.delete(key) : next.set(key, value);
   set('profiles', joinList(f.profiles), f.profiles.length === 0);
@@ -101,13 +100,19 @@ export function writeFilter(prev: URLSearchParams, f: MyActionsFilter): URLSearc
   return next;
 }
 
+const OWNERSHIP_ROLE: Record<Direction, NonNullable<FetchMyActionsQuery['ownership_role']>> = {
+  all: 'all',
+  received: 'received',
+  sent: 'initiated',
+};
+
 /** Filter → `GET /action/fetch` query. */
 export function toFetchQuery(
   f: MyActionsFilter,
   include: FetchMyActionsQuery['include'] = ['counts', 'counterparty_summary'],
 ): FetchMyActionsQuery {
   return {
-    ownership_role: f.direction === 'received' ? 'received' : f.direction === 'sent' ? 'initiated' : 'all',
+    ownership_role: OWNERSHIP_ROLE[f.direction],
     item_ids: f.profiles.length > 0 ? f.profiles : undefined,
     action_status: f.statuses.length > 0 ? f.statuses : undefined,
     action_type: f.types.length > 0 ? f.types : undefined,
@@ -118,6 +123,19 @@ export function toFetchQuery(
     offset: (f.page - 1) * f.per,
     include,
   };
+}
+
+/** The filter with one facet value removed (and the facet, once empty). */
+export function withoutFacetValue(
+  f: MyActionsFilter,
+  domain: string,
+  field: string,
+  value: string,
+): MyActionsFilter {
+  const facets = f.facets
+    .map((x) => (x.domain === domain && x.field === field ? { ...x, values: x.values.filter((v) => v !== value) } : x))
+    .filter((x) => x.values.length > 0);
+  return { ...f, facets };
 }
 
 /** Number of active filters, for the Filter button badge (profiles/search excluded). */
@@ -254,7 +272,7 @@ export function pageList(page: number, pages: number): Array<number | '…'> {
   const out: Array<number | '…'> = [];
   for (let p = 1; p <= pages; p++) {
     if (p === 1 || p === pages || Math.abs(p - page) <= 1) out.push(p);
-    else if (out[out.length - 1] !== '…') out.push('…');
+    else if (out.at(-1) !== '…') out.push('…');
   }
   return out;
 }
