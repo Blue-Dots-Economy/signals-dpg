@@ -196,7 +196,7 @@ const MANAGE_PROFILE_TOUR: GuideTour = {
 
 const MY_ACTIONS_TOUR: GuideTour = {
   id: 'my-actions',
-  title: 'Manage your requests',
+  title: 'Manage your connections',
   path: '/my-actions',
   matches: (p) => p.startsWith('/my-actions'),
   // The rows (review strip, checkboxes) render after the list loads; wait for
