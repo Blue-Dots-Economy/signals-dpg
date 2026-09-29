@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { format, isToday, isYesterday } from 'date-fns';
 import {
   AlertCircle,
+  ChevronDown,
   ArrowDownLeft,
   ArrowUpRight,
   ChevronLeft,
@@ -21,7 +22,14 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { getStatusStyle } from '@/components/actions/action-card';
 import type { Action } from '@/lib/action-api';
-import { needsResponse, pageList, PAGE_SIZES, sidesOf, type ActionSides } from '@/lib/my-actions-view';
+import {
+  needsResponse,
+  pageList,
+  PAGE_SIZES,
+  sidesOf,
+  type ActionSides,
+  type ActionSortKey,
+} from '@/lib/my-actions-view';
 import type { ColumnId } from './my-actions-toolbar';
 
 export type RowCommand = 'accepted' | 'rejected' | 'cancelled' | 'completed' | 'view_profile' | 'export';
@@ -32,6 +40,8 @@ export interface BulkCommand {
   count: number;
   tone: 'accept' | 'reject' | 'primary' | 'neutral';
   onClick: () => void;
+  /** When set, the button opens this menu instead (e.g. one export per type). */
+  menu?: Array<{ id: string; label: string; onClick: () => void; divider?: boolean }>;
 }
 
 interface Labels {
@@ -52,6 +62,9 @@ interface ActionsTableProps extends Labels {
   onPage: (page: number) => void;
   onPer: (per: number) => void;
   columns: Record<ColumnId, boolean>;
+  /** Current sort; sortable headers show it and change it. */
+  sort: ActionSortKey;
+  onSort: (sort: ActionSortKey) => void;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -64,6 +77,8 @@ interface ActionsTableProps extends Labels {
   onSelectAll: () => void;
   onClearSelection: () => void;
   bulkCommands: BulkCommand[];
+  /** Why some of the selection is left out of an action, e.g. not exportable. */
+  selectionNote?: string;
   onCommand: (action: Action, command: RowCommand) => void;
 }
 
@@ -79,14 +94,69 @@ const COLUMN_WIDTH: Record<ColumnId, number | undefined> = {
   updated: 150,
 };
 const RIGHT_ALIGNED = new Set<ColumnId>(['match', 'distance', 'updated']);
+
+/**
+ * Headers that sort, and what a click selects. Only what the API can order
+ * by: no name sort (ordering by a masked name leaks the hidden one) and no
+ * status sort server-side.
+ */
+function headerSort(column: ColumnId, current: ActionSortKey): { next: ActionSortKey; active: boolean; arrow: string } | null {
+  switch (column) {
+    case 'updated':
+      return {
+        next: current === 'recent' ? 'oldest' : 'recent',
+        active: current === 'recent' || current === 'oldest',
+        arrow: current === 'oldest' ? '▲' : '▼',
+      };
+    case 'match':
+      return { next: 'match_score', active: current === 'match_score', arrow: '▼' };
+    case 'distance':
+      return { next: 'distance', active: current === 'distance', arrow: '▲' };
+    default:
+      return null;
+  }
+}
+
+function HeaderCell({
+  column,
+  label,
+  sort,
+  onSort,
+}: Readonly<{ column: ColumnId; label: string; sort: ActionSortKey; onSort: (s: ActionSortKey) => void }>) {
+  const right = RIGHT_ALIGNED.has(column);
+  const s = headerSort(column, sort);
+  if (!s) {
+    return (
+      <th scope="col" className={`px-3 font-semibold ${right ? 'text-right' : ''}`}>
+        {label}
+      </th>
+    );
+  }
+  let ariaSort: 'ascending' | 'descending' | undefined;
+  if (s.active) ariaSort = s.arrow === '▲' ? 'ascending' : 'descending';
+  return (
+    <th scope="col" aria-sort={ariaSort} className={`px-3 font-semibold ${right ? 'text-right' : ''}`}>
+      <button
+        type="button"
+        onClick={() => onSort(s.next)}
+        className={`inline-flex items-center gap-1 hover:text-foreground ${s.active ? 'text-primary' : ''}`}
+      >
+        {label}
+        <span className={`text-[10px] ${s.active ? '' : 'opacity-0'}`} aria-hidden="true">
+          {s.arrow}
+        </span>
+      </button>
+    </th>
+  );
+}
 const FLEX_MIN = 120;
 const NAME_MIN = 180;
 
 const toneClass: Record<BulkCommand['tone'], string> = {
-  accept: 'bg-emerald-600 text-white hover:bg-emerald-600/90 border-emerald-600',
-  reject: 'bg-white text-red-600 hover:bg-white/90 border-white',
-  primary: 'bg-primary text-primary-foreground hover:bg-primary/90 border-primary',
-  neutral: 'bg-transparent text-white border-white/30 hover:bg-white/10',
+  accept: 'border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-600/90',
+  reject: 'border-red-200 bg-background text-red-600 hover:bg-red-50',
+  primary: 'border-primary bg-primary text-primary-foreground hover:bg-primary/90',
+  neutral: 'bg-background',
 };
 
 function when(iso: string, t: Translate): string {
@@ -142,7 +212,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
     direction: t('my_actions.col_direction', 'Direction'),
     status: t('my_actions.col_status', 'Status'),
     profile: t('my_actions.col_profile', 'Profile'),
-    match: t('my_actions.col_match', 'Match'),
+    match: t('my_actions.col_match', 'Match score'),
     distance: t('my_actions.col_distance', 'Distance'),
     updated: t('my_actions.col_updated', 'Updated'),
   };
@@ -181,9 +251,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
                 {t('my_actions.col_name', 'Name')}
               </th>
               {visible.map((c) => (
-                <th key={c} scope="col" className={`px-3 font-semibold ${RIGHT_ALIGNED.has(c) ? 'text-right' : ''}`}>
-                  {columnLabel[c]}
-                </th>
+                <HeaderCell key={c} column={c} label={columnLabel[c]} sort={props.sort} onSort={props.onSort} />
               ))}
               <th scope="col">
                 <span className="sr-only">{t('my_actions.more_actions', 'More actions')}</span>
@@ -201,42 +269,62 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
 
 function SelectionBar(props: Readonly<ActionsTableProps>) {
   const { t } = useTranslation();
-  const { selected, total, bulkCommands } = props;
+  const { selected, total } = props;
+  // Only what applies to this selection — a button with nothing to act on is
+  // left out rather than shown disabled.
+  const commands = props.bulkCommands.filter((b) => b.count > 0);
   return (
     <section
       aria-label={t('my_actions.selection', 'Selection')}
-      className="flex flex-wrap items-center gap-2 bg-slate-900 px-4 py-2.5 text-white"
+      className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b bg-primary/5 px-4 py-2"
     >
-      <span className="text-sm font-bold">
+      <span className="text-sm font-semibold text-foreground">
         {t('my_actions.n_selected', '{{count}} selected', { count: selected.size })}
       </span>
-      <span className="text-xs text-slate-400">{t('my_actions.of_total', 'of {{total}}', { total })}</span>
+      <span className="text-xs text-muted-foreground">{t('my_actions.of_total', 'of {{total}}', { total })}</span>
       {selected.size < total ? (
-        <button type="button" className="text-xs font-semibold text-sky-300 underline" onClick={props.onSelectAll}>
+        <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={props.onSelectAll}>
           {t('my_actions.select_all_n', 'Select all {{total}}', { total })}
         </button>
       ) : null}
+      {props.selectionNote ? (
+        <span className="text-xs text-muted-foreground">· {props.selectionNote}</span>
+      ) : null}
       <span className="flex-1" />
-      {bulkCommands.map((b) => (
-        <Button
-          key={b.id}
-          size="sm"
-          variant="outline"
-          disabled={b.count === 0}
-          className={`h-8 ${toneClass[b.tone]} disabled:opacity-40`}
-          onClick={b.onClick}
-        >
-          {b.label} ({b.count})
-        </Button>
-      ))}
-      <button
-        type="button"
+      {commands.map((b) =>
+        b.menu ? (
+          <DropdownMenu key={b.id}>
+            <DropdownMenuTrigger asChild>
+              <Button size="sm" variant="outline" className={`h-8 gap-1 ${toneClass[b.tone]}`}>
+                {b.label} ({b.count})
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {b.menu.map((m) => (
+                <React.Fragment key={m.id}>
+                  {m.divider ? <DropdownMenuSeparator /> : null}
+                  <DropdownMenuItem onSelect={m.onClick}>{m.label}</DropdownMenuItem>
+                </React.Fragment>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button key={b.id} size="sm" variant="outline" className={`h-8 ${toneClass[b.tone]}`} onClick={b.onClick}>
+            {b.label} ({b.count})
+          </Button>
+        ),
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
         onClick={props.onClearSelection}
         aria-label={t('my_actions.clear_selection', 'Clear selection')}
-        className="flex h-8 w-8 items-center justify-center rounded hover:bg-white/10"
+        className="h-8 gap-1 text-muted-foreground"
       >
         <X className="h-4 w-4" />
-      </button>
+        {t('my_actions.clear', 'Clear')}
+      </Button>
     </section>
   );
 }

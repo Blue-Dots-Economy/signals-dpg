@@ -362,22 +362,32 @@ export function MyActionsPage() {
     q: query.q,
     facets: query.facets,
   });
-  const exportSelection = () => {
+  // One export target per counterparty type the caller may export — a
+  // provider gets seekers + service providers, a service provider gets
+  // providers + seekers (network.json `export.requester_domains`). Each is one
+  // file; "all" runs them in turn.
+  const exportTargets = (): Array<{ key: string; domain: string; count?: number; filters: ExportActionsBody['filters'] }> => {
     if (allMatching) {
-      const requests = [...exportableDomains].map((domain) => ({ ...baseExportFilters(), counterparty_domain: domain }));
-      void runExports(requests);
-      return;
+      return [...exportableDomains].sort().map((domain) => ({
+        key: domain,
+        domain,
+        filters: { ...baseExportFilters(), counterparty_domain: domain },
+      }));
     }
     const exportable = [...picked.values()].filter((a) => exportStatuses.includes(a.action_status));
-    const groups = groupByCounterpartyType(exportable).filter((g) => exportableDomains.has(g.domain));
-    void runExports(
-      groups.map((g) => ({
-        ...baseExportFilters(),
-        action_ids: g.actionIds,
-        counterparty_domain: g.domain,
-        counterparty_item_type: g.itemType,
-      })),
-    );
+    return groupByCounterpartyType(exportable)
+      .filter((g) => exportableDomains.has(g.domain))
+      .map((g) => ({
+        key: g.key,
+        domain: g.domain,
+        count: g.actionIds.length,
+        filters: {
+          ...baseExportFilters(),
+          action_ids: g.actionIds,
+          counterparty_domain: g.domain,
+          counterparty_item_type: g.itemType,
+        },
+      }));
   };
 
   // ── Bulk commands (counts reflect what each would act on) ──────────────────
@@ -386,6 +396,45 @@ export function MyActionsPage() {
   const exportableCount = allMatching
     ? (counts?.ready_to_export ?? 0)
     : pickedRows.filter((a) => exportStatuses.includes(a.action_status)).length;
+  const exportCommand = (): BulkCommand => {
+    const targets = exportTargets();
+    const plural = (d: string) => pluralizeDomainLabel(d, domains);
+    const base = { id: 'export', tone: 'primary' as const, count: exporting ? 0 : exportableCount };
+    if (exporting) return { ...base, label: t('my_actions.exporting', 'Exporting…'), onClick: () => {} };
+    if (targets.length === 1) {
+      return {
+        ...base,
+        label: t('my_actions.export_type', 'Export {{type}}', { type: plural(targets[0].domain).toLowerCase() }),
+        onClick: () => void runExports([targets[0].filters]),
+      };
+    }
+    return {
+      ...base,
+      label: t('my_actions.export', 'Export'),
+      onClick: () => void runExports(targets.map((x) => x.filters)),
+      menu: [
+        ...targets.map((x) => ({
+          id: x.key,
+          label: x.count == null ? plural(x.domain) : `${plural(x.domain)} (${x.count})`,
+          onClick: () => void runExports([x.filters]),
+        })),
+        {
+          id: 'all',
+          label: t('my_actions.export_all_files', 'All — {{count}} files', { count: targets.length }),
+          onClick: () => void runExports(targets.map((x) => x.filters)),
+          divider: true,
+        },
+      ],
+    };
+  };
+
+  const notExportable = allMatching ? 0 : pickedRows.length - exportableCount;
+  let selectionNote: string | undefined;
+  if (canExport && exportableCount > 0 && notExportable > 0) {
+    selectionNote = t('my_actions.note_not_exportable', '{{count}} not exportable — only accepted or completed', {
+      count: notExportable,
+    });
+  }
   const bulkCommands: BulkCommand[] = [
     {
       id: 'accept',
@@ -403,13 +452,7 @@ export function MyActionsPage() {
     },
     ...(canExport
       ? [
-          {
-            id: 'export',
-            label: exporting ? t('my_actions.exporting', 'Exporting…') : t('my_actions.export', 'Export'),
-            count: exporting ? 0 : exportableCount,
-            tone: 'primary' as const,
-            onClick: exportSelection,
-          },
+          exportCommand(),
         ]
       : []),
   ];
@@ -447,6 +490,16 @@ export function MyActionsPage() {
 
   const onSavedView = (view: SavedViewId) => setFilter(applySavedView(filter, view, vocab));
 
+  // Back: the previous in-app page when there is one; otherwise (the tab
+  // opened here — after login, a pasted or refreshed URL) the map view.
+  // History index, not `location.key`: filter changes replace the URL, which
+  // mints a new key without adding anything to go back to.
+  const handleBack = () => {
+    const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
+    if (idx > 0) navigate(-1);
+    else navigate(`/?network=${encodeURIComponent(targetNetworkId ?? '')}&view=map`);
+  };
+
   // ── Sidebar (profile switch still sets the shared active profile) ──────────
   const handleActiveProfileChange = (id: string) => {
     setActiveProfile(id);
@@ -470,7 +523,7 @@ export function MyActionsPage() {
       variant="form"
       title={t('actions.my_actions_title')}
       subtitle={t('actions.my_actions_subtitle')}
-      onBack={() => navigate(-1)}
+      onBack={handleBack}
       backLabel={t('actions.my_actions_back')}
       networks={showNetworkSelector ? allNetworks : []}
       selectedNetwork={targetNetworkId}
@@ -519,6 +572,8 @@ export function MyActionsPage() {
           onPage={(page) => setFilter({ ...filter, page })}
           onPer={(per) => setFilter({ ...filter, per, page: 1 })}
           columns={columns}
+          sort={filter.sort}
+          onSort={(sort) => setFilter({ ...filter, sort, page: 1 })}
           isLoading={isBootstrapping || actionsQuery.isLoading}
           isError={!isBootstrapping && actionsQuery.isError}
           onRetry={() => void actionsQuery.refetch()}
@@ -535,6 +590,7 @@ export function MyActionsPage() {
           onSelectAll={() => setAllMatching(true)}
           onClearSelection={clearSelection}
           bulkCommands={selectionSize > 0 ? bulkCommands : []}
+          selectionNote={selectionNote}
           onCommand={onCommand}
         />
       </div>

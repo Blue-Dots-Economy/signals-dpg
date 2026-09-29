@@ -83,7 +83,9 @@ function TriggerButton({
       {...rest}
     >
       {label}
-      {value ? <span className="font-semibold text-primary">{value}</span> : null}
+      {value ? (
+        <span className={active ? 'font-semibold text-primary' : 'font-normal text-muted-foreground'}>{value}</span>
+      ) : null}
       <ChevronDown className="h-3.5 w-3.5 opacity-60" />
     </Button>
   );
@@ -133,17 +135,17 @@ export function MyActionsToolbar({
   };
 
   const sortLabel: Record<ActionSortKey, string> = {
-    recent: t('my_actions.sort_recent', 'Recently updated'),
-    oldest: t('my_actions.sort_oldest', 'Oldest first'),
-    match_score: t('my_actions.sort_match', 'Best match'),
-    distance: t('my_actions.sort_distance', 'Nearest'),
+    recent: t('my_actions.sort_recent', 'Updated ↓'),
+    oldest: t('my_actions.sort_oldest', 'Updated ↑'),
+    match_score: t('my_actions.sort_match', 'Match score ↓'),
+    distance: t('my_actions.sort_distance', 'Distance ↑'),
   };
   const columnLabel: Record<ColumnId, string> = {
     action: t('my_actions.col_action', 'Action'),
     direction: t('my_actions.col_direction', 'Direction'),
     status: t('my_actions.col_status', 'Status'),
     profile: t('my_actions.col_profile', 'Profile'),
-    match: t('my_actions.col_match', 'Match'),
+    match: t('my_actions.col_match', 'Match score'),
     distance: t('my_actions.col_distance', 'Distance'),
     updated: t('my_actions.col_updated', 'Updated'),
   };
@@ -284,7 +286,11 @@ export function MyActionsToolbar({
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <TriggerButton label={t('my_actions.sort', 'Sort')} value={sortLabel[filter.sort]} />
+          <TriggerButton
+            label={t('my_actions.sort', 'Sort')}
+            value={sortLabel[filter.sort]}
+            active={filter.sort !== 'recent'}
+          />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
           <DropdownMenuRadioGroup value={filter.sort} onValueChange={(v) => set({ sort: v as ActionSortKey })}>
@@ -302,6 +308,7 @@ export function MyActionsToolbar({
           <TriggerButton
             label={t('my_actions.columns', 'Columns')}
             value={`${COLUMN_IDS.filter((c) => columns[c]).length + 1}/${COLUMN_IDS.length + 1}`}
+            active={COLUMN_IDS.some((c) => !columns[c])}
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
@@ -324,6 +331,7 @@ export function MyActionsToolbar({
           <TriggerButton
             label={t('my_actions.views', 'Views')}
             value={views.find((v) => v.id === savedView)?.label ?? t('my_actions.view_custom', 'Custom')}
+            active={savedView !== 'all'}
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-60">

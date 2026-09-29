@@ -108,7 +108,16 @@ vi.mock('react-i18next', () => ({
     },
   }),
 }));
-vi.mock('@/components/layout/page-shell', () => ({ PageShell: (p: { children: React.ReactNode }) => <div>{p.children}</div> }));
+vi.mock('@/components/layout/page-shell', () => ({
+  PageShell: (p: { children: React.ReactNode; onBack?: () => void }) => (
+    <div>
+      <button type="button" onClick={p.onBack}>
+        Back
+      </button>
+      {p.children}
+    </div>
+  ),
+}));
 const statusUpdater = vi.fn();
 vi.mock('@/components/actions/action-status-updater', () => ({
   ActionStatusUpdater: (p: { open: boolean; action: Action | null; suggestedStatus: string }) => {
@@ -238,7 +247,11 @@ describe('MyActionsPage — revamp', () => {
     total = 3;
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Export (2)' }));
+    // Two counterparty types → a menu: one line per type, plus all files.
+    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
+    expect(await screen.findByRole('menuitem', { name: 'Seekers (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Service Providers (1)' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('menuitem', { name: 'All — 2 files' }));
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(2));
     const bodies = exportActionsMock.mock.calls.map((c) => c[0].filters);
     expect(bodies.map((f) => [f.counterparty_domain, f.action_ids])).toEqual([
@@ -246,5 +259,35 @@ describe('MyActionsPage — revamp', () => {
       ['service_provider', ['a2']],
     ]);
     expect(bodies[0].action_status).toEqual(['accepted', 'completed']);
+  });
+});
+
+describe('MyActionsPage — back', () => {
+  it('goes to the map view when the tab opened on My Actions (no in-app history)', async () => {
+    renderPage('/my-actions');
+    await userEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(location).toContain('view=map'));
+  });
+});
+
+describe('MyActionsPage — sortable headers', () => {
+  it('Distance and Match score headers sort; Updated toggles newest/oldest', async () => {
+    rows = [row('a1', { action_status: 'accepted' })];
+    total = 1;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /^Distance/ }));
+    await waitFor(() => expect(lastQuery().sort).toBe('distance'));
+    expect(screen.getByRole('columnheader', { name: /Distance/ })).toHaveAttribute('aria-sort', 'ascending');
+    await userEvent.click(screen.getByRole('button', { name: /^Match score/ }));
+    await waitFor(() => expect(lastQuery().sort).toBe('match_score'));
+    await userEvent.click(screen.getByRole('button', { name: /^Updated/ }));
+    await waitFor(() => expect(lastQuery().sort).toBe('recent'));
+    await userEvent.click(screen.getByRole('button', { name: /^Updated/ }));
+    await waitFor(() => expect(lastQuery().sort).toBe('oldest'));
+  });
+
+  it('Name is not sortable', () => {
+    renderPage();
+    expect(screen.queryByRole('button', { name: /^Name/ })).toBeNull();
   });
 });
