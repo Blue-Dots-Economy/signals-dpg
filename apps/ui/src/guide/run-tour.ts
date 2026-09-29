@@ -18,6 +18,55 @@ const GRACE_MS = 1500;
 const POLL_MS = 150;
 
 let active: Driver | null = null;
+
+const STAGE_PADDING = 6;
+const STAGE_RADIUS = 8;
+
+/**
+ * A ring in the brand colour around the highlighted element. The dimmed
+ * overlay alone does not show it on a dark page — the lit cut-out looks like
+ * its dark surroundings. A separate fixed element (not an outline on the
+ * element itself), so a parent's overflow can never clip it; it follows the
+ * element while the page scrolls or resizes.
+ */
+const ring = (() => {
+  let node: HTMLDivElement | null = null;
+  let target: Element | null = null;
+  const place = () => {
+    if (!node || !target) return;
+    const r = target.getBoundingClientRect();
+    Object.assign(node.style, {
+      top: `${r.top - STAGE_PADDING}px`,
+      left: `${r.left - STAGE_PADDING}px`,
+      width: `${r.width + STAGE_PADDING * 2}px`,
+      height: `${r.height + STAGE_PADDING * 2}px`,
+    });
+  };
+  return {
+    show(el: Element | undefined) {
+      // A step with no element is a centred card: Driver.js stands in a
+      // zero-size dummy, which gets no ring.
+      if (!el || el.id === 'driver-dummy-element') return this.hide();
+      if (!node) {
+        node = document.createElement('div');
+        node.className = 'signals-guide-ring';
+        node.style.borderRadius = `${STAGE_RADIUS}px`;
+        document.body.appendChild(node);
+        window.addEventListener('scroll', place, true);
+        window.addEventListener('resize', place);
+      }
+      target = el;
+      place();
+    },
+    hide() {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+      node?.remove();
+      node = null;
+      target = null;
+    },
+  };
+})();
 let starting = false;
 
 /** True while a tour is waiting to start or on screen. */
@@ -47,19 +96,34 @@ export async function runTour(tour: GuideTour): Promise<void> {
     const steps: DriveStep[] = tour.steps.flatMap((s) => {
       const element = firstVisible(s.element);
       if (s.element && !element && !s.keep) return [];
-      return [{ element, popover: { title: s.title, description: s.description } }];
+      return [
+        {
+          // Picked again when the step is shown: an element listed first may
+          // have rendered since the tour started (the bell, a profile's
+          // status), and it is the better target.
+          element: element
+            ? () => document.querySelector<HTMLElement>(firstVisible(s.element) ?? element)!
+            : undefined,
+          popover: { title: s.title, description: s.description },
+        },
+      ];
     });
     if (steps.length === 0) return;
 
+    const dark = document.documentElement.classList.contains('dark');
     active = driver({
       steps,
       showProgress: true,
       allowClose: true,
-      overlayOpacity: 0.55,
-      stagePadding: 6,
-      stageRadius: 8,
+      // A deeper veil on a dark page, so the lit element stands out.
+      overlayOpacity: dark ? 0.75 : 0.55,
+      stagePadding: STAGE_PADDING,
+      stageRadius: STAGE_RADIUS,
       popoverClass: 'signals-guide',
+      onHighlighted: (el) => ring.show(el),
+      onDeselected: () => ring.hide(),
       onDestroyed: () => {
+        ring.hide();
         active = null;
       },
     });

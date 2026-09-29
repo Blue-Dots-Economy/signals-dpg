@@ -58,3 +58,13 @@
   color: var(--popover-foreground);
   font-weight: 600;
 }
+
+/* The ring around the highlighted element (see `ring` in run-tour.ts):
+   above the overlay, below the popover, never catches a click. */
+.signals-guide-ring {
+  position: fixed;
+  z-index: 10001;
+  pointer-events: none;
+  box-shadow: 0 0 0 3px var(--primary), 0 0 0 6px color-mix(in oklab, var(--primary) 30%, transparent);
+  transition: top 0.2s, left 0.2s, width 0.2s, height 0.2s;
+}
