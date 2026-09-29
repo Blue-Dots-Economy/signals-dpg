@@ -342,3 +342,24 @@ export function viewExportableStatuses(
 ): string[] {
   return filterStatuses.length > 0 ? filterStatuses.filter((s) => exportable.includes(s)) : [...exportable];
 }
+
+/** How much of the selection an export would take, and how much it leaves out. */
+export function exportSelectionCounts(input: {
+  /** Statuses of the picked rows (ignored under "select all"). */
+  pickedStatuses: readonly string[];
+  allMatching: boolean;
+  viewExportStatuses: readonly string[];
+  /** The server's "ready to export" total, used under "select all". */
+  readyToExport: number | undefined;
+}): { exportable: number; notExportable: number } {
+  if (input.allMatching) {
+    return { exportable: input.viewExportStatuses.length > 0 ? (input.readyToExport ?? 0) : 0, notExportable: 0 };
+  }
+  const exportable = input.pickedStatuses.filter((s) => input.viewExportStatuses.includes(s)).length;
+  return { exportable, notExportable: input.pickedStatuses.length - exportable };
+}
+
+/** True when the view has no filter, search or profile narrowing at all. */
+export function isUnfiltered(filter: MyActionsFilter): boolean {
+  return activeFilterCount(filter) === 0 && !filter.q.trim() && filter.profiles.length === 0;
+}

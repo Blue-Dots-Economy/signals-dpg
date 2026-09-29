@@ -216,3 +216,27 @@ describe('first-use copy and exportable view statuses', () => {
     expect(viewExportableStatuses(['rejected'], ['accepted'])).toEqual([]);
   });
 });
+
+describe('exportSelectionCounts / isUnfiltered', () => {
+  it('counts picked rows by the view’s exportable statuses, or the server total under select-all', async () => {
+    const { exportSelectionCounts } = await import('../my-actions-view');
+    const view = ['accepted', 'completed'];
+    expect(
+      exportSelectionCounts({ pickedStatuses: ['accepted', 'created', 'completed'], allMatching: false, viewExportStatuses: view, readyToExport: 9 }),
+    ).toEqual({ exportable: 2, notExportable: 1 });
+    expect(exportSelectionCounts({ pickedStatuses: [], allMatching: true, viewExportStatuses: view, readyToExport: 9 })).toEqual({
+      exportable: 9,
+      notExportable: 0,
+    });
+    expect(exportSelectionCounts({ pickedStatuses: [], allMatching: true, viewExportStatuses: [], readyToExport: 9 }).exportable).toBe(0);
+    expect(exportSelectionCounts({ pickedStatuses: [], allMatching: true, viewExportStatuses: view, readyToExport: undefined }).exportable).toBe(0);
+  });
+
+  it('is unfiltered only with no filter, search or profile', async () => {
+    const { isUnfiltered } = await import('../my-actions-view');
+    expect(isUnfiltered(EMPTY_FILTER)).toBe(true);
+    expect(isUnfiltered({ ...EMPTY_FILTER, q: 'a' })).toBe(false);
+    expect(isUnfiltered({ ...EMPTY_FILTER, profiles: ['p'] })).toBe(false);
+    expect(isUnfiltered({ ...EMPTY_FILTER, statuses: ['accepted'] })).toBe(false);
+  });
+});

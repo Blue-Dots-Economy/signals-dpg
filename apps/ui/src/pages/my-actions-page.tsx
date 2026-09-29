@@ -38,10 +38,11 @@ import {
 import {
   actionStatuses,
   actionTypes,
-  activeFilterCount,
   applySavedView,
   currentSavedView,
+  exportSelectionCounts,
   firstUseCopy,
+  isUnfiltered,
   needsResponse,
   parseFilter,
   pendingStatuses,
@@ -153,6 +154,48 @@ function useMyActionsNetwork(networkFromUrl: string | null) {
  * across their profiles — search, schema-driven filters, saved views, sort,
  * columns, pagination, bulk respond and export. Filter state lives in the URL.
  */
+/**
+ * One export button per counterparty type ("Export seekers (9)") — each
+ * downloads its own file. Under "select all" the per-type counts are not
+ * known, so those buttons show no number.
+ */
+function buildExportCommands(input: {
+  exporting: boolean;
+  targets: ReadonlyArray<{ key: string; domain: string; count?: number; filters: ExportActionsBody['filters'] }>;
+  exportableCount: number;
+  exportingLabel: string;
+  labelFor: (domain: string) => string;
+  onExport: (filters: Array<ExportActionsBody['filters']>) => void;
+}): BulkCommand[] {
+  if (input.exporting) {
+    return [{ id: 'export', label: input.exportingLabel, count: 1, hideCount: true, tone: 'primary', onClick: () => {} }];
+  }
+  const unknownCount = input.exportableCount > 0 ? 1 : 0;
+  return input.targets.map((x) => ({
+    id: `export:${x.key}`,
+    label: input.labelFor(x.domain),
+    count: x.count ?? unknownCount,
+    hideCount: x.count == null,
+    tone: 'primary' as const,
+    onClick: () => input.onExport([x.filters]),
+  }));
+}
+
+/**
+ * Rows are selectable only when some bulk command can apply to the caller:
+ * they may export, or they have received requests waiting on a reply
+ * (Accept / Reject). A seeker with only sent applications gets no checkboxes.
+ */
+function canSelectRows(input: {
+  canExport: boolean;
+  needsResponseCount: number | undefined;
+  rows: readonly Action[];
+  pendingStatuses: readonly string[];
+}): boolean {
+  if (input.canExport || (input.needsResponseCount ?? 0) > 0) return true;
+  return input.rows.some((a) => needsResponse(a, input.pendingStatuses));
+}
+
 export function MyActionsPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -404,42 +447,38 @@ export function MyActionsPage() {
   // ── Bulk commands (counts reflect what each would act on) ──────────────────
   const pickedRows = [...picked.values()];
   const respondable = pickedRows.filter((a) => needsResponse(a, pending));
-  let exportableCount = pickedRows.filter((a) => viewExportStatuses.includes(a.action_status)).length;
-  if (allMatching) exportableCount = viewExportStatuses.length > 0 ? (counts?.ready_to_export ?? 0) : 0;
-  // One button per counterparty type the selection holds ("Export seekers
-  // (9)", "Export service providers (1)") — each downloads its own file, so
-  // the caller picks the one they need. Under "select all" the per-type
-  // counts are not known, so those buttons show no number.
-  const exportCommands = (): BulkCommand[] => {
-    if (exporting) {
-      return [{ id: 'export', label: t('my_actions.exporting', 'Exporting…'), count: 1, hideCount: true, tone: 'primary', onClick: () => {} }];
-    }
-    const plural = (d: string) => pluralizeDomainLabel(d, domains).toLowerCase();
-    return exportTargets().map((x) => ({
-      id: `export:${x.key}`,
-      label: t('my_actions.export_type', 'Export {{type}}', { type: plural(x.domain) }),
-      count: x.count ?? (exportableCount > 0 ? 1 : 0),
-      hideCount: x.count == null,
-      tone: 'primary',
-      onClick: () => void runExports([x.filters]),
-    }));
-  };
-
-  // Selection only when some bulk command can apply to this caller: they may
-  // export, or they have received requests waiting on a reply (Accept /
-  // Reject). A seeker with only sent applications gets no checkboxes.
-  const selectable =
-    canExport || (counts?.needs_response ?? 0) > 0 || rows.some((a) => needsResponse(a, pending));
-
-  const notExportable = allMatching ? 0 : pickedRows.length - exportableCount;
-  let selectionNote: string | undefined;
-  let selectionNoteDetail: string | undefined;
-  if (canExport && exportableCount > 0 && notExportable > 0) {
-    selectionNote = t('my_actions.note_not_exportable_short', '{{count}} not exportable', { count: notExportable });
-    selectionNoteDetail = t('my_actions.note_not_exportable', '{{count}} not exportable — only accepted or completed', {
-      count: notExportable,
+  const { exportable: exportableCount, notExportable } = exportSelectionCounts({
+    pickedStatuses: pickedRows.map((a) => a.action_status),
+    allMatching,
+    viewExportStatuses,
+    readyToExport: counts?.ready_to_export,
+  });
+  const exportCommands = (): BulkCommand[] =>
+    buildExportCommands({
+      exporting,
+      targets: exportTargets(),
+      exportableCount,
+      exportingLabel: t('my_actions.exporting', 'Exporting…'),
+      labelFor: (domain) =>
+        t('my_actions.export_type', 'Export {{type}}', { type: pluralizeDomainLabel(domain, domains).toLowerCase() }),
+      onExport: (filters) => void runExports(filters),
     });
-  }
+
+  const selectable = canSelectRows({
+    canExport,
+    needsResponseCount: counts?.needs_response,
+    rows,
+    pendingStatuses: pending,
+  });
+
+  const note = canExport && exportableCount > 0 && notExportable > 0
+    ? {
+        short: t('my_actions.note_not_exportable_short', '{{count}} not exportable', { count: notExportable }),
+        detail: t('my_actions.note_not_exportable', '{{count}} not exportable — only accepted or completed', {
+          count: notExportable,
+        }),
+      }
+    : undefined;
   const bulkCommands: BulkCommand[] = [
     {
       id: 'accept',
@@ -505,9 +544,8 @@ export function MyActionsPage() {
   // Nothing filtered and still no rows: the caller has no actions yet, so
   // point them at where actions start (the map) instead of "loosen the
   // filters". Worded for the action types this network actually has.
-  const nothingFiltered = activeFilterCount(filter) === 0 && !filter.q.trim() && filter.profiles.length === 0;
   const [firstUseKey, firstUseFallback] = firstUseCopy(types);
-  const emptyState = nothingFiltered
+  const emptyState = isUnfiltered(filter)
     ? {
         title: t('my_actions.first_use_title', 'No actions yet'),
         body: t(firstUseKey, firstUseFallback),
@@ -607,8 +645,8 @@ export function MyActionsPage() {
           onSelectAll={() => setAllMatching(true)}
           onClearSelection={clearSelection}
           bulkCommands={selectionSize > 0 ? bulkCommands : []}
-          selectionNote={selectionNote}
-          selectionNoteDetail={selectionNoteDetail}
+          selectionNote={note?.short}
+          selectionNoteDetail={note?.detail}
           onCommand={onCommand}
         />
       </div>
