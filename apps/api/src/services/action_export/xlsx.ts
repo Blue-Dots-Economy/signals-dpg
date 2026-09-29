@@ -83,7 +83,7 @@ function cellFor(key: string, value: unknown, timeZone: string): Cell {
 /** Approximate displayed text of a cell, for sizing its column. */
 function cellText(cell: Cell): string {
   if (cell === null || cell === undefined) return '';
-  const value = typeof cell === 'object' && !(cell instanceof Date) ? cell.value : cell;
+  const value: unknown = typeof cell === 'object' && 'value' in cell ? cell.value : cell;
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return DATE_FORMAT;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
