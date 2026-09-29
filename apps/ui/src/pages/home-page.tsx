@@ -2096,6 +2096,7 @@ export function HomePage() {
         // control in this browse chrome honours. It is a primary action on the
         // list, so it gets the same treatment.
         className="pointer-coarse:min-h-11"
+        data-tour="bulk-select"
         onClick={() =>
           browseSelection.selectMode
             ? browseSelection.exitSelect()
@@ -2559,7 +2560,7 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <div className="relative h-full">
+              <div data-tour="map" className="relative h-full">
                 <MapErrorBoundary>
                 <MapView
                   schema={activeSchema!}

@@ -180,7 +180,7 @@ export function ActionList({
       </div>
     ) : (
       <>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div data-tour="action-list" className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {actions.map((action) => {
             const cls = actionClassFor(
               activeTab,
@@ -278,7 +278,7 @@ export function ActionList({
             </>
           )}
 
-          <Button variant="outline" size="sm" onClick={onRefresh} disabled={isRefetching}>
+          <Button data-tour="action-refresh" variant="outline" size="sm" onClick={onRefresh} disabled={isRefetching}>
             <RefreshCw className={`mr-2 h-4 w-4 ${isRefetching ? 'animate-spin' : ''}`} />
             {t('actions.refresh')}
           </Button>
@@ -286,7 +286,7 @@ export function ActionList({
       </div>
 
       {/* Sliding-pill tabs */}
-      <div className="relative flex rounded-2xl border bg-muted/60 p-1.5">
+      <div data-tour="action-tabs" className="relative flex rounded-2xl border bg-muted/60 p-1.5">
         <div
           className="absolute bottom-1.5 top-1.5 rounded-xl bg-card shadow-sm transition-[left] duration-300"
           style={{ left: `calc(${activeIdx * 50}% + 6px)`, width: 'calc(50% - 12px)' }}

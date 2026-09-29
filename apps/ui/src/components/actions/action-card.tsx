@@ -165,13 +165,15 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
               // a browse-list metric — there is no sort here, so the basis is
               // always the profile match. The column is 0-10 (see
               // compute_match_score) while the pill renders 0-100.
-              <MatchScoreBadge
-                metric={{ kind: 'relevance', percent: action.match_score * 10 }}
-                basis="profile"
-                size="sm"
-              />
+              <span data-tour="match-score" className="inline-flex">
+                <MatchScoreBadge
+                  metric={{ kind: 'relevance', percent: action.match_score * 10 }}
+                  basis="profile"
+                  size="sm"
+                />
+              </span>
             ) : (
-              <span className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
+              <span data-tour="match-score" className="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-500">
                 {t('actions.not_scored_yet', 'Not scored yet')}
               </span>
             )}
@@ -286,7 +288,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
         )}
 
         {action.distance_m != null && (
-          <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div data-tour="action-distance" className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
             <span>{formatDistanceKm(action.distance_m)}</span>
           </div>
@@ -294,7 +296,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
 
         {/* Actions */}
         {!selectionMode && (
-        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+        <div data-tour="action-respond" className="flex flex-wrap items-center gap-2 border-t pt-3">
           {/* Always available (both roles, every status): the counterparty's
               profile — masked while pending, unmasked once PII is revealed
               (accepted/completed). Handled inside ProfileCardModal. */}
