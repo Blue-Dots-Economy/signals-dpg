@@ -222,7 +222,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [isConfigLoading, isKeycloakLogin]);
 
   useEffect(() => {
-    fetchSession();
+    // fetchSession handles its own failures (it clears the user and loading).
+    void fetchSession();
   }, [fetchSession]);
 
   // ── Terminal session expiry ────────────────────────────────────────────────
@@ -308,13 +309,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const startKeycloakLogin = useCallback(
-    async (returnTo?: string, consentAttempt?: string): Promise<void> => {
+    (returnTo?: string, consentAttempt?: string): Promise<void> => {
       // Full navigation to the API, which runs the OIDC flow server-side and
       // sets the session cookie on the way back. The code exchange no longer
       // happens in the page, so no token passes through the browser at all.
       // Supersedes #688's `startOidcLogin(authCfg, {...})`: that options-object
       // refactor lived in the OIDC client this change removes.
       startBffLogin(returnTo ?? '/', consentAttempt);
+      return Promise.resolve();
     },
     []
   );

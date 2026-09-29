@@ -43,7 +43,7 @@ const ErrorResponse = z.object({
  * Note this group has no group-level auth hook (see apps/api/CLAUDE.md), so
  * the route declares its own preHandler.
  */
-export const auth_me: FastifyPluginAsyncZod = async function (fastify) {
+export const auth_me: FastifyPluginAsyncZod = function (fastify) {
   fastify.route({
     url: '/me',
     method: 'GET',
@@ -72,6 +72,8 @@ export const auth_me: FastifyPluginAsyncZod = async function (fastify) {
       });
     },
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 /**
