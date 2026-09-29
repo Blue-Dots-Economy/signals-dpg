@@ -416,3 +416,48 @@ describe('POST /api/v1/action/export', () => {
 
 /** The download-level audit log line(s) written by the route. */
 const auditLogs = () => state.logs.filter((l) => l.operation === 'action.export.audit');
+
+describe('POST /api/v1/action/export — My Actions filters', () => {
+  const A = '3f9a1c2e-0000-4000-8000-00000000000a';
+  const B = '3f9a1c2e-0000-4000-8000-00000000000b';
+  const rowsFor = () => [
+    [requesterRow()],
+    [actionRow('a1')],
+    [
+      itemRow('s-a1', 'seeker', { beneficiary_name: 'M***', gender: 'Female' }),
+      itemRow('p-me', 'provider', { org: 'Mine' }),
+    ],
+  ];
+
+  it('403 when any of item_ids is not the caller’s', async () => {
+    const app = await buildApp();
+    state.selects = [[{ item_id: A, created_by: ME }, { item_id: B, created_by: 'someone-else' }]];
+    const res = await post(app, { filters: { item_ids: [A, B] } });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('FORBIDDEN_ITEM');
+  });
+
+  it('exports across several owned profiles', async () => {
+    const app = await buildApp();
+    state.selects = [[{ item_id: A, created_by: ME }, { item_id: B, created_by: ME }], ...rowsFor()];
+    const res = await post(app, { filters: { item_ids: [A, B], action_status: ['accepted'] } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-export-row-count']).toBe('1');
+  });
+
+  it('q matches a revealed counterparty name', async () => {
+    const app = await buildApp();
+    state.selects = rowsFor();
+    const res = await post(app, { filters: { q: 'meera', action_status: ['accepted'] } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-export-row-count']).toBe('1');
+  });
+
+  it('q that matches no visible name exports nothing', async () => {
+    const app = await buildApp();
+    state.selects = rowsFor();
+    const res = await post(app, { filters: { q: 'nobody', action_status: ['accepted'] } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-export-row-count']).toBe('0');
+  });
+});

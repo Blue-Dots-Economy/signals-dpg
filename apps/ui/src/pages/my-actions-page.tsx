@@ -368,7 +368,7 @@ export function MyActionsPage() {
   // file; "all" runs them in turn.
   const exportTargets = (): Array<{ key: string; domain: string; count?: number; filters: ExportActionsBody['filters'] }> => {
     if (allMatching) {
-      return [...exportableDomains].sort().map((domain) => ({
+      return [...exportableDomains].sort((a, b) => a.localeCompare(b)).map((domain) => ({
         key: domain,
         domain,
         filters: { ...baseExportFilters(), counterparty_domain: domain },

@@ -96,6 +96,13 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
   };
 });
 
+// The saved-view counts service has its own tests (grouped query); here only
+// its wiring into the response is asserted.
+const countOwnedActionsForViews = vi.fn(async () => ({ all: 5, needs_response: 2, ready_to_export: 1, sent: 3 }));
+vi.mock('@/services/actions/owned_action_counts', () => ({
+  countOwnedActionsForViews: (...a: unknown[]) => countOwnedActionsForViews(...(a as [])),
+}));
+
 vi.mock('@/network_configs', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getNetworkConfigById: (...a: any[]) => getNetworkConfigById(...a),
@@ -852,5 +859,24 @@ describe('fetch_actions_handler — include=counterparty_summary', () => {
     primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
     const reply = await call({});
     expect(bodyOf(reply).actions[0]).not.toHaveProperty('counterparty');
+  });
+});
+
+describe('fetch_actions_handler — include=counts', () => {
+  it('adds the saved-view counts to meta, scoped by profile and action type', async () => {
+    primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
+    const reply = await call({ include: ['counts'], action_type: ['connect'] });
+    expect(bodyOf(reply).meta.counts).toEqual({ all: 5, needs_response: 2, ready_to_export: 1, sent: 3 });
+    expect(countOwnedActionsForViews).toHaveBeenCalledWith(
+      USER,
+      expect.objectContaining({ action_type: ['connect'], item_ids: [] }),
+    );
+  });
+
+  it('leaves counts out unless asked for', async () => {
+    primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
+    const reply = await call({});
+    expect(bodyOf(reply).meta).not.toHaveProperty('counts');
+    expect(countOwnedActionsForViews).not.toHaveBeenCalled();
   });
 });

@@ -109,10 +109,25 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 vi.mock('@/components/layout/page-shell', () => ({
-  PageShell: (p: { children: React.ReactNode; onBack?: () => void }) => (
+  PageShell: (p: {
+    children: React.ReactNode;
+    onBack?: () => void;
+    onActiveProfileChange?: (id: string) => void;
+    onNetworkSelect?: (id: string) => void;
+    onProfilesChanged?: () => void;
+  }) => (
     <div>
       <button type="button" onClick={p.onBack}>
         Back
+      </button>
+      <button type="button" onClick={() => p.onActiveProfileChange?.('p2')}>
+        sidebar-profile
+      </button>
+      <button type="button" onClick={() => p.onNetworkSelect?.('orange_dot')}>
+        sidebar-network
+      </button>
+      <button type="button" onClick={() => p.onProfilesChanged?.()}>
+        sidebar-profiles-changed
       </button>
       {p.children}
     </div>
@@ -127,13 +142,29 @@ vi.mock('@/components/actions/action-status-updater', () => ({
 }));
 const bulkDialog = vi.fn();
 vi.mock('@/components/actions/bulk-status-dialog', () => ({
-  BulkStatusDialog: (p: { open: boolean; actions: Action[]; targetStatus: string }) => {
+  BulkStatusDialog: (p: {
+    open: boolean;
+    actions: Action[];
+    targetStatus: string;
+    onSettled: (ok: number, total: number, failed: string[]) => void;
+    onOpenChange: (open: boolean) => void;
+  }) => {
     if (p.open) bulkDialog(p.actions.map((a) => a.action_id), p.targetStatus);
-    return null;
+    return p.open ? (
+      <div>
+        <button type="button" onClick={() => p.onSettled(0, p.actions.length, p.actions.map((a) => a.action_id))}>
+          bulk-settle-failed
+        </button>
+        <button type="button" onClick={() => p.onOpenChange(false)}>
+          bulk-close
+        </button>
+      </div>
+    ) : null;
   },
 }));
 vi.mock('@/components/actions/profile-card-modal', () => ({ ProfileCardModal: () => <div data-testid="profile-modal" /> }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastMock = { success: vi.fn(), error: vi.fn() };
+vi.mock('sonner', () => ({ toast: toastMock }));
 const exportActionsMock = vi.fn();
 vi.mock('@/lib/action-export', async (importOriginal) => {
   const real = await importOriginal<typeof import('@/lib/action-export')>();
@@ -289,5 +320,121 @@ describe('MyActionsPage — sortable headers', () => {
   it('Name is not sortable', () => {
     renderPage();
     expect(screen.queryByRole('button', { name: /^Name/ })).toBeNull();
+  });
+});
+
+describe('MyActionsPage — export paths', () => {
+  const accepted = (id: string) => row(id, { action_status: 'accepted' });
+
+  it('one counterparty type → "Export seekers (n)" sends the picked ids', async () => {
+    rows = [accepted('a1'), accepted('a2')];
+    total = 2;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers (2)' }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
+    expect(exportActionsMock.mock.calls[0][0].filters).toMatchObject({ action_ids: ['a1', 'a2'], counterparty_domain: 'seeker' });
+    await waitFor(() => expect(toastMock.success).toHaveBeenCalled());
+  });
+
+  it('"Select all N" exports by filter, one request per exportable counterparty type', async () => {
+    rows = [accepted('a1')];
+    total = 30;
+    renderPage('/my-actions?q=asha');
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Select all 30' }));
+    await userEvent.click(screen.getByRole('button', { name: /^Export \(2\)/ }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'All — 2 files' }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(2));
+    const filters = exportActionsMock.mock.calls.map((c) => c[0].filters);
+    expect(filters.map((f) => f.counterparty_domain)).toEqual(['seeker', 'service_provider']);
+    expect(filters[0]).toMatchObject({ q: 'asha', action_status: ['accepted', 'completed'] });
+    expect(filters[0].action_ids).toBeUndefined();
+  });
+
+  it('a failed export shows the mapped message; an empty one says so', async () => {
+    const { ActionExportError } = await import('@/lib/action-export');
+    rows = [accepted('a1')];
+    total = 1;
+    exportActionsMock.mockRejectedValueOnce(new ActionExportError('too big', 413, 'EXPORT_TOO_LARGE'));
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_too_large'));
+    exportActionsMock.mockResolvedValueOnce({ blob: new Blob(), filename: 'f.csv', rowCount: 0, skipped: 0 });
+    await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('actions.export_nothing'));
+  });
+
+  it('row menu: Export profile sends that one action; View profile opens the profile', async () => {
+    rows = [accepted('a1')];
+    total = 1;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Export profile' }));
+    await waitFor(() => expect(exportActionsMock).toHaveBeenCalledTimes(1));
+    expect(exportActionsMock.mock.calls[0][0].filters).toMatchObject({ action_ids: ['a1'], counterparty_domain: 'seeker' });
+    await userEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'View profile' }));
+    expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
+  });
+});
+
+describe('MyActionsPage — views and columns', () => {
+  it('a saved view rewrites direction and statuses in the URL', async () => {
+    total = 5;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /^Views/ }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: /Needs my response/ }));
+    await waitFor(() => expect(location).toContain('dir=received'));
+    expect(location).toContain('status=created');
+  });
+
+  it('remembers hidden columns', async () => {
+    localStorage.removeItem('my-actions-columns');
+    rows = [row('a1')];
+    total = 1;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: /^Columns/ }));
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Distance' }));
+    expect(JSON.parse(localStorage.getItem('my-actions-columns') ?? '{}')).toMatchObject({ distance: false });
+  });
+});
+
+describe('MyActionsPage — sidebar, chips and bulk settle', () => {
+  it('a sidebar profile switch scopes the list to that profile; a network switch drops profiles', async () => {
+    total = 5;
+    renderPage('/my-actions?profiles=p1');
+    await userEvent.click(screen.getByRole('button', { name: 'sidebar-profile' }));
+    await waitFor(() => expect(lastQuery().item_ids).toEqual(['p2']));
+    await userEvent.click(screen.getByRole('button', { name: 'sidebar-network' }));
+    await waitFor(() => expect(location).toContain('network=orange_dot'));
+    expect(location).not.toContain('profiles=');
+    await userEvent.click(screen.getByRole('button', { name: 'sidebar-profiles-changed' }));
+  });
+
+  it('every chip kind can be removed, and Clear all resets', async () => {
+    total = 5;
+    renderPage('/my-actions?profiles=p1&dir=sent&type=apply&q=asha&f_seeker.educationCategory=12th');
+    for (const name of [/Remove Search/, /Remove Profile/, /Remove Direction/, /Remove Action type/, /Remove Education/]) {
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
+    }
+    await userEvent.click(screen.getByRole('button', { name: /Remove Education/ }));
+    await waitFor(() => expect(location).not.toContain('f_seeker'));
+    await userEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    await waitFor(() => expect(location).not.toContain('dir='));
+    expect(location).not.toContain('q=');
+  });
+
+  it('a partly failed bulk keeps only the failed rows selected', async () => {
+    rows = [row('a1'), row('a2')];
+    total = 2;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reject (2)' }));
+    expect(bulkDialog).toHaveBeenCalledWith(['a1', 'a2'], 'rejected');
+    await userEvent.click(screen.getByRole('button', { name: 'bulk-settle-failed' }));
+    await userEvent.click(screen.getByRole('button', { name: 'bulk-close' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
   });
 });

@@ -4,6 +4,7 @@ import type { Action } from '@/lib/action-api';
 import {
   EMPTY_FILTER,
   actionStatuses,
+  actionTypes,
   activeFilterCount,
   applySavedView,
   currentSavedView,
@@ -13,6 +14,7 @@ import {
   pendingStatuses,
   sidesOf,
   toFetchQuery,
+  withoutFacetValue,
   writeFilter,
 } from '../my-actions-view';
 
@@ -143,5 +145,31 @@ describe('row helpers', () => {
   it('lists pages with gaps', () => {
     expect(pageList(1, 1)).toEqual([1]);
     expect(pageList(5, 10)).toEqual([1, '…', 4, 5, 6, '…', 10]);
+  });
+});
+
+describe('small helpers', () => {
+  it('lists action types and handles a missing network', () => {
+    expect(actionTypes(network)).toEqual(['apply', 'connect']);
+    expect(actionTypes(null)).toEqual([]);
+    expect(actionStatuses(undefined)).toEqual([]);
+    expect(pendingStatuses(null)).toEqual([]);
+  });
+
+  it('removes one facet value, and the facet once it is empty', () => {
+    const f = { ...EMPTY_FILTER, facets: [{ domain: 'seeker', field: 'gender', values: ['Male', 'Female'] }] };
+    expect(withoutFacetValue(f, 'seeker', 'gender', 'Male').facets).toEqual([
+      { domain: 'seeker', field: 'gender', values: ['Female'] },
+    ]);
+    expect(withoutFacetValue(withoutFacetValue(f, 'seeker', 'gender', 'Male'), 'seeker', 'gender', 'Female').facets).toEqual([]);
+  });
+
+  it('"all actions" clears direction and statuses', () => {
+    const f = applySavedView({ ...EMPTY_FILTER, direction: 'sent', statuses: ['x'] }, 'all', { pending: [], exportable: [] });
+    expect(f).toMatchObject({ direction: 'all', statuses: [] });
+  });
+
+  it('includes nothing extra when told so', () => {
+    expect(toFetchQuery(EMPTY_FILTER, []).include).toEqual([]);
   });
 });

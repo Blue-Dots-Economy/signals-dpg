@@ -633,18 +633,22 @@ function rowMenu(
 ): Array<{ c: RowCommand; label: string; danger?: boolean }> {
   const received = sides.direction === 'received';
   const pending = review || a.action_status === 'created' || a.action_status === 'pending';
-  const items: Array<{ c: RowCommand; label: string; danger?: boolean }> = [];
-  if (review) {
-    items.push({ c: 'accepted', label: t('actions.btn_accept', 'Accept') });
-    items.push({ c: 'rejected', label: t('actions.btn_reject', 'Reject'), danger: true });
-  }
-  if (!received && pending) items.push({ c: 'cancelled', label: t('my_actions.withdraw', 'Withdraw'), danger: true });
-  if (received && a.action_status === 'accepted') {
-    items.push({ c: 'completed', label: t('my_actions.mark_complete', 'Mark complete') });
-  }
-  items.push({ c: 'view_profile', label: t('actions.btn_view_profile', 'View profile') });
-  if (exportable) items.push({ c: 'export', label: t('my_actions.export_profile', 'Export profile') });
-  return items;
+  type Item = { c: RowCommand; label: string; danger?: boolean };
+  const onlyIf = (cond: boolean, ...items: Item[]): Item[] => (cond ? items : []);
+  return [
+    ...onlyIf(
+      review,
+      { c: 'accepted', label: t('actions.btn_accept', 'Accept') },
+      { c: 'rejected', label: t('actions.btn_reject', 'Reject'), danger: true },
+    ),
+    ...onlyIf(!received && pending, { c: 'cancelled', label: t('my_actions.withdraw', 'Withdraw'), danger: true }),
+    ...onlyIf(received && a.action_status === 'accepted', {
+      c: 'completed',
+      label: t('my_actions.mark_complete', 'Mark complete'),
+    }),
+    { c: 'view_profile', label: t('actions.btn_view_profile', 'View profile') },
+    ...onlyIf(exportable, { c: 'export', label: t('my_actions.export_profile', 'Export profile') }),
+  ];
 }
 
 function ActionRow({ action: a, visible, colCount, selected, review, exportable, labels, onToggle, onCommand }: Readonly<ActionRowProps>) {
