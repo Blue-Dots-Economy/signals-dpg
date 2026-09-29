@@ -446,27 +446,28 @@ const CONNECT_TOUR: GuideTour = {
   title: 'Connect or apply',
   path: '/',
   matches: (p) => p === '/',
-  // Starts on the map: tapping a pin is the quickest way to reach someone.
-  readyWhen: '[data-tour="map-location"]',
-  prepare: '[data-tour="view-map"]',
+  // Runs in the list: every step can point at a real card.
+  readyWhen: '[data-tour="browse-sort"]',
+  prepare: '[data-tour="view-list"]',
   requiresAuth: true,
   steps: [
     {
       title: 'Connect or apply',
-      description: 'Find someone on the map and send them a request. Your profile needs to be <b>Live</b> first.',
+      description: 'Find someone and send them a request. Your profile needs to be <b>Live</b> first.',
     },
     {
-      element: '[data-tour="map"]',
-      keep: true,
-      title: '1. Tap a pin',
-      description: 'Each pin is a person or a listing. A number is a group — tap it to zoom in. Tap a pin to open their card.',
+      element: ['[data-tour="search"]', '[data-testid="browse-toolbar"]'],
+      title: '1. Find someone',
+      description: 'Search, sort or filter the list to find the right person or listing.',
     },
     {
+      element: ['[data-tour="card-match-score"]', '[data-tour="card-grid"] > :first-child', '[data-tour="card-grid"]'],
       keep: true,
       title: '2. Check the fit',
-      description: 'The card shows their details. <b>See Match Score</b> tells you how well they fit your profile.',
+      description: 'Each card shows their key details. Tap <b>View more details</b>, or <b>See Match Score</b> where shown, to see how well they fit.',
     },
     {
+      element: ['[data-tour="card-action"]', '[data-tour="card-grid"]'],
       keep: true,
       title: '3. Send a request',
       description: 'Tap <b>Connect</b> (people and services) or <b>Apply</b> (jobs). Add a note if asked, then confirm.',
