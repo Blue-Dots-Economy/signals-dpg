@@ -27,7 +27,10 @@ export function GuideButton() {
   const { isAuthenticated, user } = useAuth();
 
   const available = React.useMemo(
-    () => TOURS.filter((tour) => !tour.requiresAuth || isAuthenticated),
+    () =>
+      TOURS.filter((tour) =>
+        isAuthenticated ? !tour.guestOnly : !tour.requiresAuth,
+      ),
     [isAuthenticated],
   );
   const here = available.filter((tour) => tour.matches(pathname, searchParams));
@@ -137,7 +140,8 @@ function TourItem({ tour, onSelect }: Readonly<{ tour: GuideTour; onSelect: (t: 
 
 /**
  * The tour to play by itself on this page, if any: signed out, a tour marked
- * `autoStart`; signed in, the page's tour — but only in a first-login session.
+ * `autoStart`; signed in, only in a first-login session — the welcome tour
+ * where it applies, otherwise the page's own tour.
  */
 export function autoStartTour(
   tours: readonly GuideTour[],
@@ -145,6 +149,8 @@ export function autoStartTour(
   params: URLSearchParams,
   who: { isAuthenticated: boolean; firstLogin: boolean },
 ): GuideTour | undefined {
-  if (who.isAuthenticated && !who.firstLogin) return undefined;
-  return tours.find((t) => (who.isAuthenticated || t.autoStart) && t.matches(pathname, params));
+  const here = tours.filter((t) => t.matches(pathname, params));
+  if (!who.isAuthenticated) return here.find((t) => t.autoStart);
+  if (!who.firstLogin) return undefined;
+  return here.find((t) => t.welcome) ?? here[0];
 }

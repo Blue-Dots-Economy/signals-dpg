@@ -4,15 +4,20 @@ import type { GuideTour } from '../tours';
 vi.mock('../run-tour', () => ({ runTour: vi.fn(), isTourRunning: () => false, hasSeenTour: () => false, markTourSeen: vi.fn() }));
 const { autoStartTour } = await import('../guide-button');
 
-const tour = (id: string, path: string, autoStart = false): GuideTour => ({
+const tour = (id: string, path: string, extra: Partial<GuideTour> = {}): GuideTour => ({
   id,
   title: id,
   path,
   matches: (p) => p === path,
-  autoStart,
   steps: [],
+  ...extra,
 });
-const tours = [tour('home', '/', true), tour('my-actions', '/my-actions')];
+const tours = [
+  tour('welcome', '/', { welcome: true, requiresAuth: true }),
+  tour('home', '/', { autoStart: true, guestOnly: true }),
+  tour('map', '/'),
+  tour('my-actions', '/my-actions'),
+];
 const params = new URLSearchParams();
 
 describe('autoStartTour', () => {
@@ -22,9 +27,9 @@ describe('autoStartTour', () => {
     expect(autoStartTour(tours, '/my-actions', params, who)).toBeUndefined();
   });
 
-  it('first-login session: each page’s tour plays', () => {
+  it('first-login session: the welcome tour on home, each other page’s own tour elsewhere', () => {
     const who = { isAuthenticated: true, firstLogin: true };
-    expect(autoStartTour(tours, '/', params, who)?.id).toBe('home');
+    expect(autoStartTour(tours, '/', params, who)?.id).toBe('welcome');
     expect(autoStartTour(tours, '/my-actions', params, who)?.id).toBe('my-actions');
   });
 

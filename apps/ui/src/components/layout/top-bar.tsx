@@ -45,6 +45,7 @@ function NotificationBell() {
       className="relative"
       onClick={() => navigate('/my-actions')}
       aria-label={t('nav.pending_actions', { count })}
+      data-tour="notifications"
     >
       <Bell className="h-4 w-4" />
       {count > 0 && (

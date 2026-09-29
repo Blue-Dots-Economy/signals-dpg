@@ -51,12 +51,109 @@ export interface GuideTour {
   requiresAuth?: boolean;
   /** Play once, automatically, on a first visit to a matching page. */
   autoStart?: boolean;
+  /**
+   * The welcome tour: plays by itself in a person's first login session (see
+   * `/auth/me` first_login), taking the place of the page's own tour.
+   */
+  welcome?: boolean;
+  /** Hidden from the menu when signed in (e.g. the visitor's home tour). */
+  guestOnly?: boolean;
   steps: GuideStep[];
 }
 
 
-// Every tour is capped at five steps: related controls share a step and its
-// text lists them, rather than getting a step each.
+// Keep tours short: related controls share a step and its text lists them,
+// rather than getting a step each. The welcome tour is the long one — it is
+// the only tour a first-timer is sure to see, so it covers the whole app in
+// one pass.
+
+const WELCOME_TOUR: GuideTour = {
+  id: 'welcome',
+  title: 'Welcome — how it all works',
+  path: '/',
+  matches: (p) => p === '/',
+  requiresAuth: true,
+  welcome: true,
+  steps: [
+    {
+      keep: true,
+      title: 'Welcome 👋',
+      description: `This network connects people who need something — a job, a skill, a service — with the people and organisations who offer it.
+        This tour shows you how it all works in a minute. Use the arrow keys or the buttons; you can close it any time.`,
+    },
+    {
+      element: ['[data-tour="profile-status"]', '[data-sidebar="sidebar"]'],
+      keep: true,
+      title: 'Your profile',
+      description: `Your profile says who you are here and what you offer or look for. Its status decides who can see you:
+        <ul>
+          <li><b>Live</b>: others can find you, and you can connect.</li>
+          <li><b>Draft</b>: not finished yet — complete the required fields to go live.</li>
+          <li><b>Paused</b>: hidden until you resume it.</li>
+        </ul>`,
+    },
+    {
+      element: ['[data-tour="map"]', '[data-tour="view-map"]', '[data-tour="view-toggle"]'],
+      keep: true,
+      title: 'Map view',
+      description: `See who is around you.
+        <ul>
+          <li><b>Pins and clusters</b>: a number is a group — zoom in or click it to spread it out.</li>
+          <li><b>Search this area</b> after you move the map; the count shows how many are on it.</li>
+          <li><b>Full screen</b> for a bigger map.</li>
+        </ul>`,
+    },
+    {
+      element: ['[data-tour="card-grid"]', '[data-tour="view-list"]', '[data-tour="view-toggle"]'],
+      keep: true,
+      title: 'List view',
+      description: `The same people as cards, best matches first.
+        <ul>
+          <li>Each card shows the key details and a <b>match score</b>.</li>
+          <li>Switch between map and list with the icons at the top right.</li>
+          <li>Tick cards to connect with several at once.</li>
+        </ul>`,
+    },
+    {
+      element: ['[data-tour="search"]', '[data-testid="browse-toolbar"]'],
+      title: 'Search and filters',
+      description: `
+        <ul>
+          <li><b>Search</b> by name, skill or place.</li>
+          <li>The bar below: choose <b>who</b> to see, <b>sort</b>, set a <b>distance</b> and add <b>filters</b>; applied filters show as chips.</li>
+        </ul>`,
+    },
+    {
+      element: ['[data-tour="card-action"]', '[data-tour="card-match-score"]', '[data-tour="card-grid"]'],
+      keep: true,
+      title: 'Connect or apply',
+      description: `Found someone? Send a request from their card (<b>Connect</b> or <b>Apply</b>).
+        <ul>
+          <li><b>Match score</b>: how well they fit your profile.</li>
+          <li>They are told, and can accept or reject.</li>
+        </ul>`,
+    },
+    {
+      keep: true,
+      title: 'Your privacy',
+      description: `Names and contact details stay hidden until a request is accepted — yours and theirs.
+        Until then each side sees only what the other chose to show on their profile.`,
+    },
+    {
+      element: ['[data-tour="notifications"]', '[data-sidebar="sidebar"]'],
+      keep: true,
+      title: 'Replies and requests',
+      description: `The <b>bell</b> shows requests waiting for you. It opens <b>My Actions</b>, where everything you sent and received is in one list:
+        accept or reject, follow a request's status, and export the ones that were accepted.`,
+    },
+    {
+      element: '[data-tour="guide-button"]',
+      keep: true,
+      title: 'Help is always here',
+      description: 'Open this menu any time for a closer look at the page you are on — the map, the list, your profile or My Actions.',
+    },
+  ],
+};
 
 const HOME_TOUR: GuideTour = {
   id: 'home',
@@ -64,6 +161,7 @@ const HOME_TOUR: GuideTour = {
   path: '/',
   matches: (p) => p === '/',
   autoStart: true,
+  guestOnly: true,
   steps: [
     {
       element: '[data-tour="guest-hero"]',
@@ -406,6 +504,7 @@ const CONNECT_TOUR: GuideTour = {
 };
 
 export const TOURS: GuideTour[] = [
+  WELCOME_TOUR,
   HOME_TOUR,
   MAP_TOUR,
   LIST_TOUR,
