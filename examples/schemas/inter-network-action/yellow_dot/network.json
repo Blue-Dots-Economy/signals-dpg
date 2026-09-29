@@ -400,6 +400,10 @@
           ],
           "to_network": "yellow_dot",
           "to_domain": "tutor",
+          "column_fields": {
+            "from": [],
+            "to": ["subjects", "experience_years", "teaching_mode"]
+          },
           "to_items": [
             "profile_1.0"
           ],
@@ -455,6 +459,10 @@
           ],
           "to_network": "yellow_dot",
           "to_domain": "coaching_center",
+          "column_fields": {
+            "from": [],
+            "to": ["city", "programs", "seats_available"]
+          },
           "to_items": [
             "profile_1.0"
           ],
@@ -515,6 +523,10 @@
           ],
           "to_network": "blue_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": [],
+            "to": []
+          },
           "to_items": [
             "job_posting_1.0",
             "job_posting_1.1"
