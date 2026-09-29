@@ -13,6 +13,8 @@ export interface OwnedActionsFilters {
   action_type?: string[];
   action_status?: string[];
   item_id?: string;
+  /** Several of the caller's items; merged with `item_id`. */
+  item_ids?: string[];
   ownership_role: 'all' | 'initiated' | 'received';
   updated_from?: Date;
   updated_to?: Date;
@@ -75,15 +77,22 @@ function counterpartyConditions(
   ];
 }
 
-/** `item_id` narrowed to the side(s) the ownership role covers. */
+/** Every item id the filter scopes to (`item_id` plus `item_ids`), deduplicated. */
+export function scopedItemIds(filters: Pick<OwnedActionsFilters, 'item_id' | 'item_ids'>): string[] {
+  return [...new Set([...(filters.item_id ? [filters.item_id] : []), ...(filters.item_ids ?? [])])];
+}
+
+/** The scoped item(s) narrowed to the side(s) the ownership role covers. */
 function itemCondition(
-  itemId: string | undefined,
+  itemIds: string[],
   role: OwnedActionsFilters['ownership_role']
 ): SQL | undefined {
-  if (!itemId) return undefined;
-  if (role === 'initiated') return eq(item_actions.source_item_id, itemId);
-  if (role === 'received') return eq(item_actions.target_item_id, itemId);
-  return or(eq(item_actions.source_item_id, itemId), eq(item_actions.target_item_id, itemId));
+  if (itemIds.length === 0) return undefined;
+  const on = (col: AnyPgColumn) =>
+    itemIds.length === 1 ? eq(col, itemIds[0]) : inArray(col, itemIds);
+  if (role === 'initiated') return on(item_actions.source_item_id);
+  if (role === 'received') return on(item_actions.target_item_id);
+  return or(on(item_actions.source_item_id), on(item_actions.target_item_id));
 }
 
 /** Ownership: caller owns the source (`initiated`), the target (`received`), or either. */
@@ -111,7 +120,7 @@ export function buildOwnedActionsWhere(
   return and(
     ...rowFilterConditions(filters),
     ...counterpartyConditions(userId, filters),
-    itemCondition(filters.item_id, filters.ownership_role),
+    itemCondition(scopedItemIds(filters), filters.ownership_role),
     ownerCondition(userId, filters.ownership_role)
   );
 }
@@ -157,4 +166,34 @@ export function stateMatchesFacets(
     const wanted = new Set(values.map(String));
     return asArray.some((v) => wanted.has(v));
   });
+}
+
+/**
+ * The facet selections that apply to a counterparty in `domain`: a selection
+ * with no `domain` applies to every counterparty, one with a `domain` only to
+ * counterparties in that domain. Shared by the list and the export so both
+ * narrow the same rows.
+ */
+export function facetsForDomain<V>(
+  selections: ReadonlyArray<{ domain?: string; field: string; values: V[] }>,
+  domain: string
+): Array<{ field: string; values: V[] }> {
+  return selections
+    .filter((s) => !s.domain || s.domain === domain)
+    .map(({ field, values }) => ({ field, values }));
+}
+
+/**
+ * Case-insensitive substring search over names the caller may already see.
+ * Callers pass only UNMASKED names (a public name, or a private one revealed
+ * on this row) — a masked value like "A***" must never be offered, or search
+ * would let a caller probe hidden names letter by letter.
+ */
+export function matchesActionSearch(
+  q: string | undefined,
+  visibleNames: ReadonlyArray<string | null | undefined>
+): boolean {
+  const needle = q?.trim().toLowerCase();
+  if (!needle) return true;
+  return visibleNames.some((n) => typeof n === 'string' && n.toLowerCase().includes(needle));
 }

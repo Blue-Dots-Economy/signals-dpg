@@ -25,6 +25,7 @@ export {
   getInstanceCustomItemSchemaUrl,
   getInteractionPiiRevealStatuses,
   getInteractionExportRequesterDomains,
+  getInteractionSummaryFields,
   getExportableCounterparties,
   getExportableStatuses,
   type ExportableCounterparty,

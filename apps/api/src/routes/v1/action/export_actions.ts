@@ -3,6 +3,7 @@ import { asc, desc, eq, inArray } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
   ExportActionsBodySchema,
+  getDomainItemSchema,
   getExportableStatuses,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
@@ -16,7 +17,8 @@ import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { incrWithinWindow } from '@/utils/rate_window';
 import { csvLine } from '@/utils/csv';
-import { buildOwnedActionsWhere } from '@/services/actions/owned_actions';
+import { buildOwnedActionsWhere, scopedItemIds } from '@/services/actions/owned_actions';
+import { visibleItemName } from '@/services/actions/visible_name';
 import {
   buildExport,
   type ExportItem,
@@ -184,7 +186,7 @@ async function runExport(
         action_ids: filters.action_ids,
         action_type: filters.action_type,
         action_status: statuses,
-        item_id: filters.item_id,
+        item_ids: scopedItemIds(filters),
         ownership_role: filters.ownership_role,
         updated_from: filters.updated_from,
         updated_to: filters.updated_to,
@@ -244,6 +246,24 @@ async function runExport(
     decrypt: (it) =>
       decryptItemPrivate({ item_state: it.item_state, item_private_state: it.item_private_state })
         .mergedState,
+    visibleName: (it, revealed) => {
+      const cfg = configs.get(it.item_network);
+      let schema: Record<string, unknown> = {};
+      try {
+        if (cfg) schema = getDomainItemSchema(cfg, it.item_domain, it.item_type) as Record<string, unknown>;
+      } catch {
+        schema = {};
+      }
+      return visibleItemName({
+        itemId: it.item_id,
+        schema,
+        publicState: it.item_state,
+        revealed,
+        decrypt: () =>
+          decryptItemPrivate({ item_state: it.item_state, item_private_state: it.item_private_state })
+            .mergedState,
+      });
+    },
     onDecryptError: (err, itemId) =>
       request.log.warn({ err, item_id: itemId }, 'pii decrypt failed in export — row exported masked'),
     onRuleError: (err, ref) =>
@@ -352,14 +372,23 @@ const NOT_ENABLED = {
  */
 async function resolveExportScope(request: ExportRequest, userId: string): Promise<ScopeResult> {
   const { filters } = request.body;
-  const requester = await resolveRequesterItem(userId, filters.item_id);
-  if (filters.item_id && requester?.created_by !== userId) {
-    return {
-      ok: false,
-      status: 403,
-      body: { error: 'FORBIDDEN_ITEM', message: 'item_id is not owned by the caller' },
-    };
+  const scoped = scopedItemIds(filters);
+  if (scoped.length > 0) {
+    const owned = await db
+      .select({ item_id: items.item_id, created_by: items.created_by })
+      .from(items)
+      .where(inArray(items.item_id, scoped));
+    const ownedIds = new Set(owned.filter((o) => o.created_by === userId).map((o) => o.item_id));
+    if (!scoped.every((id) => ownedIds.has(id))) {
+      return {
+        ok: false,
+        status: 403,
+        body: { error: 'FORBIDDEN_ITEM', message: 'item_id is not owned by the caller' },
+      };
+    }
   }
+  // One domain per account, so any scoped profile decides the requester domain.
+  const requester = await resolveRequesterItem(userId, scoped[0]);
   if (!requester) return { ok: false, status: 403, body: NOT_ENABLED };
 
   let requesterConfig: NetworkConfigDocument;

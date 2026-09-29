@@ -101,6 +101,31 @@ const toStringArray = (v: string | string[] | undefined) => {
 
 export const ActionSortKeySchema = z.enum(['recent', 'oldest', 'match_score', 'distance']);
 
+/** Longest `q` accepted by the owned-action list and export (#639 revamp). */
+export const ACTION_SEARCH_MAX = 100;
+/** Most profiles one owned-action query can scope to. */
+export const ACTION_ITEM_IDS_MAX = 50;
+
+/**
+ * One schema-driven filter on the counterparty's item_state. `domain` (optional)
+ * limits the selection to counterparties in that domain, so two domains that
+ * share a field name are filtered independently.
+ */
+export const ActionFacetSelectionSchema = z.object({
+  domain: z.string().min(1).optional(),
+  field: z.string().min(1),
+  values: z.array(z.string()).min(1),
+});
+
+/** Extra, opt-in parts of the owned-action list response. */
+export const ActionFetchIncludeSchema = z.enum(['counts', 'counterparty_summary']);
+
+// Profiles to scope to: a repeated `item_ids` query param or a single value.
+const ItemIdsParam = z
+  .union([z.uuid(), z.array(z.uuid()).max(ACTION_ITEM_IDS_MAX)])
+  .optional()
+  .transform((v) => (v === undefined ? undefined : Array.isArray(v) ? v : [v]));
+
 const FetchOwnedRecordsQuerySchemaBase = z.object({
   action_id: z.uuid().optional(),
   action_type: z.string().min(1).optional(),
@@ -120,10 +145,18 @@ export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.ext
     .union([z.string().min(1), z.array(z.string().min(1))])
     .optional()
     .transform(toStringArray),
+  // Several of the caller's profiles at once; `item_id` stays as the
+  // single-profile alias. Omitting both = every profile the caller owns.
+  item_ids: ItemIdsParam,
+  // Free-text search on the counterparty's UNMASKED name (public, or revealed
+  // on this row) and the caller's own item name. A masked name never matches.
+  q: z.string().trim().min(1).max(ACTION_SEARCH_MAX).optional(),
   sort: ActionSortKeySchema.default('recent'),
-  facets: z
-    .array(z.object({ field: z.string().min(1), values: z.array(z.string()).min(1) }))
-    .optional(),
+  facets: z.array(ActionFacetSelectionSchema).optional(),
+  include: z
+    .union([ActionFetchIncludeSchema, z.array(ActionFetchIncludeSchema)])
+    .optional()
+    .transform((v) => (v === undefined ? [] : Array.isArray(v) ? v : [v])),
 });
 
 /** Request-shape bounds for `POST /api/v1/action/export` (#770 review #7). */
@@ -145,6 +178,8 @@ export const ExportActionsBodySchema = z
         action_status: z.array(z.string().min(1)).optional(),
         ownership_role: ActionOwnershipRoleSchema.default('all'),
         item_id: z.uuid().optional(),
+        item_ids: z.array(z.uuid()).min(1).max(ACTION_ITEM_IDS_MAX).optional(),
+        q: z.string().trim().min(1).max(ACTION_SEARCH_MAX).optional(),
         // One file = one counterparty (domain, item_type); these select it when
         // the caller's rows span more than one.
         counterparty_domain: z.string().min(1).optional(),
@@ -155,6 +190,7 @@ export const ExportActionsBodySchema = z
         facets: z
           .array(
             z.object({
+              domain: z.string().min(1).optional(),
               field: z.string().min(1),
               values: z.array(z.string()).min(1).max(EXPORT_FACET_VALUES_MAX),
             })
@@ -201,6 +237,26 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   // item locations, so it only ever appears on the response row.
   match_score: z.number().nullable().optional(),
   distance_m: z.number().nullable().optional(),
+  // `include=counterparty_summary` only: which kind of item the counterparty
+  // is, plus the interaction's `summary_fields` for it — non-private fields
+  // only, so it carries no personal data at any status.
+  counterparty: z
+    .object({
+      network: z.string(),
+      domain: z.string(),
+      item_type: z.string(),
+      summary: z.record(z.string(), z.unknown()),
+    })
+    .nullable()
+    .optional(),
+});
+
+/** `include=counts`: totals for the saved views over the same base filter. */
+export const OwnedActionCountsSchema = z.object({
+  all: z.number(),
+  needs_response: z.number(),
+  ready_to_export: z.number(),
+  sent: z.number(),
 });
 
 export const OwnedActionEventSchema = ActionEventSelectSchema.extend({

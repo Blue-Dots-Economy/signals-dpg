@@ -4,7 +4,13 @@ import {
   getInteractionPiiRevealStatuses,
   type NetworkConfigDocument,
 } from '@dpg/schemas';
-import { counterpartyItemId, ownItemId, stateMatchesFacets } from '@/services/actions/owned_actions';
+import {
+  counterpartyItemId,
+  facetsForDomain,
+  matchesActionSearch,
+  ownItemId,
+  stateMatchesFacets,
+} from '@/services/actions/owned_actions';
 import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
 import { resolveProfileColumns, valueAtPath, type ProfileColumn } from './columns';
 
@@ -78,8 +84,16 @@ export interface BuildExportInput {
   filters: {
     counterparty_domain?: string;
     counterparty_item_type?: string;
-    facets?: ReadonlyArray<{ field: string; values: string[] }>;
+    facets?: ReadonlyArray<{ domain?: string; field: string; values: string[] }>;
+    /** Search on unmasked names — same rule as the list (see `visibleName`). */
+    q?: string;
   };
+  /**
+   * The item's name as the caller may see it, or null when it stays masked.
+   * Required for `filters.q`; `revealed` is this row's reveal gate for the
+   * counterparty (always false for the caller's own item's private name).
+   */
+  visibleName?: (item: ExportItem, revealed: boolean) => string | null;
   projection: { fields: '*' | readonly string[] };
   include: ReadonlyArray<'match_score'>;
   /** Returns the counterparty's merged (decrypted) state. May throw. */
@@ -282,7 +296,7 @@ function passesFacets(input: BuildExportInput, c: Candidate): boolean {
       cfg,
       c.counterparty.item_domain,
       c.counterparty.item_type,
-      selections.map((f) => ({ field: f.field, values: f.values }))
+      facetsForDomain(selections, c.counterparty.item_domain)
     );
   } catch {
     allowed = [];
@@ -290,12 +304,33 @@ function passesFacets(input: BuildExportInput, c: Candidate): boolean {
   return stateMatchesFacets(c.counterparty.item_state, allowed);
 }
 
-/** Step 2: facets plus the requested counterparty domain / item type. */
+/** The counterparty reveal gate — the same condition `buildRecord` applies. */
+function revealGate(c: Candidate): boolean {
+  return (
+    c.revealStatuses.includes(c.row.action_status) &&
+    c.counterparty.lifecycle_status === 'live' &&
+    (c.own ? c.own.lifecycle_status === 'live' : true)
+  );
+}
+
+/** Search on names the caller may already see; a masked name never matches. */
+function passesSearch(input: BuildExportInput, c: Candidate): boolean {
+  const q = input.filters.q;
+  if (!q) return true;
+  if (!input.visibleName) return false; // fail closed: no name rule, no match
+  return matchesActionSearch(q, [
+    input.visibleName(c.counterparty, revealGate(c)),
+    c.own ? input.visibleName(c.own, false) : null,
+  ]);
+}
+
+/** Step 2: facets, search, plus the requested counterparty domain / item type. */
 function selectCandidates(input: BuildExportInput, candidates: Candidate[]): Candidate[] {
   const { counterparty_domain: domain, counterparty_item_type: itemType } = input.filters;
   return candidates.filter(
     (c) =>
       passesFacets(input, c) &&
+      passesSearch(input, c) &&
       (!domain || c.counterparty.item_domain === domain) &&
       (!itemType || c.counterparty.item_type === itemType)
   );
@@ -324,11 +359,8 @@ function buildRecord(
   counts: ExportCounts,
   reveals: ExportReveal[]
 ): unknown[] {
-  const { row, counterparty: cp, own } = c;
-  let revealed =
-    c.revealStatuses.includes(row.action_status) &&
-    cp.lifecycle_status === 'live' &&
-    (own ? own.lifecycle_status === 'live' : true);
+  const { row, counterparty: cp } = c;
+  let revealed = revealGate(c);
   let state = cp.item_state;
   if (revealed) {
     try {

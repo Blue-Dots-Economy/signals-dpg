@@ -116,3 +116,38 @@ describe('stateMatchesFacets', () => {
     ).toBe(false);
   });
 });
+
+describe('owned-action filters for the My Actions revamp', () => {
+  it('item_ids scope to several profiles on the covered side(s)', async () => {
+    const q = render('u1', { ownership_role: 'received', item_ids: ['i1', 'i2'] });
+    expect(q.sql).toContain('"target_item_id" in ($1, $2)');
+    expect(q.params.slice(0, 2)).toEqual(['i1', 'i2']);
+  });
+
+  it('item_id and item_ids merge, deduplicated', async () => {
+    const { scopedItemIds } = await import('../owned_actions');
+    expect(scopedItemIds({ item_id: 'i1', item_ids: ['i1', 'i2'] })).toEqual(['i1', 'i2']);
+    expect(scopedItemIds({})).toEqual([]);
+  });
+
+  it('a domain-qualified facet applies only to counterparties in that domain', async () => {
+    const { facetsForDomain } = await import('../owned_actions');
+    const selections = [
+      { field: 'gender', values: ['Female'] },
+      { domain: 'service_provider', field: 'ownershipType', values: ['NGO'] },
+    ];
+    expect(facetsForDomain(selections, 'seeker')).toEqual([{ field: 'gender', values: ['Female'] }]);
+    expect(facetsForDomain(selections, 'service_provider')).toEqual([
+      { field: 'gender', values: ['Female'] },
+      { field: 'ownershipType', values: ['NGO'] },
+    ]);
+  });
+
+  it('search matches only the names offered, case-insensitively', async () => {
+    const { matchesActionSearch } = await import('../owned_actions');
+    expect(matchesActionSearch(undefined, [])).toBe(true);
+    expect(matchesActionSearch('meera', ['Meera Kumari'])).toBe(true);
+    // A masked name is never offered by callers, so null never matches.
+    expect(matchesActionSearch('m', [null, undefined])).toBe(false);
+  });
+});

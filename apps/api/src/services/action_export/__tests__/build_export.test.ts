@@ -440,3 +440,53 @@ describe('buildExport — facets', () => {
     expect(r.records).toHaveLength(2);
   });
 });
+
+describe('buildExport — search and domain facets (My Actions revamp)', () => {
+  // Same rule as the list: unmasked names only.
+  const visibleName = (it: ExportItem, revealed: boolean) => {
+    if (it.item_domain === 'provider') return String(it.item_state.organisation_name ?? '') || null;
+    return revealed ? String(REAL[it.item_id]?.beneficiary_name ?? '') || null : null;
+  };
+
+  it('q matches a revealed counterparty name', () => {
+    const r = okOf(
+      buildExport(
+        input({
+          rows: [row(seekerA, myProvider), row(seekerB, myProvider)],
+          filters: { q: 'meera' },
+          visibleName,
+        })
+      )
+    );
+    expect(r.records).toHaveLength(1);
+    expect(r.records[0][col(r, 'counterparty_item_id')]).toBe('s-a');
+  });
+
+  it('q never matches a name that stays masked', () => {
+    const paused = baseItems();
+    paused.set('s-a', item('s-a', 'seeker', { beneficiary_name: 'M***' }, 'paused'));
+    const r = okOf(
+      buildExport(
+        input({ rows: [row(seekerA, myProvider)], items: paused, filters: { q: 'meera' }, visibleName })
+      )
+    );
+    expect(r.records).toHaveLength(0);
+  });
+
+  it('q with no name rule fails closed', () => {
+    const r = okOf(buildExport(input({ rows: [row(seekerA, myProvider)], filters: { q: 'meera' } })));
+    expect(r.records).toHaveLength(0);
+  });
+
+  it('a domain-qualified facet narrows only that counterparty domain', () => {
+    const r = okOf(
+      buildExport(
+        input({
+          rows: [row(seekerA, myProvider), row(seekerB, myProvider)],
+          filters: { facets: [{ domain: 'seeker', field: 'gender', values: ['Male'] }] },
+        })
+      )
+    );
+    expect(r.records.map((rec) => rec[col(r, 'counterparty_item_id')])).toEqual(['s-b']);
+  });
+});

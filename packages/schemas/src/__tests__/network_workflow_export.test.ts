@@ -217,3 +217,31 @@ describe('getExportableCounterparties', () => {
     ]);
   });
 });
+
+describe('interaction summary_fields (My Actions revamp)', () => {
+  it('parses summary_fields and resolves the counterparty side', async () => {
+    const { parseNetworkConfigDocument, getInteractionSummaryFields } = await import('../network_workflow');
+    const cfg = parseNetworkConfigDocument({
+      id: 'n',
+      domains: [
+        { id: 'seeker', status_rules: [{ status: 'new', when: 'default' }], item_schemas: { p: { type: 'object' } } },
+        { id: 'provider', status_rules: [{ status: 'new', when: 'default' }], item_schemas: { p: { type: 'object' } } },
+      ],
+      actions: {
+        apply: {
+          interactions: [
+            {
+              from_domain: 'seeker',
+              to_domain: 'provider',
+              requirement_schema: { type: 'object' },
+              summary_fields: { from: ['educationCategory'], to: ['role'] },
+            },
+          ],
+        },
+      },
+    });
+    const input = { actionType: 'apply', fromNetwork: 'n', fromDomain: 'seeker', toNetwork: 'n', toDomain: 'provider' };
+    expect(getInteractionSummaryFields(cfg, input, 'from')).toEqual(['educationCategory']);
+    expect(getInteractionSummaryFields(cfg, input, 'to')).toEqual(['role']);
+  });
+});

@@ -251,6 +251,19 @@ export const NetworkActionInteractionSchema = z
       .object({ requester_domains: z.array(z.string().min(1)).min(1) })
       .strict()
       .optional(),
+    // Fields of each side's item shown to the OTHER side in the My Actions
+    // list (e.g. a seeker's education and experience to the provider they
+    // applied to). `from` = fields of the from item, `to` = fields of the to
+    // item. Only non-private item_state fields are ever returned — a private
+    // or undeclared field listed here is dropped server-side, so this can never
+    // show personal data before the reveal. Absent ⇒ no summary.
+    summary_fields: z
+      .object({
+        from: z.array(z.string().min(1)).optional().default([]),
+        to: z.array(z.string().min(1)).optional().default([]),
+      })
+      .strict()
+      .optional(),
   })
   .superRefine((interaction, ctx) => {
     // A requester must be a party to the engagement: a domain outside the
@@ -578,6 +591,32 @@ export function getInteractionExportRequesterDomains(
 ): readonly string[] {
   const interaction = getActionInteraction(networkConfig, input);
   return interaction.export?.requester_domains ?? [];
+}
+
+/**
+ * The counterparty fields to summarise for a viewer on one side of this
+ * interaction: the viewer owning the `to` item sees `summary_fields.from`, the
+ * viewer owning the `from` item sees `summary_fields.to`. Field names only —
+ * the caller must still drop private/undeclared fields for the item's schema.
+ *
+ * @throws Error when the network does not declare the interaction — same
+ *   contract as {@link getInteractionPiiRevealStatuses}.
+ */
+export function getInteractionSummaryFields(
+  networkConfig: NetworkConfigDocument,
+  input: {
+    actionType: string;
+    fromNetwork: string;
+    fromDomain: string;
+    fromItemType?: string;
+    toNetwork: string;
+    toDomain: string;
+    toItemType?: string;
+  },
+  counterpartySide: 'from' | 'to'
+): readonly string[] {
+  const interaction = getActionInteraction(networkConfig, input);
+  return interaction.summary_fields?.[counterpartySide] ?? [];
 }
 
 // Lives in a dependency-free module so the UI can import it too.
