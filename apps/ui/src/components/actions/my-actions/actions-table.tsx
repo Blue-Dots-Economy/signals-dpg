@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { getStatusStyle } from '@/components/actions/action-card';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { Action } from '@/lib/action-api';
 import {
   needsResponse,
@@ -218,6 +219,26 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
   };
   const visible = (Object.keys(COLUMN_WIDTH) as ColumnId[]).filter((c) => columns[c]);
   const colCount = visible.length + 3; // select + name + columns + menu
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <div className="flex flex-col overflow-hidden rounded-xl border bg-card">
+        {selected.size > 0 ? <SelectionBar {...props} /> : null}
+        <div className="flex items-center gap-3 border-b bg-muted/40 px-3 py-2 text-xs font-semibold text-muted-foreground">
+          <SelectBox
+            on={allOnPage}
+            partial={someOnPage}
+            label={t('my_actions.select_page', 'Select page')}
+            onClick={() => props.onTogglePage(pageIds, !allOnPage)}
+          />
+          {t('my_actions.select_page', 'Select page')}
+        </div>
+        <CardList {...props} />
+        <Pagination {...props} />
+      </div>
+    );
+  }
   const minWidth =
     44 + NAME_MIN + 56 + visible.reduce((n, c) => n + (COLUMN_WIDTH[c] ?? FLEX_MIN), 0);
 
@@ -468,6 +489,111 @@ function Pagination(props: Readonly<ActionsTableProps>) {
         </Button>
       </nav>
     </div>
+  );
+}
+
+// ─── Phone layout: one card per action ──────────────────────────────────────
+
+function CardList(props: Readonly<ActionsTableProps>) {
+  const { t } = useTranslation();
+  if (props.isLoading) {
+    return (
+      <div className="flex flex-col gap-2 p-3">
+        {['a', 'b', 'c'].map((k) => (
+          <Skeleton key={k} className="h-20 w-full" />
+        ))}
+      </div>
+    );
+  }
+  if (props.isError) {
+    return (
+      <div className="flex flex-col items-center gap-3 px-6 py-12 text-center">
+        <p className="font-semibold">{t('my_actions.load_failed', "Actions couldn't be loaded")}</p>
+        <Button variant="outline" size="sm" onClick={props.onRetry}>
+          {t('my_actions.retry', 'Try again')}
+        </Button>
+      </div>
+    );
+  }
+  if (props.rows.length === 0) {
+    return (
+      <div className="flex flex-col items-center gap-1 px-6 py-12 text-center">
+        <p className="font-semibold">{t('my_actions.empty_title', 'No actions match')}</p>
+        <p className="text-sm text-muted-foreground">
+          {t('my_actions.empty_body', 'Try removing a filter or clearing the search.')}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <ul className="flex flex-col">
+      {props.rows.map((a) => (
+        <ActionCard
+          key={a.action_id}
+          action={a}
+          selected={props.selected.has(a.action_id)}
+          review={needsResponse(a, props.pendingStatuses)}
+          exportable={props.canExport && props.exportStatuses.includes(a.action_status)}
+          labels={props}
+          onToggle={() => props.onToggle(a.action_id)}
+          onCommand={(c) => props.onCommand(a, c)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function ActionCard({
+  action: a,
+  selected,
+  review,
+  exportable,
+  labels,
+  onToggle,
+  onCommand,
+}: Readonly<Omit<ActionRowProps, 'visible' | 'colCount'>>) {
+  const { t } = useTranslation();
+  const sides = sidesOf(a);
+  const hasName = !!sides.other.name && sides.other.name !== sides.other.itemId;
+  const name = hasName ? sides.other.name! : labels.domainLabel(sides.other.domain);
+  return (
+    <li
+      className={`flex gap-3 border-b px-3 py-3 ${selected ? 'bg-primary/5' : ''} ${
+        review ? 'shadow-[inset_3px_0_0_theme(colors.amber.500)]' : ''
+      }`}
+    >
+      <div className="pt-1">
+        <SelectBox on={selected} label={t('my_actions.select_row', 'Select {{name}}', { name })} onClick={onToggle} />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="truncate font-semibold">{name}</p>
+            <p className="text-xs text-muted-foreground">
+              {labels.domainLabel(sides.other.domain)} · {labels.profileLabel(sides.mine.itemId)}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs text-muted-foreground">{when(a.updated_at, t)}</span>
+        </div>
+        <p className="text-sm">{actionText(a, sides, t)}</p>
+        <div className="-mx-3 flex flex-wrap items-center gap-y-1">
+          <DirectionCell received={sides.direction === 'received'} />
+          <StatusCell status={a.action_status} label={labels.statusLabel(a.action_status)} />
+          {a.match_score == null ? null : (
+            <span className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold text-primary-foreground">
+              ★ {Math.round(a.match_score * 10)}%
+            </span>
+          )}
+          {a.distance_m == null ? null : (
+            <span className="px-3 text-xs text-muted-foreground">{(a.distance_m / 1000).toFixed(1)} km</span>
+          )}
+        </div>
+        {review ? <ReviewStrip action={a} sides={sides} labels={labels} onCommand={onCommand} /> : null}
+      </div>
+      <div>
+        <RowMenu items={rowMenu(a, sides, review, exportable, t)} onCommand={onCommand} />
+      </div>
+    </li>
   );
 }
 

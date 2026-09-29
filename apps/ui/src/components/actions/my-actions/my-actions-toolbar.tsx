@@ -15,6 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { useIsMobile } from '@/hooks/use-mobile';
 import type { EnumFilterField } from '@/lib/enum-filters';
 import {
   activeFilterCount,
@@ -114,6 +115,7 @@ export function MyActionsToolbar({
   refreshing,
 }: Readonly<MyActionsToolbarProps>) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile(); // phones get cards — no columns to pick
   const [q, setQ] = React.useState(filter.q);
   React.useEffect(() => setQ(filter.q), [filter.q]);
 
@@ -303,6 +305,7 @@ export function MyActionsToolbar({
         </DropdownMenuContent>
       </DropdownMenu>
 
+      {isMobile ? null : (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <TriggerButton
@@ -325,6 +328,7 @@ export function MyActionsToolbar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
