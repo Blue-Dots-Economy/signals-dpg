@@ -37,7 +37,6 @@ export const FIXED_COLUMNS = [
   'counterparty_item_type',
   'created_at',
   'updated_at',
-  'pii_revealed',
 ] as const;
 
 /**
@@ -54,7 +53,6 @@ export const COLUMN_LABELS: Record<(typeof FIXED_COLUMNS)[number] | 'match_score
   counterparty_item_type: 'Profile type',
   created_at: 'Created',
   updated_at: 'Updated',
-  pii_revealed: 'Contact details shared',
   match_score: 'Match score',
 };
 
@@ -420,7 +418,6 @@ function buildRecord(
     cp.item_type,
     row.created_at,
     row.updated_at,
-    revealed,
     ...(withMatchScore ? [row.match_score ?? null] : []),
     ...columns.map((col) => valueAtPath(state, col.path)),
   ];

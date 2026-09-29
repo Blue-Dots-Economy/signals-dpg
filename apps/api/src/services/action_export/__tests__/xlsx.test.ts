@@ -13,8 +13,8 @@ async function sheetOf(header: string[], labels: string[], records: unknown[][],
 describe('buildExportWorkbook', () => {
   it('writes plain-word headings, zone-named date headings, and typed cells', async () => {
     const sheet = await sheetOf(
-      ['action_status', 'direction', 'created_at', 'pii_revealed', 'match_score', 'phone', 'langs', 'years'],
-      ['Status', 'Direction', 'Created', 'Contact details shared', 'Match score', 'Mobile', 'Languages', 'Years'],
+      ['action_status', 'direction', 'created_at', 'shared', 'match_score', 'phone', 'langs', 'years'],
+      ['Status', 'Direction', 'Created', 'Shared', 'Match score', 'Mobile', 'Languages', 'Years'],
       [['accepted', 'received', new Date('2026-09-01T00:00:00Z'), true, 7.5, '0987654321', ['Hindi', 'English'], 3]]
     );
     expect(sheet.sheet).toBe('Service Provider');
@@ -22,7 +22,7 @@ describe('buildExportWorkbook', () => {
       'Status',
       'Direction',
       'Created (IST)',
-      'Contact details shared',
+      'Shared',
       'Match score',
       'Mobile',
       'Languages',

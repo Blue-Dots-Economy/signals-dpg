@@ -291,7 +291,6 @@ describe('POST /api/v1/action/export', () => {
       'Profile type',
       'Created (IST)',
       'Updated (IST)',
-      'Contact details shared',
       'Beneficiary Name',
       'Gender',
     ]);
@@ -300,7 +299,7 @@ describe('POST /api/v1/action/export', () => {
     // Real dates, shown at the EXPORT_TIMEZONE (IST) wall-clock time.
     expect((row[7] as unknown as Date).toISOString()).toBe('2026-09-01T05:30:00.000Z');
     expect((row[8] as unknown as Date).toISOString()).toBe('2026-09-02T05:30:00.000Z');
-    expect(row.slice(9)).toEqual(['Yes', 'Meera Kumari', 'Female']);
+    expect(row.slice(9)).toEqual(['Meera Kumari', 'Female']);
 
     // Download audit = one structured log line (no table), tied to the file
     // by export_id.

@@ -229,12 +229,11 @@ describe('buildExport — counterparty and columns', () => {
 });
 
 describe('buildExport — reveal gate', () => {
-  it('accepted + both live → decrypted, pii_revealed=true', () => {
+  it('accepted + both live → decrypted and counted as revealed', () => {
     const r = okOf(buildExport(input({ rows: [row(seekerA, myProvider)] })));
     const rec = r.records[0];
     expect(rec[col(r, 'beneficiary_name')]).toBe('Meera Kumari');
     expect(rec[col(r, 'mobile_number')]).toBe('9876543210');
-    expect(rec[col(r, 'pii_revealed')]).toBe(true);
     expect(r.counts).toMatchObject({ row_count: 1, revealed_count: 1, masked_count: 0 });
   });
 
@@ -269,6 +268,11 @@ describe('buildExport — reveal gate', () => {
     ]);
   });
 
+  it('the file has no reveal-flag column — masked values speak for themselves', () => {
+    const r = okOf(buildExport(input({ rows: [row(seekerA, myProvider)] })));
+    expect(r.header).not.toContain('pii_revealed');
+  });
+
   it('counterparty paused → masked', () => {
     const items = baseItems();
     items.set('s-a', { ...items.get('s-a')!, lifecycle_status: 'paused' });
@@ -280,7 +284,8 @@ describe('buildExport — reveal gate', () => {
     const items = baseItems();
     items.set('p-me', { ...items.get('p-me')!, lifecycle_status: 'paused' });
     const r = okOf(buildExport(input({ rows: [row(seekerA, myProvider)], items })));
-    expect(r.records[0][col(r, 'pii_revealed')]).toBe(false);
+    expect(r.records[0][col(r, 'beneficiary_name')]).toBe('M***');
+    expect(r.counts).toMatchObject({ revealed_count: 0, masked_count: 1 });
   });
 
   it('decrypt failure → masked row and the error is reported', () => {
@@ -297,7 +302,7 @@ describe('buildExport — reveal gate', () => {
       )
     );
     expect(r.records[0][col(r, 'beneficiary_name')]).toBe('M***');
-    expect(r.records[0][col(r, 'pii_revealed')]).toBe(false);
+    expect(r.counts).toMatchObject({ revealed_count: 0, masked_count: 1 });
     expect(onDecryptError).toHaveBeenCalledWith(expect.any(Error), 's-a');
   });
 });
