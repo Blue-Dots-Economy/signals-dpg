@@ -104,15 +104,18 @@ const WELCOME_TOUR: GuideTour = {
       description: 'Search by name, skill or place. Use filters to narrow it down.',
     },
     {
-      element: ['[data-tour="map"]', '[data-tour="card-action"]', '[data-tour="card-grid"]'],
+      // A pin on the map when one is in view (Leaflet / Google markers),
+      // else the card's button in the list, else the map itself.
+      element: [
+        '.leaflet-marker-icon',
+        'gmp-advanced-marker',
+        '[data-tour="card-action"]',
+        '[data-tour="map"]',
+        '[data-tour="card-grid"]',
+      ],
       keep: true,
       title: 'Connect',
       description: 'Tap a pin on the map to see who it is, then tap <b>Connect</b> or <b>Apply</b>. The match score shows how well you fit.',
-    },
-    {
-      keep: true,
-      title: 'You stay private',
-      description: 'Your name and phone number are shared only after you both agree.',
     },
     {
       element: ['[data-tour="notifications"]', '[data-sidebar="sidebar"]'],

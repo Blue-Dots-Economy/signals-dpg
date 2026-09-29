@@ -101,9 +101,7 @@ export async function runTour(tour: GuideTour): Promise<void> {
           // Picked again when the step is shown: an element listed first may
           // have rendered since the tour started (the bell, a profile's
           // status), and it is the better target.
-          element: element
-            ? () => document.querySelector<HTMLElement>(firstVisible(s.element) ?? element)!
-            : undefined,
+          element: element ? () => (pick(firstVisible(s.element) ?? element) ?? pick(element))! : undefined,
           popover: { title: s.title, description: s.description },
         },
       ];
@@ -161,10 +159,41 @@ function firstVisible(element: string | string[] | undefined): string | undefine
 }
 
 function isVisible(selector: string): boolean {
-  const el = document.querySelector<HTMLElement>(selector);
-  if (!el) return false;
-  const rect = el.getBoundingClientRect();
-  return rect.width > 0 && rect.height > 0;
+  return pick(selector) !== null;
+}
+
+function hasSize(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+function onScreen(el: Element): boolean {
+  const r = el.getBoundingClientRect();
+  return r.bottom > 0 && r.right > 0 && r.top < window.innerHeight && r.left < window.innerWidth;
+}
+
+/**
+ * The element a selector stands for: of everything it matches, the first one
+ * on screen (a pin inside the map's view, not one panned away), else the first
+ * with any size — Driver.js scrolls that one into view.
+ */
+function pick(selector: string): HTMLElement | null {
+  const all = [...document.querySelectorAll<HTMLElement>(selector)].filter(
+    (el) => hasSize(el) && reachable(el),
+  );
+  return all.find(onScreen) ?? all[0] ?? null;
+}
+
+/**
+ * Inside the map, only what the map is showing counts: a pin panned out of
+ * view has a size but cannot be scrolled to, so it must sit within the map.
+ */
+function reachable(el: Element): boolean {
+  const map = el.closest('[data-tour="map"]');
+  if (!map || map === el) return true;
+  const m = map.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  return r.bottom > m.top && r.top < m.bottom && r.right > m.left && r.left < m.right;
 }
 
 const SEEN_PREFIX = 'signals-guide:seen:';
