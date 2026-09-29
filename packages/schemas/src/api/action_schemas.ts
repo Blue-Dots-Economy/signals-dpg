@@ -244,7 +244,7 @@ export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   match_score: z.number().nullable().optional(),
   distance_m: z.number().nullable().optional(),
   // `include=counterparty_summary` only: which kind of item the counterparty
-  // is, plus the interaction's `summary_fields` for it — non-private fields
+  // is, plus the interaction's `column_fields` for it — non-private fields
   // only, so it carries no personal data at any status.
   counterparty: z
     .object({

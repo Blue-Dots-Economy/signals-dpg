@@ -833,7 +833,7 @@ describe('fetch_actions_handler — include=counterparty_summary', () => {
           interactions: [
             {
               ...NETWORK_CONFIG.actions.connect.interactions[0],
-              summary_fields: { from: ['gender', 'beneficiary_name', 'undeclared'], to: [] },
+              column_fields: { from: ['gender', 'beneficiary_name', 'undeclared'], to: [] },
             },
           ],
         },

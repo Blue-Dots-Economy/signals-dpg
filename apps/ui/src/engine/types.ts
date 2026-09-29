@@ -147,7 +147,7 @@ export interface DotNetworkInteraction {
     cancel?: string[];
   } | null;
   /** Fields of each side shown to the other in My Actions (server-filtered to non-private). */
-  summary_fields?: { from?: string[]; to?: string[] };
+  column_fields?: { from?: string[]; to?: string[] };
 }
 
 export interface DotNetworkInstance {

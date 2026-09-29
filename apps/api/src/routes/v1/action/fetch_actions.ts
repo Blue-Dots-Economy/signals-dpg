@@ -8,7 +8,7 @@ import z, {
   OwnedItemActionSchema,
   getDomainItemSchema,
   getInteractionPiiRevealStatuses,
-  getInteractionSummaryFields,
+  getInteractionColumnFields,
 } from '@dpg/schemas';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
@@ -440,7 +440,7 @@ const fetch_actions_handler = async (
         const cfg = await getNetworkConfigCached(row.target_item_network);
         const counterpartyCfg = await getNetworkConfigCached(cMeta.item_network);
         if (cfg && counterpartyCfg) {
-          const fields = getInteractionSummaryFields(
+          const fields = getInteractionColumnFields(
             cfg,
             {
               actionType: row.action_type,
