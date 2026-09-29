@@ -61,7 +61,7 @@ const FetchOwnedActionsResponseSchema = z.object({
   actions: OwnedItemActionSchema.array(),
 });
 
-export const fetch_actions: FastifyPluginAsyncZod = async function (fastify) {
+export const fetch_actions: FastifyPluginAsyncZod = function (fastify) {
   fastify.route({
     url: '/fetch',
     method: 'GET',
@@ -75,6 +75,8 @@ export const fetch_actions: FastifyPluginAsyncZod = async function (fastify) {
     },
     handler: fetch_actions_handler,
   });
+  // Plugins return a promise; nothing here awaits (routes register synchronously).
+  return Promise.resolve();
 };
 
 const fetch_actions_handler = async (
@@ -285,11 +287,19 @@ const fetch_actions_handler = async (
 
     const revealStatusesByAction = new Map<string, readonly string[]>();
     const resolveRevealStatuses = async (rows: typeof matchingRows) => {
-    for (const row of rows) {
-      if (revealStatusesByAction.has(row.action_id)) continue;
+    const pending = rows.filter((row) => !revealStatusesByAction.has(row.action_id));
+    // Every network's config first (memoised, in parallel), then the rows.
+    const configs = new Map(
+      await Promise.all(
+        [...new Set(pending.map((r) => r.target_item_network))].map(
+          async (network) => [network, await getNetworkConfigCached(network)] as const,
+        ),
+      ),
+    );
+    for (const row of pending) {
       let statuses: readonly string[] = [];
       try {
-        const cfg = await getNetworkConfigCached(row.target_item_network);
+        const cfg = configs.get(row.target_item_network);
         if (cfg) {
           statuses = getInteractionPiiRevealStatuses(cfg, interactionInputOf(row));
         }

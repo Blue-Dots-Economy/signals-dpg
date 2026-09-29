@@ -108,6 +108,21 @@ export async function countOwnedActionsForViews(
       item_actions.target_item_owner
     );
 
+  // Each network's config once, in parallel; a failed load only drops that
+  // network's status views (reported), never the whole count.
+  const configs = new Map(
+    await Promise.all(
+      [...new Set(groups.map((r) => r.target_item_network))].map(async (network) => {
+        try {
+          return [network, await opts.getNetworkConfig(network)] as const;
+        } catch (err) {
+          opts.onError?.(err);
+          return [network, null] as const;
+        }
+      })
+    )
+  );
+
   const counts: OwnedActionViewCounts = { all: 0, needs_response: 0, ready_to_export: 0, sent: 0 };
   for (const row of groups) {
     const g: CountGroup = {
@@ -118,8 +133,8 @@ export async function countOwnedActionsForViews(
     };
     counts.all += g.n;
     if (g.initiated) counts.sent += g.n;
+    const cfg = configs.get(g.target_item_network);
     try {
-      const cfg = await opts.getNetworkConfig(g.target_item_network);
       if (cfg) addStatusViews(counts, g, cfg);
     } catch (err) {
       opts.onError?.(err);

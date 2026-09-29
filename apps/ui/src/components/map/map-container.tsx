@@ -286,7 +286,7 @@ export function MapView({
       }
     }
 
-    resolveMarkers();
+    void resolveMarkers();
     return () => { cancelled = true; };
   }, [items, schema, resolveMarkerLabel, selfLocation]);
 

@@ -229,7 +229,9 @@ export async function runExportRequests(
   const queue = [...requests];
   for (let filters = queue.shift(); filters; filters = queue.shift()) {
     try {
-      const result = await send({ filters, projection: { fields: '*' }, format: 'xlsx' });
+      // One at a time on purpose: the server allows one export per user at a
+      // time (EXPORT_IN_PROGRESS), and each file is saved as it arrives.
+      const result = await send({ filters, projection: { fields: '*' }, format: 'xlsx' }); // NOSONAR
       if (result.rowCount === 0) continue;
       onFile(result);
       outcome.exported += result.rowCount;

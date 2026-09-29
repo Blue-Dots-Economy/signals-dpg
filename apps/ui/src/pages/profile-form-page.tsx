@@ -544,10 +544,12 @@ export function ProfileFormPage() {
         // No suggestion picked — geocode the marked field(s) from the typed text.
         const { primary } = parseLocationFields(profileSchema as Record<string, unknown>);
         const queries = buildLocationQueries(data, primary);
-        for (const { query, label } of queries) {
-          const [best] = await getGeoProvider().suggest(query);
-          if (best) item_locations.push(toPoint(best.lat, best.lng, label));
-        }
+        // In parallel; results keep the queries' order.
+        const provider = getGeoProvider();
+        const found = await Promise.all(queries.map(({ query }) => provider.suggest(query)));
+        found.forEach(([best], i) => {
+          if (best) item_locations.push(toPoint(best.lat, best.lng, queries[i].label));
+        });
       }
 
       if (isEdit && existingItem) {

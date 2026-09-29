@@ -129,7 +129,7 @@ async function* generate_csv(
 
 type ExportRequest = FastifyRequest<{ Querystring: ExportQueryType }>;
 
-export const aggregator_export: FastifyPluginAsync = async (app) => {
+export const aggregator_export: FastifyPluginAsync = (app) => {
   app.route({
     method: 'GET',
     url: '/dashboard/export',
@@ -179,6 +179,8 @@ export const aggregator_export: FastifyPluginAsync = async (app) => {
       );
     },
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export default aggregator_export;

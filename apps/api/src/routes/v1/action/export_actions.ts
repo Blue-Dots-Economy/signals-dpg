@@ -58,7 +58,7 @@ const EXPORT_BODY_LIMIT = 64 * 1024 + EXPORT_ACTION_IDS_MAX * 40;
 // Keeps each pii_reveal_audit INSERT well under Postgres' 65535-parameter cap.
 const REVEAL_AUDIT_BATCH = 1000;
 
-export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
+export const export_actions: FastifyPluginAsyncZod = function (fastify) {
   fastify.route({
     url: '/export',
     method: 'POST',
@@ -79,6 +79,8 @@ export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
     },
     handler: export_actions_handler,
   });
+  // Plugins return a promise; nothing here awaits (routes register synchronously).
+  return Promise.resolve();
 };
 
 const export_actions_handler = async (request: ExportRequest, reply: FastifyReply) => {
@@ -542,8 +544,10 @@ async function writeRevealAudit(
 ): Promise<void> {
   if (reveals.length === 0) return;
   await db.transaction(async (tx) => {
+    // Batches in order on the transaction's one connection — they cannot run
+    // in parallel, and all of them commit or none do.
     for (let i = 0; i < reveals.length; i += REVEAL_AUDIT_BATCH) {
-      await tx
+      await tx // NOSONAR
         .insert(pii_reveal_audit)
         .values(
           reveals.slice(i, i + REVEAL_AUDIT_BATCH).map((r) => revealAuditRow(r, viewerUserId))

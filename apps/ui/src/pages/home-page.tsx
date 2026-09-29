@@ -2297,7 +2297,8 @@ export function HomePage() {
     const baseItemId = marker.id.split('#')[0];
     const titleField = network?.domains.find((d) => d.id === marker.domain)?.card?.title_field;
     if (mapDetailItem?.item_id === baseItemId && titleField) {
-      const title = String(mapDetailItem.item_state[titleField] ?? '').trim();
+      const raw = mapDetailItem.item_state[titleField];
+      const title = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
       if (title) return title;
     }
     return marker.label;
