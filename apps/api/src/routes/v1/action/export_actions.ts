@@ -377,7 +377,6 @@ async function runExport(
     network: result.counterparty?.network,
     counterpartyDomain: result.counterparty?.domain,
     statuses,
-    exportId,
     now,
     timeZone,
   });

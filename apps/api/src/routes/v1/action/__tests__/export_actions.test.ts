@@ -260,7 +260,7 @@ describe('POST /api/v1/action/export', () => {
     const exportId = res.headers['x-export-id'] as string;
     expect(exportId).toMatch(/^[0-9a-f-]{36}$/);
     expect(res.headers['content-disposition']).toMatch(
-      new RegExp(`^attachment; filename="net1_seeker_accepted_${exportId.slice(0, 8)}_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\+0530\\.xlsx"$`)
+      new RegExp(`^attachment; filename="net1_seeker_accepted_\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}\\+0530\\.xlsx"$`)
     );
     expect(res.headers['content-disposition']).not.toContain('Meera');
     expect(res.headers['x-export-row-count']).toBe('1');
