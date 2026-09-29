@@ -35,6 +35,8 @@ import { SEARCH_AREA_MIN_ZOOM } from '@/lib/map-caps';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
+import { MarkerDetailSheet } from '@/components/map/marker-detail-sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { BulkSingleError } from '@/lib/bulk';
@@ -113,6 +115,8 @@ import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+
+type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['children']>[0];
 
 /**
  * True when the map covers so much longitude that "zoom out" is not a usable
@@ -209,6 +213,7 @@ function MarkerDetailPopup({
   connectDisabled,
   connectDisabledReason,
   onItemResolved,
+  cardVariant,
 }: Readonly<{
   networkId: string | null;
   marker: MapMarker;
@@ -237,6 +242,8 @@ function MarkerDetailPopup({
   // `useItemDetail` result instead of re-fetching or reintroducing a full
   // browse feed.
   onItemResolved?: (item: Item) => void;
+  /** Forwarded to `MarkerPopupCard` — `'list'` in the phone bottom sheet. */
+  cardVariant?: 'popup' | 'list';
 }>) {
   const { t } = useTranslation();
   const { data: popupNetworkConfig } = useNetworkConfig(networkId ?? null);
@@ -307,6 +314,7 @@ function MarkerDetailPopup({
       localItem={localItem}
       networkItem={item}
       domains={popupNetworkConfig?.domains}
+      cardVariant={cardVariant}
     />
   );
 }
@@ -649,6 +657,14 @@ export function HomePage() {
   // `useItemDetail` fetch (Task 7, #203 §5.2 cleanup) — see
   // `MarkerDetailPopup`'s `onItemResolved` doc comment for why this exists.
   const [mapDetailItem, setMapDetailItem] = React.useState<Item | null>(null);
+  // Phone map (#745): a tapped marker opens in a bottom sheet instead of the
+  // provider's popup bubble. `null` = closed.
+  const isMobile = useIsMobile();
+  const [sheetMarker, setSheetMarker] = React.useState<MapMarker | null>(null);
+  // Leaving the map closes it, so returning to the map does not re-open it.
+  React.useEffect(() => {
+    if (viewMode !== 'map') setSheetMarker(null);
+  }, [viewMode]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
   // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
   // when unset (serve all domains). When exactly ONE domain is served, that is
@@ -2222,6 +2238,70 @@ export function HomePage() {
     />
   );
 
+  // One marker-details renderer for both shapes: the desktop popup bubble and
+  // the phone bottom sheet (#745). `onBeforeConnect` closes whichever is open,
+  // so the action's own modal does not end up underneath it.
+  const renderMarkerDetail = (
+    marker: MapMarker,
+    triggerAction: TriggerAction,
+    cardVariant: 'popup' | 'list',
+    onBeforeConnect: () => void,
+  ) => {
+    // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
+    const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
+    const sourceMarker = mapMarkers.markers.find(
+      (m) =>
+        m.item_id === baseItemId &&
+        (!marker.domain || m.item_domain === marker.domain),
+    );
+    const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
+    const connectAction = domainActions[0];
+    const markerDomain = marker.domain
+      ? network?.domains.find((d) => d.id === marker.domain)
+      : undefined;
+    const markerSchema = markerDomain?.item_schemas
+      ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
+      : activeSchema;
+    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
+    // detail fetch — slim markers don't carry it.
+    const markerItemType = markerDomain?.item_schemas
+      ? Object.keys(markerDomain.item_schemas)[0]
+      : undefined;
+    return (
+      <MarkerDetailPopup
+        networkId={network?.id ?? null}
+        marker={marker}
+        sourceMarker={sourceMarker}
+        itemType={markerItemType}
+        schema={markerSchema}
+        cardConfig={markerDomain?.card}
+        localItem={myItem}
+        connectAction={connectAction}
+        connectDisabled={openActionItemIds.has(baseItemId)}
+        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
+        onConnect={(itemId) => {
+          onBeforeConnect();
+          if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
+        }}
+        onItemResolved={setMapDetailItem}
+        cardVariant={cardVariant}
+      />
+    );
+  };
+
+  // The sheet's heading: the item's configured title once its detail has
+  // loaded (`onItemResolved` lifts it into `mapDetailItem`), the marker's
+  // generic label until then.
+  const markerSheetTitle = (marker: MapMarker): string => {
+    const baseItemId = marker.id.split('#')[0];
+    const titleField = network?.domains.find((d) => d.id === marker.domain)?.card?.title_field;
+    if (mapDetailItem?.item_id === baseItemId && titleField) {
+      const title = String(mapDetailItem.item_state[titleField] ?? '').trim();
+      if (title) return title;
+    }
+    return marker.label;
+  };
+
   return (
     <>
     <PageShell
@@ -2498,51 +2578,35 @@ export function HomePage() {
                       wideViewport: isWideViewport(mapViewport),
                     }),
                   )}
-                  renderPopup={(marker) => {
-                    // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
-                    const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
-                    const sourceMarker = mapMarkers.markers.find(
-                      (m) =>
-                        m.item_id === baseItemId &&
-                        (!marker.domain || m.item_domain === marker.domain),
-                    );
-                    const domainActions = marker.domain ? getActionsForDomain(marker.domain) : [];
-                    const connectAction = domainActions[0];
-                    const markerDomain = marker.domain
-                      ? network?.domains.find((d) => d.id === marker.domain)
-                      : undefined;
-                    const markerSchema = markerDomain?.item_schemas
-                      ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
-                      : activeSchema;
-                    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
-                    // detail fetch — slim markers don't carry it.
-                    const markerItemType = markerDomain?.item_schemas
-                      ? Object.keys(markerDomain.item_schemas)[0]
-                      : undefined;
-                    return (
-                      <MarkerDetailPopup
-                        networkId={network?.id ?? null}
-                        marker={marker}
-                        sourceMarker={sourceMarker}
-                        itemType={markerItemType}
-                        schema={markerSchema}
-                        cardConfig={markerDomain?.card}
-                        localItem={myItem}
-                        connectAction={connectAction}
-                        connectDisabled={openActionItemIds.has(baseItemId)}
-                        connectDisabledReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
-                        onConnect={(itemId) => {
-                          // Close the marker popup first so it doesn't cover
-                          // the consent modal the action is about to open.
-                          setClosePopupNonce((n) => n + 1);
-                          if (connectAction) triggerAction(connectAction.action_type, connectAction, itemId);
-                        }}
-                        onItemResolved={setMapDetailItem}
-                      />
-                    );
-                  }}
+                  renderPopup={(marker) =>
+                    renderMarkerDetail(marker, triggerAction, 'popup', () =>
+                      // Close the marker popup first so it doesn't cover
+                      // the consent modal the action is about to open.
+                      setClosePopupNonce((n) => n + 1),
+                    )
+                  }
+                  // Phone: no popup bubble — the tapped marker opens in the
+                  // bottom sheet below instead.
+                  showPopup={!isMobile}
+                  onMarkerSelect={isMobile ? setSheetMarker : undefined}
                 />
                 </MapErrorBoundary>
+                {isMobile && (
+                  <MarkerDetailSheet
+                    open={sheetMarker !== null}
+                    onOpenChange={(open) => {
+                      if (!open) setSheetMarker(null);
+                    }}
+                    title={sheetMarker ? markerSheetTitle(sheetMarker) : ''}
+                  >
+                    {sheetMarker &&
+                      renderMarkerDetail(sheetMarker, triggerAction, 'list', () =>
+                        // Close the sheet first: the action opens its own
+                        // bottom sheet, which must not stack under this one.
+                        setSheetMarker(null),
+                      )}
+                  </MarkerDetailSheet>
+                )}
                 {/* "Search this area" — the dense-map escape hatch #644
                     describes, placed where you need it.
                     
@@ -2575,7 +2639,8 @@ export function HomePage() {
                   // whole-city view with two listings.
                   (mapViewport.zoom ?? 0) >= SEARCH_AREA_MIN_ZOOM &&
                   (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) && (
-                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4">
+                    // Hidden while any modal is open — see MapCountPill.
+                    <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                       <button
                         type="button"
                         data-testid="search-this-area"
@@ -2614,7 +2679,7 @@ export function HomePage() {
                     `fixed` (not `absolute`) so it stays visible above the map's own
                     maximize overlay (z-[1000]) in both normal and maximized mode. */}
                 {mapMarkers.partial && (
-                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4">
+                  <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                     <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                       {t('home.map_partial')}
                     </p>

@@ -1,0 +1,153 @@
+name: Cut release
+# Creates a release tag, writes its notes, and kicks off the image build — but
+# only if CI has already passed on the commit being tagged (#765).
+#
+# Why this exists: tags were cut by hand, which meant remembering to check CI
+# first. build-images.yaml's `verify-ci` job is the backstop that refuses to
+# PUBLISH an untested commit; this is the front door that stops the bad tag
+# being created in the first place, so the failure arrives before the tag
+# exists rather than after.
+#
+# It does NOT prevent someone running `git tag && git push` from a laptop. Only
+# a tag ruleset restricting who may create `20*-s*-rc*` can do that. This is the
+# paved road, not the fence.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag, e.g. 202610-s1-rc1 or v1.2.0'
+        required: true
+        type: string
+      base:
+        description: 'Branch to cut the tag from'
+        required: true
+        default: develop
+        type: choice
+        options: [develop, main]
+      dry_run:
+        description: 'Check everything and preview the notes, but create nothing'
+        type: boolean
+        default: false
+      skip_ci_check:
+        description: 'Tag even if CI has not passed (emergency use only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # create the tag ref and the release
+  actions: write    # read CI runs, and dispatch build-images
+
+jobs:
+  cut:
+    name: Cut ${{ inputs.tag }} from ${{ inputs.base }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cut the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          BASE: ${{ inputs.base }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          SKIP: ${{ inputs.skip_ci_check }}
+        run: |
+          set -euo pipefail
+
+          # ── 1. Validate the tag name ──────────────────────────────────────
+          # build-images.yaml only fires on these two patterns. A tag outside
+          # them would be created here and then never build, which is a worse
+          # outcome than refusing it up front.
+          if ! printf '%s' "${TAG}" | grep -qE '^(v[0-9]+\.[0-9]+\.[0-9]+|20[0-9]{4}-s[0-9]+-rc[0-9]+)$'; then
+            echo "::error title=Bad tag name::'${TAG}' matches neither v*.*.* nor 20*-s*-rc*. build-images.yaml would never fire for it."
+            exit 1
+          fi
+
+          # ── 2. Refuse to move an existing tag ─────────────────────────────
+          if gh api "repos/${REPO}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "::error title=Tag already exists::${TAG} is already present. Release tags are immutable — cut the next candidate instead (…-rc2, …-rc3)."
+            exit 1
+          fi
+
+          # ── 3. Resolve the commit being tagged ────────────────────────────
+          SHA=$(gh api "repos/${REPO}/commits/${BASE}" --jq '.sha')
+          echo "Tagging ${BASE} @ ${SHA}"
+
+          # ── 4. The gate ───────────────────────────────────────────────────
+          # Same question build-images.yaml's verify-ci asks, asked earlier:
+          # is there a successful ci.yaml run for THIS commit? Fails closed when
+          # there is no run at all, which is the realistic accident (a commit CI
+          # never saw) rather than a commit it saw and rejected.
+          if [ "${SKIP:-false}" = "true" ]; then
+            echo "::warning title=CI gate bypassed::Cutting ${TAG} at ${SHA} without checking CI, because skip_ci_check was set."
+          else
+            runs=$(gh api --paginate \
+              "repos/${REPO}/actions/workflows/ci.yaml/runs?head_sha=${SHA}" \
+              --jq '.workflow_runs[] | "\(.status)/\(.conclusion // "pending")\t\(.event)\t\(.html_url)"')
+
+            if [ -z "${runs}" ]; then
+              echo "::error title=No CI run for this commit::ci.yaml has never run for ${SHA} (tip of ${BASE}). Note that merges into 'feature' do not run CI, so cut releases from develop or main."
+              exit 1
+            fi
+
+            echo "ci.yaml runs for ${SHA}:"
+            echo "${runs}" | sed 's/^/  /'
+
+            if ! echo "${runs}" | grep -q '^completed/success'; then
+              echo "::error title=CI did not pass::No successful ci.yaml run exists for ${SHA}. Fix CI on ${BASE} before cutting ${TAG}."
+              exit 1
+            fi
+            echo "CI passed for ${SHA}."
+          fi
+
+          # ── 5. Preview the notes ──────────────────────────────────────────
+          # Generated from the PRs merged since the previous release, so the
+          # description is written by whoever merged rather than assembled here.
+          notes=$(gh api "repos/${REPO}/releases/generate-notes" \
+            -f tag_name="${TAG}" -f target_commitish="${SHA}" --jq '.body')
+          {
+            echo "## ${TAG}"
+            echo
+            echo "Commit \`${SHA}\` from \`${BASE}\`"
+            echo
+            echo "${notes}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${DRY_RUN:-false}" = "true" ]; then
+            echo "::notice title=Dry run::All checks passed. ${TAG} was NOT created. The notes preview is in the run summary."
+            exit 0
+          fi
+
+          # ── 6. Create the tag AND the release, in one call ────────────────
+          # POST /releases creates the tag itself when tag_name does not yet
+          # exist, using target_commitish. Doing it in one call removes the
+          # partial state a two-step version leaves behind: the first attempt at
+          # this workflow created the tag and then failed on the release, which
+          # left a tag with no notes and no build, and blocked its own retry
+          # (step 2 refuses an existing tag).
+          #
+          # Deliberately the REST API, not `gh release create` / `git push`:
+          #   * `gh release create` shells out to git and fails with "not a git
+          #     repository" — this job has no checkout and does not need one.
+          #   * a tag pushed with GITHUB_TOKEN does NOT trigger `on: push: tags`
+          #     (GitHub suppresses it to prevent recursion), so build-images
+          #     would sit silent. Step 7 dispatches it explicitly instead —
+          #     workflow_dispatch is an exception to that suppression rule.
+          # The body is the SAME string previewed in step 5, passed through
+          # explicitly rather than re-requested with `generate_release_notes`.
+          # Two reasons: what the dry run shows is then byte-identical to what
+          # gets published, and the create endpoint's flag is
+          # `generate_release_notes` — `generate_notes` (the name of the
+          # separate preview endpoint) is silently ignored, which published an
+          # empty release the first time round.
+          gh api "repos/${REPO}/releases" \
+            -f tag_name="${TAG}" \
+            -f name="${TAG}" \
+            -f target_commitish="${SHA}" \
+            -f body="${notes}" \
+            --jq '"Created release \(.name) at \(.target_commitish[0:8]) -> \(.html_url)"'
+
+          # ── 7. Build and publish the images ───────────────────────────────
+          # --repo is required: gh infers the repository from git context
+          # otherwise, and there is no checkout here.
+          gh workflow run build-images.yaml --repo "${REPO}" --ref "${TAG}"
+          echo "::notice title=Release cut::${TAG} created at ${SHA}; build-images.yaml dispatched against the tag."

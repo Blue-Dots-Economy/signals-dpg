@@ -4,7 +4,7 @@ import { user } from '@api/db/postgres/schema/auth';
 
 export type ActingOrg = {
   org_id: string;
-  org_type: 'aggregator' | 'voice' | 'network_service';
+  org_type: 'aggregator' | 'network_service';
   service_user_id: string;
 };
 
@@ -52,12 +52,14 @@ export type ResolveActingActorInput = {
  * matrix documented in
  * docs/superpowers/specs/2026-05-23-action-on-behalf-of-network-service-tier-design.md.
  *
- * Two tiers are allowed today:
+ * Two tiers exist, and they are the only two:
  *   - `aggregator`: scoped to users with `onboarded_by_org_id ===
  *     acting_org.org_id`.
  *   - `network_service`: unrestricted; any user in the network.
  *
- * Voice-typed acting_orgs are rejected (placeholder for future).
+ * Every other org type is rejected. #518 retired a third, `voice`, which
+ * reached exactly as far as `network_service` and so decided nothing; the
+ * voice channel is now told apart by the token's `azp`, not by its org type.
  */
 export const resolve_acting_actor = async (
   input: ResolveActingActorInput,
@@ -76,23 +78,16 @@ export const resolve_acting_actor = async (
     };
   }
 
-  // 2. Tier gate: aggregator, network_service OR voice. Anything else is
-  //    rejected.
+  // 2. Tier gate: aggregator or network_service. Anything else is rejected.
   //
-  //    `voice` was excluded when this was written ("...may act on behalf of
-  //    users today"), before voice-dpg existed as an integrating DPG. It now
-  //    authenticates exactly like the aggregator — client-credentials token,
-  //    service org whose slug matches the Keycloak client id — and the
-  //    platform layers below already admit it (`SERVICE_ORG_TYPES`,
-  //    `ALLOWED_ORG_TYPES`); only this list had not caught up.
-  //
-  //    Note voice does NOT get the aggregator's ownership check in step 5:
-  //    that rule is "the aggregator that onboarded this user", and voice has
-  //    no equivalent, so it behaves like network_service (network-wide scope).
+  //    `organization.type` is plain nullable text, so the union above is a
+  //    claim about the data rather than a guarantee from the database. A row
+  //    carrying a retired or unknown type reaches here and is refused — which
+  //    is why this stays an explicit check rather than an exhaustiveness
+  //    assertion the compiler would let us delete.
   if (
     acting_org.org_type !== 'aggregator' &&
-    acting_org.org_type !== 'network_service' &&
-    acting_org.org_type !== 'voice'
+    acting_org.org_type !== 'network_service'
   ) {
     return { ok: false, status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' };
   }
@@ -151,11 +146,11 @@ export const lookup_user_for_acting = async (
  */
 export const action_error_messages: Record<ResolveErr['error'], string> = {
   CANNOT_OVERRIDE_SELF:
-    'acting_as_user_id requires an x-acting-org-id header naming an aggregator-type, network_service-type or voice-type acting org.',
+    'acting_as_user_id requires an x-acting-org-id header naming an aggregator-type or network_service-type acting org.',
   MISSING_ACTING_AS_USER_ID:
-    'aggregator-type, network_service-type or voice-type acting_org requires acting_as_user_id in the request body.',
+    'aggregator-type or network_service-type acting_org requires acting_as_user_id in the request body.',
   ACTING_ORG_TYPE_NOT_ALLOWED:
-    'only aggregator-type, network_service-type or voice-type acting orgs may act on behalf of users.',
+    'only aggregator-type or network_service-type acting orgs may act on behalf of users.',
   NOT_AUTHORIZED_FOR_TARGET:
     'acting_as_user_id is not a user onboarded by this aggregator.',
   USER_NOT_FOUND:

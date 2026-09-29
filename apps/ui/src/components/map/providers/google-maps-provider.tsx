@@ -730,6 +730,7 @@ export function GoogleMapProvider({
   closePopupNonce,
   selfLocation,
   renderPopup,
+  showPopup = true,
   resolveIcon,
   resolveMarkerImage,
   onViewportChange,
@@ -814,7 +815,10 @@ export function GoogleMapProvider({
         <ClustererManager
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}
-          onMarkerActivate={setActiveMarker}
+          // With `showPopup` off no marker ever becomes active, so neither the
+          // InfoWindow nor the mobile overlay opens; clicks still reach
+          // `onMarkerClick`.
+          onMarkerActivate={showPopup ? setActiveMarker : () => {}}
           onMarkerDeactivate={() => setActiveMarker(null)}
           onMarkerClick={onMarkerClick}
           renderPopup={renderPopup}

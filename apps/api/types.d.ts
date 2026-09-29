@@ -11,7 +11,7 @@ declare module 'fastify' {
     };
     permissions?: Record<string, string[]>;
     /**
-     * The aggregator / voice org this request is acting on behalf of.
+     * The aggregator / network-service org this request is acting on behalf of.
      * Populated by the acting_org preHandler (mounted on /api/v1/admin/*
      * and the aggregator-facing read paths). Absent on routes that don't
      * require the preHandler — handlers MUST treat this as optional.
@@ -19,18 +19,20 @@ declare module 'fastify' {
      * - `org_id`           — the aggregator org's id in the Signals
      *                        organization table (mirrored from
      *                        aggregator-dpg via POST /api/v1/admin/aggregator/upsert).
-     * - `org_type`         — 'aggregator' | 'voice' | 'network_service'.
-     *                        The preHandler accepts all three; route handlers
-     *                        can narrow further (e.g. onboarding rejects
-     *                        network_service callers; aggregator dashboards
-     *                        require 'aggregator').
+     * - `org_type`         — 'aggregator' | 'network_service'.
+     *                        The preHandler accepts both; route handlers can
+     *                        narrow further (e.g. aggregator dashboards require
+     *                        'aggregator'). #518 retired a third type, `voice`,
+     *                        which reached exactly as far as `network_service`;
+     *                        the voice channel is identified by the token's
+     *                        `azp`, not by its org type.
      * - `service_user_id`  — the user that owns the apikey that authenticated
      *                        the request (i.e. the integrating DPG's service
      *                        account in Signals).
      */
     acting_org?: {
       org_id: string;
-      org_type: 'aggregator' | 'voice' | 'network_service';
+      org_type: 'aggregator' | 'network_service';
       service_user_id: string;
     };
     /**
@@ -45,5 +47,17 @@ declare module 'fastify' {
      * and `claim_required` refuses.
      */
     acting_org_grant?: string[];
+    /**
+     * The Keycloak client id (`azp`) a service-account token was issued to —
+     * e.g. `aggregator-dpg`, `voice-dpg`. Set only on the client-credentials
+     * path; `undefined` for cookie sessions and apikey callers.
+     *
+     * This is the audit channel #518 left behind when it retired the `voice`
+     * org type. Every service org is `network_service` now, so `acting_org`
+     * identifies the TIER and this identifies the SERVICE. Use it for audit,
+     * support triage and logging — never for authorization, which is the
+     * distinction the retired type got wrong.
+     */
+    service_client_id?: string;
   }
 }

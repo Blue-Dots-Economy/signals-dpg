@@ -1,0 +1,1 @@
+ALTER TABLE "organization" ADD CONSTRAINT "organization_type_allowed" CHECK ("organization"."type" IS NULL OR "organization"."type" IN ('aggregator', 'network_service'));

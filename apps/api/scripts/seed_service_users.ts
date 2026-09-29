@@ -1,7 +1,7 @@
 /**
- * Local-dev seed for the aggregator-dpg integrating-DPG service user.
+ * Local-dev seed for the integrating-DPG service users.
  *
- * The service user lives inside an organization with type='network_service'
+ * Each service user lives inside an organization with type='network_service'
  * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
  * tables exist.
  *
@@ -13,8 +13,9 @@
  *
  * For production (k8s), the deploy-time migrate-job (in the separate
  * charts repo) applies `provision_service_users.sql` on every
- * install/upgrade, reading the raw key from the AGGREGATOR_DPG_API_KEY
- * Secret. The cluster Secret is the source of truth there.
+ * install/upgrade, reading each raw key from its own Secret
+ * (AGGREGATOR_DPG_API_KEY, RAYA_VOICE_BOT_API_KEY, ...). The cluster
+ * Secrets are the source of truth there.
  */
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -50,8 +51,16 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
+//
+// Slugs must match `provision_service_users.sql` in the charts repo, which is
+// what production actually runs — the slug is also the lookup key that
+// `service_account.ts` resolves a Keycloak client id against. Note the voice
+// bot's org is `raya-voice-bot`, NOT `voice-dpg`: `voice-dpg` is the name of
+// its Keycloak client, and the two were named independently. Renaming either
+// to match the other is its own change.
 const SERVICES = [
   { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
+  { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local' },
 ] as const;
 
 const ensure_org = async (slug: string, name: string): Promise<string> => {

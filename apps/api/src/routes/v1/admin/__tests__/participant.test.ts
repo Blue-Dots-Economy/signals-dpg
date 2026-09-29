@@ -461,7 +461,7 @@ const baseBody = (over: Record<string, unknown> = {}) => ({
 const buildApp = async (
   acting?: {
     org_id?: string;
-    org_type?: 'aggregator' | 'voice' | 'network_service';
+    org_type?: 'aggregator' | 'network_service';
   } | null,
 ): Promise<FastifyInstance> => {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
@@ -526,8 +526,6 @@ describe('POST /admin/participant', () => {
   });
 
   it('403 ACTING_ORG_TYPE_NOT_ALLOWED for an org type outside the allowed set', async () => {
-    // voice used to be the example; it is now an admitted integrating DPG, so
-    // the rejection case needs a type that genuinely is not allowed.
     const app = await buildApp({
       org_type: 'employer' as unknown as 'aggregator',
     });
@@ -540,8 +538,25 @@ describe('POST /admin/participant', () => {
     expect(res.json().error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
   });
 
-  it('admits a voice acting org for participant upsert', async () => {
-    const app = await buildApp({ org_id: 'org_voice_1', org_type: 'voice' });
+  it('403 ACTING_ORG_TYPE_NOT_ALLOWED for the retired `voice` type (#518)', async () => {
+    // `organization.type` is plain nullable text, so a surviving `voice` row is
+    // representable even though the union no longer admits it. It must be
+    // refused, not treated as the network-wide tier it used to be.
+    const app = await buildApp({
+      org_id: 'org_voice_1',
+      org_type: 'voice' as unknown as 'network_service',
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody(),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('ACTING_ORG_TYPE_NOT_ALLOWED');
+  });
+
+  it('admits a network_service acting org for participant upsert', async () => {
+    const app = await buildApp({ org_id: 'org_signals_1', org_type: 'network_service' });
     const res = await app.inject({
       method: 'POST',
       url: '/participant',

@@ -256,6 +256,12 @@ export interface MapProviderProps {
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   /**
+   * Draw the provider's own marker popup (Leaflet bubble / Google InfoWindow or
+   * mobile overlay). Default true. The phone home map turns it off and shows
+   * the marker's details in a bottom sheet instead, driven by `onMarkerClick`.
+   */
+  showPopup?: boolean;
+  /**
    * Optional per-marker icon resolver. Defaults to a domain-based lucide icon
    * (see `getIconForDomain`). Callers can override to pick an icon from other
    * marker data (e.g. the tourist app keys on `data.category`). Signals leaves

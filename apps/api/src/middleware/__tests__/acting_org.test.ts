@@ -140,7 +140,29 @@ describe('acting_org preHandler', () => {
     });
   });
 
-  it('happy path — accepts voice and network_service org_type values too', async () => {
+  it('happy path — accepts a network_service org_type too', async () => {
+    selectResults.organization = [{ id: 'org_signals', type: 'network_service' }];
+    selectResults.member = [{ id: 'mem_2' }];
+    const req = makeRequest({
+      headers: { 'x-acting-org-id': 'org_signals' },
+      user: { id: 'svc_user_ns' },
+    });
+    const reply = makeReply();
+    await acting_org_preHandler(req, reply);
+    expect(reply.code).not.toHaveBeenCalled();
+    expect((req as any).acting_org).toEqual({
+      org_id: 'org_signals',
+      org_type: 'network_service',
+      service_user_id: 'svc_user_ns',
+    });
+  });
+
+  it('replies 403 for the retired `voice` org_type read from the database (#518)', async () => {
+    // The one case TypeScript cannot cover. `organization.type` is plain
+    // nullable text, so narrowing the union proves nothing about the rows a
+    // deployed database actually holds — this middleware reads the type
+    // straight from the row, so a surviving `voice` org must be refused here
+    // rather than admitted with network-wide reach.
     selectResults.organization = [{ id: 'org_voice', type: 'voice' }];
     selectResults.member = [{ id: 'mem_2' }];
     const req = makeRequest({
@@ -149,12 +171,11 @@ describe('acting_org preHandler', () => {
     });
     const reply = makeReply();
     await acting_org_preHandler(req, reply);
-    expect(reply.code).not.toHaveBeenCalled();
-    expect((req as any).acting_org).toEqual({
-      org_id: 'org_voice',
-      org_type: 'voice',
-      service_user_id: 'svc_user_voice',
-    });
+    expect(reply.code).toHaveBeenCalledWith(403);
+    expect(reply.send).toHaveBeenCalledWith(
+      expect.objectContaining({ error: 'ACTING_ORG_TYPE_NOT_ALLOWED' }),
+    );
+    expect((req as any).acting_org).toBeUndefined();
   });
 
   it('treats x-acting-org-id presented as an array header (multi-value) by using the first value', async () => {

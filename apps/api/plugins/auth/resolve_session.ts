@@ -324,6 +324,14 @@ async function resolveServiceSession(
     name: service.user.name,
     role: service.user.role,
   };
+  // Which integrating DPG this is (#518). Every service org is
+  // `type='network_service'` now, so the acting org tells you the caller is a
+  // service and nothing more — the client id is what separates the voice bot
+  // from aggregator-dpg. Bound onto the request logger rather than logged once,
+  // so every subsequent line for this request carries it without each call site
+  // having to remember.
+  request.service_client_id = service.client_id;
+  request.log = request.log.child({ service_client_id: service.client_id });
   // Acting-org grant (§5.1). Carried to acting_org.ts, which decides whether
   // to enforce it based on ACTING_ORG_SOURCE.
   request.acting_org_grant = actingOrgGrant(claims);

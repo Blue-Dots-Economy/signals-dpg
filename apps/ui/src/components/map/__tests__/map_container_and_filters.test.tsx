@@ -67,6 +67,7 @@ function makeFakeProvider(name: string) {
     closePopupNonce,
     selfLocation,
     renderPopup,
+    showPopup,
     resolveIcon,
     resolveMarkerImage,
     onViewportChange,
@@ -82,6 +83,7 @@ function makeFakeProvider(name: string) {
         <p>{`self: ${selfLocation ? `${selfLocation.lat},${selfLocation.lng}` : 'none'}`}</p>
         <p>{`viewport listener: ${onViewportChange ? 'yes' : 'no'}`}</p>
         <p>{`icon resolver: ${resolveIcon ? 'custom' : 'default'}`}</p>
+        <p>{`show popup: ${String(showPopup ?? 'unset')}`}</p>
         <button type="button" onClick={() => onViewportChange?.(EMITTED_VIEWPORT)}>
           emit viewport
         </button>
@@ -348,6 +350,36 @@ describe('MapView — marker resolution from item_locations', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Acme' }));
 
     expect(onMarkerClick).toHaveBeenCalledWith('item-a#0');
+  });
+
+  // #745: the phone home map shows a tapped marker in a bottom sheet, so it
+  // needs the whole marker, not just its id — and the provider's own popup off.
+  it('hands the whole marker to onMarkerSelect, alongside onMarkerClick', async () => {
+    const onMarkerClick = vi.fn();
+    const onMarkerSelect = vi.fn();
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[itemAt('item-a', [{ lat: 10, lng: 20 }], { name: 'Acme' })]}
+        onMarkerClick={onMarkerClick}
+        onMarkerSelect={onMarkerSelect}
+      />,
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Acme' }));
+
+    expect(onMarkerClick).toHaveBeenCalledWith('item-a#0');
+    expect(onMarkerSelect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'item-a#0', label: 'Acme', lat: 10, lng: 20 }),
+    );
+  });
+
+  it('forwards showPopup to the provider, on by default', async () => {
+    const { rerender } = render(<MapView schema={NAME_SCHEMA} items={[]} />);
+    expect(await screen.findByText('show popup: true')).toBeInTheDocument();
+
+    rerender(<MapView schema={NAME_SCHEMA} items={[]} showPopup={false} />);
+    expect(await screen.findByText('show popup: false')).toBeInTheDocument();
   });
 
   it('prefers resolveMarkerLabel over the schema heuristic, ignoring a blank result', async () => {

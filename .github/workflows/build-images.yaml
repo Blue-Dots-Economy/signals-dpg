@@ -18,6 +18,12 @@ on:
     # branch that predates this change will not pick the new pattern up.
     tags: ['v*.*.*', '20*-s*-rc*']
   workflow_dispatch:
+    inputs:
+      skip_ci_check:
+        description: 'Publish even if CI has not passed for this commit (emergency use only)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -29,7 +35,66 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate: refuse to publish an image built from a commit CI has not passed
+  # (#765). Until #756 split publishing out of ci.yaml, this was enforced by
+  # `needs: [typecheck-api, typecheck-ui, test, schema-parity]` on the
+  # publish-images job. That job is gone, and `needs:` cannot reach across
+  # workflows, so the dependency is re-expressed as a lookup instead.
+  #
+  # It asks about ci.yaml RUNS rather than individual check runs, because this
+  # repo's CI exposes one check per job (typecheck-api, test, sonar, …) and
+  # there is no single check named "CI" to look for.
+  #
+  # Cheap by design: no re-run of the suite, just an API call. A release tag is
+  # cut from develop or main, where CI has already run on that exact commit.
+  verify-ci:
+    name: Verify CI passed for this commit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read   # read workflow runs for this SHA
+    steps:
+      - name: Require a successful ci.yaml run for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          SKIP: ${{ inputs.skip_ci_check }}
+        run: |
+          set -euo pipefail
+
+          # `inputs` is empty on a tag push, so this is false unless someone
+          # dispatched with the box ticked.
+          if [ "${SKIP:-false}" = "true" ]; then
+            echo "::warning title=CI gate bypassed::Publishing ${SHA} without checking CI, because skip_ci_check was set on this dispatch."
+            exit 0
+          fi
+
+          runs=$(gh api --paginate \
+            "repos/${REPO}/actions/workflows/ci.yaml/runs?head_sha=${SHA}" \
+            --jq '.workflow_runs[] | "\(.status)/\(.conclusion // "pending")\t\(.event)\t\(.html_url)"')
+
+          # FAIL CLOSED on no runs at all. This is the realistic accident: a tag
+          # cut from a commit CI never saw (a feature branch, a local commit),
+          # not a tag cut from a red one. A check for "not failed" would pass it.
+          if [ -z "${runs}" ]; then
+            echo "::error title=No CI run for this commit::ci.yaml has never run for ${SHA}, so there is nothing to verify. Cut the release tag from a commit on develop or main that CI has already tested."
+            exit 1
+          fi
+
+          echo "ci.yaml runs found for ${SHA}:"
+          echo "${runs}" | sed 's/^/  /'
+
+          if echo "${runs}" | grep -q '^completed/success'; then
+            echo "CI passed for ${SHA} — proceeding to build."
+            exit 0
+          fi
+
+          echo "::error title=CI did not pass::No successful ci.yaml run exists for ${SHA}. Fix CI on that commit and re-tag, or re-run this workflow manually with skip_ci_check if this is a deliberate emergency publish."
+          exit 1
+
   build:
+    needs: verify-ci
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
