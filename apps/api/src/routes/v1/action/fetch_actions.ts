@@ -32,7 +32,7 @@ import {
   stateMatchesFacets,
 } from '@/services/actions/owned_actions';
 import { countOwnedActionsForViews } from '@/services/actions/owned_action_counts';
-import { PRIVATE_NAME_FIELDS } from '@/services/actions/visible_name';
+import { PRIVATE_NAME_FIELDS, privateNameShown } from '@/services/actions/visible_name';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { memoizeNetworkConfigs } from '@/utils/network_config_memo';
 
@@ -339,8 +339,7 @@ const fetch_actions_handler = async (
       const entry = resolvedNames.get(id);
       if (!entry) return null;
       if (entry.kind === 'public') return entry.value;
-      const revealStatuses = revealStatusesByAction.get(actionId) ?? [];
-      if (revealStatuses.includes(status) && entry.lifecycle_status === 'live') {
+      if (privateNameShown(revealStatusesByAction.get(actionId) ?? [], status, entry.lifecycle_status)) {
         return unmask(id);
       }
       return null;
@@ -359,8 +358,7 @@ const fetch_actions_handler = async (
       // schema-declared reveals_pii_on_status AND the named profile is live.
       // A paused/draft profile keeps its name masked even on an accepted
       // action — mirrors the contact-details reveal gate (#273).
-      const revealStatuses = revealStatusesByAction.get(actionId) ?? [];
-      if (revealStatuses.includes(status) && entry.lifecycle_status === 'live') {
+      if (privateNameShown(revealStatusesByAction.get(actionId) ?? [], status, entry.lifecycle_status)) {
         return unmask(id) ?? entry.masked;
       }
       return entry.masked;

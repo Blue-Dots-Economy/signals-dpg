@@ -12,6 +12,7 @@ import {
   ownItemId,
   stateMatchesFacets,
 } from '@/services/actions/owned_actions';
+import { privateNameShown } from '@/services/actions/visible_name';
 import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
 import { resolveProfileColumns, valueAtPath, type ProfileColumn } from './columns';
 
@@ -336,7 +337,7 @@ function passesSearch(input: BuildExportInput, c: Candidate): boolean {
   if (!q) return true;
   if (!input.visibleName) return false; // fail closed: no name rule, no match
   const nameShown = (item: ExportItem) =>
-    c.revealStatuses.includes(c.row.action_status) && item.lifecycle_status === 'live';
+    privateNameShown(c.revealStatuses, c.row.action_status, item.lifecycle_status);
   return matchesActionSearch(q, [
     input.visibleName(c.counterparty, nameShown(c.counterparty)),
     c.own ? input.visibleName(c.own, nameShown(c.own)) : null,

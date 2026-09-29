@@ -71,8 +71,29 @@ const CFG = parseNetworkConfigDocument({
   },
 });
 
+// A second network where the same caller also reveals (and so exports) on
+// `completed` — for the "profiles on two networks" case.
+const CFG2 = parseNetworkConfigDocument({
+  ...CFG,
+  id: 'net2',
+  actions: {
+    connect: {
+      interactions: [
+        {
+          ...CFG.actions.connect.interactions[0],
+          event_schema: {
+            type: 'object',
+            properties: { status: { type: 'string', enum: ['created', 'accepted', 'completed'] } },
+          },
+          reveals_pii_on_status: ['accepted', 'completed'],
+        },
+      ],
+    },
+  },
+});
+
 vi.mock('@/network_configs', () => ({
-  getNetworkConfigById: vi.fn(async () => CFG),
+  getNetworkConfigById: vi.fn(async (id: string) => (id === 'net2' ? CFG2 : CFG)),
 }));
 
 vi.mock('@/utils/item_decrypt', () => ({
@@ -94,12 +115,14 @@ const state = {
   holdRate: null as Promise<void> | null,
 };
 
+const refundWithinWindow = vi.fn(async () => undefined);
 vi.mock('@/utils/rate_window', () => ({
   incrWithinWindow: vi.fn(async () => {
     if (state.holdRate) await state.holdRate;
     if (state.rateThrows) throw new Error('redis down');
     return state.rateCount;
   }),
+  refundWithinWindow: () => refundWithinWindow(),
 }));
 
 function chain(result: () => Promise<unknown[]>) {
@@ -203,6 +226,7 @@ const post = (app: FastifyInstance, payload: unknown) =>
   app.inject({ method: 'POST', url: '/api/v1/action/export', payload: payload as object });
 
 beforeEach(() => {
+  refundWithinWindow.mockClear();
   state.selects = [];
   state.logs = [];
   state.revealAudit = [];
@@ -373,6 +397,35 @@ describe('POST /api/v1/action/export', () => {
     });
   });
 
+  it('profiles on two networks: each network\u2019s exportable statuses are allowed', async () => {
+    const app = await buildApp();
+    // net1 exports only `accepted`; the caller's net2 profile adds `completed`.
+    state.selects = [[requesterRow(), { ...requesterRow(), item_id: 'p-me-2', item_network: 'net2' }], []];
+    const res = await post(app, { filters: { action_status: ['completed'] } });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it('a refused export gives its rate-limit hit back; a served one keeps it', async () => {
+    const app = await buildApp();
+    state.selects = [[requesterRow()]];
+    await post(app, { filters: { action_status: ['created'] } }); // 400
+    expect(refundWithinWindow).toHaveBeenCalledTimes(1);
+    refundWithinWindow.mockClear();
+    state.selects = [[requesterRow()], []];
+    expect((await post(app, {})).statusCode).toBe(200);
+    expect(refundWithinWindow).not.toHaveBeenCalled();
+  });
+
+  it('accepts a body with a large selection (above Fastify’s 1 MiB default)', async () => {
+    const app = await buildApp();
+    state.selects = [[requesterRow()], []];
+    const ids = Array.from({ length: 30_000 }, (_, i) => `3f9a1c2e-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    const res = await post(app, { filters: { action_ids: ids } });
+    // The route's own cap answers (EXPORT_MAX_ROWS is 2 here), not Fastify's
+    // generic body-too-large — so the body was accepted and parsed.
+    expect(res.json().error).toBe('EXPORT_TOO_LARGE');
+  });
+
   it('with no status filter, only exportable statuses are queried (and recorded)', async () => {
     const app = await buildApp();
     state.selects = [[requesterRow()], [actionRow('a1')], [itemRow('s-a1', 'seeker', {}), itemRow('p-me', 'provider', {})]];
@@ -517,7 +570,8 @@ describe('POST /api/v1/action/export — My Actions filters', () => {
     const res = await post(app, { filters: { q: 'meera', action_status: ['accepted'] } });
     expect(res.statusCode).toBe(200);
     const line = auditLogs()[0];
-    expect(line).toMatchObject({ filters: { has_search: true } });
+    expect(line).toMatchObject({ filters: { has_search: true, action_ids_count: 0 } });
+    expect((line.filters as Record<string, unknown>).action_ids).toBeUndefined();
     expect(JSON.stringify(line)).not.toContain('meera');
   });
 

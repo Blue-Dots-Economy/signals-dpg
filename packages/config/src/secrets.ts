@@ -366,7 +366,8 @@ export const NetworkRuntimeSecretsSchema = z.object({
   // Redis. Bulk decrypt is the obvious scraping route.
   EXPORT_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
   // IANA zone for bulk-export timestamps (filename, file dates, generated-at).
-  // Every value carries its offset, so the file stays unambiguous.
+  // The filename and generated-at carry the offset; date cells are wall-clock
+  // times in this zone, named in their column heading.
   EXPORT_TIMEZONE: z
     .string()
     .default('Asia/Kolkata')

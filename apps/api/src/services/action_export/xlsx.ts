@@ -1,6 +1,6 @@
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node';
 import { humanizeKey } from './columns';
-import { wallClockInZone, zoneAbbreviation } from './time';
+import { wallClockInZone, zoneHeading } from './time';
 
 /**
  * Excel workbook of an engagement export (#770). One sheet, headings in plain
@@ -100,7 +100,7 @@ export function safeSheetName(name: string): string {
 
 /** Builds the workbook; resolves to the file bytes. */
 export async function buildExportWorkbook(input: ExportWorkbookInput): Promise<Buffer> {
-  const zone = zoneAbbreviation(input.now, input.timeZone);
+  const zone = zoneHeading(input.now, input.timeZone);
   const headings = input.header.map((key, i) => {
     const label = input.labels[i] ?? humanizeKey(key);
     return DATE_COLUMNS.has(key) ? `${label} (${zone})` : label;

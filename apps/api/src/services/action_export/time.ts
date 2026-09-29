@@ -1,8 +1,9 @@
 /**
  * Timestamps for the engagement export (#771) in the deployment's configured
- * zone (`EXPORT_TIMEZONE`, default UTC). Every value carries its offset (`Z`
- * or `±HH:MM`), so a file read anywhere stays unambiguous. Uses Intl — no
- * date library — and follows daylight saving.
+ * zone (`EXPORT_TIMEZONE`). The filename and the generated-at header carry
+ * their offset (`Z` or `±HH:MM`); the file's date cells are wall-clock times
+ * in the zone, which their heading names (`zoneHeading`). Uses Intl — no date
+ * library — and follows daylight saving.
  */
 
 // One check for config (EXPORT_TIMEZONE) and here.
@@ -75,7 +76,20 @@ export function wallClockInZone(at: Date, timeZone: string): Date {
   return new Date(at.getTime() + zonedParts(at, timeZone).offsetMinutes * 60_000);
 }
 
-/** Short zone name for a column heading: `IST`, `UTC`, or `GMT+x`. */
+/**
+ * The zone name for a date column heading. One heading covers every row, so
+ * a zone with daylight saving is named by its IANA id (`Europe/London`) — a
+ * short name taken from one moment (`BST`) would mislabel the other half of
+ * the year. A fixed-offset zone keeps its short name (`IST`, `UTC`).
+ */
+export function zoneHeading(at: Date, timeZone: string): string {
+  const year = at.getUTCFullYear();
+  const winter = zonedParts(new Date(Date.UTC(year, 0, 1)), timeZone).offsetMinutes;
+  const summer = zonedParts(new Date(Date.UTC(year, 6, 1)), timeZone).offsetMinutes;
+  return winter === summer ? zoneAbbreviation(at, timeZone) : timeZone;
+}
+
+/** Short zone name at `at`: `IST`, `UTC`, or `GMT+x`. */
 export function zoneAbbreviation(at: Date, timeZone: string): string {
   const name = new Intl.DateTimeFormat('en-IN', { timeZone, timeZoneName: 'short' })
     .formatToParts(at)

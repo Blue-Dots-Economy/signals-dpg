@@ -5,6 +5,7 @@ import {
   isValidTimeZone,
   wallClockInZone,
   zoneAbbreviation,
+  zoneHeading,
 } from '../time';
 
 // #771 follow-up: EXPORT_TIMEZONE — export timestamps in a configured zone,
@@ -70,5 +71,16 @@ describe('wallClockInZone / zoneAbbreviation', () => {
     const at = new Date('2026-09-01T00:00:00Z');
     expect(zoneAbbreviation(at, 'Asia/Kolkata')).toBe('IST');
     expect(zoneAbbreviation(at, 'UTC')).toBe('UTC');
+  });
+});
+
+describe('zoneHeading', () => {
+  it('names a fixed-offset zone briefly and a daylight-saving zone by its id', () => {
+    const winter = new Date('2026-01-15T00:00:00Z');
+    expect(zoneHeading(winter, 'Asia/Kolkata')).toBe('IST');
+    expect(zoneHeading(winter, 'UTC')).toBe('UTC');
+    // Never "GMT" in summer or "BST" in winter: one heading covers both.
+    expect(zoneHeading(winter, 'Europe/London')).toBe('Europe/London');
+    expect(zoneHeading(new Date('2026-07-15T00:00:00Z'), 'Europe/London')).toBe('Europe/London');
   });
 });

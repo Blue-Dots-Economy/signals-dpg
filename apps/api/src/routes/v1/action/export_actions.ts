@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
+  EXPORT_ACTION_IDS_MAX,
   ExportActionsBodySchema,
   getDomainItemSchema,
   getExportableStatuses,
@@ -15,7 +16,7 @@ import { pii_reveal_audit } from '@api/db/postgres/schema';
 import { apiConfig, getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
-import { incrWithinWindow } from '@/utils/rate_window';
+import { incrWithinWindow, refundWithinWindow } from '@/utils/rate_window';
 import { buildOwnedActionsWhere, scopedItemIds } from '@/services/actions/owned_actions';
 import { visibleItemName } from '@/services/actions/visible_name';
 import {
@@ -53,6 +54,7 @@ type ExportRequest = FastifyRequest<{ Body: z.infer<typeof ExportActionsBodySche
 const inFlight = new Set<string>();
 
 const RATE_WINDOW_SEC = 3600;
+const EXPORT_BODY_LIMIT = 64 * 1024 + EXPORT_ACTION_IDS_MAX * 40;
 // Keeps each pii_reveal_audit INSERT well under Postgres' 65535-parameter cap.
 const REVEAL_AUDIT_BATCH = 1000;
 
@@ -60,6 +62,11 @@ export const export_actions: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
     url: '/export',
     method: 'POST',
+    // Room for the largest selection the body schema allows
+    // (EXPORT_ACTION_IDS_MAX UUIDs ≈ 39 bytes each in JSON) — above Fastify's
+    // 1 MiB default, which would otherwise refuse it with a generic 413
+    // before EXPORT_TOO_LARGE could be reported.
+    bodyLimit: EXPORT_BODY_LIMIT,
     preHandler: auth_middleware_if_enabled,
     schema: {
       tags: ['action'],
@@ -109,10 +116,15 @@ const export_actions_handler = async (request: ExportRequest, reply: FastifyRepl
 
 async function limitedExport(request: ExportRequest, reply: FastifyReply, userId: string) {
   // Cross-pod per-user limit. Fails CLOSED: this route bulk-decrypts PII, so
-  // an unavailable limiter must not turn into an unlimited one.
+  // an unavailable limiter must not turn into an unlimited one. Counted up
+  // front (so parallel pods cannot race past it) and given back when no file
+  // is served — a refused request (bad filter, mixed types, over the limit)
+  // reads no data, so it must not use up the caller's hourly exports.
+  const rateKey = `export:rl:${userId}`;
   try {
-    const used = await incrWithinWindow(`export:rl:${userId}`, RATE_WINDOW_SEC);
+    const used = await incrWithinWindow(rateKey, RATE_WINDOW_SEC);
     if (used > apiConfig.export_rate_limit_per_hour) {
+      await refund(request, rateKey);
       return reply.code(429).send({
         error: 'EXPORT_RATE_LIMITED',
         message: 'Too many exports in the last hour; try again later',
@@ -131,8 +143,11 @@ async function limitedExport(request: ExportRequest, reply: FastifyReply, userId
 
   const started = Date.now();
   try {
-    return await runExport(request, reply, userId, started);
+    const sent = await runExport(request, reply, userId, started);
+    if (reply.statusCode !== 200) await refund(request, rateKey);
+    return sent;
   } catch (err) {
+    await refund(request, rateKey);
     request.log.error(
       { err, operation: 'action.export', status: 'failure', latency_ms: Date.now() - started },
       'Failed to export actions'
@@ -144,33 +159,47 @@ async function limitedExport(request: ExportRequest, reply: FastifyReply, userId
   }
 }
 
+/** Returns one rate-limit hit; a failure only costs the caller that hit. */
+async function refund(request: ExportRequest, key: string): Promise<void> {
+  try {
+    await refundWithinWindow(key);
+  } catch (err) {
+    request.log.warn({ err, operation: 'action.export' }, 'export rate-limit refund failed');
+  }
+}
+
+/**
+ * The filters as the audit line records them: never the free-text search
+ * (personal data — only whether one was applied), and the selected action ids
+ * as a count, so one line stays small however large the selection.
+ */
+function auditFilters<F extends { q?: string; action_ids?: string[] }>(filters: F) {
+  const { q, action_ids, ...rest } = filters;
+  return { ...rest, has_search: Boolean(q), action_ids_count: action_ids?.length ?? 0 };
+}
+
 /**
  * An integrating DPG's machine identity rather than a signed-in person: an
  * `x-api-key` caller, or a Keycloak client-credentials token (the only path
  * that sets `service_client_id`). Deliberately NOT `user.role` — the service
  * marker is `member.role = 'service'`, which `request.user` does not carry.
  */
-/** The filters minus the free-text search, for logging. */
-function withoutSearch<F extends { q?: string }>(filters: F): Omit<F, 'q'> {
-  const { q: _q, ...rest } = filters;
-  return rest;
-}
-
 function isServiceCaller(request: FastifyRequest): boolean {
   return typeof request.headers['x-api-key'] === 'string' || Boolean(request.service_client_id);
 }
 
 /**
- * The caller's own profile the export is scoped to: `item_id` when given
- * (must be theirs), otherwise their oldest profile that is not retired, a
- * live one first — a retired profile's network rules must not decide the
- * export (one domain per user, so the domain is the same either way).
+ * The caller's own profiles the export is scoped to: the given `item_ids`
+ * (ownership is checked by the caller of this), otherwise every profile that
+ * is not retired. Live ones first, then oldest — the first is the requester
+ * named in the audit line.
  */
-async function resolveRequesterItem(userId: string, itemId: string | undefined) {
-  const where = itemId
-    ? eq(items.item_id, itemId)
-    : and(eq(items.created_by, userId), ne(items.lifecycle_status, 'retired'));
-  const [row] = await db
+async function listRequesterProfiles(userId: string, itemIds: readonly string[]) {
+  const where =
+    itemIds.length > 0
+      ? inArray(items.item_id, [...itemIds])
+      : and(eq(items.created_by, userId), ne(items.lifecycle_status, 'retired'));
+  return db
     .select({
       item_id: items.item_id,
       created_by: items.created_by,
@@ -179,9 +208,7 @@ async function resolveRequesterItem(userId: string, itemId: string | undefined) 
     })
     .from(items)
     .where(where)
-    .orderBy(desc(sql`${items.lifecycle_status} = 'live'`), asc(items.created_at))
-    .limit(1);
-  return row;
+    .orderBy(desc(sql`${items.lifecycle_status} = 'live'`), asc(items.created_at));
 }
 
 async function runExport(
@@ -203,7 +230,7 @@ async function runExport(
 
   const scope = await resolveExportScope(request, userId);
   if (!scope.ok) return reply.code(scope.status).send(scope.body);
-  const { requester, requesterConfig, statuses } = scope;
+  const { requester, requesterConfigs, statuses } = scope;
 
   const rows = await db
     .select()
@@ -257,8 +284,7 @@ async function runExport(
   const configs = await loadNetworkConfigs(
     request,
     [...rows.map((r) => r.target_item_network), ...itemRows.map((it) => it.item_network)],
-    requester.item_network,
-    requesterConfig
+    requesterConfigs
   );
 
   // One decrypt per item: the search name check and the row itself both read
@@ -305,6 +331,8 @@ async function runExport(
         publicState: it.item_state,
         revealed,
         decrypt: () => decrypt(it),
+        onDecryptError: (err) =>
+          request.log.warn({ err, item_id: it.item_id }, 'pii decrypt failed in export search — name treated as masked'),
       });
     },
     onDecryptError: (err, itemId) =>
@@ -349,9 +377,7 @@ async function runExport(
       export_id: exportId,
       requester_user_id: userId,
       requester_item_id: filters.item_id ?? requester.item_id,
-      // `q` is a free-text name search — personal data, never logged; only
-      // whether one was applied.
-      filters: { ...withoutSearch(filters), action_status: statuses, has_search: Boolean(filters.q) },
+      filters: { ...auditFilters(filters), action_status: statuses },
       projection,
       format,
       counterparty_domain: result.counterparty?.domain,
@@ -400,8 +426,9 @@ async function runExport(
 type ScopeResult =
   | {
       ok: true;
-      requester: NonNullable<Awaited<ReturnType<typeof resolveRequesterItem>>>;
-      requesterConfig: NetworkConfigDocument;
+      requester: Awaited<ReturnType<typeof listRequesterProfiles>>[number];
+      /** Configs of every network the caller's profiles are on. */
+      requesterConfigs: Map<string, NetworkConfigDocument>;
       statuses: string[];
     }
   | { ok: false; status: 400 | 403 | 500; body: Record<string, unknown> };
@@ -435,26 +462,36 @@ async function resolveExportScope(request: ExportRequest, userId: string): Promi
       };
     }
   }
-  // One domain per account, so any scoped profile decides the requester domain.
-  const requester = await resolveRequesterItem(userId, scoped[0]);
+  // Every profile in scope decides what may be exported: a caller with
+  // profiles on two networks gets each network's exportable statuses (the
+  // union), and each row is still checked against its own interaction's rules
+  // in buildExport — so no profile's rules are applied to another's rows.
+  const profiles = await listRequesterProfiles(userId, scoped);
+  const requester = profiles[0];
   if (!requester) return { ok: false, status: 403, body: NOT_ENABLED };
 
-  let requesterConfig: NetworkConfigDocument;
-  try {
-    requesterConfig = await getNetworkConfigById(requester.item_network);
-  } catch (err) {
-    request.log.error({ err, network: requester.item_network }, 'network config unavailable for export');
-    return {
-      ok: false,
-      status: 500,
-      body: {
-        error: 'NETWORK_CONFIG_UNAVAILABLE',
-        message: 'A network configuration could not be loaded; try again shortly',
-      },
-    };
+  const requesterConfigs = new Map<string, NetworkConfigDocument>();
+  for (const network of new Set(profiles.map((p) => p.item_network))) {
+    try {
+      requesterConfigs.set(network, await getNetworkConfigById(network));
+    } catch (err) {
+      request.log.error({ err, network }, 'network config unavailable for export');
+      return {
+        ok: false,
+        status: 500,
+        body: {
+          error: 'NETWORK_CONFIG_UNAVAILABLE',
+          message: 'A network configuration could not be loaded; try again shortly',
+        },
+      };
+    }
   }
 
-  const exportable = getExportableStatuses(requesterConfig, requester.item_domain);
+  const exportable = [
+    ...new Set(
+      profiles.flatMap((p) => getExportableStatuses(requesterConfigs.get(p.item_network)!, p.item_domain))
+    ),
+  ];
   if (exportable.length === 0) return { ok: false, status: 403, body: NOT_ENABLED };
 
   const notExportable = (filters.action_status ?? []).filter((s) => !exportable.includes(s));
@@ -470,7 +507,7 @@ async function resolveExportScope(request: ExportRequest, userId: string): Promi
     };
   }
   const statuses = filters.action_status?.length ? filters.action_status : exportable;
-  return { ok: true, requester, requesterConfig, statuses };
+  return { ok: true, requester, requesterConfigs, statuses };
 }
 
 /**
@@ -481,15 +518,15 @@ async function resolveExportScope(request: ExportRequest, userId: string): Promi
 async function loadNetworkConfigs(
   request: ExportRequest,
   networkIds: readonly string[],
-  knownId: string,
-  knownConfig: NetworkConfigDocument
+  known: ReadonlyMap<string, NetworkConfigDocument>
 ): Promise<Map<string, NetworkConfigDocument | null>> {
-  const load = memoizeNetworkConfigs(
-    (err, network) => request.log.error({ err, network }, 'network config unavailable for export'),
-    { id: knownId, config: knownConfig }
+  const load = memoizeNetworkConfigs((err, network) =>
+    request.log.error({ err, network }, 'network config unavailable for export')
   );
-  const ids = [...new Set([knownId, ...networkIds])];
-  return new Map(await Promise.all(ids.map(async (id) => [id, await load(id)] as const)));
+  const ids = [...new Set([...known.keys(), ...networkIds])];
+  return new Map(
+    await Promise.all(ids.map(async (id) => [id, known.get(id) ?? (await load(id))] as const))
+  );
 }
 
 /**

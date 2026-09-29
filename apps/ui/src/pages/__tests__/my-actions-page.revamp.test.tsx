@@ -435,14 +435,14 @@ describe('MyActionsPage — export paths', () => {
     expect(exportActionsMock).not.toHaveBeenCalled();
   });
 
-  it('sends the live profiles as item_ids when none is picked', async () => {
+  it('sends no item_ids when no profile is picked — every profile, like the list', async () => {
     rows = [accepted('a1')];
     total = 1;
     renderPage();
     await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
     await userEvent.click(screen.getByRole('button', { name: 'Export seekers (1)' }));
     await waitFor(() => expect(exportActionsMock).toHaveBeenCalled());
-    expect(exportActionsMock.mock.calls[0][0].filters.item_ids?.length).toBeGreaterThan(0);
+    expect(exportActionsMock.mock.calls[0][0].filters.item_ids).toBeUndefined();
   });
 
   it('a failed export shows the mapped message; an empty one says so', async () => {

@@ -361,9 +361,9 @@ export function MyActionsPage() {
   const viewExportStatuses = viewExportableStatuses(filter.statuses, exportStatuses);
   const baseExportFilters = (): ExportActionsBody['filters'] => ({
     ownership_role: query.ownership_role ?? 'all',
-    // The picked profiles, else every live one — so the server scopes the
-    // export by the profiles this page lists, not an older or retired one.
-    item_ids: query.item_ids ?? (liveItems.length > 0 ? liveItems.slice(0, 50).map((i) => i.item_id) : undefined),
+    // The picked profiles, else none — the server then covers every profile
+    // the caller owns, exactly the rows the list (and its counts) show.
+    item_ids: query.item_ids,
     action_type: Array.isArray(query.action_type) ? query.action_type : undefined,
     // Only exportable statuses; a row whose status changed since it was shown
     // is dropped server-side instead of exported.

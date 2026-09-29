@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { visibleItemName } from '../visible_name';
+import { privateNameShown, visibleItemName } from '../visible_name';
 
 const schema = { display_name_field: 'organisation_name', properties: { organisation_name: {} } };
 
@@ -44,5 +44,32 @@ describe('visibleItemName', () => {
         },
       })
     ).toBeNull();
+  });
+});
+
+describe('visibleItemName — decrypt failure', () => {
+  it('reports the error and treats the name as masked', () => {
+    const onDecryptError = vi.fn();
+    const name = visibleItemName({
+      itemId: 'i',
+      schema: {},
+      publicState: { name: 'A***' },
+      revealed: true,
+      decrypt: () => {
+        throw new Error('bad blob');
+      },
+      onDecryptError,
+    });
+    expect(name).toBeNull();
+    expect(onDecryptError).toHaveBeenCalledWith(expect.any(Error));
+  });
+});
+
+describe('privateNameShown', () => {
+  it('needs both a revealing status and a live profile', () => {
+    expect(privateNameShown(['accepted'], 'accepted', 'live')).toBe(true);
+    expect(privateNameShown(['accepted'], 'created', 'live')).toBe(false);
+    expect(privateNameShown(['accepted'], 'accepted', 'paused')).toBe(false);
+    expect(privateNameShown([], 'accepted', 'live')).toBe(false);
   });
 });
