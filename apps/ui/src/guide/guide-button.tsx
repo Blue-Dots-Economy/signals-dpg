@@ -25,6 +25,7 @@ export function GuideButton() {
   const { pathname } = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { isAuthenticated, user } = useAuth();
+  const userId = isAuthenticated ? user?.id : undefined;
 
   const available = React.useMemo(
     () =>
@@ -38,13 +39,13 @@ export function GuideButton() {
 
   const start = React.useCallback(
     (tour: GuideTour, opts?: { replace?: boolean }) => {
-      markTourSeen(tour.id);
+      markTourSeen(tour.id, userId);
       if (!tour.matches(pathname, searchParams)) {
         navigate(tourTarget(tour, pathname, searchParams), { replace: opts?.replace });
       }
       void runTour(tour);
     },
-    [navigate, pathname, searchParams],
+    [navigate, pathname, searchParams, userId],
   );
 
   // `?tour=<id>` deep link — e.g. a link in a training email.
@@ -79,8 +80,8 @@ export function GuideButton() {
   React.useEffect(() => {
     if (requested || import.meta.env.MODE === 'test' || navigator.webdriver) return;
     const tour = autoStartTour(available, pathname, searchParams, { isAuthenticated, firstLogin });
-    if (tour && !hasSeenTour(tour.id) && !isTourRunning()) start(tour);
-  }, [pathname, searchParams, requested, start, available, isAuthenticated, firstLogin]);
+    if (tour && !hasSeenTour(tour.id, userId) && !isTourRunning()) start(tour);
+  }, [pathname, searchParams, requested, start, available, isAuthenticated, firstLogin, userId]);
 
   const label = t('guide.menu', 'Help and tours');
 

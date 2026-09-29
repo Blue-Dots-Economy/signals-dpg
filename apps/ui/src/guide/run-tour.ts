@@ -105,17 +105,26 @@ function isVisible(selector: string): boolean {
 
 const SEEN_PREFIX = 'signals-guide:seen:';
 
-export function hasSeenTour(id: string): boolean {
+/**
+ * Seen records are per signed-in person (`<prefix><userId>:<tour>`), not per
+ * browser: on a shared phone each person gets their own first-login tours,
+ * and a visitor's records (no user id) never hide a member's.
+ */
+function seenKey(id: string, userId: string | undefined): string {
+  return SEEN_PREFIX + (userId ? `${userId}:` : '') + id;
+}
+
+export function hasSeenTour(id: string, userId?: string): boolean {
   try {
-    return localStorage.getItem(SEEN_PREFIX + id) !== null;
+    return localStorage.getItem(seenKey(id, userId)) !== null;
   } catch {
     return true; // storage blocked: never auto-start rather than nag every visit
   }
 }
 
-export function markTourSeen(id: string): void {
+export function markTourSeen(id: string, userId?: string): void {
   try {
-    localStorage.setItem(SEEN_PREFIX + id, new Date().toISOString());
+    localStorage.setItem(seenKey(id, userId), new Date().toISOString());
   } catch {
     /* storage blocked — ignore */
   }

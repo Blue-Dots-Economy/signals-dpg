@@ -39,3 +39,17 @@ describe('autoStartTour', () => {
     expect(autoStartTour(tours, '/my-actions', params, who)).toBeUndefined();
   });
 });
+
+describe('seen records', () => {
+  it('are kept per signed-in person, apart from the visitor’s', async () => {
+    const real = await vi.importActual<typeof import('../run-tour')>('../run-tour');
+    localStorage.clear();
+    real.markTourSeen('welcome', 'user-a');
+    expect(real.hasSeenTour('welcome', 'user-a')).toBe(true);
+    expect(real.hasSeenTour('welcome', 'user-b')).toBe(false);
+    expect(real.hasSeenTour('welcome')).toBe(false);
+    real.markTourSeen('home');
+    expect(real.hasSeenTour('home')).toBe(true);
+    expect(real.hasSeenTour('home', 'user-a')).toBe(false);
+  });
+});
