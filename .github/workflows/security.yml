@@ -4,15 +4,20 @@
 # in-scope repos can't drift apart; see that repo's
 # .github/workflows/security-scan.yml and docs/operations/security-scanning-a2*.md.
 #
-# What runs here (language: ts, no image-refs, gitleaks off):
+# What runs here (language: ts, no image-refs, gitleaks on):
 #   * trivy-fs    — dependency CVEs from pnpm-lock.yaml + Dockerfile/IaC
 #                   misconfig + filesystem secret detection -> SARIF
 #   * deps-audit  — `pnpm audit` as a second opinion (log only, no SARIF)
 #   * image-scan  — SKIPPED: no image-refs passed. The api/ui images are scanned
 #                   in build-images.yaml instead, against the freshly-built local
 #                   image, so we scan the exact artifact before it's published.
-#   * gitleaks    — SKIPPED: run-gitleaks defaults to false. Native GitHub secret
-#                   scanning covers this repo's history.
+#   * gitleaks    — git-history secret scan. NOW ON: run-gitleaks defaults to
+#                   true as of bluedots-automation#253, which also made the scan
+#                   fail closed. Native GitHub secret scanning is not a
+#                   substitute -- on a free public repo it matches partner
+#                   patterns (provider-registered token formats) and not custom
+#                   high-entropy secrets such as Keycloak client secrets, so the
+#                   two are complementary rather than redundant.
 #
 # Report-only (`block: false`): findings land in Security > Code scanning and the
 # job still passes. Green means "the scan ran", NOT "nothing found". Flip to
@@ -47,7 +52,7 @@ jobs:
       contents: read
       security-events: write
       packages: read
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@56298e8001dbbf5f25b0d47f958b46727fc8f9d5  # main 2026-09-13
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@d6a39c5b22be14b4b4aeaa78fc1d86c1f67bb555  # feature 2026-09-25 -- repin to @main once promoted
     with:
       language: ts
       node-version: "24"   # matches engines.node (>=24) and ci.yaml
