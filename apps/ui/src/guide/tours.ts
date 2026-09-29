@@ -104,10 +104,10 @@ const WELCOME_TOUR: GuideTour = {
       description: 'Search by name, skill or place. Use filters to narrow it down.',
     },
     {
-      element: ['[data-tour="card-action"]', '[data-tour="card-match-score"]', '[data-tour="card-grid"]'],
+      element: ['[data-tour="map"]', '[data-tour="card-action"]', '[data-tour="card-grid"]'],
       keep: true,
       title: 'Connect',
-      description: 'Like someone? Tap <b>Connect</b> or <b>Apply</b>. The match score shows how well you fit.',
+      description: 'Tap a pin on the map to see who it is, then tap <b>Connect</b> or <b>Apply</b>. The match score shows how well you fit.',
     },
     {
       keep: true,
@@ -443,36 +443,36 @@ const CONNECT_TOUR: GuideTour = {
   title: 'Connect or apply',
   path: '/',
   matches: (p) => p === '/',
-  readyWhen: '[data-tour="browse-sort"]',
-  prepare: '[data-tour="view-list"]',
+  // Starts on the map: tapping a pin is the quickest way to reach someone.
+  readyWhen: '[data-tour="map-location"]',
+  prepare: '[data-tour="view-map"]',
   requiresAuth: true,
   steps: [
     {
       title: 'Connect or apply',
-      description: 'Find a person or listing, check how well they fit, then send a request: <b>Connect</b> for people and services, <b>Apply</b> for jobs and openings; the button on each card shows which. Contact details are shared only after they accept. You need an active profile to send requests.',
+      description: 'Find someone on the map and send them a request. Your profile needs to be <b>Live</b> first.',
     },
     {
-      element: '[data-tour="search"]',
-      title: '1. Find someone',
-      description: 'Search, sort and filter the list, or click a pin on the map, to find a listing that interests you.',
+      element: '[data-tour="map"]',
+      keep: true,
+      title: '1. Tap a pin',
+      description: 'Each pin is a person or a listing. A number is a group — tap it to zoom in. Tap a pin to open their card.',
     },
     {
-      element: ['[data-tour="card-match-score"]', '[data-tour="card-grid"]'],
       keep: true,
       title: '2. Check the fit',
-      description: 'On a card, <b>See Match Score</b> compares their profile with yours. The <b>Proceed</b> button in the details sends the same request as the card’s own button (Connect or Apply), so you can go straight on.',
+      description: 'The card shows their details. <b>See Match Score</b> tells you how well they fit your profile.',
     },
     {
-      element: ['[data-tour="card-action"]', '[data-tour="card-grid"]'],
       keep: true,
       title: '3. Send a request',
-      description: 'Click the card’s request button: <b>Connect</b> or <b>Apply</b>, depending on the listing. You may be asked for a few details or a note, then confirm.',
+      description: 'Tap <b>Connect</b> (people and services) or <b>Apply</b> (jobs). Add a note if asked, then confirm.',
     },
     {
-      element: '[data-sidebar="sidebar"]',
+      element: ['[data-tour="notifications"]', '[data-sidebar="sidebar"]'],
       keep: true,
       title: '4. Follow up',
-      description: 'Your request appears in <b>My Actions</b> under Initiated. You will see when it is accepted, and their contact details then become visible.',
+      description: 'Your request shows in <b>My Actions</b>. Once they accept, you can see each other’s contact details.',
     },
   ],
 };
