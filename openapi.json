@@ -6988,6 +6988,13 @@
                         "privacy"
                       ],
                       "additionalProperties": false
+                    },
+                    "variant": {
+                      "type": "string",
+                      "enum": [
+                        "adult",
+                        "u18"
+                      ]
                     }
                   },
                   "required": [

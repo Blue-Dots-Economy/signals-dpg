@@ -1,6 +1,6 @@
 import {
   ConsentStatusByIdentifierQuerySchema,
-  ConsentStatusResponseSchema,
+  ConsentStatusByIdentifierResponseSchema,
 } from '@dpg/schemas';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -22,6 +22,24 @@ const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as numbe
 // Kong's 10k/min global cap applied). Fail-open on a Redis blip: a rate-limit
 // backend outage must not break the login/consent flow for legitimate users.
 //
+// This response deliberately carries NO `variant`, unlike the authenticated
+// `/consent/status` (#626). Returning it here would disclose, to anyone holding
+// a phone number, that the number belongs to a minor — unconditionally, on the
+// first request, for every known minor. The per-IP window below bounds bulk
+// scraping but does nothing against the targeted lookup, which is the case that
+// matters. The accepted-version integers do not disclose it either: they only
+// diverge between the adult and U18 sets once a deployment ships distinct U18
+// versions, and a minor with no acceptances returns empty lists regardless.
+//
+// The pre-login gate therefore shows the adult copy. That is not a gap in the
+// U18 control: per #453 a gated minor is routed to `U18GuardianFlow` AFTER
+// authentication (`otp-page.tsx`, `oidc-callback-page.tsx`), which renders the
+// U18 documents and records their consent guardian-sourced. And an acceptance
+// made at that adult pre-login gate is not written for a known minor on a
+// network with a U18 set (`pre-login-consent.ts`): it would be stamped `u18` by
+// `accept_consent` while the person read the adult text, so they are asked
+// again with the U18 documents after sign-in instead.
+//
 // Keyed on `request.ip`, consistent with every other per-IP limiter in this API.
 // That resolves via `trustProxy` (app.ts) from the X-Forwarded-For chain, so it
 // is only as trustworthy as the edge's XFF handling. Where the instance sits
@@ -32,7 +50,7 @@ const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as numbe
 const CONSENT_RL_WINDOW_SEC = 60;
 const CONSENT_RL_MAX_PER_WINDOW = 30;
 
-export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fastify) => {
+export const get_consent_status_by_identifier: FastifyPluginAsyncZod = (fastify) => {
   fastify.route({
     url: '/status-by-identifier',
     method: 'GET',
@@ -40,11 +58,13 @@ export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fa
       tags: ['consent'],
       querystring: ConsentStatusByIdentifierQuerySchema,
       response: {
-        200: ConsentStatusResponseSchema,
+        200: ConsentStatusByIdentifierResponseSchema,
       },
     },
     handler: get_consent_status_by_identifier_handler,
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export const get_consent_status_by_identifier_handler = async (
