@@ -275,6 +275,10 @@
           ],
           "to_network": "blue_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": [],
+            "to": ["company_name", "role", "city", "employment_type"]
+          },
           "to_items": [
             "job_posting_1.0",
             "job_posting_1.1"
@@ -337,6 +341,10 @@
           ],
           "to_network": "blue_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": [],
+            "to": ["company_name", "role", "city", "employment_type"]
+          },
           "to_items": [
             "job_posting_1.0",
             "job_posting_1.1"

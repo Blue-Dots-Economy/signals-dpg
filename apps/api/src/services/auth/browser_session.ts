@@ -76,6 +76,13 @@ export const BrowserSessionSchema = z.object({
    */
   appOrigin: z.string(),
   createdAt: z.number(),
+  /**
+   * Whether this session is the person's first login to the app, decided
+   * once — on the session's first `/auth/me` — and then kept, so a reload
+   * inside that first session still says true (see `app_first_login.ts`).
+   * Optional: absent until decided, and on rows written before it existed.
+   */
+  firstLogin: z.boolean().optional(),
 });
 
 export type BrowserSession = z.infer<typeof BrowserSessionSchema>;

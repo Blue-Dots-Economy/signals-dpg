@@ -137,6 +137,17 @@ export interface DotNetworkInteraction {
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
   reveals_pii_on_status?: string[];
+  /** Bulk-export eligibility (#769): which side(s) may export the counterparty. */
+  export?: { requester_domains: string[] };
+  /** Status buckets; `create` = still waiting on the receiver. */
+  metric_categories?: {
+    create?: string[];
+    accept?: string[];
+    reject?: string[];
+    cancel?: string[];
+  } | null;
+  /** Fields of each side shown to the other in My Actions (server-filtered to non-private). */
+  column_fields?: { from?: string[]; to?: string[] };
 }
 
 export interface DotNetworkInstance {

@@ -14,6 +14,28 @@ import {
 // Stands in for auth_middleware_if_enabled. `behaviour` lets each test choose
 // whether the middleware authenticates, rejects, or is switched off entirely.
 let behaviour: 'authenticated' | 'rejects' | 'disabled' = 'authenticated';
+// How the caller arrived: a browser session cookie, or a service credential.
+let via: 'browser' | 'apikey' | 'client_credentials' | 'none' = 'none';
+
+// The browser session store and the one-time first-login claim.
+let session: { firstLogin?: boolean } | null = null;
+const updateSession = vi.fn(async (_id: string, patch: { firstLogin?: boolean }) => {
+  session = { ...session, ...patch };
+  return session;
+});
+let claimResult: boolean | Error = true;
+const claimAppFirstLogin = vi.fn(async () => {
+  if (claimResult instanceof Error) throw claimResult;
+  return claimResult;
+});
+vi.mock('@api/plugins/auth/resolve_browser_session', () => ({ SESSION_COOKIE: 'sid' }));
+vi.mock('@/services/auth/browser_session', () => ({
+  readSession: async () => session,
+  updateSession: (id: string, patch: { firstLogin?: boolean }) => updateSession(id, patch),
+}));
+vi.mock('@/services/auth/app_first_login', () => ({
+  claimAppFirstLogin: () => claimAppFirstLogin(),
+}));
 
 vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: async (request: FastifyRequest, reply: FastifyReply) => {
@@ -31,6 +53,9 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
       name: 'Asha',
       role: 'admin',
     };
+    if (via === 'browser') (request as unknown as { cookies: Record<string, string> }).cookies = { sid: 's1' };
+    if (via === 'apikey') request.headers['x-api-key'] = 'k';
+    if (via === 'client_credentials') request.service_client_id = 'voice-dpg';
   },
 }));
 
@@ -54,6 +79,11 @@ const get = async () => {
 beforeEach(() => {
   vi.resetModules();
   behaviour = 'authenticated';
+  via = 'none';
+  session = null;
+  claimResult = true;
+  updateSession.mockClear();
+  claimAppFirstLogin.mockClear();
 });
 
 describe('GET /api/v1/auth/me', () => {
@@ -66,6 +96,7 @@ describe('GET /api/v1/auth/me', () => {
       email: 'asha@example.org',
       name: 'Asha',
       role: 'admin',
+      first_login: false,
     });
   });
 
@@ -86,5 +117,46 @@ describe('GET /api/v1/auth/me', () => {
 
     expect(res.statusCode).toBe(401);
     expect(res.json().code).toBe('UNAUTHORIZED');
+  });
+});
+
+describe('GET /api/v1/auth/me — first_login', () => {
+  it('a browser session claims the first login once, and remembers it for reloads', async () => {
+    via = 'browser';
+    session = {};
+    expect((await get()).json().first_login).toBe(true);
+    expect(claimAppFirstLogin).toHaveBeenCalledTimes(1);
+    expect(updateSession).toHaveBeenCalledWith('s1', { firstLogin: true });
+
+    // Reload in the same session: the cached answer, no second claim.
+    expect((await get()).json().first_login).toBe(true);
+    expect(claimAppFirstLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it('a later session (marker already set) is not a first login', async () => {
+    via = 'browser';
+    session = {};
+    claimResult = false;
+    expect((await get()).json().first_login).toBe(false);
+    expect(updateSession).toHaveBeenCalledWith('s1', { firstLogin: false });
+  });
+
+  it.each(['apikey', 'client_credentials'] as const)(
+    'a %s caller (voice / aggregator) is never a first login and claims nothing',
+    async (credential) => {
+      via = credential;
+      session = {};
+      expect((await get()).json().first_login).toBe(false);
+      expect(claimAppFirstLogin).not.toHaveBeenCalled();
+    },
+  );
+
+  it('a failed claim answers false rather than failing the request', async () => {
+    via = 'browser';
+    session = {};
+    claimResult = new Error('db down');
+    const res = await get();
+    expect(res.statusCode).toBe(200);
+    expect(res.json().first_login).toBe(false);
   });
 });

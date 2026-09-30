@@ -414,6 +414,14 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/uri_fields.ts',
           ),
         },
+        // Same reasoning: pure export-eligibility helper (#771).
+        {
+          find: '@dpg/schemas/export_eligibility',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/export_eligibility.ts',
+          ),
+        },
         {
           find: /^@dpg\/(.*)$/,
           replacement: path.resolve(__dirname, '../../packages/$1/src'),

@@ -469,6 +469,10 @@
           "from_domain": "seeker",
           "to_network": "purple_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": ["disability_type", "looking_for", "highest_qualification"],
+            "to": ["provider_category", "organisation_name", "services_offered", "service_cities"]
+          },
           "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -485,6 +489,7 @@
                 "enum": [
                   "created",
                   "accepted",
+                  "completed",
                   "rejected",
                   "cancelled"
                 ]
@@ -500,13 +505,18 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         },
         {
           "from_network": "purple_dot",
           "from_domain": "provider",
           "to_network": "purple_dot",
           "to_domain": "seeker",
+          "column_fields": {
+            "from": ["provider_category", "organisation_name", "services_offered", "service_cities"],
+            "to": ["disability_type", "looking_for", "highest_qualification"]
+          },
           "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -523,6 +533,7 @@
                 "enum": [
                   "created",
                   "accepted",
+                  "completed",
                   "rejected",
                   "cancelled"
                 ]
@@ -538,13 +549,18 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         },
         {
           "from_network": "purple_dot",
           "from_domain": "provider",
           "to_network": "purple_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": ["provider_category", "organisation_name", "services_offered", "service_cities"],
+            "to": ["provider_category", "organisation_name", "services_offered", "service_cities"]
+          },
           "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -555,13 +571,14 @@
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["created", "accepted", "rejected", "cancelled"]
+                "enum": ["created", "accepted", "completed", "rejected", "cancelled"]
               },
               "remark": { "type": "string" }
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         }
       ]
     }
