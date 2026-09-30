@@ -14,7 +14,7 @@ import { resolveUserConsentVariant } from '@/services/consent_variant';
 
 type Req = FastifyRequest<{ Body: ConsentAcceptBody }>;
 
-export const accept_consent: FastifyPluginAsyncZod = async (fastify) => {
+export const accept_consent: FastifyPluginAsyncZod = (fastify) => {
   fastify.route({
     url: '/accept',
     method: 'POST',
@@ -28,6 +28,8 @@ export const accept_consent: FastifyPluginAsyncZod = async (fastify) => {
     },
     handler: accept_consent_handler,
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export const accept_consent_handler = async (

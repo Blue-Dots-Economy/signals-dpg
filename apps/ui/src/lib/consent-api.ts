@@ -1,11 +1,12 @@
 import { createApiClient } from './api-client';
-import type { ConsentConfigDocument } from '@dpg/schemas';
 import type {
   ConsentAcceptBody,
-  ConsentStatusResponse,
+  ConsentConfigDocument,
   ConsentStatusByIdentifierResponse,
+  ConsentStatusResponse,
+  ProfileConsentAcceptBody,
+  ProfileConsentStatusResponse,
 } from '@dpg/schemas';
-import type { ProfileConsentAcceptBody, ProfileConsentStatusResponse } from '@dpg/schemas';
 
 const apiClient = createApiClient();
 

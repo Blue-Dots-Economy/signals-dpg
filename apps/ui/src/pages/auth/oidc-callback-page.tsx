@@ -249,7 +249,9 @@ export function OidcCallbackPage() {
     exchangeStarted.current = true;
     let cancelled = false;
 
-    (async () => {
+    // Not awaited: an effect cannot be async. The body catches its own
+    // failures and reports them on the page.
+    void (async () => {
       try {
         // The code exchange now happens on the API (AUTH-VULN-03/04) — by the
         // time we land here the session cookie is already set and the tokens

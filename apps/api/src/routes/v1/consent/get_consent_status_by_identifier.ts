@@ -48,7 +48,7 @@ const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as numbe
 const CONSENT_RL_WINDOW_SEC = 60;
 const CONSENT_RL_MAX_PER_WINDOW = 30;
 
-export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fastify) => {
+export const get_consent_status_by_identifier: FastifyPluginAsyncZod = (fastify) => {
   fastify.route({
     url: '/status-by-identifier',
     method: 'GET',
@@ -61,6 +61,8 @@ export const get_consent_status_by_identifier: FastifyPluginAsyncZod = async (fa
     },
     handler: get_consent_status_by_identifier_handler,
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export const get_consent_status_by_identifier_handler = async (

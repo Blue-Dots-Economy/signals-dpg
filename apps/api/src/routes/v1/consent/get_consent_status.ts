@@ -12,7 +12,7 @@ import { resolveUserConsentVariant } from '@/services/consent_variant';
 
 type Req = FastifyRequest<{ Querystring: { network: string } }>;
 
-export const get_consent_status: FastifyPluginAsyncZod = async (fastify) => {
+export const get_consent_status: FastifyPluginAsyncZod = (fastify) => {
   fastify.route({
     url: '/status',
     method: 'GET',
@@ -26,6 +26,8 @@ export const get_consent_status: FastifyPluginAsyncZod = async (fastify) => {
     },
     handler: get_consent_status_handler,
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export const get_consent_status_handler = async (
