@@ -31,6 +31,7 @@ import { fetchNetworkConfig } from '@/lib/network-api';
 import { setStoredSignupDomain } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
 import { resolvePostLoginLanding } from '@/lib/post-login-landing';
+import { preLoginConsentApplies } from './pre-login-consent';
 
 /** How long to wait for the consent write before landing the user anyway. */
 const CONSENT_WRITE_TIMEOUT_MS = 8000;
@@ -64,6 +65,9 @@ async function flushPendingConsent(
   // device and must not be written against this session. See pending-consent.ts.
   const pending = takePendingConsent(consentAttempt);
   if (!pending) return;
+  // Shown the adult copy before sign-in; a known minor is asked again with the
+  // U18 documents by the gates below instead (#626).
+  if (!(await preLoginConsentApplies(pending.network, pending.brand ?? null))) return;
   try {
     // Bounded: a slow or hanging consent write must not hold the user on
     // the spinner after they are already signed in.

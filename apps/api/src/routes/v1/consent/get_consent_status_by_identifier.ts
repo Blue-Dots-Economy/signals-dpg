@@ -34,9 +34,11 @@ const EMPTY_STATUSES = { statuses: { terms: [] as number[], privacy: [] as numbe
 // The pre-login gate therefore shows the adult copy. That is not a gap in the
 // U18 control: per #453 a gated minor is routed to `U18GuardianFlow` AFTER
 // authentication (`otp-page.tsx`, `oidc-callback-page.tsx`), which renders the
-// U18 documents and records their consent guardian-sourced. The ledger is right
-// either way, because `accept_consent` re-derives the variant server-side and
-// ignores whatever versions the client sent.
+// U18 documents and records their consent guardian-sourced. And an acceptance
+// made at that adult pre-login gate is not written for a known minor on a
+// network with a U18 set (`pre-login-consent.ts`): it would be stamped `u18` by
+// `accept_consent` while the person read the adult text, so they are asked
+// again with the U18 documents after sign-in instead.
 //
 // Keyed on `request.ip`, consistent with every other per-IP limiter in this API.
 // That resolves via `trustProxy` (app.ts) from the X-Forwarded-For chain, so it
