@@ -587,7 +587,8 @@ describe('accept_consent_handler', () => {
   });
 
   it('falls back to the adult set for a minor on a network with no U18 documents', async () => {
-    // 4 of 9 shipped configs have no `u18_documents`. Without this fallback
+    // 4 of the 9 network/brand consent configs in bluedots-schemas (upsdm,
+    // orange_dot, onetac, yellow_dot) have no `u18_documents`. Without this fallback
     // `resolveConsentVersion` returns null and the handler 400s — a minor on
     // those networks could not log in at all, which is worse than the bug.
     resolveUserConsentVariant.mockResolvedValue('u18');

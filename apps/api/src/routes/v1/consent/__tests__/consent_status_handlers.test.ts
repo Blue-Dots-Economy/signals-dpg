@@ -200,6 +200,20 @@ describe('get_consent_status_handler', () => {
     expect(reply.body).toEqual({ variant: 'adult', statuses: { terms: [1], privacy: [] } });
   });
 
+  it('a known minor gets variant u18 — the U18 set is what the gate compares against (#626)', async () => {
+    getWardAge.mockResolvedValue(15);
+    rowQueue.push([{ consentCategory: 'terms', documentVersion: 2 }]);
+
+    const reply = await call(get_consent_status_handler, {
+      user: { id: 'minor-1' },
+      query: { network: 'blue_dot' },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ variant: 'u18', statuses: { terms: [2], privacy: [] } });
+    expect(getWardAge).toHaveBeenCalledWith('minor-1');
+  });
+
   it('500 CONSENT_READ_FAILED when the read throws', async () => {
     dbState.failWith = new Error('db down');
 
@@ -341,6 +355,21 @@ describe('get_consent_status_by_identifier_handler', () => {
 
     expect(reply.statusCode).toBe(200);
     expect(reply.body).toEqual({ statuses: { terms: [2], privacy: [2] } });
+  });
+
+  it('never reports a variant, even for a known minor — it would disclose that a number belongs to a minor (#626)', async () => {
+    getWardAge.mockResolvedValue(15);
+    rowQueue.push([{ id: 'minor-1' }]);
+    rowQueue.push([{ consentCategory: 'terms', documentVersion: 2 }]);
+
+    const reply = await call(get_consent_status_by_identifier_handler, {
+      query: { network: 'blue_dot', email: 'minor@example.com' },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).not.toHaveProperty('variant');
+    // Structurally, too: the unauthenticated route never looks the age up.
+    expect(getWardAge).not.toHaveBeenCalled();
   });
 
   it('resolves by phone alone', async () => {
