@@ -50,7 +50,7 @@
     "auth": "workspace:*",
     "config": "workspace:*",
     "database": "workspace:*",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.4",
     "drizzle-orm": "^0.45.2",
     "fastify": "^5.12.3",
     "fastify-qs": "^5.0.0",
