@@ -15,7 +15,12 @@ import {
 } from '@/utils/served_domain_guard';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
-import { createItemInternal, ItemServiceError, resolveGoLiveGates } from '@/services/item_service';
+import {
+  assertSuppliedLocationsInCountry,
+  createItemInternal,
+  ItemServiceError,
+  resolveGoLiveGates,
+} from '@/services/item_service';
 import { tagUserWithDefaultAggregator } from '@/services/aggregator/default_aggregator';
 import { resolveLocationsForCreate } from '@/services/geocoding/resolve_locations_for_create';
 import { getWardAge } from '@/services/minor_guardian_repo';
@@ -230,6 +235,15 @@ export const create_item_handler = async (
       error: 'PARTITION_SETUP_FAILED',
       message: 'Failed to prepare storage for item type',
     });
+  }
+
+  // Caller-resolved coordinates skip the geocoder, so they are held to the
+  // configured country here instead (#789).
+  try {
+    await assertSuppliedLocationsInCountry(body.item_locations);
+  } catch (err) {
+    const mapped = mapCreateItemError(err, request.log, body);
+    return reply.code(mapped.status).send(mapped.body);
   }
 
   // Backend geocoding: resolve coordinates from the schema's location field when

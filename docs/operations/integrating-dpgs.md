@@ -352,6 +352,14 @@ recover from the address text alone.
   declares its primary location field private, the coordinate is jittered
   100–250 m before storage either way. You can never persist an exact private
   address by sending it here.
+- **Country check (#789).** When the instance sets `GEOCODING_COUNTRY` (e.g.
+  `IN`) and mounts that country's boundary (`GEOCODING_BOUNDARY_PATH`), every
+  supplied point must fall inside the country, within about 2 km of the border.
+  A point outside it fails the whole write with
+  `400 { "error": "LOCATION_OUTSIDE_COUNTRY", "message": "Location <lat>, <lng> is outside the allowed region (IN)." }`
+  and nothing is stored. The message names the point so a bulk operator can find
+  the row. Echoed-back coordinates are not re-checked. Geocoded points are not
+  checked either, because the geocoder is already restricted to the same country.
 
 Each entry is `{ lat, lng, label? }`; `lat` must be -90..90 and `lng`
 -180..180, both as JSON numbers (a stringified coordinate is a 400, not a

@@ -24,6 +24,9 @@ describe('buildGeoCacheKey', () => {
   it('prefixes the normalized query with geo:place:', () => {
     expect(buildGeoCacheKey(' Noida ')).toBe('geo:place:noida');
   });
+  it('scopes the key by country when geocoding is restricted (#785)', () => {
+    expect(buildGeoCacheKey(' Noida ', 'IN')).toBe('geo:place:IN:noida');
+  });
 });
 
 describe('getCachedCoordinates', () => {

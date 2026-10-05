@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as runtimeEnv from '@/lib/runtime-env';
-import { getGeoProvider } from './provider';
+import { getGeoProvider, normalizeCountry } from './provider';
 
 describe('getGeoProvider PII-mask guard', () => {
   beforeEach(() => {
@@ -17,5 +17,16 @@ describe('getGeoProvider PII-mask guard', () => {
     const masked = '***';
     expect(await provider.suggest(masked)).toEqual([]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('normalizeCountry (#785)', () => {
+  it('upper-cases a two-letter code', () => {
+    expect(normalizeCountry(' in ')).toBe('IN');
+  });
+  it('treats unset, blank, or malformed values as no restriction', () => {
+    expect(normalizeCountry(undefined)).toBeUndefined();
+    expect(normalizeCountry('')).toBeUndefined();
+    expect(normalizeCountry('India')).toBeUndefined();
   });
 });

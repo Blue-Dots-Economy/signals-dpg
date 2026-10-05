@@ -34,6 +34,7 @@ import { guardianProfileConsentRow } from './guardian_consent_rows';
 import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { geocodeLocationsFromState } from '@/services/geocoding/resolve_locations_for_create';
+import { findLocationOutsideCountry } from '@/services/geocoding/country_boundary';
 import { jitterCoordinate } from '@/services/geocoding/jitter';
 import {
   buildNetworkItemSchemaUrl,
@@ -123,6 +124,32 @@ export class ItemServiceError extends Error {
 }
 
 export type { DbOrTx } from '@/services/db_types';
+
+/**
+ * Rejects caller-supplied coordinates outside the configured country (#789).
+ *
+ * Only for points the CALLER resolved — a bulk `geo_location` cell, an
+ * autocomplete pick, a partner's `item_locations`. Those skip the geocoder, so
+ * its country restriction never sees them. Geocoded points are not checked:
+ * text geocoding stays best-effort, and failing a registration because the
+ * geocoder's answer sat on a simplified border line would be worse than the
+ * bug. A no-op when `GEOCODING_COUNTRY` (or the boundary file) is unset.
+ *
+ * @throws {ItemServiceError} 400 LOCATION_OUTSIDE_COUNTRY, naming the point so a
+ *   bulk operator can find the row.
+ */
+export async function assertSuppliedLocationsInCountry(
+  points: readonly ItemLocation[] | undefined,
+): Promise<void> {
+  if (!points?.length) return;
+  const outside = await findLocationOutsideCountry(points);
+  if (!outside) return;
+  throw new ItemServiceError(
+    400,
+    'LOCATION_OUTSIDE_COUNTRY',
+    `Location ${outside.lat}, ${outside.lng} is outside the allowed region (${geocodingConfig.country}).`,
+  );
+}
 
 /**
  * Whether `userId` is the creator of the item identified by the partition key.
@@ -888,9 +915,12 @@ async function resolveLocationUpdate(
     Array.isArray(bodyLocations) && bodyLocations.length > 0 ? bodyLocations : null;
   if (providedCoords) {
     const stored = (existingItem.item_locations ?? []) as ItemLocation[];
-    return sameLocations(providedCoords, stored)
-      ? stored
-      : locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
+    // Echoed-back coordinates are what is already stored, so they are not
+    // re-checked: an edit to an unrelated field must not start failing on a
+    // point written before the country check existed.
+    if (sameLocations(providedCoords, stored)) return stored;
+    await assertSuppliedLocationsInCountry(providedCoords);
+    return locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
   }
   if (addressChanged) {
     if (isPrimaryAddressBlank(itemSchema as Record<string, unknown>, mergedFullState)) {
