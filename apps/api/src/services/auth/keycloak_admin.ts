@@ -11,6 +11,11 @@
  * the same reason `scripts/seed_service_users.ts` builds its own db handle.
  */
 
+import {
+  createClientCredentialsTokenSource,
+  TokenSourceError,
+  type TokenSource,
+} from '@dpg/notification';
 import type { KeycloakUserRepresentation } from './user_to_keycloak';
 
 export interface KeycloakAdminConfig {
@@ -57,14 +62,27 @@ export type CreateOutcome =
   | { kind: 'conflict'; detail: string };
 
 export class KeycloakAdminClient {
-  private token: string | null = null;
-  private tokenExpiresAt = 0;
+  /**
+   * The service-account token, from the same client-credentials implementation
+   * the notification client uses. Its clock reads `clockOverride` when
+   * `accessToken(now)` pins one, so callers (and tests) can still supply `now`.
+   */
+  private readonly tokens: TokenSource;
+  private clockOverride: number | undefined;
 
   constructor(
     private readonly config: KeycloakAdminConfig,
     /** Injectable for tests; defaults to global fetch. */
     private readonly fetchImpl: typeof fetch = fetch
-  ) {}
+  ) {
+    this.tokens = createClientCredentialsTokenSource({
+      tokenUrl: `${this.realmBase}/protocol/openid-connect/token`,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
+      fetchImpl,
+      now: () => this.clockOverride ?? Date.now(),
+    });
+  }
 
   private get realmBase(): string {
     return `${this.config.baseUrl.replace(/\/$/, '')}/realms/${this.config.realm}`;
@@ -80,42 +98,34 @@ export class KeycloakAdminClient {
    * Cached with a 30s safety margin so a long migration run does not fetch one
    * per request, nor use a token that expires mid-flight.
    */
-  async accessToken(now: number = Date.now()): Promise<string> {
-    if (this.token && now < this.tokenExpiresAt) return this.token;
-
-    const res = await this.fetchImpl(`${this.realmBase}/protocol/openid-connect/token`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.config.clientId,
-        client_secret: this.config.clientSecret,
-      }).toString(),
-    });
-
-    if (!res.ok) {
-      throw new KeycloakAdminError(
-        `Could not obtain a Keycloak service-account token (is ${this.config.clientId} ` +
-          'configured with serviceAccountsEnabled and the right secret?)',
-        res.status,
-        await safeText(res)
-      );
+  async accessToken(now?: number): Promise<string> {
+    // The token source reads its clock synchronously inside token(), so the
+    // override only needs to hold for that call.
+    this.clockOverride = now;
+    let pending: Promise<string>;
+    try {
+      pending = this.tokens.token();
+    } finally {
+      this.clockOverride = undefined;
     }
 
-    const body = (await res.json()) as { access_token?: string; expires_in?: number };
-    if (!body.access_token) {
-      throw new KeycloakAdminError('Keycloak token response carried no access_token');
+    try {
+      return await pending;
+    } catch (err) {
+      if (err instanceof TokenSourceError) {
+        throw new KeycloakAdminError(
+          `Could not obtain a Keycloak service-account token (is ${this.config.clientId} ` +
+            'configured with serviceAccountsEnabled and the right secret?)',
+          err.status
+        );
+      }
+      throw err;
     }
-
-    this.token = body.access_token;
-    this.tokenExpiresAt = now + Math.max((body.expires_in ?? 60) - 30, 10) * 1000;
-    return this.token;
   }
 
   /** Drop the cached token so the next call fetches a fresh one. */
   private forgetToken(): void {
-    this.token = null;
-    this.tokenExpiresAt = 0;
+    this.tokens.invalidate();
   }
 
   /**

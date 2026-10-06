@@ -1,112 +1,127 @@
-import { createNotificationAuthHeaders } from './create_auth_headers';
-import type { NotifyRequest } from './notification.types';
+import {
+  NotifyTransportError,
+  type NotifyEvent,
+  type NotifyResult,
+} from './notify_event';
+import type { TokenSource } from './token_source';
 
 export interface NotificationClientConfig {
+  /** The notification service's base URL. Any path on it is replaced by `/v1/notify`. */
   baseUrl: string;
-  keyId: string;
-  secret: string;
+  /** Supplies the `Authorization: Bearer` token. */
+  tokens: TokenSource;
+  /** Injectable for tests; defaults to the global `fetch`. */
+  fetchImpl?: typeof fetch;
+  /** Per-request timeout. Defaults to 10 s. */
+  timeoutMs?: number;
 }
 
+const DEFAULT_TIMEOUT_MS = 10_000;
+
 /**
- * Client for communicating with the Notification Service.
+ * Client for the notification service's `POST /v1/notify`.
+ *
+ * `send` resolves with the service's verdict — accepted (`ok: true`) or refused
+ * (`ok: false`, with the service's `error` code) — and rejects with
+ * `NotifyTransportError` only when no verdict was reached (network failure,
+ * timeout, no token). Whether a refusal is fatal is the caller's decision.
  */
 export class NotificationClient {
-  constructor(
-    private readonly baseUrl: string,
-    private readonly keyId: string,
-    private readonly secret: string
-  ) {}
+  private readonly url: string;
+  private readonly tokens: TokenSource;
+  private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
 
-  /**
-   * Send a notification.
-   *
-   * The caller is responsible for:
-   * - Fetching providers via `/providers`
-   * - Selecting a valid `channel`
-   * - Selecting a valid `template_id`
-   * - Ensuring `variables` match the provider schema
-   *
-   * @typeParam TVariables - Variables schema for the selected channel
-   *
-   * @param payload - Notification request payload
-   *
-   * @example
-   * ```ts
-   * await notificationClient.notify({
-   *   channel: 'email',
-   *   template_id: 'basic_email',
-   *   to: 'uja@dway.com',
-   *   priority: 'realtime',
-   *   variables: {
-   *     fromName: 'Notification Service Demo',
-   *     fromEmail: 'hello@bluedotseconomy.org',
-   *     subject: 'Welcome!',
-   *     html: '<h1>Hello</h1>',
-   *   },
-   * });
-   * ```
-   *
-   * @throws Error if the notification service responds with a non-2xx status
-   */
-  async notify<TVariables extends Record<string, unknown>>(
-    payload: NotifyRequest<TVariables>
-  ): Promise<void> {
-    const path = '/notify';
-    const url = new URL(path, this.baseUrl);
-
-    const headers = createNotificationAuthHeaders(
-      { method: 'POST', path },
-      { keyId: this.keyId, secret: this.secret }
-    );
-
-    const res = await fetch(url.toString(), {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
-
-    if (!res.ok) {
-      throw new Error(
-        `Notification service error ${res.status}: ${await res.text()}`
-      );
-    }
+  constructor(cfg: NotificationClientConfig) {
+    this.url = new URL('/v1/notify', cfg.baseUrl).toString();
+    this.tokens = cfg.tokens;
+    this.fetchImpl = cfg.fetchImpl ?? fetch;
+    this.timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  /**
-   * Fetch available notification providers and their schemas.
-   */
-  async getProviders(): Promise<unknown[]> {
-    const path = '/providers';
-    const url = new URL(path, this.baseUrl);
+  async send(event: NotifyEvent): Promise<NotifyResult> {
+    const body = JSON.stringify({ ...event, priority: event.priority ?? 'normal' });
 
-    const headers = createNotificationAuthHeaders(
-      { method: 'GET', path },
-      { keyId: this.keyId, secret: this.secret }
-    );
+    let res = await this.post(body, event.correlation_id);
+    if (res.status === 401) {
+      // The cached token can die before its stated expiry (secret rotated,
+      // session revoked, Keycloak restarted). Refresh once and retry once; a
+      // second 401 is a real refusal and is returned as one.
+      await res.body?.cancel().catch(() => undefined);
+      this.tokens.invalidate();
+      res = await this.post(body, event.correlation_id);
+    }
 
-    const res = await fetch(url.toString(), {
-      method: 'GET',
-      headers,
-    });
+    const parsed = await readJson(res);
 
-    if (!res.ok) {
-      throw new Error(
-        `Notification service error ${res.status}: ${await res.text()}`
+    if (res.ok) {
+      return {
+        ok: true,
+        status: res.status as 200 | 202,
+        body: parsed as { notification_event_id: string; correlation_id: string },
+      };
+    }
+
+    const error =
+      typeof parsed?.error === 'string' && parsed.error !== ''
+        ? parsed.error
+        : `http_${res.status}`;
+    const kind =
+      parsed?.kind === 'caller' || parsed?.kind === 'configuration'
+        ? parsed.kind
+        : undefined;
+    return { ok: false, status: res.status, error, ...(kind ? { kind } : {}) };
+  }
+
+  private async post(body: string, correlationId?: string): Promise<Response> {
+    let token: string;
+    try {
+      token = await this.tokens.token();
+    } catch (err) {
+      throw new NotifyTransportError(
+        `notification service: could not obtain an access token (${describe(err)})`,
+        { cause: err }
       );
     }
 
-    return res.json() as Promise<unknown[]>;
+    try {
+      return await this.fetchImpl(this.url, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          ...(correlationId ? { 'x-correlation-id': correlationId } : {}),
+        },
+        body,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (err) {
+      throw new NotifyTransportError(
+        `notification service: request failed (${describe(err)})`,
+        { cause: err }
+      );
+    }
   }
 }
 
 /**
- * Create a notification client with the given config.
- * Use this in apps, e.g. from env: createNotificationClient({ baseUrl: process.env.NOTIFICATION_SERVICE_ENDPOINT!, keyId: process.env.NOTIFICATION_SERVICE_KEY_ID!, secret: process.env.NOTIFICATION_SERVICE_SECRET! })
+ * Names the failure without echoing anything that could carry a secret: the
+ * error's class (`TimeoutError`, `TypeError`, `TokenSourceError`, …) and, for
+ * a token-endpoint refusal, its status.
  */
-export function createNotificationClient(config: NotificationClientConfig): NotificationClient {
-  return new NotificationClient(
-    config.baseUrl,
-    config.keyId,
-    config.secret
-  );
+function describe(err: unknown): string {
+  if (err instanceof Error) {
+    const status = (err as { status?: unknown }).status;
+    return typeof status === 'number' ? `${err.name}, status ${status}` : err.name;
+  }
+  return 'unknown error';
+}
+
+async function readJson(res: Response): Promise<Record<string, unknown> | null> {
+  try {
+    const value: unknown = await res.json();
+    return value && typeof value === 'object' ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }

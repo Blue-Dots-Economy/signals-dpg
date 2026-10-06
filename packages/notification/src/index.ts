@@ -1,11 +1,28 @@
 export {
-  createNotificationAuthHeaders,
-  type NotificationAuthConfig,
-  type NotificationAuthInput,
-} from './create_auth_headers';
-export type { NotificationPriority, NotifyRequest } from './notification.types';
+  NotifyTransportError,
+  type NotifyAttachment,
+  type NotifyEvent,
+  type NotifyPriority,
+  type NotifyResult,
+} from './notify_event';
 export {
-  NotificationClient,
-  createNotificationClient,
-  type NotificationClientConfig,
-} from './notification_client';
+  createClientCredentialsTokenSource,
+  TokenSourceError,
+  type ClientCredentialsTokenSourceConfig,
+  type TokenSource,
+} from './token_source';
+export { NotificationClient, type NotificationClientConfig } from './notification_client';
+export {
+  ACTION_CANCELLED_BY_RETIRE,
+  ACTION_EVENT_SHAPES,
+  GUARDIAN_OTP_KINDS,
+  ITEM_EVENT,
+  ITEM_ONBOARDED,
+  SUPPORT_REQUEST,
+  USER_WELCOME,
+  actionEvent,
+  guardianEvent,
+  type ActionEventShape,
+  type GuardianOtpKind,
+  type ItemEvent,
+} from './events';
