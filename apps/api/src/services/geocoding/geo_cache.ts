@@ -18,9 +18,16 @@ export function normalizeGeoKey(query: string): string {
 // infeasible: this sits at the shared exact-resolve / paid-API layer used by
 // both public (exact) and private fields.
 // See docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
-/** Redis key for a resolved place: `geo:place:<normalized query>`. */
-export function buildGeoCacheKey(query: string): string {
-  return `geo:place:${normalizeGeoKey(query)}`;
+/**
+ * Redis key for a resolved place: `geo:place:<normalized query>`, or
+ * `geo:place:<COUNTRY>:<normalized query>` when geocoding is restricted to a
+ * country (#785). The country is part of the key so turning the restriction on
+ * does not keep serving a foreign point cached before it existed. Unrestricted
+ * keys are unchanged, so deployments without a country keep their cache.
+ */
+export function buildGeoCacheKey(query: string, country?: string): string {
+  const scope = country ? `${country}:` : '';
+  return `geo:place:${scope}${normalizeGeoKey(query)}`;
 }
 
 /**
@@ -38,8 +45,9 @@ const GEO_NEGATIVE_SENTINEL = '__no_result__';
 export async function getCachedCoordinates(
   query: string,
   loader: () => Promise<Coordinates | null>,
+  country?: string,
 ): Promise<Coordinates | null> {
-  const cacheKey = buildGeoCacheKey(query);
+  const cacheKey = buildGeoCacheKey(query, country);
 
   try {
     const cached = await redis.get(cacheKey);

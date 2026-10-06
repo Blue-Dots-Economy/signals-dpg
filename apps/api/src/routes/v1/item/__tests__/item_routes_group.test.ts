@@ -26,10 +26,17 @@ const {
   class ItemServiceError extends Error {
     statusCode: number;
     errorCode: string;
-    constructor(statusCode: number, errorCode: string, message: string) {
+    details?: Record<string, unknown>;
+    constructor(
+      statusCode: number,
+      errorCode: string,
+      message: string,
+      details?: Record<string, unknown>,
+    ) {
       super(message);
       this.statusCode = statusCode;
       this.errorCode = errorCode;
+      this.details = details;
     }
   }
   class DatabaseError extends Error {
@@ -218,7 +225,8 @@ async function loadRoutes() {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const args = [fakeFastify as any, {} as any] as const;
-  await update_item(...args);
+  // Callback-style plugin: it registers synchronously and signals with `done`.
+  update_item(...args, () => undefined);
   await delete_item(...args);
   await fetch_items(...args);
 }
@@ -421,6 +429,30 @@ describe('update_item_handler', () => {
       message: 'not your item',
     });
     expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("passes an ItemServiceError's details through, e.g. INVALID_ITEM_STATE's per-field map", async () => {
+    updateItemInternal.mockImplementation(async () => {
+      throw new ItemServiceError(
+        400,
+        'INVALID_ITEM_STATE',
+        'Invalid item_state: ncsJobId: is not an allowed field',
+        { fields: { ncsJobId: 'is not an allowed field' } },
+      );
+    });
+
+    const reply = await callHandler(update_item_handler, {
+      params,
+      body,
+      user: { id: 'user-2' },
+    });
+
+    expect(reply.statusCode).toBe(400);
+    expect(reply.body).toEqual({
+      error: 'INVALID_ITEM_STATE',
+      message: 'Invalid item_state: ncsJobId: is not an allowed field',
+      fields: { ncsJobId: 'is not an allowed field' },
+    });
   });
 
   it('maps a PG 22P02 (invalid text representation) to 400 INVALID_INPUT', async () => {

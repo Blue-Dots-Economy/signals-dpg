@@ -32,6 +32,7 @@ export {
   parseNetworkConfigDocument,
   type NetworkConfigDocument,
   validateAgainstJsonSchema,
+  JsonSchemaValidationError,
 } from './network_workflow';
 export {
   parseLocationFields,

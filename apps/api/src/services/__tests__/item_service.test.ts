@@ -29,6 +29,7 @@ const {
   getPiiKey,
   jitterCoordinate,
   geocodeLocationsFromState,
+  findLocationOutsideCountry,
   guardianConsentRequired,
   guardianProfileConsentRow,
   apiConfig,
@@ -58,10 +59,11 @@ const {
   getPiiKey: vi.fn(),
   jitterCoordinate: vi.fn(),
   geocodeLocationsFromState: vi.fn(),
+  findLocationOutsideCountry: vi.fn(),
   guardianConsentRequired: vi.fn(),
   guardianProfileConsentRow: vi.fn(),
   apiConfig: { allow_extra_schema_data: false, max_profiles_per_user: 3 },
-  geocodingConfig: { jitter_min_meters: 100, jitter_max_meters: 250 },
+  geocodingConfig: { jitter_min_meters: 100, jitter_max_meters: 250, country: 'IN' },
 }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -77,7 +79,11 @@ vi.mock('drizzle-orm', () => ({
   }),
 }));
 
-vi.mock('@dpg/schemas', () => ({
+vi.mock('@dpg/schemas', async () => ({
+  // The real class, so `instanceof` in the service sees the same constructor the
+  // tests throw.
+  JsonSchemaValidationError: (await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas/network_workflow'))
+    .JsonSchemaValidationError,
   getDomainItemSchema: (...a: any[]) => getDomainItemSchema(...a),
   getDomainItemTypes: (...a: any[]) => getDomainItemTypes(...a),
   getInstanceCustomItemSchemaUrl: (...a: any[]) => getInstanceCustomItemSchemaUrl(...a),
@@ -164,6 +170,10 @@ vi.mock('@/services/minor', () => ({
 
 vi.mock('@/services/geocoding/resolve_locations_for_create', () => ({
   geocodeLocationsFromState: (...a: any[]) => geocodeLocationsFromState(...a),
+}));
+
+vi.mock('@/services/geocoding/country_boundary', () => ({
+  findLocationOutsideCountry: (...a: any[]) => findLocationOutsideCountry(...a),
 }));
 
 vi.mock('@/services/geocoding/jitter', () => ({
@@ -1198,6 +1208,25 @@ describe('updateItemInternal — state edits', () => {
     );
   });
 
+  it('400 INVALID_ITEM_STATE carries the per-field map from a schema failure', async () => {
+    const { JsonSchemaValidationError } =
+      await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas/network_workflow');
+    validateAgainstJsonSchema.mockImplementation(() => {
+      throw new JsonSchemaValidationError('item_state', { ncsJobId: 'is not an allowed field' }, []);
+    });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { ncsJobId: 'x' } }),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'INVALID_ITEM_STATE',
+      message: 'Invalid item_state: ncsJobId: is not an allowed field',
+      details: { fields: { ncsJobId: 'is not an allowed field' } },
+    });
+  });
+
   it('400 INVALID_ITEM_STATE when the merged state fails validation', async () => {
     validateAgainstJsonSchema.mockImplementation(() => {
       throw new Error('bad name');
@@ -1320,6 +1349,40 @@ describe('updateItemInternal — state edits', () => {
 });
 
 describe('updateItemInternal — location precedence', () => {
+  beforeEach(() => {
+    findLocationOutsideCountry.mockResolvedValue(null);
+  });
+
+  it('rejects explicit client coords outside the country with LOCATION_OUTSIDE_COUNTRY (#789)', async () => {
+    findLocationOutsideCountry.mockResolvedValue({ lat: 23.81, lng: 90.41 });
+    const { exec, queue, rec } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const err = await updateItemInternal(exec, 'i1', 'u1', false, {
+      item_locations: [{ lat: 23.81, lng: 90.41 }],
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ItemServiceError);
+    expect(err).toMatchObject({
+      statusCode: 400,
+      errorCode: 'LOCATION_OUTSIDE_COUNTRY',
+      message: 'Location 23.81, 90.41 is outside the allowed region (IN).',
+    });
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('does not re-check coords echoed back unchanged, so legacy points keep saving (#789)', async () => {
+    const stored = [{ lat: 23.81, lng: 90.41 }];
+    const { exec, queue } = makeExec();
+    queue.push([{ ...existingItem, item_locations: stored }]);
+    queue.push([updatedRow]);
+
+    await updateItemInternal(exec, 'i1', 'u1', false, { item_locations: stored });
+
+    expect(findLocationOutsideCountry).not.toHaveBeenCalled();
+  });
+
   it('explicit client coords win and are jittered for a private field', async () => {
     isLocationFieldPrivate.mockReturnValue(true);
     const { exec, queue, rec } = makeExec();
