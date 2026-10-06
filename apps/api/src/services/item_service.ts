@@ -11,6 +11,7 @@ import {
   isPrimaryAddressBlank,
   splitItemStateByPrivacy,
   validateAgainstJsonSchema,
+  JsonSchemaValidationError,
 } from '@dpg/schemas';
 import { classify_item, DEFAULT_GO_LIVE_GATES, type GoLiveGate } from './items/classifier.js';
 import type { DbOrTx } from '@/services/db_types';
@@ -124,6 +125,21 @@ export class ItemServiceError extends Error {
 }
 
 export type { DbOrTx } from '@/services/db_types';
+
+/**
+ * A schema failure on `item_state` as the 400 every item write returns. Carries
+ * the validator's per-field map as `fields` (merged into the route's error
+ * body), so a caller can point at the offending input without parsing the
+ * message — a bulk CSV column, a form field.
+ */
+function invalidItemStateError(err: unknown): ItemServiceError {
+  return new ItemServiceError(
+    400,
+    'INVALID_ITEM_STATE',
+    err instanceof Error ? err.message : 'Invalid item_state',
+    err instanceof JsonSchemaValidationError ? { fields: err.fields } : undefined,
+  );
+}
 
 /**
  * Rejects caller-supplied coordinates outside the configured country (#789).
@@ -282,11 +298,7 @@ async function resolveSchema(params: {
       ignoredKeys: required,
     });
   } catch (err) {
-    throw new ItemServiceError(
-      400,
-      'INVALID_ITEM_STATE',
-      err instanceof Error ? err.message : 'Invalid item_state'
-    );
+    throw invalidItemStateError(err);
   }
 
   const itemState = splitItemStateByPrivacy(itemSchema, params.submittedItemState);
@@ -835,11 +847,7 @@ async function computeItemStateUpdate(
       ignoredKeys: requiredKeys,
     });
   } catch (err) {
-    throw new ItemServiceError(
-      400,
-      'INVALID_ITEM_STATE',
-      err instanceof Error ? err.message : 'Invalid item_state',
-    );
+    throw invalidItemStateError(err);
   }
 
   // Live latch: a live profile must stay complete — reject an edit that empties

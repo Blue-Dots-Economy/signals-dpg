@@ -104,7 +104,10 @@ export const update_item_handler = async (
     });
   } catch (err) {
     if (err instanceof ItemServiceError) {
+      // `details` (e.g. INVALID_ITEM_STATE's per-field `fields`) spread first so
+      // it can never override the error code or message — as create does.
       return reply.code(err.statusCode).send({
+        ...err.details,
         error: err.errorCode,
         message: err.message,
       });

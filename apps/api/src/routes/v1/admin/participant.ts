@@ -597,12 +597,20 @@ function replyItemWriteFailure(
     fallbackMessage: string;
   },
 ) {
-  const e = err as { statusCode?: number; errorCode?: string };
+  const e = err as {
+    statusCode?: number;
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  };
   const isClientError =
     typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 500;
   const logger = isClientError ? ctx.request.log.warn : ctx.request.log.error;
   logger.call(ctx.request.log, { err, ...opts.logContext }, opts.logMessage);
   return ctx.reply.code(e.statusCode ?? 500).send({
+    // A typed client error's curated extras (e.g. INVALID_ITEM_STATE's per-field
+    // `fields`) — never an untyped error's, whose shape is unknown. Spread first
+    // so it cannot override the error code or message.
+    ...(isClientError && e.errorCode ? e.details : undefined),
     error: e.errorCode ?? opts.fallbackError,
     message: e.errorCode ? (err as Error).message : opts.fallbackMessage,
   });

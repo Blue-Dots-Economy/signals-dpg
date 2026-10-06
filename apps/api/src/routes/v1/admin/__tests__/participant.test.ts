@@ -1694,7 +1694,11 @@ describe('POST /admin/participant', () => {
     lastQueriedUserId = user_id;
     const { create_profile_item } = await import('@/lib/profile_item');
     vi.mocked(create_profile_item).mockRejectedValueOnce(
-      Object.assign(new Error('schema error'), { statusCode: 400, errorCode: 'INVALID_ITEM_STATE' }),
+      Object.assign(new Error('Invalid item_state: mobile_number: Enter a 10-digit mobile number'), {
+        statusCode: 400,
+        errorCode: 'INVALID_ITEM_STATE',
+        details: { fields: { mobile_number: 'Enter a 10-digit mobile number' } },
+      }),
     );
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
     const res = await app.inject({
@@ -1703,6 +1707,12 @@ describe('POST /admin/participant', () => {
       payload: baseBody(),
     });
     expect(res.statusCode).toBe(400);
+    // The per-field map reaches the integrator, so a bulk row can name its column.
+    expect(res.json()).toEqual({
+      error: 'INVALID_ITEM_STATE',
+      message: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+      fields: { mobile_number: 'Enter a 10-digit mobile number' },
+    });
     expect(vi.mocked(publishItemEvent)).not.toHaveBeenCalled();
   });
 

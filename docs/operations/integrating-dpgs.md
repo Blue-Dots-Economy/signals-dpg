@@ -477,6 +477,8 @@ or every entry was `false`/unrecognised).
 | `GET /admin/participant` + minor, caller is `voice`/`network_service` | 400 | `U18_NOT_ALLOWED` | **not additive (#692).** The read now matches the POST: minors onboard through the portal. `aggregator` callers are exempt — their probe never reads consent. Reported only after the disclosure check, so it cannot reveal minor status to a caller not entitled to the user. |
 | `GET /admin/participant` on a multi-network instance with no `?network=` | 400 | `NETWORK_REQUIRED` | **not additive (#692).** Consent documents are per-network, so version comparison needs one named. Single-network instances (all of them today) are unaffected — the served network is used. |
 | `GET /admin/participant` + `?network=` naming an unserved network | 400 | `NETWORK_NOT_SERVED` | **not additive (#692).** A typo (`blue-dot`) previously returned 200 with every flag `false`. Callers that omit `?network=` are unaffected. |
+| `item_state` fails the item schema | 400 | `INVALID_ITEM_STATE` | **additive (#785).** `message` names each failing field (`Invalid item_state: mobile_number: Enter a 10-digit mobile number, ncsJobId: is not an allowed field`), and the body carries the same as `fields: { "<field>": "<message>" }` (nested fields dotted, e.g. `address.city`). A failed `pattern` uses the field's `x-error-message` from `network.json`, else `Please enter a valid <title>.`, and never the raw regex; an `enum` lists its allowed values. Map `fields` keys straight onto your form inputs or CSV columns. |
+| supplied `item_locations` point outside the instance's country | 400 | `LOCATION_OUTSIDE_COUNTRY` | see **Coordinates** above (#789). |
 
 ### `POST /api/v1/admin/participant/decrypt` — error matrix (additions)
 

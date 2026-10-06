@@ -79,7 +79,11 @@ vi.mock('drizzle-orm', () => ({
   }),
 }));
 
-vi.mock('@dpg/schemas', () => ({
+vi.mock('@dpg/schemas', async () => ({
+  // The real class, so `instanceof` in the service sees the same constructor the
+  // tests throw.
+  JsonSchemaValidationError: (await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas/network_workflow'))
+    .JsonSchemaValidationError,
   getDomainItemSchema: (...a: any[]) => getDomainItemSchema(...a),
   getDomainItemTypes: (...a: any[]) => getDomainItemTypes(...a),
   getInstanceCustomItemSchemaUrl: (...a: any[]) => getInstanceCustomItemSchemaUrl(...a),
@@ -1202,6 +1206,25 @@ describe('updateItemInternal — state edits', () => {
       'item_state',
       { allowAdditionalProperties: false, ignoredKeys: ['name'] },
     );
+  });
+
+  it('400 INVALID_ITEM_STATE carries the per-field map from a schema failure', async () => {
+    const { JsonSchemaValidationError } =
+      await vi.importActual<typeof import('@dpg/schemas')>('@dpg/schemas/network_workflow');
+    validateAgainstJsonSchema.mockImplementation(() => {
+      throw new JsonSchemaValidationError('item_state', { ncsJobId: 'is not an allowed field' }, []);
+    });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { ncsJobId: 'x' } }),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      errorCode: 'INVALID_ITEM_STATE',
+      message: 'Invalid item_state: ncsJobId: is not an allowed field',
+      details: { fields: { ncsJobId: 'is not an allowed field' } },
+    });
   });
 
   it('400 INVALID_ITEM_STATE when the merged state fails validation', async () => {
