@@ -41,10 +41,10 @@
   },
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
-    "@types/node": "^26.4.1",
+    "@types/node": "^26.6.3",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.13",
-    "turbo": "^2.10.12",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.5",
     "typescript": "^7.0.2"
   }
 }
