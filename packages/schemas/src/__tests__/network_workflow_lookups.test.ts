@@ -322,6 +322,45 @@ describe('validateAgainstJsonSchema', () => {
     expect(caught?.message).not.toContain('[0-9]');
   });
 
+  it('uses the URL copy for a failed x-uri field without its own x-error-message', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        website: { type: 'string', 'x-uri': true, title: 'Website' },
+        portfolio: { type: 'string', 'x-uri': true, 'x-error-message': 'Link your portfolio.' },
+      },
+    };
+    let caught: JsonSchemaValidationError | undefined;
+    try {
+      validateAgainstJsonSchema(
+        schema,
+        { website: 'not a url', portfolio: 'not a url' },
+        'item_state',
+      );
+    } catch (err) {
+      caught = err as JsonSchemaValidationError;
+    }
+    expect(caught?.fields).toEqual({
+      website: 'Please enter a valid web address.',
+      portfolio: 'Link your portfolio.',
+    });
+  });
+
+  it('keeps the first message when one field fails more than once', () => {
+    // ajv reports minLength before pattern for the same string.
+    const schema = {
+      type: 'object',
+      properties: { pin: { type: 'string', minLength: 6, pattern: '^[0-9]+$', title: 'PIN' } },
+    };
+    let caught: JsonSchemaValidationError | undefined;
+    try {
+      validateAgainstJsonSchema(schema, { pin: 'ab' }, 'item_state');
+    } catch (err) {
+      caught = err as JsonSchemaValidationError;
+    }
+    expect(caught?.fields).toEqual({ pin: 'must NOT have fewer than 6 characters' });
+  });
+
   it('lists the allowed values for a failed enum', () => {
     const schema = {
       type: 'object',
