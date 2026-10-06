@@ -10,7 +10,7 @@ import {
  * §11 integration test — CREATE seam (POST /api/v1/network/action/perform).
  *
  * Proves the notification dispatch can't break the action:
- *   (a) the action returns 201 even when `nc.notify` rejects, and
+ *   (a) the action returns 201 even when `nc.send` fails, and
  *   (b) `insertActionEvent` is called exactly once (no double insert from
  *       the dispatch path).
  *
@@ -19,10 +19,12 @@ import {
  */
 
 // Shared with vi.mock factories (hoisted above top-level consts).
-const { BASE_URL, notifySpy, insertActionEventSpy } = vi.hoisted(() => ({
+const { BASE_URL, sendSpy, insertActionEventSpy } = vi.hoisted(() => ({
   BASE_URL: 'http://source.local',
-  notifySpy: vi.fn(async () => {
-    throw new Error('NS down');
+  sendSpy: vi.fn(async (_event: unknown): Promise<unknown> => {
+    // A transport failure (NS unreachable): the client throws this type.
+    const { NotifyTransportError } = await import('@dpg/notification');
+    throw new NotifyTransportError('fetch failed: TypeError');
   }),
   insertActionEventSpy: vi.fn(async () => ({
     event_id: 'evt_1',
@@ -34,7 +36,7 @@ const { BASE_URL, notifySpy, insertActionEventSpy } = vi.hoisted(() => ({
 }));
 
 // Notifications are CONFIGURED here (unlike the other seam tests) so dispatch
-// actually runs and reaches the (throwing) notify client.
+// actually runs and reaches the (failing) send.
 // The route is peer-guarded (AUTH-VULN-05). These cases cover the notify /
 // match-score seams, not auth, so let every request through — the guard's own
 // wiring is asserted in the network route-registration test.
@@ -56,20 +58,19 @@ vi.mock('@/config', () => ({
   },
   getCurrentApiBaseUrl: () => BASE_URL,
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
+  // No NOTIFICATION_FROM_EMAIL: the sender identity is NS deployment config.
   notification: {
-    NOTIFICATION_FROM_EMAIL: 'from@test.local',
-    NOTIFICATION_REPLY_TO: 'reply@test.local',
     FRONTEND_BASE_URL: 'http://fe.test',
   },
   uiHostBindings: { byDomain: {}, warnings: [] },
 }));
 
-// Throwing notification client — the whole point of the test.
+// Failing notification client — the whole point of the test.
 vi.mock('@/utils/notificationClient', () => ({
-  getNotificationClient: () => ({ notify: notifySpy }),
+  getNotificationClient: () => ({ send: sendSpy }),
 }));
 
-// Recipient resolution stubbed so dispatch reaches notify (not skipped).
+// Recipient resolution stubbed so dispatch reaches send (not skipped).
 vi.mock('@/notifications/resolve_owner', () => ({
   resolveOwnerEmail: vi.fn(async () => 'recipient@test.local'),
   resolveProviderServiceName: vi.fn(async () => 'Acme Services'),
@@ -203,11 +204,11 @@ const buildApp = (): FastifyInstance => {
 
 describe('POST /api/v1/network/action/perform — notification fire-and-forget', () => {
   beforeEach(() => {
-    notifySpy.mockClear();
+    sendSpy.mockClear();
     insertActionEventSpy.mockClear();
   });
 
-  it('returns 201 even when nc.notify rejects, and inserts the event exactly once', async () => {
+  it('returns 201 even when nc.send fails, and inserts the event exactly once', async () => {
     const res = await buildApp().inject({
       method: 'POST',
       url: '/action/perform',
@@ -221,8 +222,30 @@ describe('POST /api/v1/network/action/perform — notification fire-and-forget',
     // (b) Exactly one insertActionEvent — dispatch must not insert again.
     expect(insertActionEventSpy).toHaveBeenCalledTimes(1);
 
-    // The dispatch ran and reached the (throwing) notify; the rejection is
-    // swallowed by the per-plan catch and never surfaces to the route.
-    await vi.waitFor(() => expect(notifySpy).toHaveBeenCalled());
+    // The dispatch ran and sent one event per local side, with the true action
+    // type, each recipient's own domain, and no rendered copy.
+    await vi.waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(2));
+    const events = sendSpy.mock.calls.map(([e]) => e as Record<string, unknown>);
+    for (const e of events) {
+      expect(Object.keys(e).sort()).toEqual(
+        ['domain', 'event_type', 'idempotency_key', 'priority', 'to', 'variables'],
+      );
+    }
+    expect(events.map((e) => [e.event_type, e.domain]).sort()).toEqual([
+      ['action.connect.inbound_request', 'provider'],
+      ['action.connect.outbound_request', 'seeker'],
+    ]);
+  });
+
+  it('returns 201 when NS answers 422 (a configuration error is logged, never surfaced)', async () => {
+    sendSpy.mockResolvedValue({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+    const res = await buildApp().inject({
+      method: 'POST',
+      url: '/action/perform',
+      payload: VALID_BODY,
+    });
+
+    expect(res.statusCode).toBe(201);
+    await vi.waitFor(() => expect(sendSpy).toHaveBeenCalled());
   });
 });

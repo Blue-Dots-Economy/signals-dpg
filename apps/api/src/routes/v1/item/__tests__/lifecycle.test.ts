@@ -671,11 +671,7 @@ describe('item_lifecycle_handler — retire (terminal & destructive)', () => {
       },
       log,
     );
-    expect(dispatchRetireCancelNotifications).toHaveBeenCalledWith(
-      counterparties,
-      'blue_dot',
-      log,
-    );
+    expect(dispatchRetireCancelNotifications).toHaveBeenCalledWith(counterparties, log);
     // Counterparties are internal plumbing, never part of the response body.
     expect(reply.body).not.toHaveProperty('counterparties');
   });

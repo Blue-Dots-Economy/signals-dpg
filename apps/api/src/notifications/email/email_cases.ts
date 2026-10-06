@@ -187,14 +187,6 @@ export function getEmailCase(caseId: string): EmailCaseDef {
   return def;
 }
 
-export function actionCaseId(
-  group: 'connect' | 'apply',
-  role: 'seeker' | 'provider',
-  shape: string,
-): string {
-  return `action.${group}.${role}.${shape.toLowerCase()}`;
-}
-
 export function requiredMessageKeys(): string[] {
   const keys: string[] = [];
   for (const def of CASES.values()) {

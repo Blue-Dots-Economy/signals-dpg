@@ -1,35 +1,33 @@
 import type { FastifyBaseLogger } from 'fastify';
+import { ACTION_CANCELLED_BY_RETIRE } from '@dpg/notification';
 
 import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
-import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions';
+import { resolveNotifierConfig } from './notify_actions';
 import { resolveOwnerEmail } from './resolve_owner';
+import { sendBestEffort } from './send_event';
 
 /**
- * Fire-and-forget notifier for the retire → counterparty email (#418).
+ * Fire-and-forget notifier for the retire → counterparty notice (#418).
  *
  * Called from the lifecycle route AFTER the retire transaction commits, with
  * the counterparties whose open connections `cancelItemConnections` ended. For
- * each, resolves the (local) owner email and sends one branded email using the
- * dedicated `retire.cancel` email case. Reuses the action-notifier config,
- * brand resolution, owner-email lookup, and the central email sender.
+ * each, resolves the (local) owner email and sends one
+ * `action.cancelled_by_retire` event, with the counterparty's own domain, to
+ * the notification service. Reuses the action-notifier config and the
+ * owner-email lookup.
  *
  * Never throws and never blocks the route (mirrors `dispatchActionNotifications`).
  * No-op when notifications aren't configured. A counterparty with no local user
  * (owner-less, or hosted on another instance) resolves to no email and is
  * skipped — this is the v1 "local counterparties only" rule.
- *
- * @param brandNetwork the retired item's network id, for the brand sign-off.
  */
 export async function dispatchRetireCancelNotifications(
   counterparties: readonly RetireCancelledCounterparty[],
-  brandNetwork: string,
   log: FastifyBaseLogger,
 ): Promise<void> {
   if (counterparties.length === 0) return;
   const config = resolveNotifierConfig();
   if (!config) return;
-
-  const brandName = await resolveNetworkBrandName(brandNetwork);
 
   // Dedupe: one notice per counterparty per connection.
   const seen = new Set<string>();
@@ -44,9 +42,9 @@ export async function dispatchRetireCancelNotifications(
       const email = await resolveOwnerEmail(cp.ownerUserId);
       if (!email) continue;
 
-      // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
-      // unresolved URL ships an `<a href="">` whose button does nothing —
-      // guard the same dead-`href` case as the action dispatcher (#569).
+      // The counterparty's own domain — this mail goes to THEM, so it links
+      // to their portal, not the retiring owner's (#569). A missing URL would
+      // leave the only call to action broken, so skip this counterparty.
       const ctaUrl = config.resolveCtaUrl(cp.domain);
       if (!ctaUrl) {
         log.warn(
@@ -56,17 +54,19 @@ export async function dispatchRetireCancelNotifications(
         continue;
       }
 
-      await config.sender.dispatchEmail({
-        caseId: 'retire.cancel',
-        to: email,
-        fromName: brandName,
-        network: cp.network,
-        // The counterparty's own domain — this mail goes to THEM, so it links
-        // to their portal, not the retiring owner's (#569).
-        ctaUrl,
-        dedupeId: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
-        log: (message, meta) => log.warn(meta ?? {}, message),
-      });
+      await sendBestEffort(
+        config.send,
+        {
+          event_type: ACTION_CANCELLED_BY_RETIRE,
+          domain: cp.domain,
+          to: { email },
+          variables: { ctaUrl, teamName: config.teamName },
+          priority: 'normal',
+          idempotency_key: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
+        },
+        (message, meta) => log.warn(meta, message),
+        { actionId: cp.actionId },
+      );
     } catch (err) {
       log.warn(
         { err, actionId: cp.actionId },

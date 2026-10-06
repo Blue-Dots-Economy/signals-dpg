@@ -300,11 +300,7 @@ const item_lifecycle_handler = async (
       // retire (#418). Fire-and-forget, AFTER commit — never blocks or fails
       // the retire. No-op when notifications are unconfigured or a counterparty
       // has no local email.
-      void dispatchRetireCancelNotifications(
-        result.counterparties,
-        result.item_network,
-        request.log,
-      );
+      void dispatchRetireCancelNotifications(result.counterparties, request.log);
     }
 
     // Owner-facing pause/retire email (#531/#534). Fire-and-forget after commit.

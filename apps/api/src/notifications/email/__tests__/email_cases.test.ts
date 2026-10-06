@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   EMAIL_CASE_IDS,
-  actionCaseId,
   getEmailCase,
   requiredMessageKeys,
 } from '../email_cases';
@@ -41,10 +40,7 @@ describe('email case registry', () => {
     expect(EMAIL_CASE_IDS).toHaveLength(39);
   });
 
-  it('maps plan fields to an action case id', () => {
-    expect(actionCaseId('connect', 'seeker', 'INBOUND_REQUEST')).toBe(
-      'action.connect.seeker.inbound_request',
-    );
+  it('keys an action case by its id', () => {
     expect(getEmailCase('action.connect.seeker.inbound_request').keys.subject).toBe(
       'action.connect.seeker.inbound_request.subject',
     );
