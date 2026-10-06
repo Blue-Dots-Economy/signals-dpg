@@ -167,6 +167,7 @@ describe('DirectDispatcher', () => {
     expect(calls).toHaveLength(2);
     expect(deps.log).toHaveBeenCalledWith('ns_rejected', {
       event_type: 'action.connect.inbound_request',
+      domain: 'service_provider',
       status: 422,
       error: 'no_policy',
       kind: 'configuration',

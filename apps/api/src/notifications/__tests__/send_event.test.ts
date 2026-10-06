@@ -38,6 +38,7 @@ describe('sendBestEffort', () => {
     await expect(sendBestEffort(send, EVENT, log, { op: 'create' })).resolves.toBe(false);
     expect(log).toHaveBeenCalledWith('ns_rejected', {
       event_type: 'item.created',
+      domain: 'seeker',
       status: 422,
       error: 'missing_variable',
       kind: 'caller',
@@ -54,6 +55,7 @@ describe('sendBestEffort', () => {
     await expect(sendBestEffort(send, EVENT, log)).resolves.toBe(false);
     expect(log).toHaveBeenCalledWith('ns_unreachable', {
       event_type: 'item.created',
+      domain: 'seeker',
       error: 'fetch failed: TypeError',
     });
   });

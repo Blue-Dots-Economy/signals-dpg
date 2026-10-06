@@ -15,7 +15,8 @@ export type SendEvent = (event: NotifyEvent) => Promise<NotifyResult>;
  * never fails the action that triggered it. Any other error is a defect and is
  * rethrown for the caller's own catch-all.
  *
- * The log carries the event type, the outcome and the caller's `meta` only —
+ * The log carries the event type, its domain, the outcome and the caller's
+ * `meta` only —
  * never the recipient or a variable value.
  */
 export async function sendBestEffort(
@@ -29,7 +30,12 @@ export async function sendBestEffort(
     result = await send(event);
   } catch (err) {
     if (err instanceof NotifyTransportError) {
-      log('ns_unreachable', { event_type: event.event_type, error: err.message, ...meta });
+      log('ns_unreachable', {
+        event_type: event.event_type,
+        domain: event.domain,
+        error: err.message,
+        ...meta,
+      });
       return false;
     }
     throw err;
@@ -37,6 +43,7 @@ export async function sendBestEffort(
   if (result.ok) return true;
   log('ns_rejected', {
     event_type: event.event_type,
+    domain: event.domain,
     status: result.status,
     error: result.error,
     kind: result.kind,

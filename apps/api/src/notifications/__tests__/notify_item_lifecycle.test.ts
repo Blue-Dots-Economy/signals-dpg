@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { itemLifecycleEventType } from '../notify_item_lifecycle';
+import { itemLifecycleEventType, itemLifecycleIdempotencyKey } from '../notify_item_lifecycle';
 
 /**
  * Event selection for item-lifecycle notifications. Signals picks only the
@@ -48,5 +48,49 @@ describe('itemLifecycleEventType', () => {
 
   it('returns null for an unknown op', () => {
     expect(itemLifecycleEventType({ ...base, op: 'archive' as never })).toBeNull();
+  });
+});
+
+/**
+ * NS keeps normal-priority idempotency keys for 90 days (R12). Events that
+ * repeat for the same item (update, pause) carry the UTC hour, so each hour
+ * may notify once — today's behaviour under the legacy 1-hour dedupe.
+ */
+describe('itemLifecycleIdempotencyKey', () => {
+  const HOUR = 3_600_000;
+  const T = Date.UTC(2026, 9, 6, 10, 15); // 10:15 UTC
+  const OWNER = '11111111-1111-4111-8111-111111111111';
+  const ITEM = '22222222-2222-4222-8222-222222222222';
+  const bucket = Math.floor(T / HOUR);
+
+  it('buckets item.updated and item.paused by UTC hour', () => {
+    for (const ev of ['item.updated', 'item.paused']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T)).toBe(
+        `item_lifecycle:${ev}:${OWNER}:${ITEM}:${bucket}`,
+      );
+      // Same hour → same key (deduped); next hour → a new key (sent).
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T + 40 * 60_000)).toBe(
+        itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T),
+      );
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T + HOUR)).not.toBe(
+        itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T),
+      );
+    }
+  });
+
+  it('leaves one-shot events unbucketed', () => {
+    for (const ev of ['item.created', 'item.created_draft', 'item.retired']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T)).toBe(`item_lifecycle:${ev}:${OWNER}:${ITEM}`);
+    }
+    expect(itemLifecycleIdempotencyKey('item.onboarded_by_aggregator', OWNER, undefined, T)).toBe(
+      `item_lifecycle:item.onboarded_by_aggregator:${OWNER}`,
+    );
+  });
+
+  it('stays within the 128-character NS key limit in the worst case', () => {
+    const farFuture = Date.UTC(9999, 11, 31, 23, 59);
+    for (const ev of ['item.created', 'item.created_draft', 'item.updated', 'item.paused', 'item.retired', 'item.onboarded_by_aggregator']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, farFuture).length).toBeLessThanOrEqual(128);
+    }
   });
 });

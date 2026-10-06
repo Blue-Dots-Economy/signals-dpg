@@ -87,6 +87,34 @@ export function itemLifecycleEventType(event: ItemLifecycleEvent): string | null
   }
 }
 
+const HOUR_MS = 3_600_000;
+
+/** Events that can happen to the same item again and again. */
+const REPEATABLE_ITEM_EVENTS: ReadonlySet<string> = new Set([ITEM_EVENT.updated, ITEM_EVENT.paused]);
+
+/**
+ * The `idempotency_key` for an item-lifecycle event: per (event, owner, item),
+ * so this send is never deduped against a different email to the same
+ * recipient (#592 Blocker 1).
+ *
+ * NS keeps normal-priority keys for 90 days (R12), so an event that can recur
+ * for the same item (`item.updated`, `item.paused`) also carries the UTC hour:
+ * at most one such email per item per hour, as under the legacy 1-hour
+ * dedupe. One-shot events (created, created_draft, retired, onboarded) keep a
+ * plain key. Worst case (two UUIDs plus an hour bucket) is well under NS's
+ * 128-character limit.
+ */
+export function itemLifecycleIdempotencyKey(
+  eventType: string,
+  ownerId: string,
+  itemId: string | undefined,
+  now: number = Date.now(),
+): string {
+  const itemSegment = itemId ? `:${itemId}` : '';
+  const hourSegment = REPEATABLE_ITEM_EVENTS.has(eventType) ? `:${Math.floor(now / HOUR_MS)}` : '';
+  return `item_lifecycle:${eventType}:${ownerId}${itemSegment}${hourSegment}`;
+}
+
 /**
  * Fire-and-forget entry point for the item-lifecycle route seams (create_item,
  * update_item, lifecycle pause/retire, admin participant onboarding). Resolves
@@ -150,10 +178,6 @@ export async function dispatchItemLifecycleNotification(
       variables = { name: name || 'there', ctaUrl, teamName: config.teamName };
     }
 
-    // Per (event, owner, item) key so this send is not deduped against a
-    // different email to the same recipient (#592 Blocker 1). The onboarding
-    // notice has no itemId but is already unique per owner.
-    const itemSegment = event.itemId ? `:${event.itemId}` : '';
     await sendBestEffort(
       config.send,
       {
@@ -162,7 +186,8 @@ export async function dispatchItemLifecycleNotification(
         to: { email },
         variables,
         priority: 'normal',
-        idempotency_key: `item_lifecycle:${eventType}:${event.ownerId}${itemSegment}`,
+        // The onboarding notice has no itemId but is already unique per owner.
+        idempotency_key: itemLifecycleIdempotencyKey(eventType, event.ownerId, event.itemId),
       },
       (message, meta) => log.warn(meta, message),
       { op: event.op, network: event.network, ownerId: event.ownerId },

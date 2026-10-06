@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { NotifyEvent, NotifyResult } from '@dpg/notification';
 
 // Mock the dispatcher's external deps so we exercise its own logic (config gate,
@@ -48,6 +48,10 @@ function configured() {
 const sentEvent = (): NotifyEvent => send.mock.calls[0]![0] as NotifyEvent;
 
 describe('dispatchItemLifecycleNotification', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     send.mockResolvedValue(ACCEPTED);
@@ -119,6 +123,42 @@ describe('dispatchItemLifecycleNotification', () => {
       log,
     );
     expect(sentEvent().idempotency_key).toBe('item_lifecycle:item.created:u1:item-9');
+  });
+
+  it('gives two updates in different hours two keys, and two in the same hour one key (R12)', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com' });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const ev = { op: 'update', ownerId: 'u1', itemId: 'item-9', domain: 'seeker', network: 'blue_dot' } as const;
+
+    vi.setSystemTime(Date.UTC(2026, 9, 6, 10, 5));
+    await dispatchItemLifecycleNotification(ev, log);
+    vi.setSystemTime(Date.UTC(2026, 9, 6, 10, 55));
+    await dispatchItemLifecycleNotification(ev, log);
+    vi.setSystemTime(Date.UTC(2026, 9, 6, 11, 5));
+    await dispatchItemLifecycleNotification(ev, log);
+
+    const keys = (send.mock.calls as [NotifyEvent][]).map(([e]) => e.idempotency_key);
+    const hour10 = Math.floor(Date.UTC(2026, 9, 6, 10) / 3_600_000);
+    expect(keys).toEqual([
+      `item_lifecycle:item.updated:u1:item-9:${hour10}`,
+      `item_lifecycle:item.updated:u1:item-9:${hour10}`,
+      `item_lifecycle:item.updated:u1:item-9:${hour10 + 1}`,
+    ]);
+  });
+
+  it('buckets a pause by hour too', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com' });
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.UTC(2026, 9, 6, 10, 5));
+    await dispatchItemLifecycleNotification(
+      { op: 'pause', ownerId: 'u1', itemId: 'item-9', domain: 'seeker', network: 'blue_dot' },
+      log,
+    );
+    expect(sentEvent().idempotency_key).toBe(
+      `item_lifecycle:item.paused:u1:item-9:${Math.floor(Date.UTC(2026, 9, 6, 10) / 3_600_000)}`,
+    );
   });
 
   it('sends item.updated with the real domain for a service_provider update', async () => {
@@ -214,6 +254,7 @@ describe('dispatchItemLifecycleNotification', () => {
     expect(warn).toHaveBeenCalledWith(
       {
         event_type: 'item.updated',
+        domain: 'seeker',
         status: 422,
         error: 'missing_variable',
         kind: 'caller',
