@@ -17,8 +17,10 @@ Copy is edited in **notification-service, through its admin API**:
   the templates an event is delivered with.
 - `/v1/admin/export` — the live catalogue, for review or for committing back.
 
-A change published there takes effect on the next send. Signals needs no
-redeploy, and no Signals config changes.
+A change published there reaches every NS pod within its resolve cache TTL
+(`NS_RESOLVE_CACHE_TTL_MS`, default 60 s); the pod that served the admin call
+uses it on the next send. Signals needs no redeploy, and no Signals config
+changes.
 
 ## Where the starting catalogue comes from
 
@@ -57,13 +59,14 @@ Signals needs two things to send notifications:
 
 When the endpoint or the client secret is unset, best-effort notifications are
 skipped. Support submissions answer `503 SUPPORT_NOT_CONFIGURED`, and guardian
-OTP answers `503 NO_OTP_PROVIDER`.
+OTP is unavailable as described in `docs/operations/guardian-otp-templates.md`.
 
 These Signals settings feed event variables:
 
 - **`INSTANCE_NAME`** — the "Team \<name\>" sign-off (`teamName`) in action,
-  retire, item-lifecycle, guardian OTP, support and welcome emails, and the app
-  name in welcome. Set it to the operating org, for example `EkStep` on Blue
+  retire, item-lifecycle, support and welcome emails and in the guardian OTP
+  emails whose template uses it (see
+  `docs/operations/guardian-otp-templates.md`), and the app name in welcome. Set it to the operating org, for example `EkStep` on Blue
   Dot or `ALIMCO` on Purple Dot.
 - **`FRONTEND_BASE_URL` / `UI_HOST_BINDINGS`** — the login link (`ctaUrl`) each
   recipient gets, resolved to their own portal.
@@ -76,5 +79,11 @@ These Signals settings feed event variables:
 - **SMS OTP template** — guardian OTP policies name the SMS `login_otp`
   template, which NS seeds from its vendor settings
   (`SMS_LOGIN_OTP_TEMPLATE_ID` for msg91; `PINNACLE_LOGIN_OTP_TEMPLATE_ID` with
-  `SMS_LOGIN_OTP_BODY` for pinnacle). Set it on every cluster that sends
-  guardian OTP by SMS.
+  `SMS_LOGIN_OTP_BODY` for pinnacle). NS publishes a seeded policy only when
+  every template it names is active, and seeds each catalogue entry once, so
+  configure `login_otp` **before the first NS boot that loads `NS_SEED_FILE`**.
+  On a cluster where it was configured later, the guardian OTP policies are
+  drafts: publish them through `/v1/admin/policies`
+  (`POST /v1/admin/policies/:id/publish`). This applies to every cluster that
+  sends guardian OTP, by email or SMS, since each guardian policy carries both
+  channels.

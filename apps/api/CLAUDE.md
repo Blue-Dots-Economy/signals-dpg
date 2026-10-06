@@ -75,7 +75,8 @@ skip. The senders:
   `support.request` event straight from the route handler
   (`routes/v1/support/submit_support.ts`, no `dispatcher.ts` in between):
   the first `SUPPORT_EMAIL` address is `to`, the rest plus `SUPPORT_CC_EMAIL`
-  go in `cc` (de-duplicated, at most 10), `reply_to` is the submitter's email,
+  go in `cc` (de-duplicated, at most 10), `reply_to` is the submitter's email
+  (omitted when the submitter gave none),
   attachments ride beside the `variables` (never in them), and the
   `idempotency_key` is the per-submission reference
   (`src/support/build_support_email.ts`'s `generateSupportReference`). It

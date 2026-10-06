@@ -48,9 +48,10 @@ export interface WelcomeLog {
 }
 
 /**
- * The welcome's idempotency key. Per user, not per occurrence: a welcome is
- * sent once in an account's life, so a repeat (a retried provisioning, a race
- * between two first logins) collapses into the first send.
+ * The welcome's idempotency key. Per user, not per occurrence. The welcome is
+ * an urgent send, so NS holds the key in its 15-minute urgent idempotency
+ * window: a repeat within that window (a retried provisioning, a race between
+ * two first logins) collapses into the first send.
  */
 export function welcomeIdempotencyKey(userId: string): string {
   return `${USER_WELCOME}:${userId}`;

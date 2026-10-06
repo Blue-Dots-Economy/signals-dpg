@@ -16,8 +16,7 @@ export type SendEvent = (event: NotifyEvent) => Promise<NotifyResult>;
  * rethrown for the caller's own catch-all.
  *
  * The log carries the event type, its domain, the outcome and the caller's
- * `meta` only —
- * never the recipient or a variable value.
+ * `meta` only — never the recipient or a variable value.
  */
 export async function sendBestEffort(
   send: SendEvent,

@@ -403,11 +403,14 @@ describe('login_otp dependency note (R10)', () => {
     );
   });
 
-  it('names both vendor settings, and is absent when no directory needs it', () => {
+  it('names both vendor settings, the first-boot requirement and the recovery, and is absent when no directory needs it', () => {
     const note = loginOtpNote(['blue_dot', 'purple_dot/alimco']);
     expect(note).toContain('blue_dot, purple_dot/alimco');
     expect(note).toContain('SMS_LOGIN_OTP_TEMPLATE_ID (msg91)');
     expect(note).toContain('PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle)');
+    expect(note).toMatch(/before the first\s+notification-service boot that loads NS_SEED_FILE/);
+    expect(note).toContain('publish the guardian policy drafts through /v1/admin/policies');
+    expect(note).toContain('every cluster that sends guardian OTP, by email or SMS');
     expect(loginOtpNote([])).toBeNull();
   });
 
@@ -426,6 +429,9 @@ describe('login_otp dependency note (R10)', () => {
         'SMS_LOGIN_OTP_TEMPLATE_ID (msg91), or PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle)',
       );
       expect(out).toMatch(/note: the guardian OTP policies in [^\n]*blue_dot/);
+      expect(out).toMatch(/before the first\s+notification-service boot that loads NS_SEED_FILE/);
+      expect(out).toContain('publish the guardian policy drafts through /v1/admin/policies');
+      expect(out).toContain('every cluster that sends guardian OTP, by email or SMS');
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { NotificationClient } from '../notification_client';
 import { NotifyTransportError, type NotifyEvent } from '../notify_event';
-import type { TokenSource } from '../token_source';
+import { createClientCredentialsTokenSource, type TokenSource } from '../token_source';
 
 const TOKEN = 'super-secret-bearer-token';
 const OTP = '493817';
@@ -221,6 +221,47 @@ describe('NotificationClient.send — transport failures', () => {
     const assertion = expect(pending).rejects.toThrow(NotifyTransportError);
     await vi.advanceTimersByTimeAsync(5_000);
     await assertion;
+  });
+
+  it('a token fetch past its timeout rejects with NotifyTransportError, without calling the service', async () => {
+    vi.useFakeTimers();
+    // Same fake-clock backing for AbortSignal.timeout as the request-timeout test.
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms: number) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException('The operation timed out.', 'TimeoutError')),
+        ms
+      );
+      return controller.signal;
+    });
+    // The token endpoint never answers on its own; only the abort signal ends it.
+    const tokenFetch = vi.fn<FetchFn>(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(init.signal!.reason));
+        })
+    );
+    const tokens = createClientCredentialsTokenSource({
+      tokenUrl: 'http://keycloak:8080/realms/bluedots/protocol/openid-connect/token',
+      clientId: 'signals-api',
+      clientSecret: 's3cret',
+      fetchImpl: tokenFetch as unknown as typeof fetch,
+      timeoutMs: 2_000,
+    });
+    const fetchImpl = vi.fn<FetchFn>(async () => json(ACCEPTED, 202));
+    const client = new NotificationClient({
+      baseUrl: 'http://ns:3000',
+      tokens,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const pending = client.send(EVENT);
+    const assertion = expect(pending).rejects.toThrow(NotifyTransportError);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await assertion;
+    expect(tokenFetch).toHaveBeenCalledTimes(1);
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(2_000);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('defaults the timeout to 10 s', async () => {

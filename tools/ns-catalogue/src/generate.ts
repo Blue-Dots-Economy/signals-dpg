@@ -62,16 +62,24 @@ export function loginOtpPolicyEvents(catalogue: NsCatalogue): string[] {
 
 /**
  * The deployment note the CLI prints for catalogues whose policies name the SMS
- * `login_otp` template (R10): NS publishes those policies once its login_otp SMS
- * template (id, plus body text for pinnacle) is configured for the active vendor. `null` when no directory needs it.
+ * `login_otp` template (R10, R15). NS publishes a seeded policy only when every
+ * template it names is active, and seeds each catalogue policy once: the login_otp
+ * SMS template (id, plus body text for pinnacle) must be configured for the
+ * active vendor before the first NS boot that loads `NS_SEED_FILE`. A cluster
+ * configured later publishes the guardian policy drafts through
+ * `/v1/admin/policies`. This holds for every cluster that sends guardian OTP,
+ * by email or SMS, because the same policies carry both channels. `null` when
+ * no directory needs it.
  */
 export function loginOtpNote(dirs: string[]): string | null {
   if (dirs.length === 0) return null;
   return [
     `note: the guardian OTP policies in ${dirs.join(', ')} name the SMS template '${SMS_OTP_TEMPLATE_KEY}'.`,
-    `  NS publishes them once its ${SMS_OTP_TEMPLATE_KEY} SMS template is configured for the active SMS vendor:`,
+    `  Configure the ${SMS_OTP_TEMPLATE_KEY} SMS template for the active SMS vendor before the first`,
+    '  notification-service boot that loads NS_SEED_FILE:',
     '  SMS_LOGIN_OTP_TEMPLATE_ID (msg91), or PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle).',
-    '  Set it on every cluster that loads these catalogues.',
+    '  On a cluster where it was configured later, publish the guardian policy drafts through /v1/admin/policies.',
+    '  This applies to every cluster that sends guardian OTP, by email or SMS.',
   ].join('\n');
 }
 

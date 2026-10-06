@@ -21,9 +21,16 @@ The policy for each event is `first_available`: the email template
 - **Email** — the per-scenario copy below is an NS template, edited through the
   NS admin API (see `docs/operations/email-copy-overrides.md`).
 - **SMS** — the same DLT-registered `login_otp` template the login OTP uses,
-  carrying only the code in `message`. NS seeds it from its vendor settings, so
-  each cluster that sends guardian OTP by SMS sets it there. The scenario
-  context is conveyed in the email; the SMS is just the code.
+  carrying only the code in `message`. NS seeds it from its vendor settings.
+  The scenario context is conveyed in the email; the SMS is just the code.
+
+Every guardian policy names both templates, so NS publishes it only once
+`login_otp` is active. Every cluster that sends guardian OTP, by email or SMS,
+configures `login_otp` in NS (`SMS_LOGIN_OTP_TEMPLATE_ID` for msg91;
+`PINNACLE_LOGIN_OTP_TEMPLATE_ID` with `SMS_LOGIN_OTP_BODY` for pinnacle)
+**before the first NS boot that loads `NS_SEED_FILE`**. On a cluster where it
+was configured later, publish the guardian policy drafts through
+`/v1/admin/policies` (`POST /v1/admin/policies/:id/publish`).
 
 Common:
 
@@ -33,11 +40,18 @@ Common:
 - Variables are **always filled**: when the guardian name or provider title
   cannot be resolved, Signals sends `parentName` `there`, `domain` the
   `teamName`, and `org` `the organisation`.
-- The "Team {name}" sign-off is `teamName`, from `INSTANCE_NAME`. The From
-  address is NS deployment config.
+- The "Team {name}" sign-off comes from the network's copy. In blue_dot and
+  purple_dot (and their brands) the `guardian.account`, `guardian.profile` and
+  `guardian.action` templates carry fixed text (`Team EkStep`, `Team ALIMCO`);
+  `guardian.action_bulk`, and every guardian template in orange_dot and
+  yellow_dot, use the `teamName` variable, from `INSTANCE_NAME`.
+  `otp.generic` has no sign-off. The From address is NS deployment config.
 - An NS refusal or transport failure is logged (event type, status, NS error
-  code; never the OTP or the contact) and the route answers
-  `503 NO_OTP_PROVIDER`.
+  code; never the OTP or the contact). The consent routes answer `503`
+  (`NO_OTP_PROVIDER` on `/u18/signup/guardian`, `OTP_PROVIDER_UNAVAILABLE` on
+  the other guardian consent routes). Action routes, single or bulk, report it
+  per item as `OTP_PROVIDER_UNAVAILABLE` (`guardianGateFailure` in
+  `apps/api/src/services/guardian_action_gate.ts`).
 
 ## Copy (from #294)
 
