@@ -1,0 +1,30 @@
+{
+  "code": "123456",
+  "rendered": {
+    "Team ALIMCO": {
+      "subject": "OTP to verify access",
+      "html": "<html lang=\"en\" dir=\"ltr\">\n<body>\n<p>Hi!</p><p>Use the following One-Time Password (OTP) to sign in:</p><p><b>123456</b></p><p>This OTP is valid for 5 mins. Do not share it with anyone.</p><p>- Team ALIMCO</p>\n</body>\n</html>\n",
+      "text": "Hi!\n\nUse the following One-Time Password (OTP) to sign in:\n\n123456\n\nThis OTP is valid for 5 mins. Do not share it with anyone.\n\n- Team ALIMCO\n"
+    },
+    "Team Blue Dots": {
+      "subject": "OTP to verify access",
+      "html": "<html lang=\"en\" dir=\"ltr\">\n<body>\n<p>Hi!</p><p>Use the following One-Time Password (OTP) to sign in:</p><p><b>123456</b></p><p>This OTP is valid for 5 mins. Do not share it with anyone.</p><p>- Team Blue Dots</p>\n</body>\n</html>\n",
+      "text": "Hi!\n\nUse the following One-Time Password (OTP) to sign in:\n\n123456\n\nThis OTP is valid for 5 mins. Do not share it with anyone.\n\n- Team Blue Dots\n"
+    },
+    "Team EkStep": {
+      "subject": "OTP to verify access",
+      "html": "<html lang=\"en\" dir=\"ltr\">\n<body>\n<p>Hi!</p><p>Use the following One-Time Password (OTP) to sign in:</p><p><b>123456</b></p><p>This OTP is valid for 5 mins. Do not share it with anyone.</p><p>- Team EkStep</p>\n</body>\n</html>\n",
+      "text": "Hi!\n\nUse the following One-Time Password (OTP) to sign in:\n\n123456\n\nThis OTP is valid for 5 mins. Do not share it with anyone.\n\n- Team EkStep\n"
+    },
+    "Team OneTAC": {
+      "subject": "OTP to verify access",
+      "html": "<html lang=\"en\" dir=\"ltr\">\n<body>\n<p>Hi!</p><p>Use the following One-Time Password (OTP) to sign in:</p><p><b>123456</b></p><p>This OTP is valid for 5 mins. Do not share it with anyone.</p><p>- Team OneTAC</p>\n</body>\n</html>\n",
+      "text": "Hi!\n\nUse the following One-Time Password (OTP) to sign in:\n\n123456\n\nThis OTP is valid for 5 mins. Do not share it with anyone.\n\n- Team OneTAC\n"
+    },
+    "Team Orange Dots": {
+      "subject": "OTP to verify access",
+      "html": "<html lang=\"en\" dir=\"ltr\">\n<body>\n<p>Hi!</p><p>Use the following One-Time Password (OTP) to sign in:</p><p><b>123456</b></p><p>This OTP is valid for 5 mins. Do not share it with anyone.</p><p>- Team Orange Dots</p>\n</body>\n</html>\n",
+      "text": "Hi!\n\nUse the following One-Time Password (OTP) to sign in:\n\n123456\n\nThis OTP is valid for 5 mins. Do not share it with anyone.\n\n- Team Orange Dots\n"
+    }
+  }
+}

@@ -289,6 +289,7 @@ describe('golden: a copy token the case does not declare', () => {
       actionTypes: [],
       copy,
       version: 'golden',
+      loginOtpSignoff: 'Team EkStep',
     });
     expect(warnings.some((w) => w.includes('{{nickname}}'))).toBe(true);
     const ns = renderNsEmail(emailTemplate(catalogue.templates, 'profile.update'), {

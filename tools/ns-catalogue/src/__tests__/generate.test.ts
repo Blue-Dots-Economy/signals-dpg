@@ -52,6 +52,7 @@ function minimalInput(overrides: Partial<Parameters<typeof buildCatalogue>[0]> =
     actionTypes: ['connect'],
     copy: mergeCopy(readDefaultCopyText(), []).copy,
     version: VERSION,
+    loginOtpSignoff: 'Team EkStep',
     ...overrides,
   };
 }
@@ -260,12 +261,13 @@ describe('warnings', () => {
 });
 
 describe('templates', () => {
-  it('carries every live email case, not login.otp, plus the WhatsApp welcome', () => {
+  it('carries every live email case, not login.otp, plus Keycloak login_otp and the WhatsApp welcome', () => {
     const { catalogue: c } = catalogueFor('blue_dot');
     const email = c.templates.filter((t) => t.channel === 'email').map((t) => t.template_key);
-    expect(email.sort()).toEqual([...generatedCaseIds()].sort());
+    expect(email.sort()).toEqual([...generatedCaseIds(), 'login_otp'].sort());
     expect(email).not.toContain('login.otp');
-    expect(email).toHaveLength(38);
+    expect(email).toHaveLength(39);
+    expect(c.templates).toHaveLength(40);
     expect(c.templates.filter((t) => t.channel === 'email').every((t) => t.provider === undefined)).toBe(true);
   });
 

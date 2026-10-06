@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { mergeCopy, readDefaultCopyText, type CopyLayer } from './copy';
 import { buildCatalogue, type NsCatalogue } from './generate';
+import { loginOtpSignoffFor } from './login_otp_email';
 import { catalogueErrors } from './ns_rules';
 
 /** F2-7: one catalogue per bluedots-schemas directory, written beside it. */
@@ -92,6 +93,7 @@ export function generateForDir(schemasDir: string, dir: string, version: string)
     actionTypes: Object.keys(network.actions ?? {}),
     copy: merged.copy,
     version,
+    loginOtpSignoff: loginOtpSignoffFor(dir),
   });
   warnings.push(...buildWarnings);
   return { dir, networkId: network.id, catalogue, warnings, errors: catalogueErrors(catalogue) };

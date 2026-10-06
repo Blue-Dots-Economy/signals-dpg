@@ -12,6 +12,7 @@ import {
 } from '@dpg/notification';
 
 import { knownCopyKeys } from './copy';
+import { loginOtpEmailTemplate } from './login_otp_email';
 import { resolveCopyGroup, resolveRecipientRole, type RecipientRole } from './legacy/action_copy';
 import { resolveBrandColor } from './legacy/brand';
 import { oneLine } from './legacy/dispatch_email';
@@ -41,6 +42,8 @@ export interface CatalogueInput {
   copy: Map<string, string>;
   /** e.g. the schemas repo's short SHA plus the date. */
   version: string;
+  /** F3-10: the directory's Keycloak theme sign-off. */
+  loginOtpSignoff: string;
 }
 
 /**
@@ -310,7 +313,8 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * Build one network's NS catalogue: an email template per live case, the
- * WhatsApp welcome, and every policy. Pure; the CLI does the file work.
+ * WhatsApp welcome, Keycloak's email login_otp, and every policy. Pure; the
+ * CLI does the file work.
  */
 export function buildCatalogue(input: CatalogueInput): { catalogue: NsCatalogue; warnings: string[] } {
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(input.version)) {
@@ -331,6 +335,7 @@ export function buildCatalogue(input: CatalogueInput): { catalogue: NsCatalogue;
     provider_template_id: WHATSAPP_WELCOME_CONTENT_SID,
     variables: [{ name: '1', type: 'string', required: true }],
   });
+  templates.push(loginOtpEmailTemplate(input.loginOtpSignoff));
   templates.sort((a, b) => compare(a.channel, b.channel) || compare(a.template_key, b.template_key));
 
   const policies = buildPolicies(input, warnings);

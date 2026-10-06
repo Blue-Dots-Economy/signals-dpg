@@ -122,3 +122,16 @@ export function renderNsEmail(
     html: substitute(t.body_html, values, t.variables, true),
   };
 }
+
+/**
+ * The text body NS sends for an email template (render.ts renderValidated,
+ * email branch): substituted without escaping. Variables are validated as in
+ * renderNsEmail.
+ */
+export function renderNsEmailText(
+  t: { body_text: string; variables: NsVariableSpec[] },
+  input: Record<string, string>,
+): string {
+  const values = validateVariables(t.variables, input);
+  return substitute(t.body_text, values, t.variables, false);
+}
