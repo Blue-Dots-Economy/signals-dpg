@@ -51,7 +51,29 @@ export const WHATSAPP_WELCOME_CONTENT_SID = 'HX3f2a5d7e4a18e5664124592a12a154eb'
 const WHATSAPP_PROVIDER = 'twilio';
 
 /** NS seeds the SMS OTP template from env per vendor (F2-7); policies only name it. */
-const SMS_OTP_TEMPLATE_KEY = 'login_otp';
+export const SMS_OTP_TEMPLATE_KEY = 'login_otp';
+
+/** Event types of the policies in `catalogue` that name the SMS `login_otp` template. */
+export function loginOtpPolicyEvents(catalogue: NsCatalogue): string[] {
+  return catalogue.policies
+    .filter((p) => p.channels.some((c) => c.channel === 'sms' && c.template_key === SMS_OTP_TEMPLATE_KEY))
+    .map((p) => p.event_type);
+}
+
+/**
+ * The deployment note the CLI prints for catalogues whose policies name the SMS
+ * `login_otp` template (R10): NS publishes those policies once its login_otp SMS
+ * template id is configured for the active vendor. `null` when no directory needs it.
+ */
+export function loginOtpNote(dirs: string[]): string | null {
+  if (dirs.length === 0) return null;
+  return [
+    `note: the guardian OTP policies in ${dirs.join(', ')} name the SMS template '${SMS_OTP_TEMPLATE_KEY}'.`,
+    `  NS publishes them once its ${SMS_OTP_TEMPLATE_KEY} SMS template id is configured for the active SMS vendor:`,
+    '  SMS_LOGIN_OTP_TEMPLATE_ID (msg91) or PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle).',
+    '  Set it on every cluster that loads these catalogues.',
+  ].join('\n');
+}
 
 /** `login.otp` has no live caller: Keycloak sends login OTPs (F3). */
 const NOT_GENERATED = new Set(['login.otp']);

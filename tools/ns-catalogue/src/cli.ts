@@ -9,6 +9,7 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
+import { loginOtpNote, loginOtpPolicyEvents } from './generate';
 import { CATALOGUE_FILE, generateForSchemasRepo } from './schemas_repo';
 
 function defaultVersion(schemasDir: string): string {
@@ -51,6 +52,11 @@ function main(argv: string[]): number {
     }
     for (const w of r.warnings) process.stdout.write(`  warning: ${w}\n`);
   }
+  const otpDirs = results
+    .filter((r) => r.catalogue && r.errors.length === 0 && loginOtpPolicyEvents(r.catalogue).length > 0)
+    .map((r) => r.dir);
+  const note = loginOtpNote(otpDirs);
+  if (note) process.stdout.write(`\n${note}\n`);
   return failed ? 1 : 0;
 }
 

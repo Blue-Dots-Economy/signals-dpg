@@ -1,4 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
@@ -12,7 +15,15 @@ import {
 } from '@dpg/notification';
 
 import { mergeCopy, readDefaultCopyText } from '../copy';
-import { WHATSAPP_WELCOME_CONTENT_SID, buildCatalogue, generatedCaseIds } from '../generate';
+import { resolveBrandColor as apiResolveBrandColor } from '../../../../apps/api/src/notifications/brand';
+import {
+  WHATSAPP_WELCOME_CONTENT_SID,
+  buildCatalogue,
+  generatedCaseIds,
+  loginOtpNote,
+  loginOtpPolicyEvents,
+} from '../generate';
+import { resolveBrandColor as legacyResolveBrandColor } from '../legacy/brand';
 import type { NsCatalogue, NsPolicyEntry } from '../ns_rules';
 import { catalogueErrors } from '../ns_rules';
 import { F2_7_DIRS, generateForSchemasRepo, stableJson } from '../schemas_repo';
@@ -400,4 +411,120 @@ describe('legacy copies', () => {
       expect(body).toBe(readFileSync(`${API}${api}`, 'utf8'));
     });
   }
+
+  it('legacy/brand.ts resolves the same colour as apps/api brand.ts for every fixture network', () => {
+    const ids = readdirSync(FIXTURES, { recursive: true, encoding: 'utf8' })
+      .filter((f) => f.endsWith('network.json'))
+      .map((f) => (JSON.parse(fixture(f)) as { id: string }).id);
+    expect(ids.length).toBeGreaterThan(0);
+    for (const id of [...new Set(ids), 'onest_yellow_dot', 'no_such_network', '', null, undefined]) {
+      expect(legacyResolveBrandColor(id), String(id)).toBe(apiResolveBrandColor(id));
+    }
+  });
+
+  // The partial copies keep only the pure parts of their api originals, so each
+  // top-level declaration they carry is compared span by span (header comment
+  // and import lines differ by design and are not compared).
+  const SRC = new URL('../../../../apps/api/src/', import.meta.url).pathname;
+  const partial: Array<{ legacy: string; api: string; decls: string[] }> = [
+    {
+      legacy: 'dispatch_email.ts',
+      api: 'notifications/email/dispatch_email.ts',
+      decls: [
+        'EmailAttachment',
+        'EmailNotifyRequest',
+        'DispatchEmailArgs',
+        'EmailSender',
+        'EmailSenderDeps',
+        'oneLine',
+        'createEmailSender',
+      ],
+    },
+    {
+      legacy: 'messages_index.ts',
+      api: 'notifications/email/messages.ts',
+      decls: [
+        'EmailMessages',
+        'EmailMessagesIndex',
+        'lintPlaceholders',
+        'mergeLayer',
+        'toEmailMessages',
+        'brandLayerKey',
+        'loadEmailMessagesIndex',
+      ],
+    },
+    { legacy: 'support_details.ts', api: 'support/build_support_email.ts', decls: ['buildSupportDetailsTable'] },
+    { legacy: 'support_details.ts', api: 'support/attachments.ts', decls: ['formatBytes'] },
+  ];
+  for (const { legacy, api, decls } of partial) {
+    for (const name of decls) {
+      it(`legacy/${legacy} ${name} matches apps/api ${api}`, () => {
+        const copy = declarationSpan(readFileSync(`${LEGACY}${legacy}`, 'utf8'), name);
+        const original = declarationSpan(readFileSync(`${SRC}${api}`, 'utf8'), name);
+        expect(copy, `${name} missing from legacy/${legacy}`).not.toBeNull();
+        expect(original, `${name} missing from apps/api ${api}`).not.toBeNull();
+        expect(copy).toBe(original);
+      });
+    }
+  }
+});
+
+/**
+ * The source of a top-level declaration: from its `function`/`interface`/
+ * `const`/`type` line to the first closing line at column 0, with any leading
+ * `export ` dropped (a copy may export a helper the original keeps private).
+ */
+function declarationSpan(source: string, name: string): string | null {
+  const lines = source.split('\n');
+  const start = lines.findIndex((l) =>
+    new RegExp(`^(?:export )?(?:async )?(?:function|interface|const|type) ${name}\\b`).test(l),
+  );
+  if (start === -1) return null;
+  const end = lines.findIndex((l, i) => i >= start && /^[}\]][;)]*$/.test(l));
+  if (end === -1) return null;
+  return lines
+    .slice(start, end + 1)
+    .join('\n')
+    .replace(/^export /, '');
+}
+
+describe('login_otp dependency note (R10)', () => {
+  it('lists the guardian OTP policies that name the SMS login_otp template', () => {
+    const { catalogue } = catalogueFor('blue_dot');
+    expect(loginOtpPolicyEvents(catalogue).sort()).toEqual(
+      [
+        guardianEvent('account'),
+        guardianEvent('profile'),
+        guardianEvent('action'),
+        guardianEvent('action_bulk'),
+        guardianEvent('generic'),
+      ].sort(),
+    );
+  });
+
+  it('names both vendor settings, and is absent when no directory needs it', () => {
+    const note = loginOtpNote(['blue_dot', 'purple_dot/alimco']);
+    expect(note).toContain('blue_dot, purple_dot/alimco');
+    expect(note).toContain('SMS_LOGIN_OTP_TEMPLATE_ID (msg91)');
+    expect(note).toContain('PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle)');
+    expect(loginOtpNote([])).toBeNull();
+  });
+
+  it('the CLI prints the note after generating catalogues', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'ns-catalogue-cli-'));
+    try {
+      cpSync(FIXTURES, tmp, { recursive: true });
+      const pkg = new URL('../../', import.meta.url).pathname;
+      const out = execFileSync(join(pkg, 'node_modules/.bin/tsx'), ['src/cli.ts', tmp, '--version', VERSION], {
+        cwd: pkg,
+        encoding: 'utf8',
+        env: { ...process.env, INIT_CWD: pkg },
+      });
+      expect(out).toContain("name the SMS template 'login_otp'");
+      expect(out).toContain('SMS_LOGIN_OTP_TEMPLATE_ID (msg91) or PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle)');
+      expect(out).toMatch(/note: the guardian OTP policies in [^\n]*blue_dot/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  }, 30_000);
 });

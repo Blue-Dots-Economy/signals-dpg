@@ -39,6 +39,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter api exec tsc --noEmit
+      - run: pnpm --filter ns-catalogue typecheck
 
   typecheck-ui:
     runs-on: ubuntu-latest
