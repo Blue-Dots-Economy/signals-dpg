@@ -1,34 +1,43 @@
 # Guardian OTP notification templates (U18, #294)
 
-Email and SMS are handled differently — matching how the rest of signals already
-does OTP/notification:
+Signals generates, stores (sha256 in Redis) and verifies every guardian OTP.
+notification-service (NS) only carries it. Each send is one `/v1/notify` event:
 
-- **Email — body rendered IN-REPO.** The #294 per-scenario copy lives as keys
-  in `apps/api/src/notifications/email/messages.default.properties`, sent via
-  the central dispatcher (`email/dispatch_email.ts`, #529) — same convention
-  as the login OTP and action emails, which resolve their copy from the same
-  file. It ships via the generic **`basic_email`** template. **No
-  notification-service email template to author** — the copy lives in that
-  properties file, overridable at deploy time (see
-  `docs/operations/email-copy-overrides.md`).
-- **SMS — same as the login OTP.** SMS bodies are DLT-registered and can't be
-  composed in-app, and the instance has a single generic OTP template. So the
-  guardian SMS reuses exactly what the login OTP uses: `template_id =
-  SMS_TEMPLATE_ID` (default `login_otp`) with `variables: { message: otp }`. It
-  carries **only the code** — no per-scenario SMS templates, no parent-facing SMS
-  copy. The scenario context is conveyed in the **email**; the SMS is just the
-  code (identical to how a user's own login OTP arrives).
+- `guardian.otp.account`, `guardian.otp.profile`, `guardian.otp.action` and
+  `guardian.otp.action_bulk` for the #294 scenarios, and `guardian.otp.generic`
+  for a code with no scenario.
+- No `domain` (the null-domain policy applies), priority `urgent`, and no
+  idempotency key: every challenge is its own send.
+- `to` holds the guardian contact point Signals has: an email address, or an
+  E.164 phone (guardian phones are normalised to E.164 at capture).
+- Variables: `message` (the OTP), `parentName`, `domain`, `org` and `teamName`;
+  the bulk scenario adds `noun` and `orgList` (organisation names joined as
+  `A, B and C`). `guardian.otp.generic` sends `message` only.
+
+The policy for each event is `first_available`: the email template
+`guardian.<kind>` (or `otp.generic`) when the contact is an email, the SMS
+`login_otp` template when it is a phone.
+
+- **Email** — the per-scenario copy below is an NS template, edited through the
+  NS admin API (see `docs/operations/email-copy-overrides.md`).
+- **SMS** — the same DLT-registered `login_otp` template the login OTP uses,
+  carrying only the code in `message`. NS seeds it from its vendor settings, so
+  each cluster that sends guardian OTP by SMS sets it there. The scenario
+  context is conveyed in the email; the SMS is just the code.
 
 Common:
-- The OTP is **valid for 10 minutes** (`GUARDIAN_OTP_TTL_SEC = 600`). The email states this + "Do not share it with anyone"; the SMS says whatever the existing DLT OTP template says.
-- Email variables are **best-effort**: `parentName` / `domain` / `providerOrgName` may be absent (guardian name not decryptable yet, provider title unresolved) — the template falls back gracefully.
-- The email "Team {name}" sign-off uses `INSTANCE_NAME` (via `supportConfig.teamName`), and `from`/`replyTo` use `NOTIFICATION_FROM_EMAIL` — deploy-configurable, no hardcoded brand.
 
-## SMS
-
-No new DLT templates needed — the guardian SMS uses the instance's existing OTP
-template (`SMS_TEMPLATE_ID`, default `login_otp`), code only, exactly like the
-login OTP. All the #294 per-scenario copy lives in the **email**.
+- The OTP is **valid for 10 minutes** (`GUARDIAN_OTP_TTL_SEC = 600`). The email
+  states this and "Do not share it with anyone"; the SMS says whatever the DLT
+  OTP template says.
+- Variables are **always filled**: when the guardian name or provider title
+  cannot be resolved, Signals sends `parentName` `there`, `domain` the
+  `teamName`, and `org` `the organisation`.
+- The "Team {name}" sign-off is `teamName`, from `INSTANCE_NAME`. The From
+  address is NS deployment config.
+- An NS refusal or transport failure is logged (event type, status, NS error
+  code; never the OTP or the contact) and the route answers
+  `503 NO_OTP_PROVIDER`.
 
 ## Copy (from #294)
 

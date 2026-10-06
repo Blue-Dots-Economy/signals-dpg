@@ -154,13 +154,13 @@ Open **http://localhost:5173** in your browser.
 
 ## Optional — Notification configuration
 
-- `SUPPORT_EMAIL` — recipient for the in-app "Contact support" form. Emails are sent via the
-  notification service from `NOTIFICATION_FROM_EMAIL`, with Reply-To set to the submitting user.
-  When unset, the form is disabled (API returns 503).
-- `EMAIL_MESSAGES_PATH` — optional path to a mounted override of the bundled email copy
-  (subjects/bodies/CTA labels for every email the API sends). Unset uses the bundled defaults;
-  see [`docs/operations/email-copy-overrides.md`](docs/operations/email-copy-overrides.md) for
-  the override workflow.
+- `NOTIFICATION_SERVICE_ENDPOINT` — the notification-service base URL. Signals sends every
+  notification to its `/v1/notify` endpoint as an event, with a bearer token for the Keycloak
+  service client (`KEYCLOAK_API_CLIENT_ID` / `KEYCLOAK_API_CLIENT_SECRET`). Copy, sender identity
+  and channels are notification-service config, edited through its admin API; see
+  [`docs/operations/email-copy-overrides.md`](docs/operations/email-copy-overrides.md).
+- `SUPPORT_EMAIL` — recipient for the in-app "Contact support" form, with Reply-To set to the
+  submitting user. When unset, the form is disabled (API returns 503).
 
 ---
 

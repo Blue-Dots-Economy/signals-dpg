@@ -126,30 +126,34 @@ theme resolves per binding.
 
 ## Step 6 — Configure mail delivery
 
-Action emails need a notification client **plus** a from-address, or
+Action emails need a notification client **plus** a URL source
+(`FRONTEND_BASE_URL` or `UI_HOST_BINDINGS`, both set in Step 1), or
 `resolveNotifierConfig()` (`apps/api/src/notifications/notify_actions.ts`)
 returns `null` and **no action email is sent at all** — there is nothing to
 inspect in an inbox until this is configured.
 
 ### Path A — with real notification-service credentials
 
-Set these four env vars (placeholder names below; use your own values, never
+Set these env vars (placeholder names below; use your own values, never
 commit real secrets):
 
 ```bash
 NOTIFICATION_SERVICE_ENDPOINT=<notification-service-base-url>
-NOTIFICATION_SERVICE_KEY_ID=<notification-service-key-id>
-NOTIFICATION_SERVICE_SECRET=<notification-service-secret>
-NOTIFICATION_FROM_EMAIL=<verified-from-address>
+KEYCLOAK_API_CLIENT_ID=signals-api
+KEYCLOAK_API_CLIENT_SECRET=<signals-api-client-secret>
 ```
 
-Why all four are needed: `getNotificationClient()`
-(`apps/api/src/utils/notificationClient.ts`) only constructs a client when
-`NOTIFICATION_SERVICE_ENDPOINT` + `_KEY_ID` + `_SECRET` are **all** present;
-`resolveNotifierConfig()` then additionally requires `NOTIFICATION_FROM_EMAIL`
-before it will cache a non-null config. Missing any one of the four means the
-whole action-email pipeline is a silent no-op (see Path B below for exactly
-how silent).
+Why these: `getNotificationClient()`
+(`apps/api/src/utils/notificationClient.ts`) constructs a client when
+`NOTIFICATION_SERVICE_ENDPOINT` and `KEYCLOAK_API_CLIENT_SECRET` are both
+present. It sends each event to `/v1/notify` with a `client_credentials`
+bearer token from the Keycloak realm (`KEYCLOAK_REALM`, at
+`KEYCLOAK_INTERNAL_BASE_URL` or `KEYCLOAK_BASE_URL`). The notification service
+needs the templates and policies for the network seeded (its `NS_SEED_FILE`,
+from bluedots-schemas `ns-catalogue.json`) and its own sender settings
+(`EMAIL_FROM_NAME` / `EMAIL_FROM_ADDRESS`). Missing the endpoint or the secret
+means the whole action-email pipeline is a silent no-op (see Path B below for
+exactly how silent).
 
 Confirm the API sees them:
 
@@ -166,7 +170,7 @@ mail is inspectable without a real inbox.
 point in `/tmp/signals-api.log`.** Tracing the code:
 
 - `getNotificationClient()` returns `undefined` silently (no log call at
-  all) when any of `NOTIFICATION_SERVICE_ENDPOINT` / `_KEY_ID` / `_SECRET`
+  all) when `NOTIFICATION_SERVICE_ENDPOINT` or `KEYCLOAK_API_CLIENT_SECRET`
   is unset.
 - `resolveNotifierConfig()` then caches `null` and returns, again with no
   log call.
@@ -192,7 +196,7 @@ behaviour for the notification-config gate is confirmed either way, since
 the code path a real signup would hit is the same `if (!nc) return;` shown
 above.)
 
-**Practical implication:** without the four credentials above, do not expect
+**Practical implication:** without the credentials above, do not expect
 to observe a resolved CTA URL by watching logs or inboxes. The only way to
 prove `UI_HOST_BINDINGS` resolution is correct without credentials is to
 read the source directly (`apps/api/src/notifications/brand.ts`'s
@@ -238,38 +242,31 @@ docker compose stop db redis
 An earlier draft of this runbook said there was no way to observe the CTA
 without notification-service credentials. **That was wrong**, and it was wrong
 in a specific way worth recording: it only checked the Signals API's own logs.
-Signals renders the COMPLETE email — subject and HTML, with the CTA `href`
-already resolved — and POSTs it to `<NOTIFICATION_SERVICE_ENDPOINT>/notify`.
+Signals resolves each recipient's CTA url itself and sends it as the `ctaUrl`
+variable of the event it POSTs to `<NOTIFICATION_SERVICE_ENDPOINT>/v1/notify`.
 So standing a sink at that endpoint captures exactly the thing under test, with
-no SES, no Gmail, and no credentials.
+no notification service and no mail provider.
 
 `local-mail-sink/sink.mjs` in this repo is that sink. It accepts any POST to
-`/notify`, ignores the HMAC headers (nothing verifies them), prints the
-recipient, subject and every `href` in the body, and writes each mail to
-`local-mail-sink/mail/`.
+`/v1/notify`, accepts the bearer token without checking it, prints the event
+type, domain, recipient and every link variable (`ctaUrl`, `siteUrl`), and
+writes each event to `local-mail-sink/mail/`.
 
 ```bash
 node local-mail-sink/sink.mjs > /tmp/mail-sink.log 2>&1 &
 ```
 
-Point the API at it — the key id and secret can be any non-empty strings,
-because the sink does not verify the signature:
+Point the API at it. Signals still fetches a real `client_credentials` token
+before each send, so the local Keycloak and the `signals-api` client secret are
+needed even though the sink ignores the token:
 
 ```
 NOTIFICATION_SERVICE_ENDPOINT=http://localhost:4545
-NOTIFICATION_SERVICE_KEY_ID=local-sink
-NOTIFICATION_SERVICE_SECRET=local-sink-secret-does-not-need-to-verify
-NOTIFICATION_FROM_EMAIL=no-reply@localhost.test
+KEYCLOAK_API_CLIENT_SECRET=<signals-api-client-secret>
 ```
 
-`NOTIFICATION_FROM_EMAIL` is not optional decoration: without it
-`resolveNotifierConfig()` returns null and no action email is attempted at all.
-
-For a real inbox instead, run the `notification-service` repo with
-`SMTP_GMAIL=true` + `GMAIL_USER`/`GMAIL_PASS`, or `SMTP_AWS_SES=true` + AWS
-credentials — those are its only two transports (`src/lib/providers/email/sendMailCore.ts`
-throws "No valid mail transport configuration found" otherwise). `MAIL_LOG=true`
-only logs the recipient; it does NOT bypass sending.
+For a real inbox instead, run the `notification-service` repo with its
+catalogue seeded and an email transport configured (see that repo's docs).
 
 ### Reusing the existing local database
 
@@ -282,7 +279,8 @@ checkout's `.env` rather than generating new ones, or start from an empty DB.
 
 ### Observed results
 
-Driving a real `apply` and a real status change through the API, against
+Recorded when Signals still rendered the mail itself; with events, the same
+urls arrive as each event's `ctaUrl`. Driving a real `apply` and a real status change through the API, against
 `FRONTEND_BASE_URL=http://localhost:9999` (a dead port standing in for the
 blocked combined front-door):
 

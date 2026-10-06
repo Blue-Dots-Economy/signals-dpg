@@ -147,14 +147,16 @@ Sourced from the Zod schemas in `packages/config/src/secrets.ts`.
 
 **Notification service (`NotificationSecretsSchema`)**
 
-All fields optional; if unset, OTP / SMS-template features are disabled.
+All fields optional; if `NOTIFICATION_SERVICE_ENDPOINT` (or the Keycloak
+`KEYCLOAK_API_CLIENT_SECRET`) is unset, notifications are not sent. Signals posts
+each notification to notification-service's `/v1/notify` as an event, with a
+`client_credentials` bearer token for the Keycloak service client
+(`KEYCLOAK_API_CLIENT_ID` / `KEYCLOAK_API_CLIENT_SECRET`). Copy and sender
+identity are notification-service config (see `email-copy-overrides.md`).
 
 | Key | Required | Notes |
 |---|---|---|
 | `NOTIFICATION_SERVICE_ENDPOINT` | optional | E.g. `http://dpg-notification-service:3000`. |
-| `NOTIFICATION_SERVICE_KEY_ID` | optional | Must match a `keyId` in the notification service's `internal-secrets.json`. |
-| `NOTIFICATION_SERVICE_SECRET` | optional | HMAC secret paired with `NOTIFICATION_SERVICE_KEY_ID`. `openssl rand -hex 32`. |
-| `SMS_TEMPLATE_ID` | optional | |
 
 **Match score / signals-search (`MatchScoreSecretsSchema`)**
 
@@ -221,9 +223,10 @@ In the default Helm install the UI's nginx reverse-proxies `/api/*` to
   responsibility. Update the relevant Secret (or `values.yaml` +
   `helm upgrade`), then trigger a rolling restart of the api pod (and the
   signal-processor pod once Plan 3 ships).
-- `NOTIFICATION_SERVICE_SECRET`: rotate the corresponding key entry in
-  `internal-secrets.json` **and** the matching env var on the api pod in the
-  same deploy, otherwise HMAC verification will fail on one side.
+- `KEYCLOAK_API_CLIENT_SECRET`: regenerate the `signals-api` client secret in
+  Keycloak and update the env var on the api pod in the same deploy. Signals
+  uses it both for the Keycloak admin API and for notification-service bearer
+  tokens.
 - `SIGNALS_SEARCH_API_KEY`: rotate the key in the shared Signals `apikey`
   store (via better-auth) **and** the env var on the api pod together; a
   mismatch makes signals-search reject match-score requests with `401`.
