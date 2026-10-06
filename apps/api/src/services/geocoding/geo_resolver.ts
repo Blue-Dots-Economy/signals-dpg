@@ -21,6 +21,48 @@ export function parsePhotonFeatures(json: unknown): Coordinates | null {
   return null;
 }
 
+interface PhotonFeature {
+  geometry?: { coordinates?: [number, number] };
+  properties?: { countrycode?: string; type?: string };
+}
+
+/**
+ * Photon feature types too coarse to stand in for an address (#788) — the same
+ * rule as Google's: a country- or state-level answer is a not-found, not a pin.
+ */
+const COARSE_PHOTON_TYPES = new Set(['country', 'state']);
+
+/**
+ * Pure: the first usable Photon feature → coords. Exported for testing.
+ *
+ * With no `country` this is exactly `parsePhotonFeatures`. With a country it is
+ * the first feature inside that country and finer than state level. The
+ * country check is mandatory, not a nicety: an older Photon server ignores the
+ * `countrycode` request param and answers worldwide.
+ */
+export function pickPhotonFeature(json: unknown, country?: string): Coordinates | null {
+  if (!country) return parsePhotonFeatures(json);
+  const features = (json as { features?: PhotonFeature[] })?.features ?? [];
+  for (const f of features) {
+    const p = f.properties ?? {};
+    if (p.countrycode?.toUpperCase() !== country) continue;
+    if (p.type && COARSE_PHOTON_TYPES.has(p.type)) continue;
+    const found = parsePhotonFeatures({ features: [f] });
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Pure: the Photon request URL. Exported for testing. With a country it adds
+ * `countrycode` and asks for a few results, so the backstop filter in
+ * `pickPhotonFeature` still has an in-country match to fall back on.
+ */
+export function buildPhotonUrl(query: string, baseUrl: string, country?: string): string {
+  const base = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(query)}`;
+  return country ? `${base}&limit=5&countrycode=${country}` : `${base}&limit=1`;
+}
+
 /** Pure: first Google geocode result -> coords. Exported for testing. */
 export function parseGoogleGeocode(json: unknown): Coordinates | null {
   const data = json as {
@@ -112,11 +154,15 @@ async function resolveWithGoogle(
   return pickGoogleResult(json, country);
 }
 
-async function resolveWithPhoton(query: string, baseUrl: string): Promise<Coordinates | null> {
-  const url = `${baseUrl.replace(/\/$/, '')}/api?q=${encodeURIComponent(query)}&limit=1`;
-  const res = await fetch(url);
+async function resolveWithPhoton(
+  query: string,
+  baseUrl: string,
+  country?: string,
+): Promise<Coordinates | null> {
+  const res = await fetch(buildPhotonUrl(query, baseUrl, country));
   if (!res.ok) throw new Error(`photon http ${res.status}`);
-  return parsePhotonFeatures(await res.json());
+  // Every feature foreign or too coarse is a definitive not-found → cacheable.
+  return pickPhotonFeature(await res.json(), country);
 }
 
 /** Dispatch to the configured provider. Returns null only on a definitive
@@ -126,7 +172,7 @@ async function resolveFromProvider(q: string): Promise<Coordinates | null> {
   if (geocodingConfig.google_api_key) {
     return resolveWithGoogle(q, geocodingConfig.google_api_key, geocodingConfig.country);
   }
-  return resolveWithPhoton(q, geocodingConfig.photon_url);
+  return resolveWithPhoton(q, geocodingConfig.photon_url, geocodingConfig.country);
 }
 
 const delay = (ms: number): Promise<void> =>

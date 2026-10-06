@@ -31,7 +31,7 @@ export function getGeoProvider(): GeoProvider {
   const base = withGeoCache(
     apiKey
       ? createGooglePlacesProvider(apiKey, country)
-      : createPhotonProvider(photonUrl || undefined),
+      : createPhotonProvider(photonUrl || undefined, country),
   );
   cached = {
     suggest: (query, signal) =>

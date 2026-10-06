@@ -9,6 +9,8 @@ import {
   parseGoogleGeocode,
   pickGoogleResult,
   buildGoogleGeocodeUrl,
+  pickPhotonFeature,
+  buildPhotonUrl,
 } from '../geo_resolver';
 
 describe('parsePhotonFeatures', () => {
@@ -108,5 +110,49 @@ describe('buildGoogleGeocodeUrl (#785)', () => {
   it('sends no components param when no country is set', () => {
     const url = buildGoogleGeocodeUrl('Dharwad', 'k');
     expect(url.searchParams.has('components')).toBe(false);
+  });
+});
+
+describe('pickPhotonFeature (#788)', () => {
+  const feature = (lng: number, lat: number, countrycode: string, type = 'city') => ({
+    geometry: { coordinates: [lng, lat] },
+    properties: { countrycode, type },
+  });
+
+  it('with no country set, returns the first feature (historical behaviour)', () => {
+    const json = { features: [feature(90.4, 23.8, 'BD'), feature(75.0, 15.4, 'IN')] };
+    expect(pickPhotonFeature(json)).toEqual({ lat: 23.8, lng: 90.4 });
+  });
+
+  it('skips a feature in another country and returns the first in-country one', () => {
+    const json = { features: [feature(90.4, 23.8, 'BD'), feature(75.0, 15.4, 'in')] };
+    expect(pickPhotonFeature(json, 'IN')).toEqual({ lat: 15.4, lng: 75.0 });
+  });
+
+  it('rejects a country- or state-level feature as not found', () => {
+    const json = {
+      features: [feature(79.0, 22.0, 'IN', 'country'), feature(75.7, 15.3, 'IN', 'state')],
+    };
+    expect(pickPhotonFeature(json, 'IN')).toBeNull();
+  });
+
+  it('returns null when every feature is foreign', () => {
+    expect(pickPhotonFeature({ features: [feature(90.4, 23.8, 'BD')] }, 'IN')).toBeNull();
+  });
+});
+
+describe('buildPhotonUrl (#788)', () => {
+  it('adds countrycode and asks for several results when a country is set', () => {
+    const url = new URL(buildPhotonUrl('Dharwad', 'https://photon.example/', 'IN'));
+    expect(url.pathname).toBe('/api');
+    expect(url.searchParams.get('q')).toBe('Dharwad');
+    expect(url.searchParams.get('countrycode')).toBe('IN');
+    expect(url.searchParams.get('limit')).toBe('5');
+  });
+
+  it('keeps the single-result request with no countrycode when no country is set', () => {
+    const url = new URL(buildPhotonUrl('Dharwad', 'https://photon.example'));
+    expect(url.searchParams.has('countrycode')).toBe(false);
+    expect(url.searchParams.get('limit')).toBe('1');
   });
 });
