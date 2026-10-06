@@ -225,7 +225,8 @@ async function loadRoutes() {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const args = [fakeFastify as any, {} as any] as const;
-  await update_item(...args);
+  // Callback-style plugin: it registers synchronously and signals with `done`.
+  update_item(...args, () => undefined);
   await delete_item(...args);
   await fetch_items(...args);
 }

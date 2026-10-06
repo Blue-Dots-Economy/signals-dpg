@@ -1,4 +1,4 @@
-import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { type FastifyPluginCallbackZod } from 'fastify-type-provider-zod';
 import z, {
   CreateItemBodySchema,
 } from '@dpg/schemas';
@@ -38,7 +38,9 @@ type CreateItemRequest = FastifyRequest<{
  */
 class ConsentWriteError extends Error {}
 
-export const create_item: FastifyPluginAsyncZod = async function (fastify) {
+// Callback-style: registering a route is synchronous, so there is nothing to
+// await (an async plugin with no await is Sonar S7503).
+export const create_item: FastifyPluginCallbackZod = function (fastify, _opts, done) {
   fastify.route({
     url: '/create',
     method: 'POST',
@@ -55,6 +57,7 @@ export const create_item: FastifyPluginAsyncZod = async function (fastify) {
     },
     handler: create_item_handler,
   });
+  done();
 };
 
 /**

@@ -1,5 +1,5 @@
 import type {
-  FastifyPluginAsync,
+  FastifyPluginCallback,
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
@@ -49,7 +49,9 @@ import { insertLocalUser } from '@/services/auth/user_writer';
  */
 type UpsertRequest = FastifyRequest<{ Body: UpsertBody }>;
 
-export const participant: FastifyPluginAsync = async (app) => {
+// Callback-style: registering a route is synchronous, so there is nothing to
+// await (an async plugin with no await is Sonar S7503).
+export const participant: FastifyPluginCallback = (app, _opts, done) => {
   app.route({
     url: '/participant',
     method: 'POST',
@@ -60,6 +62,7 @@ export const participant: FastifyPluginAsync = async (app) => {
     },
     handler: participant_handler,
   });
+  done();
 };
 
 // ---------------------------------------------------------------------------

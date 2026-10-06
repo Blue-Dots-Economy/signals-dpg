@@ -1,4 +1,4 @@
-import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { type FastifyPluginCallbackZod } from 'fastify-type-provider-zod';
 import z, {
   ItemResponseSchema,
   UpdateItemBodySchema,
@@ -19,7 +19,9 @@ type UpdateItemRequest = FastifyRequest<{
   Body: z.infer<typeof UpdateItemBodySchema>;
 }>;
 
-export const update_item: FastifyPluginAsyncZod = async function (fastify) {
+// Callback-style: registering a route is synchronous, so there is nothing to
+// await (an async plugin with no await is Sonar S7503).
+export const update_item: FastifyPluginCallbackZod = function (fastify, _opts, done) {
   fastify.route({
     method: 'PATCH',
     url: '/:itemId',
@@ -36,6 +38,7 @@ export const update_item: FastifyPluginAsyncZod = async function (fastify) {
     },
     handler: update_item_handler,
   });
+  done();
 };
 
 export const update_item_handler = async (

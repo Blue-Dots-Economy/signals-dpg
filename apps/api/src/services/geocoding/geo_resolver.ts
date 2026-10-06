@@ -195,18 +195,21 @@ const delay = (ms: number): Promise<void> =>
  */
 async function resolveFromProviderWithRetry(q: string): Promise<Coordinates | null> {
   const attempts = Math.max(1, geocodingConfig.retry_attempts);
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
+  // One try per call, recursing after the backoff: tries are inherently
+  // sequential (each waits on the previous failure), so this is a chain, not a
+  // loop of awaits. After the last try the error propagates, so the cache layer
+  // treats it as best-effort (returns null, caches nothing → a later save
+  // retries live).
+  const attempt = async (n: number): Promise<Coordinates | null> => {
     try {
       return await resolveFromProvider(q);
     } catch (err) {
-      lastErr = err;
-      if (attempt < attempts) await delay(geocodingConfig.retry_backoff_ms);
+      if (n >= attempts) throw err;
+      await delay(geocodingConfig.retry_backoff_ms);
+      return attempt(n + 1);
     }
-  }
-  // Still transient after the last attempt: propagate so the cache layer treats
-  // it as best-effort (returns null, caches nothing → a later save retries live).
-  throw lastErr;
+  };
+  return attempt(1);
 }
 
 /**
