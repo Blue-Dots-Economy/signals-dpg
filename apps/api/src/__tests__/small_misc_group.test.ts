@@ -125,8 +125,6 @@ const {
   // these properties at call time, not at import time.
   cfgInstance: { INSTANCE_NAME: 'test-instance' } as { INSTANCE_NAME: string },
   cfgNotification: {} as {
-    NOTIFICATION_FROM_EMAIL?: string;
-    NOTIFICATION_REPLY_TO?: string;
     FRONTEND_BASE_URL?: string;
   },
   // Mutated in place by the notify_actions tests, same pattern as
@@ -285,8 +283,6 @@ beforeEach(() => {
   resolveProviderServiceName.mockImplementation(async () => null);
 
   cfgInstance.INSTANCE_NAME = 'test-instance';
-  delete cfgNotification.NOTIFICATION_FROM_EMAIL;
-  delete cfgNotification.NOTIFICATION_REPLY_TO;
   delete cfgNotification.FRONTEND_BASE_URL;
   cfgUiHostBindings.byDomain = {};
   cfgUiHostBindings.warnings = [];
@@ -624,9 +620,8 @@ describe('resolveNotifierConfig', () => {
     expect(resolveNotifierConfig()).toBeNull();
   });
 
-  it('is configured without NOTIFICATION_FROM_EMAIL: the sender identity is NS deployment config', () => {
+  it('is configured from the client and a URL source alone: the sender identity is NS deployment config', () => {
     configureNotifications();
-    expect(cfgNotification.NOTIFICATION_FROM_EMAIL).toBeUndefined();
 
     expect(resolveNotifierConfig()).not.toBeNull();
   });

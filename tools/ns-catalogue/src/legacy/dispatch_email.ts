@@ -3,6 +3,8 @@
  * `createEmailSender` only (the config-bound default sender is left out). The
  * golden test drives it with an injected `notify` spy to capture exactly what
  * Signals renders today.
+ * Frozen snapshot of the pre-cutover Signals renderer, kept only for the
+ * generator and the golden test.
  */
 import { resolveBrandColor } from './brand';
 import { getEmailCase } from './email_cases';

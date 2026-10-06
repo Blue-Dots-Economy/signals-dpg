@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
  * They live in `src/__tests__/` because the file spans three directories; every
  * dependency (db, redis, network config, geocoder) is mocked.
  *
- * Guardian OTP email coverage moved with the #529 dispatchEmail migration:
+ * Guardian OTP event coverage lives elsewhere:
  * the pure mapper is `services/__tests__/guardian_otp_dispatch.test.ts` and the
  * send path is `services/__tests__/guardian_otp_send.test.ts`.
  */

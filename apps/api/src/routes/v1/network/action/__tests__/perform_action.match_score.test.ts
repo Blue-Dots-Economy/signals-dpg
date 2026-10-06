@@ -52,8 +52,6 @@ vi.mock('@/config', () => ({
   getCurrentApiBaseUrl: () => BASE_URL,
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
   notification: {
-    NOTIFICATION_FROM_EMAIL: 'from@test.local',
-    NOTIFICATION_REPLY_TO: 'reply@test.local',
     FRONTEND_BASE_URL: 'http://fe.test',
   },
 }));

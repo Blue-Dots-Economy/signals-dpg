@@ -1,5 +1,5 @@
-// Legacy copy of apps/api/src/notifications/email/parse_properties.ts (Plan F2): the generator's input and the golden test's "today".
-// The runtime copy in apps/api stays until it is deleted in Task 6; keep the two identical.
+// Legacy copy of apps/api/src/notifications/email/parse_properties.ts (Plan F2).
+// Frozen snapshot of the pre-cutover Signals renderer; kept only as the generator's input and the golden test's "today".
 /**
  * Minimal Java-properties-style parser for the email messages file (#529).
  * Deliberately tiny: `key=value` per line, `#`/`!` comments, split at the

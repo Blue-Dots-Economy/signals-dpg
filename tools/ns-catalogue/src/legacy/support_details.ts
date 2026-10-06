@@ -2,6 +2,8 @@
  * Legacy copy of apps/api/src/support/build_support_email.ts
  * `buildSupportDetailsTable` (and `formatBytes` from support/attachments.ts),
  * so the golden test can render today's support email.
+ * Frozen snapshot of the pre-cutover Signals renderer, kept only for the
+ * generator and the golden test.
  */
 import { escapeHtml } from './substitute';
 

@@ -262,18 +262,12 @@ export function assertCreateTestOtpSafe(
 }
 
 export const NotificationSecretsSchema = z.object({
+  // notification-service base URL. Signals posts every notification to its
+  // /v1/notify endpoint as an event, authenticated with a client_credentials
+  // bearer token for the Keycloak service client (KEYCLOAK_API_CLIENT_ID /
+  // KEYCLOAK_API_CLIENT_SECRET). Sender identity and all copy are
+  // notification-service config.
   NOTIFICATION_SERVICE_ENDPOINT: z.string().optional(),
-  NOTIFICATION_SERVICE_KEY_ID: z.string().optional(),
-  NOTIFICATION_SERVICE_SECRET: z.string().optional(),
-  SMS_TEMPLATE_ID: z.string().optional(),
-  // Action-notification config (Phase 1 event notifications).
-  // From address for action emails. Under Gmail SMTP the notification-service
-  // forces the authenticated account as sender, so this is mainly the SES/prod
-  // sender and the address shown to recipients.
-  NOTIFICATION_FROM_EMAIL: z.string().optional(),
-  // Reply-to for action emails; honoured by all transports. Defaults to
-  // NOTIFICATION_FROM_EMAIL when unset.
-  NOTIFICATION_REPLY_TO: z.string().optional(),
   // Base URL for the generic /auth/login CTA in action emails.
   FRONTEND_BASE_URL: z.string().optional(),
   // Host -> "network/domain" map for this deployment, IDENTICAL to the string
@@ -298,10 +292,6 @@ export const NotificationSecretsSchema = z.object({
   // NOTIFY_ATTACHMENT_* caps too, so raise those alongside.
   SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   SUPPORT_ATTACHMENT_MAX_FILES: z.coerce.number().int().positive().default(3),
-  // Path to a mounted override of the bundled email messages file (#529).
-  // Unset = bundled defaults only. A bad/missing file at this path never
-  // breaks email — the loader falls back per key with warnings.
-  EMAIL_MESSAGES_PATH: z.string().optional(),
 });
 
 export const MatchScoreSecretsSchema = z.object({

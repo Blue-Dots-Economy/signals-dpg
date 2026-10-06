@@ -5,6 +5,12 @@
  * bluedots-schemas checkout and prints the warnings. Run by hand; the output is
  * committed to bluedots-schemas. Exits 1, writing nothing for that directory,
  * when a catalogue would break an NS rule.
+ *
+ * `src/legacy/` is a frozen snapshot of Signals' pre-cutover email renderer
+ * (copy, shells, case registry, substitution). Signals itself renders no copy:
+ * it sends `/v1/notify` events, and copy is edited in notification-service
+ * through its admin API. The snapshot is kept only as the generator's input and
+ * as the golden test's reference rendering.
  */
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';

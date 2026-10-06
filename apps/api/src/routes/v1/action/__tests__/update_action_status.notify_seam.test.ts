@@ -50,7 +50,7 @@ vi.mock('@/config', () => ({
   matchScoreConfig: { provider: 'noop', signals_search: {} },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
-  // No NOTIFICATION_FROM_EMAIL: the sender identity is NS deployment config.
+  // The sender identity is NS deployment config, so no from-address here.
   notification: {
     FRONTEND_BASE_URL: 'http://fe.test',
   },

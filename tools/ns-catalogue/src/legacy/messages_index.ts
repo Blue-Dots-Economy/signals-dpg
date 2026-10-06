@@ -2,6 +2,8 @@
  * Legacy copy of apps/api/src/notifications/email/messages.ts — the pure
  * `loadEmailMessagesIndex` only (file discovery and the singleton are left
  * out). The golden test uses it so "today" layers copy exactly as runtime does.
+ * Frozen snapshot of the pre-cutover Signals renderer, kept only for the
+ * generator and the golden test.
  */
 import { EMAIL_CASE_IDS, getEmailCase, requiredMessageKeys } from './email_cases';
 import { parseProperties } from './parse_properties';

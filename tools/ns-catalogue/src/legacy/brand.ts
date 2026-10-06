@@ -1,6 +1,8 @@
 /**
  * Legacy copy of apps/api/src/notifications/brand.ts — the colour map only.
  * The generator bakes the colour into each network's CTA templates.
+ * Frozen snapshot of the pre-cutover Signals renderer, kept only for the
+ * generator and the golden test.
  */
 
 /**

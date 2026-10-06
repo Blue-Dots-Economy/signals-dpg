@@ -174,8 +174,7 @@ describe('POST /api/v1/support', () => {
     });
     expect(res.statusCode).toBe(201);
     const arg = sendMock.mock.calls[0][0];
-    // Replies then go to the deployment From address, as the old fallback to
-    // NOTIFICATION_FROM_EMAIL did (F2-4).
+    // Replies then go to the deployment From address (F2-4).
     expect(arg).not.toHaveProperty('reply_to');
     expect(arg.variables.email).toBe('—');
     expect(arg.variables.phone).toBe('+919000000000');

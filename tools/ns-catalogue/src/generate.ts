@@ -44,8 +44,8 @@ export interface CatalogueInput {
 }
 
 /**
- * The Twilio content template for the welcome WhatsApp message. Same id as
- * apps/api/src/notifications/welcome.ts `WELCOME_WHATSAPP_CONTENT_SID`.
+ * The Twilio content template for the welcome WhatsApp message: the content
+ * id the pre-cutover Signals welcome sender used.
  */
 export const WHATSAPP_WELCOME_CONTENT_SID = 'HX3f2a5d7e4a18e5664124592a12a154eb';
 const WHATSAPP_PROVIDER = 'twilio';
