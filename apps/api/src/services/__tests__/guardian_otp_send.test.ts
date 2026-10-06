@@ -31,6 +31,8 @@ vi.mock('@/utils/notificationClient', () => ({
 
 import { defaultGuardianOtpSend, GuardianOtpError } from '@/services/guardian_otp';
 
+const log = { error: vi.fn() };
+
 beforeEach(() => {
   vi.clearAllMocks();
   send.mockImplementation(async () => ACCEPTED);
@@ -114,7 +116,7 @@ describe('defaultGuardianOtpSend', () => {
   it('hard-fails with NO_OTP_PROVIDER when no notification client is configured', async () => {
     getNotificationClient.mockReturnValue(undefined);
     await expectNoOtpProvider(
-      defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '123456' }),
+      defaultGuardianOtpSend({ contact: '+919876543210', contactType: 'phone', otp: '123456' }),
     );
     expect(send).not.toHaveBeenCalled();
   });
@@ -122,7 +124,7 @@ describe('defaultGuardianOtpSend', () => {
   it('ok:false (e.g. 422 no_policy) → NO_OTP_PROVIDER, without leaking the code or contact', async () => {
     send.mockResolvedValueOnce({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
     const err = await expectNoOtpProvider(
-      defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '987654' }),
+      defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '987654', log }),
     );
     const dump = inspect(err, { depth: 5 });
     expect(dump).toContain('no_policy');
@@ -133,7 +135,7 @@ describe('defaultGuardianOtpSend', () => {
   it('a transport error → NO_OTP_PROVIDER', async () => {
     send.mockRejectedValueOnce(new NotifyTransportError('fetch failed: TypeError'));
     const err = await expectNoOtpProvider(
-      defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '987654' }),
+      defaultGuardianOtpSend({ contact: '+919876543210', contactType: 'phone', otp: '987654', log }),
     );
     expect(inspect(err, { depth: 5 })).not.toContain('987654');
   });
@@ -141,7 +143,67 @@ describe('defaultGuardianOtpSend', () => {
   it('rethrows an unexpected error unchanged (a defect, not a provider outage)', async () => {
     send.mockRejectedValueOnce(new Error('boom'));
     await expect(
-      defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '123456' }),
+      defaultGuardianOtpSend({ contact: '+919876543210', contactType: 'phone', otp: '123456' }),
     ).rejects.toThrow('boom');
+  });
+
+  describe('failure logging (the route turns the error into a reply without logging it)', () => {
+    it('logs an NS refusal with event_type, status and error only', async () => {
+      send.mockResolvedValueOnce({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+      await expectNoOtpProvider(
+        defaultGuardianOtpSend({ contact: '+919876543210', contactType: 'phone', otp: '987654', log }),
+      );
+      expect(log.error).toHaveBeenCalledTimes(1);
+      expect(log.error).toHaveBeenCalledWith(
+        { event_type: 'guardian.otp.generic', status: 422, error: 'no_policy' },
+        expect.stringContaining('ns_rejected'),
+      );
+      const dump = inspect(log.error.mock.calls, { depth: 5 });
+      expect(dump).not.toContain('987654');
+      expect(dump).not.toContain('9876543210');
+    });
+
+    it('logs a transport failure with event_type and kind only', async () => {
+      send.mockRejectedValueOnce(new NotifyTransportError('fetch failed: TypeError'));
+      await expectNoOtpProvider(
+        defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '987654', log }),
+      );
+      expect(log.error).toHaveBeenCalledWith(
+        { event_type: 'guardian.otp.generic', kind: 'transport', error: 'fetch failed: TypeError' },
+        expect.stringContaining('ns_unreachable'),
+      );
+      const dump = inspect(log.error.mock.calls, { depth: 5 });
+      expect(dump).not.toContain('987654');
+      expect(dump).not.toContain('a@b.co');
+    });
+
+    it('logs and refuses a stored phone that is not E.164, without sending', async () => {
+      await expectNoOtpProvider(
+        defaultGuardianOtpSend({ contact: '12345', contactType: 'phone', otp: '987654', log }),
+      );
+      expect(send).not.toHaveBeenCalled();
+      expect(log.error).toHaveBeenCalledWith(
+        { event_type: 'guardian.otp.generic', reason: 'guardian_phone_not_e164' },
+        expect.any(String),
+      );
+      expect(inspect(log.error.mock.calls)).not.toContain('12345');
+    });
+
+    it('sends a legacy stored phone in its E.164 form', async () => {
+      await defaultGuardianOtpSend({ contact: '9876543210', contactType: 'phone', otp: '1', log });
+      expect(sentEvent().to).toEqual({ phone: '+919876543210' });
+    });
+
+    it('falls back to a structured console.error line when no logger is passed', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      send.mockResolvedValueOnce({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+      await expectNoOtpProvider(defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '987654' }));
+      expect(spy).toHaveBeenCalledTimes(1);
+      const dump = inspect(spy.mock.calls);
+      expect(dump).toContain('no_policy');
+      expect(dump).not.toContain('987654');
+      expect(dump).not.toContain('a@b.co');
+      spy.mockRestore();
+    });
   });
 });

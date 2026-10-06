@@ -14,6 +14,7 @@
  * itself — the raw email/phone must not sit in a Redis key.
  */
 import { createHash } from 'node:crypto';
+import { normalizeE164Phone } from '@dpg/schemas';
 import { redis } from '@api/db/secondary/redis';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
@@ -63,8 +64,10 @@ const PENDING_TTL_SEC = 1800; // 30 min — long enough to clear an OTP round-tr
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
+// The canonical E.164 form (R14), so a ward phone typed `98765 43210` at
+// signup and stored as `+919876543210` hash to the same pending key.
 function normalizePhone(value: string): string {
-  return value.trim();
+  return normalizeE164Phone(value) ?? value.trim();
 }
 
 function normalizeIdentifier(identifier: SignupIdentifier): { type: 'email' | 'phone'; value: string } {

@@ -1,4 +1,22 @@
 import z from 'zod';
+import { normalizeE164Phone } from './phone';
+
+/**
+ * A guardian phone, normalised to E.164 at capture (R14), so what is stored,
+ * hashed and sent is always the canonical form. A value that cannot be made
+ * E.164 is a 400.
+ */
+const GuardianPhoneSchema = z.string().transform((value, ctx) => {
+  const phone = normalizeE164Phone(value);
+  if (!phone) {
+    ctx.addIssue({ code: 'custom', message: 'Enter a valid phone number, e.g. +919876543210' });
+    return z.NEVER;
+  }
+  return phone;
+});
+
+/** A guardian email, trimmed and validated at capture (R14). */
+const GuardianEmailSchema = z.string().trim().email();
 
 export const U18DobBodySchema = z.object({
   network: z.string().min(1),
@@ -30,8 +48,8 @@ export const U18GuardianBodySchema = z
     guardianName: z.string().min(1),
     // Both contacts the guardian supplied — at least one required. The server
     // resolves the OTP channel (phone preferred) and stores whatever is given.
-    guardianEmail: z.string().min(1).optional(),
-    guardianPhone: z.string().min(1).optional(),
+    guardianEmail: GuardianEmailSchema.optional(),
+    guardianPhone: GuardianPhoneSchema.optional(),
     // Ward's guardian-validity attestation (D12) — must be explicitly true.
     guardianDeclarationAccepted: z.literal(true),
     // Explicit ack when a guardian contact matches the ward's own (warn-and-confirm, not a hard reject).
@@ -123,8 +141,8 @@ export const SignupGuardianBodySchema = z
     guardianName: z.string().min(1),
     // Both guardian contacts — at least one required; server resolves the OTP
     // channel (phone preferred) and stores whatever is given.
-    guardianEmail: z.string().min(1).optional(),
-    guardianPhone: z.string().min(1).optional(),
+    guardianEmail: GuardianEmailSchema.optional(),
+    guardianPhone: GuardianPhoneSchema.optional(),
     // Ward's guardian-validity attestation (D12) — must be explicitly true.
     guardianDeclarationAccepted: z.literal(true),
     // Explicit ack when a guardian contact matches the signup identifier itself

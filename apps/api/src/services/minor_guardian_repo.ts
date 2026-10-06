@@ -1,4 +1,5 @@
 import { and, eq, ne, count, sql } from 'drizzle-orm';
+import { normalizeE164Phone } from '@dpg/schemas';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
@@ -140,15 +141,29 @@ export async function getMinorGuardian(userId: string): Promise<{
 }
 
 /**
+ * The canonical form of a guardian phone: E.164 when it can be made so (R14),
+ * else the trimmed value. Capture already rejects a non-E.164 phone, so the
+ * fallback only keeps a legacy value stable for hashing and comparison; the
+ * send path refuses it.
+ */
+export function canonicalGuardianPhone(value: string): string {
+  return normalizeE164Phone(value) ?? value.trim();
+}
+
+/**
  * Resolve the single OTP channel from the two guardian contacts — phone is
  * preferred when both are given (per the U18 spec's channel order). Throws if
- * neither is present (callers validate at least one upstream).
+ * neither is present (callers validate at least one upstream). A phone is
+ * returned in its canonical form, so the guardian ref hash and every
+ * comparison see one spelling.
  */
 export function resolveOtpChannel(input: {
   guardianEmail?: string | null;
   guardianPhone?: string | null;
 }): { contact: string; contactType: GuardianContactType } {
-  if (input.guardianPhone) return { contact: input.guardianPhone, contactType: 'phone' };
+  if (input.guardianPhone) {
+    return { contact: canonicalGuardianPhone(input.guardianPhone), contactType: 'phone' };
+  }
   if (input.guardianEmail) return { contact: input.guardianEmail, contactType: 'email' };
   throw new Error('resolveOtpChannel: at least one guardian contact is required');
 }
@@ -172,7 +187,9 @@ export async function upsertGuardianDetails(
     guardianContact: encryptGuardianField(channel.contact),
     guardianContactType: channel.contactType,
     guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
-    guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
+    guardianPhone: input.guardianPhone
+      ? encryptGuardianField(canonicalGuardianPhone(input.guardianPhone))
+      : null,
     guardianRef: ref,
     guardianVerified: false,
   };

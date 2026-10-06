@@ -4,7 +4,6 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 
 function mockDeps(cfg: {
   recipients?: string;
-  fromEmail?: string;
   client?: boolean;
   maxTotalBytes?: number;
   maxFiles?: number;
@@ -21,7 +20,6 @@ function mockDeps(cfg: {
   vi.doMock('@/config', () => ({
     supportConfig: {
       recipients: cfg.recipients,
-      fromEmail: cfg.fromEmail,
       attachmentMaxTotalBytes: cfg.maxTotalBytes ?? 5 * 1024 * 1024,
       attachmentMaxFiles: cfg.maxFiles ?? 3,
     },
@@ -48,7 +46,7 @@ describe('GET /api/v1/support/config', () => {
   });
 
   it('reports enabled with the configured limits and allowlist', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await get(app);
     expect(res.statusCode).toBe(200);
@@ -68,7 +66,6 @@ describe('GET /api/v1/support/config', () => {
   it('serves overridden limits, so the form follows the env without a rebuild', async () => {
     mockDeps({
       recipients: 'support@org.com',
-      fromEmail: 'from@org.com',
       maxTotalBytes: 1024,
       maxFiles: 1,
     });
@@ -80,28 +77,21 @@ describe('GET /api/v1/support/config', () => {
   // The submit route 503s on exactly these two conditions; enabled must agree
   // with it or the UI shows a form that cannot succeed.
   it('reports disabled when no recipient is configured', async () => {
-    mockDeps({ recipients: undefined, fromEmail: 'from@org.com' });
+    mockDeps({ recipients: undefined });
     const app = await buildApp();
     expect((await get(app)).json().enabled).toBe(false);
     await app.close();
   });
 
-  it('no longer needs a from-address: the sender identity is notification-service config (F2-4)', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: undefined });
-    const app = await buildApp();
-    expect((await get(app)).json().enabled).toBe(true);
-    await app.close();
-  });
-
   it('reports disabled when the notification client is unavailable', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', client: false });
+    mockDeps({ recipients: 'support@org.com', client: false });
     const app = await buildApp();
     expect((await get(app)).json().enabled).toBe(false);
     await app.close();
   });
 
   it('requires authentication', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', authenticated: false });
+    mockDeps({ recipients: 'support@org.com', authenticated: false });
     const app = await buildApp();
     const res = await get(app);
     expect(res.statusCode).toBe(401);

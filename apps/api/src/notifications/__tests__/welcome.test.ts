@@ -106,6 +106,23 @@ describe('the user.welcome event', () => {
   });
 });
 
+describe('phone must be E.164 (R14)', () => {
+  it('drops a non-E.164 phone from `to` and logs welcome_phone_dropped without PII', async () => {
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: '12345' }, log);
+    expect(sentEvent().to).toEqual({ email: 'asha@example.org' });
+    expect(log.error).toHaveBeenCalledWith({ event_type: USER_WELCOME }, expect.stringContaining('welcome_phone_dropped'));
+    const dump = inspect(log.error.mock.calls);
+    expect(dump).not.toContain('12345');
+    expect(dump).not.toContain('asha@example.org');
+  });
+
+  it('sends nothing when the only contact is a non-E.164 phone', async () => {
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: 'abc' }, makeLog());
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
 describe('idempotency (R12): one welcome per user', () => {
   it('the key is per user, not per occurrence, so a repeat for the same user collapses', async () => {
     await sendWelcomeNotifications(BOTH, makeLog());

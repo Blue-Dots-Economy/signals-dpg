@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { guardianEvent } from '@dpg/notification';
-import { buildGuardianOtpEvent, formatOrgList } from '../guardian_otp';
+import { buildGuardianOtpEvent, formatOrgList, GuardianOtpError } from '../guardian_otp';
 
 describe('buildGuardianOtpEvent', () => {
   it('maps a scenario-less send to guardian.otp.generic carrying only the code', () => {
@@ -35,6 +35,28 @@ describe('buildGuardianOtpEvent', () => {
     // The code appears nowhere else in the event.
     const { message: _code, ...rest } = e.variables;
     expect(JSON.stringify({ ...e, variables: rest })).not.toContain('654321');
+  });
+
+  it('normalises a legacy stored phone to E.164 before it reaches NS (R14)', () => {
+    const e = buildGuardianOtpEvent({
+      contact: '98765 43210',
+      contactType: 'phone',
+      otp: '1',
+      variables: {},
+      teamName: 'X',
+    });
+    expect(e.to).toEqual({ phone: '+919876543210' });
+  });
+
+  it('refuses a stored phone that cannot be made E.164: NO_OTP_PROVIDER, nothing built', () => {
+    let err: unknown;
+    try {
+      buildGuardianOtpEvent({ contact: '12345', contactType: 'phone', otp: '1', variables: {}, teamName: 'X' });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(GuardianOtpError);
+    expect((err as GuardianOtpError).code).toBe('NO_OTP_PROVIDER');
   });
 
   it('maps scenario kinds to guardian.otp.<kind> with fallback values', () => {

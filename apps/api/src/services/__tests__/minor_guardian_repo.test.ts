@@ -143,6 +143,14 @@ describe('resolveOtpChannel', () => {
     ).toEqual({ contact: '111', contactType: 'phone' });
   });
 
+  it('returns the canonical E.164 form of the guardian phone (R14)', () => {
+    expect(resolveOtpChannel({ guardianPhone: '+91 98765 43210' })).toEqual({
+      contact: '+919876543210',
+      contactType: 'phone',
+    });
+    expect(resolveOtpChannel({ guardianPhone: '9876543210' }).contact).toBe('+919876543210');
+  });
+
   it('falls back to email when only email is supplied', () => {
     expect(resolveOtpChannel({ guardianEmail: 'g@x.com' })).toEqual({
       contact: 'g@x.com',

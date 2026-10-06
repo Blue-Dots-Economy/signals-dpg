@@ -241,3 +241,54 @@ describe('U18 item-scoped consent bodies', () => {
     }
   });
 });
+
+describe('guardian contacts are canonical at capture (R14)', () => {
+  const sessionBase = {
+    network: 'blue_dot',
+    guardianName: 'Meera',
+    guardianDeclarationAccepted: true as const,
+  };
+
+  it.each(['9876543210', '919876543210', '+91 98765 43210', '+919876543210'])(
+    'U18GuardianBodySchema normalises guardianPhone %j to E.164',
+    (guardianPhone) => {
+      const result = U18GuardianBodySchema.safeParse({ ...sessionBase, guardianPhone });
+      expect(result.success).toBe(true);
+      expect(result.data?.guardianPhone).toBe('+919876543210');
+    },
+  );
+
+  it.each(['12345', 'abc'])('U18GuardianBodySchema rejects guardianPhone %j', (guardianPhone) => {
+    expect(U18GuardianBodySchema.safeParse({ ...sessionBase, guardianPhone }).success).toBe(false);
+  });
+
+  it('SignupGuardianBodySchema normalises guardianPhone and rejects a non-number', () => {
+    const ok = SignupGuardianBodySchema.safeParse({
+      ...signupBase,
+      email: 'ward@example.com',
+      guardianPhone: '+91 98765 43210',
+    });
+    expect(ok.success).toBe(true);
+    expect(ok.data?.guardianPhone).toBe('+919876543210');
+    for (const guardianPhone of ['12345', 'abc']) {
+      expect(
+        SignupGuardianBodySchema.safeParse({ ...signupBase, email: 'ward@example.com', guardianPhone }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('guardianEmail is trimmed and must be an email, on both schemas', () => {
+    const session = U18GuardianBodySchema.safeParse({ ...sessionBase, guardianEmail: '  meera@example.com ' });
+    expect(session.data?.guardianEmail).toBe('meera@example.com');
+    expect(U18GuardianBodySchema.safeParse({ ...sessionBase, guardianEmail: 'not-an-email' }).success).toBe(false);
+    const signup = SignupGuardianBodySchema.safeParse({
+      ...signupBase,
+      email: 'ward@example.com',
+      guardianEmail: ' meera@example.com',
+    });
+    expect(signup.data?.guardianEmail).toBe('meera@example.com');
+    expect(
+      SignupGuardianBodySchema.safeParse({ ...signupBase, email: 'ward@example.com', guardianEmail: 'nope' }).success,
+    ).toBe(false);
+  });
+});

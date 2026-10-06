@@ -298,6 +298,17 @@ describe('startSignupGuardian', () => {
     expect(redisSet.mock.calls[0]?.[0]).toBe(pendingKeyFor('+911234567890'));
   });
 
+  it('hashes the canonical E.164 form of a ward phone, however it was typed (R14)', async () => {
+    await startSignupGuardian(
+      validStartInput({ identifier: { phoneNumber: '98765 43210' } }),
+    );
+
+    expect(guardianContactMatchesWard).toHaveBeenCalledWith(
+      expect.objectContaining({ wardPhone: '+919876543210' }),
+    );
+    expect(redisSet.mock.calls[0]?.[0]).toBe(pendingKeyFor('+919876543210'));
+  });
+
   it('stores the pending capture under a hash of the identifier with encrypted PII', async () => {
     await startSignupGuardian(
       validStartInput({ guardianEmail: 'g@example.com', guardianPhone: '+919900000000' }),

@@ -1,6 +1,7 @@
 import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 import { guardianEvent, NotifyTransportError, type NotifyEvent } from '@dpg/notification';
+import { normalizeE164Phone } from '@dpg/schemas';
 import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig } from '@/config';
 // The fixed-window counter used by the send rate-limit and the verify throttle
@@ -46,6 +47,24 @@ export type GuardianOtpScenario =
 /** Extra template variables per scenario (parent name, domain, provider org). */
 export type GuardianOtpVariables = Record<string, string>;
 
+/**
+ * Where a failed send is reported. `FastifyBaseLogger` satisfies it. The
+ * routes map `GuardianOtpError` to a reply without logging it, so the send
+ * logs its own failure reason here.
+ */
+export interface GuardianOtpLog {
+  error: (details: Record<string, unknown>, message: string) => void;
+}
+
+/**
+ * The default `GuardianOtpLog`: one structured line on stderr. The callers
+ * that issue an OTP run outside a request logger's reach (the gate, the
+ * signup service), so this is what the send uses unless one is passed.
+ */
+const consoleGuardianOtpLog: GuardianOtpLog = {
+  error: (details, message) => console.error(JSON.stringify({ level: 'error', msg: message, ...details })),
+};
+
 /** Dispatch seam — injected so the core is testable without the notifier. */
 export type OtpSend = (args: {
   contact: string;
@@ -53,6 +72,7 @@ export type OtpSend = (args: {
   otp: string;
   scenario?: GuardianOtpScenario;
   variables?: GuardianOtpVariables;
+  log?: GuardianOtpLog;
 }) => Promise<void>;
 
 export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min — matches template copy, #294)
@@ -70,8 +90,12 @@ const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
 // caller supplies the guardian contact freely — an attacker can rotate ward
 // identifiers to spam one victim number/email past the scope cap. Hash the
 // contact so no PII lands in a Redis key.
-const contactRateKey = (contact: string, contactType: GuardianContactType) =>
-  `guardian_otp:crl:${contactType}:${createHash('sha256').update(contact).digest('hex')}`;
+// A phone is hashed in its canonical E.164 form (R14), so two spellings of one
+// number share a counter.
+const contactRateKey = (contact: string, contactType: GuardianContactType) => {
+  const canonical = contactType === 'phone' ? (normalizeE164Phone(contact) ?? contact.trim()) : contact;
+  return `guardian_otp:crl:${contactType}:${createHash('sha256').update(canonical).digest('hex')}`;
+};
 
 /**
  * Map a `GuardianOtpError` to its HTTP reply shape ({status, error, message}),
@@ -115,6 +139,7 @@ export async function issueGuardianOtp(args: {
   scenario?: GuardianOtpScenario;
   variables?: GuardianOtpVariables;
   send?: OtpSend;
+  log?: GuardianOtpLog;
 }): Promise<void> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
   if (count > GUARDIAN_OTP_MAX_PER_WINDOW) {
@@ -144,6 +169,7 @@ export async function issueGuardianOtp(args: {
     otp,
     scenario: args.scenario,
     variables: args.variables,
+    ...(args.log ? { log: args.log } : {}),
   });
 }
 
@@ -178,6 +204,9 @@ export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
     throw new GuardianOtpError('VERIFY_THROTTLED');
   }
 }
+
+/** The failure reason when a stored guardian phone cannot be made E.164. */
+const GUARDIAN_PHONE_NOT_E164 = 'guardian_phone_not_e164';
 
 /** The R5 filler when a bulk guardian OTP names no organisation. */
 const NO_ORGS = 'the selected organisations';
@@ -214,10 +243,16 @@ export function buildGuardianOtpEvent(args: {
   teamName: string;
 }): NotifyEvent {
   const { contact, contactType, otp, scenario, variables, teamName } = args;
+  // Capture stores E.164 already; this catches a legacy row stored before it
+  // did. A phone that still is not E.164 is never sent (NS would refuse it).
+  const phone = contactType === 'phone' ? normalizeE164Phone(contact) : null;
+  if (contactType === 'phone' && !phone) {
+    throw new GuardianOtpError('NO_OTP_PROVIDER', { cause: new Error(GUARDIAN_PHONE_NOT_E164) });
+  }
   const event = (eventType: string, vars: Record<string, string>): NotifyEvent => ({
     event_type: eventType,
     domain: null,
-    to: contactType === 'phone' ? { phone: contact } : { email: contact },
+    to: phone ? { phone } : { email: contact },
     variables: vars,
     priority: 'urgent',
   });
@@ -242,36 +277,59 @@ export function buildGuardianOtpEvent(args: {
  * Default dispatch: one `guardian.otp.*` event to the notification service,
  * which picks the channel from the contact point. Hard-fails with
  * `NO_OTP_PROVIDER` (503 at the route) when no client is configured, the
- * service refuses the event, or it cannot be reached — a guardian-required
- * domain must not silently skip verification.
+ * service refuses the event, it cannot be reached, or a stored phone cannot be
+ * made E.164 — a guardian-required domain must not silently skip verification.
  *
- * The error's `cause` names the service's error code or the transport failure
- * for the route's log; it never carries the code, the contact or a variable.
+ * Each failure is logged here (`log`, else a structured stderr line) with the
+ * event type and the service's status/error, the transport kind, or the
+ * reason — never the code, the contact or a variable — because the routes
+ * turn the error into a reply without logging it.
  */
-export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
+export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables, log }) => {
+  const logger = log ?? consoleGuardianOtpLog;
+  const eventType = guardianEvent(scenario?.kind ?? 'generic');
   const client = getNotificationClient();
   if (!client) {
     throw new GuardianOtpError('NO_OTP_PROVIDER');
   }
-  const event = buildGuardianOtpEvent({
-    contact,
-    contactType,
-    otp,
-    scenario,
-    variables: variables ?? {},
-    teamName: supportConfig.teamName ?? 'Blue Dots',
-  });
+  let event: NotifyEvent;
+  try {
+    event = buildGuardianOtpEvent({
+      contact,
+      contactType,
+      otp,
+      scenario,
+      variables: variables ?? {},
+      teamName: supportConfig.teamName ?? 'Blue Dots',
+    });
+  } catch (err) {
+    if (err instanceof GuardianOtpError) {
+      logger.error(
+        { event_type: eventType, reason: GUARDIAN_PHONE_NOT_E164 },
+        'guardian otp: stored phone is not E.164; not sent',
+      );
+    }
+    throw err;
+  }
 
   let result;
   try {
     result = await client.send(event);
   } catch (err) {
     if (err instanceof NotifyTransportError) {
+      logger.error(
+        { event_type: event.event_type, kind: 'transport', error: err.message },
+        'guardian otp: ns_unreachable',
+      );
       throw new GuardianOtpError('NO_OTP_PROVIDER', { cause: err });
     }
     throw err;
   }
   if (!result.ok) {
+    logger.error(
+      { event_type: event.event_type, status: result.status, error: result.error },
+      'guardian otp: ns_rejected',
+    );
     throw new GuardianOtpError('NO_OTP_PROVIDER', {
       cause: new Error(`ns_rejected ${event.event_type}: ${result.status} ${result.error}`),
     });

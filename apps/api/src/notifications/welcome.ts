@@ -21,6 +21,7 @@
  */
 
 import { USER_WELCOME, type NotifyEvent } from '@dpg/notification';
+import { E164_PATTERN } from '@dpg/schemas';
 
 import { instance, notification, uiHostBindings } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
@@ -89,7 +90,13 @@ export async function sendWelcomeNotifications(
   if (!nc) return;
 
   const email = recipient.email || undefined;
-  const phone = recipient.phoneNumber || undefined;
+  // NS accepts only E.164 (R14). A stored phone in any other form is left out
+  // so the email still goes; the WhatsApp welcome is lost for that user.
+  let phone = recipient.phoneNumber || undefined;
+  if (phone && !E164_PATTERN.test(phone)) {
+    log.error({ event_type: USER_WELCOME }, 'welcome: welcome_phone_dropped (not E.164)');
+    phone = undefined;
+  }
   if (!email && !phone) return;
 
   try {
