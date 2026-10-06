@@ -63,14 +63,14 @@ export function loginOtpPolicyEvents(catalogue: NsCatalogue): string[] {
 /**
  * The deployment note the CLI prints for catalogues whose policies name the SMS
  * `login_otp` template (R10): NS publishes those policies once its login_otp SMS
- * template id is configured for the active vendor. `null` when no directory needs it.
+ * template (id, plus body text for pinnacle) is configured for the active vendor. `null` when no directory needs it.
  */
 export function loginOtpNote(dirs: string[]): string | null {
   if (dirs.length === 0) return null;
   return [
     `note: the guardian OTP policies in ${dirs.join(', ')} name the SMS template '${SMS_OTP_TEMPLATE_KEY}'.`,
-    `  NS publishes them once its ${SMS_OTP_TEMPLATE_KEY} SMS template id is configured for the active SMS vendor:`,
-    '  SMS_LOGIN_OTP_TEMPLATE_ID (msg91) or PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle).',
+    `  NS publishes them once its ${SMS_OTP_TEMPLATE_KEY} SMS template is configured for the active SMS vendor:`,
+    '  SMS_LOGIN_OTP_TEMPLATE_ID (msg91), or PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle).',
     '  Set it on every cluster that loads these catalogues.',
   ].join('\n');
 }

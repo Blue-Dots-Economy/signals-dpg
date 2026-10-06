@@ -506,7 +506,7 @@ describe('login_otp dependency note (R10)', () => {
     const note = loginOtpNote(['blue_dot', 'purple_dot/alimco']);
     expect(note).toContain('blue_dot, purple_dot/alimco');
     expect(note).toContain('SMS_LOGIN_OTP_TEMPLATE_ID (msg91)');
-    expect(note).toContain('PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle)');
+    expect(note).toContain('PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle)');
     expect(loginOtpNote([])).toBeNull();
   });
 
@@ -521,7 +521,9 @@ describe('login_otp dependency note (R10)', () => {
         env: { ...process.env, INIT_CWD: pkg },
       });
       expect(out).toContain("name the SMS template 'login_otp'");
-      expect(out).toContain('SMS_LOGIN_OTP_TEMPLATE_ID (msg91) or PINNACLE_LOGIN_OTP_TEMPLATE_ID (pinnacle)');
+      expect(out).toContain(
+        'SMS_LOGIN_OTP_TEMPLATE_ID (msg91), or PINNACLE_LOGIN_OTP_TEMPLATE_ID together with SMS_LOGIN_OTP_BODY (pinnacle)',
+      );
       expect(out).toMatch(/note: the guardian OTP policies in [^\n]*blue_dot/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
