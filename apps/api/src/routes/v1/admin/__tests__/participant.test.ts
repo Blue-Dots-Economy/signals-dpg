@@ -645,6 +645,36 @@ describe('POST /admin/participant', () => {
     expect(dbState.updates[0].set).not.toHaveProperty('domains');
   });
 
+  it('a NEW participant whose profile fails the schema gets INVALID_ITEM_STATE with its fields map', async () => {
+    dbState.signUpUserId = 'usr_new_invalid';
+    lastQueriedUserId = 'usr_new_invalid';
+    const { create_profile_item } = await import('@/lib/profile_item');
+    vi.mocked(create_profile_item).mockRejectedValueOnce(
+      Object.assign(new Error('Invalid item_state: mobile_number: Enter a 10-digit mobile number'), {
+        statusCode: 400,
+        errorCode: 'INVALID_ITEM_STATE',
+        details: { fields: { mobile_number: 'Enter a 10-digit mobile number' } },
+      }),
+    );
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: {
+        email: 'invalid-new@example.com',
+        name: 'New',
+        channel: 'bulk',
+        item_state: { mobile_number: '12' },
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({
+      error: 'INVALID_ITEM_STATE',
+      message: 'Invalid item_state: mobile_number: Enter a 10-digit mobile number',
+      fields: { mobile_number: 'Enter a 10-digit mobile number' },
+    });
+  });
+
   it('accepts a request with no consent flags at all → 200', async () => {
     dbState.signUpUserId = 'usr_new_optional';
     lastQueriedUserId = 'usr_new_optional';

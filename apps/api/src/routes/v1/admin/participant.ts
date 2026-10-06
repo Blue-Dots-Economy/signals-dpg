@@ -201,7 +201,18 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
 
 type SignUpResult =
   | { ok: true; user_id: string }
-  | { ok: false; statusCode: number; error: string; message: string };
+  | {
+      ok: false;
+      statusCode: number;
+      error: string;
+      message: string;
+      /**
+       * A typed client error's curated extras (e.g. INVALID_ITEM_STATE's
+       * per-field `fields`), merged into the error body — the same body the
+       * existing-user branches return via replyItemWriteFailure.
+       */
+      details?: Record<string, unknown>;
+    };
 
 /** Shape both branches share for classifying a write failure. */
 function isUniqueViolation(err: unknown): boolean {
@@ -402,16 +413,21 @@ function classifyOnboardFailure(
     cause?: { code?: string };
     statusCode?: number;
     errorCode?: string;
+    details?: Record<string, unknown>;
   } | null;
 
   // Propagate typed service errors (e.g. from create_profile_item, or the
-  // insert failure re-thrown above).
+  // insert failure re-thrown above). A client error keeps its curated details
+  // (INVALID_ITEM_STATE's `fields`), so a new participant's rejection carries
+  // the same body as an existing participant's.
   if (e?.statusCode && e?.errorCode) {
+    const isClientError = e.statusCode >= 400 && e.statusCode < 500;
     return {
       ok: false,
       statusCode: e.statusCode,
       error: e.errorCode,
       message: e.message ?? 'request rejected',
+      ...(isClientError && e.details ? { details: e.details } : {}),
     };
   }
 
@@ -743,7 +759,9 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   });
 
   if (!result.ok) {
+    // `details` spread first so it can never override the error code or message.
     return reply.code(result.statusCode).send({
+      ...result.details,
       error: result.error,
       message: result.message,
     });
@@ -1081,7 +1099,9 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
   });
 
   if (!result.ok) {
+    // `details` spread first so it can never override the error code or message.
     return reply.code(result.statusCode).send({
+      ...result.details,
       error: result.error,
       message: result.message,
     });
