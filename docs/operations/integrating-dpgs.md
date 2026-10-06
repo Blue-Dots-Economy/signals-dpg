@@ -354,7 +354,9 @@ recover from the address text alone.
   address by sending it here.
 - **Country check (#789).** When the instance sets `GEOCODING_COUNTRY` (e.g.
   `IN`) and mounts that country's boundary (`GEOCODING_BOUNDARY_PATH`), every
-  supplied point must fall inside the country, within about 2 km of the border.
+  supplied point must fall inside the country, or within 15 km of its drawn
+  border (the default outline is coarse enough that real border towns sit a
+  few km outside it).
   A point outside it fails the whole write with
   `400 { "error": "LOCATION_OUTSIDE_COUNTRY", "message": "Location <lat>, <lng> is outside the allowed region (IN)." }`
   and nothing is stored. The message names the point so a bulk operator can find

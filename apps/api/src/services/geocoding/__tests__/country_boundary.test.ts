@@ -85,6 +85,15 @@ describe('findLocationOutsideCountry', () => {
     ).resolves.toEqual(outside);
   });
 
+  it('applies the 15 km border tolerance', async () => {
+    // At lat 15, 1° of longitude is ~107.5 km: lng 80.12 is ~13 km east of the
+    // lng=80 edge, lng 80.16 is ~17 km east.
+    const within = { lat: 15, lng: 80.12 };
+    const beyond = { lat: 15, lng: 80.16 };
+    await expect(findLocationOutsideCountry([within])).resolves.toBeNull();
+    await expect(findLocationOutsideCountry([within, beyond])).resolves.toEqual(beyond);
+  });
+
   it('returns null when every point is inside', async () => {
     await expect(findLocationOutsideCountry([{ lat: 12, lng: 72 }])).resolves.toBeNull();
   });

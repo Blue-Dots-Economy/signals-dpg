@@ -25,11 +25,19 @@ export type BoundaryPolygons = Polygon[];
 
 /**
  * How far outside the drawn border a point may sit and still count as inside.
- * The boundary file is simplified, and a real village on the border must not be
- * rejected because the line was smoothed past it. ~2 km is far larger than the
- * simplification error and far smaller than any cross-border mix-up.
+ * The default boundary is Natural Earth 1:10m, whose own positional error is
+ * several km along the Bangladesh border: Petrapole (WB) sits 6.25 km outside
+ * the drawn line, Jogbani (Bihar) 3.5 km, Moreh (Manipur) 2.3 km. A real border
+ * address must not fail its write over that.
+ *
+ * 15 km clears those with over 2x margin and still rejects the nearest foreign
+ * cities (Lahore 21 km, Jessore 26 km, Sylhet 31 km, Khulna 61 km, Dhaka 74 km,
+ * Kathmandu 84 km outside). Don't raise it past ~20 km: Lahore gets in. What it
+ * admits is the strip on the far side of the border that a 1:10m outline cannot
+ * resolve anyway (Benapole, Birgunj, Rajshahi). A sharper source (Survey of
+ * India) would justify a tighter value.
  */
-export const BOUNDARY_TOLERANCE_METERS = 2000;
+export const BOUNDARY_TOLERANCE_METERS = 15_000;
 
 const METERS_PER_DEGREE_LAT = 110_540;
 const METERS_PER_DEGREE_LNG_AT_EQUATOR = 111_320;
