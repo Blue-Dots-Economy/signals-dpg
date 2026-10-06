@@ -151,6 +151,7 @@ const precreate_issue_handler = async (
       contactType: contact.contactType,
       scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
+      log: request.log,
     });
   } catch (err) {
     const r = guardianOtpErrorReply(err);
@@ -263,6 +264,7 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
       contactType: contact.contactType,
       scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
+      log: request.log,
     });
   } catch (err) {
     const r = guardianOtpErrorReply(err);

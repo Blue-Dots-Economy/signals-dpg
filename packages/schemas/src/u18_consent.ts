@@ -6,7 +6,7 @@ import { normalizeE164Phone } from './phone';
  * hashed and sent is always the canonical form. A value that cannot be made
  * E.164 is a 400.
  */
-const GuardianPhoneSchema = z.string().transform((value, ctx) => {
+const GuardianPhoneSchema = z.string().min(1).transform((value, ctx) => {
   const phone = normalizeE164Phone(value);
   if (!phone) {
     ctx.addIssue({ code: 'custom', message: 'Enter a valid phone number, e.g. +919876543210' });

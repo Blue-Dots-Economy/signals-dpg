@@ -623,6 +623,8 @@ describe('u18_guardian_handler', () => {
       contactType: 'email',
       scenario: { kind: 'account' },
       variables: { parentName: 'Parent One' },
+      // The route's own request logger, so a failed send is logged with it.
+      log,
     });
   });
 
@@ -879,6 +881,8 @@ describe('u18_signup_guardian (PRE-AUTH)', () => {
         guardianPhone: '8880002222',
         guardianDeclarationAccepted: true,
         sameContactAcknowledged: true,
+        // The route's request logger reaches the OTP send.
+        log,
       });
     });
 

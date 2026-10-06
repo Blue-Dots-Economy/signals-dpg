@@ -121,6 +121,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
       contactType: contact.contactType,
       scenario: { kind: 'account' },
       variables: { parentName: body.guardianName },
+      log: request.log,
     });
   } catch (err) {
     const r = guardianOtpErrorReply(err);

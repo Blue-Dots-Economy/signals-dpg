@@ -194,16 +194,25 @@ describe('defaultGuardianOtpSend', () => {
       expect(sentEvent().to).toEqual({ phone: '+919876543210' });
     });
 
-    it('falls back to a structured console.error line when no logger is passed', async () => {
-      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('falls back to a pino-shaped error line on stdout when no logger is passed', async () => {
+      const spy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
       send.mockResolvedValueOnce({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
       await expectNoOtpProvider(defaultGuardianOtpSend({ contact: 'a@b.co', contactType: 'email', otp: '987654' }));
-      expect(spy).toHaveBeenCalledTimes(1);
-      const dump = inspect(spy.mock.calls);
-      expect(dump).toContain('no_policy');
-      expect(dump).not.toContain('987654');
-      expect(dump).not.toContain('a@b.co');
+      const lines = spy.mock.calls.map(([chunk]) => String(chunk));
       spy.mockRestore();
+      const line = lines.find((l) => l.includes('ns_rejected'));
+      expect(line).toBeDefined();
+      expect(line!.endsWith('\n')).toBe(true);
+      expect(JSON.parse(line!)).toMatchObject({
+        level: 50,
+        time: expect.any(Number),
+        msg: 'guardian otp: ns_rejected',
+        event_type: 'guardian.otp.generic',
+        status: 422,
+        error: 'no_policy',
+      });
+      expect(line).not.toContain('987654');
+      expect(line).not.toContain('a@b.co');
     });
   });
 });

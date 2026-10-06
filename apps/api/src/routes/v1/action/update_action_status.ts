@@ -35,6 +35,7 @@ import {
   type GateResult,
 } from '@/services/guardian_action_gate';
 import { guardianActionConsentRow, actionConsentRow } from '@/services/guardian_consent_rows';
+import type { GuardianOtpLog } from '@/services/guardian_otp';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -80,6 +81,7 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 async function buildBulkGuardianAcceptGate(
   items: unknown[],
   callerId: string,
+  log: GuardianOtpLog,
 ): Promise<Map<number, GateResult>> {
   const gateItems: BulkGateItem[] = [];
   let otp: string | undefined;
@@ -131,7 +133,7 @@ async function buildBulkGuardianAcceptGate(
     });
   }
   if (gateItems.length === 0) return new Map();
-  return guardianBulkActionGate({ items: gateItems, stage: 'accept', otp });
+  return guardianBulkActionGate({ items: gateItems, stage: 'accept', otp, log });
 }
 
 /**
@@ -158,7 +160,7 @@ export const update_action_status_handler = async (
   let batchGate: Map<number, GateResult> | undefined;
   if (request.body.length > 1 && request.body.length <= apiConfig.bulk_max_items) {
     try {
-      batchGate = await buildBulkGuardianAcceptGate(request.body, callerId);
+      batchGate = await buildBulkGuardianAcceptGate(request.body, callerId, request.log);
     } catch (err) {
       request.log.error(
         { err },
@@ -330,6 +332,7 @@ export const update_action_status_handler = async (
             // is ever re-added, minors are blocked automatically (#395).
             channel: 'self',
             otp: body.guardian_otp,
+            log: request.log,
           }));
 
         // Per-item BulkItemFailure (mirrors perform_action.ts, commit

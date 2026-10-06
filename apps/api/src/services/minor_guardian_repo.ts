@@ -75,8 +75,9 @@ export async function isGuardianWardLimitReached(
 
 /**
  * Warn-and-ack guard: whether a guardian email/phone equals the ward's own
- * contact. Email compared case-insensitively, phone trimmed — matching how both
- * call sites normalized before this was centralized.
+ * contact. Email compared case-insensitively; phones compared in their
+ * canonical E.164 form on both sides (R14), so `98765 43210` matches
+ * `+919876543210`.
  */
 export function guardianContactMatchesWard(args: {
   wardEmail?: string | null;
@@ -85,9 +86,10 @@ export function guardianContactMatchesWard(args: {
   guardianPhone?: string | null;
 }): boolean {
   const wardEmail = args.wardEmail?.trim().toLowerCase();
-  const wardPhone = args.wardPhone?.trim();
+  const wardPhone = args.wardPhone ? canonicalGuardianPhone(args.wardPhone) : '';
+  const guardianPhone = args.guardianPhone ? canonicalGuardianPhone(args.guardianPhone) : '';
   const emailMatch = !!wardEmail && !!args.guardianEmail && args.guardianEmail.trim().toLowerCase() === wardEmail;
-  const phoneMatch = !!wardPhone && !!args.guardianPhone && args.guardianPhone.trim() === wardPhone;
+  const phoneMatch = !!wardPhone && !!guardianPhone && guardianPhone === wardPhone;
   return emailMatch || phoneMatch;
 }
 

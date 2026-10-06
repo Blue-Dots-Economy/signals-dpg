@@ -27,6 +27,7 @@ import {
   verifyGuardianOtp,
   assertVerifyAttemptAllowed,
   type GuardianContactType,
+  type GuardianOtpLog,
 } from '@/services/guardian_otp';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
@@ -125,6 +126,8 @@ export interface StartSignupGuardianInput {
   guardianPhone?: string;
   guardianDeclarationAccepted: true;
   sameContactAcknowledged?: boolean;
+  /** request.log — where a failed OTP send is reported. */
+  log?: GuardianOtpLog;
 }
 
 /**
@@ -198,6 +201,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     contactType: channel.contactType,
     scenario: { kind: 'account' },
     variables: { parentName: input.guardianName, domain: input.domain },
+    ...(input.log ? { log: input.log } : {}),
   });
 }
 

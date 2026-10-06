@@ -118,6 +118,7 @@ const start_handler = async (request: StartReq, reply: FastifyReply) => {
       guardianPhone: body.guardianPhone,
       guardianDeclarationAccepted: body.guardianDeclarationAccepted,
       sameContactAcknowledged: body.sameContactAcknowledged,
+      log: request.log,
     });
   } catch (err) {
     if (err instanceof SignupGuardianError) {

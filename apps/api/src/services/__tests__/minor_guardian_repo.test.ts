@@ -83,6 +83,18 @@ describe('guardianContactMatchesWard', () => {
     ).toBe(true);
   });
 
+  it('matches a non-canonical ward phone against the canonical guardian phone (R14)', () => {
+    expect(
+      guardianContactMatchesWard({ wardPhone: '98765 43210', guardianPhone: '+919876543210' }),
+    ).toBe(true);
+    expect(
+      guardianContactMatchesWard({ wardPhone: '+91 (98765) 43-210', guardianPhone: '9876543210' }),
+    ).toBe(true);
+    expect(
+      guardianContactMatchesWard({ wardPhone: '98765 43211', guardianPhone: '+919876543210' }),
+    ).toBe(false);
+  });
+
   it('matches phone after trimming', () => {
     expect(
       guardianContactMatchesWard({

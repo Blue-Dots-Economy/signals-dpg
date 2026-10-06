@@ -112,7 +112,7 @@ async function buildBulkGuardianGate(
     });
   }
   if (gateItems.length === 0) return new Map();
-  return guardianBulkActionGate({ items: gateItems, otp });
+  return guardianBulkActionGate({ items: gateItems, otp, log: request.log });
 }
 
 async function runPerformActions(
@@ -210,6 +210,7 @@ async function runPerformActions(
           targetItemId: body.target_item.item_id,
           channel: request.acting_org ? 'external' : 'self',
           otp: body.guardian_otp,
+          log: request.log,
         }));
       const guardianGateFail = guardianGateFailure(guardianGate);
       if (guardianGateFail) throw guardianGateFail;

@@ -111,6 +111,26 @@ describe('guardianActionGate', () => {
     });
   });
 
+  it('forwards the caller\'s request logger to the OTP send (single and bulk)', async () => {
+    getWardAge.mockResolvedValue(11);
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    resolveProviderServiceName.mockResolvedValue('Acme');
+    issueGuardianOtp.mockResolvedValue(undefined);
+    const log = { error: vi.fn() };
+
+    await guardianActionGate({ ...baseInput, log });
+    await guardianBulkActionGate({
+      items: [
+        { index: 0, wardUserId: 'ward-1', network: 'blue_dot', sourceDomain: 'seeker', actionType: 'apply', sourceItemId: 'src', targetItemId: 'tgt-a' },
+      ],
+      log,
+    });
+
+    expect(issueGuardianOtp).toHaveBeenCalledTimes(2);
+    expect(issueGuardianOtp.mock.calls[0][0].log).toBe(log);
+    expect(issueGuardianOtp.mock.calls[1][0].log).toBe(log);
+  });
+
   it('passes the network.json action type + stage through as the scenario', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });

@@ -57,12 +57,14 @@ export interface GuardianOtpLog {
 }
 
 /**
- * The default `GuardianOtpLog`: one structured line on stderr. The callers
- * that issue an OTP run outside a request logger's reach (the gate, the
- * signup service), so this is what the send uses unless one is passed.
+ * The fallback `GuardianOtpLog` for a call with no request logger: one
+ * pino-shaped line (level 50 = error) on stdout, beside the app's own logs.
+ * Every route passes `request.log`, so this only covers direct callers.
  */
-const consoleGuardianOtpLog: GuardianOtpLog = {
-  error: (details, message) => console.error(JSON.stringify({ level: 'error', msg: message, ...details })),
+const fallbackGuardianOtpLog: GuardianOtpLog = {
+  error: (details, message) => {
+    process.stdout.write(JSON.stringify({ level: 50, time: Date.now(), msg: message, ...details }) + '\n');
+  },
 };
 
 /** Dispatch seam — injected so the core is testable without the notifier. */
@@ -280,13 +282,13 @@ export function buildGuardianOtpEvent(args: {
  * service refuses the event, it cannot be reached, or a stored phone cannot be
  * made E.164 — a guardian-required domain must not silently skip verification.
  *
- * Each failure is logged here (`log`, else a structured stderr line) with the
+ * Each failure is logged here (`log`, else a pino-shaped stdout line) with the
  * event type and the service's status/error, the transport kind, or the
  * reason — never the code, the contact or a variable — because the routes
  * turn the error into a reply without logging it.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables, log }) => {
-  const logger = log ?? consoleGuardianOtpLog;
+  const logger = log ?? fallbackGuardianOtpLog;
   const eventType = guardianEvent(scenario?.kind ?? 'generic');
   const client = getNotificationClient();
   if (!client) {
