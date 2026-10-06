@@ -1,0 +1,24 @@
+{
+  "name": "ns-catalogue",
+  "version": "1.0.0",
+  "description": "Generates notification-service catalogues from Signals' email copy and network.json (run by hand)",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@11.1.2",
+  "dependencies": {
+    "notification": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.13",
+    "vitest": "^4.1.11"
+  }
+}

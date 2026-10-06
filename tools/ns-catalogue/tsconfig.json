@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@dpg/*": ["../../packages/*/src"]
+    },
+    "types": ["node"],
+    "declaration": false,
+    "composite": false,
+    "noEmit": true
+  },
+  "include": ["src"]
+}

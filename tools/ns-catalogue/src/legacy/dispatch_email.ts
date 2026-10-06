@@ -1,0 +1,180 @@
+/**
+ * Legacy copy of apps/api/src/notifications/email/dispatch_email.ts — the pure
+ * `createEmailSender` only (the config-bound default sender is left out). The
+ * golden test drives it with an injected `notify` spy to capture exactly what
+ * Signals renders today.
+ */
+import { resolveBrandColor } from './brand';
+import { getEmailCase } from './email_cases';
+import type { EmailMessagesIndex } from './messages_index';
+import { renderCtaShell, renderOtpBox, renderPlainShell, renderSiteLink } from './shells';
+import { substituteHtml, substitutePlain } from './substitute';
+
+/**
+ * The single email send path (#529): copy lookup → token substitution
+ * (escaping boundary) → HTML shell → notification service. Criticality comes
+ * from the case registry: critical sends rethrow so the caller can surface
+ * delivery failure (OTP 502s, support 502); best-effort sends never throw —
+ * an email failure must never block the action that triggered it.
+ */
+/**
+ * A file to attach to the email. Base64 rather than a Buffer because it travels
+ * to the notification service as JSON; the relay decodes it (#551).
+ */
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  /** Base64, no `data:` prefix. */
+  data: string;
+}
+
+export interface EmailNotifyRequest {
+  channel: 'email';
+  template_id: 'basic_email';
+  to: string;
+  priority: 'realtime' | 'other';
+  dedupe_id?: string;
+  variables: {
+    fromName: string;
+    fromEmail: string;
+    replyTo: string;
+    subject: string;
+    html: string;
+    cc?: string;
+    attachments?: EmailAttachment[];
+  };
+}
+
+export interface DispatchEmailArgs {
+  caseId: string;
+  to: string;
+  /** From-name shown to the recipient (brand, "<X> Support", "Welcome to <X>", …). */
+  fromName: string;
+  variables?: Record<string, string>;
+  dedupeId?: string;
+  replyTo?: string;
+  cc?: string;
+  /**
+   * Files to attach. Kept out of `variables` because those are copy tokens that
+   * get substituted and HTML-escaped; attachments are opaque payload and must
+   * never pass through substitution.
+   */
+  attachments?: EmailAttachment[];
+  /** cta-shell cases only: */
+  ctaUrl?: string;
+  network?: string;
+  /**
+   * Brand id for copy resolution (`forContext`'s brand layer). No caller sets
+   * this yet — brand isn't resolvable at send time anywhere in the system
+   * today; this is the hook for when it is (a per-plan brand, analogous to
+   * `network`).
+   */
+  brand?: string;
+  /** Per-call log override (route handlers pass request.log-backed fns). */
+  log?: (message: string, meta?: Record<string, unknown>) => void;
+}
+
+export interface EmailSender {
+  dispatchEmail(args: DispatchEmailArgs): Promise<{ ok: boolean }>;
+}
+
+export interface EmailSenderDeps {
+  notify: (req: EmailNotifyRequest) => Promise<unknown>;
+  getMessages: () => Promise<EmailMessagesIndex>;
+  fromEmail: string;
+  defaultReplyTo: string;
+  /**
+   * Network used for context-free sends (guardian/login OTP, welcome,
+   * support — callers that pass no `args.network`): the instance's single
+   * served network, or `null` on a multi-network instance (those sends keep
+   * base copy rather than guessing). Per-plan `args.network` (action/retire)
+   * always wins over this when present — see `send()` below.
+   */
+  defaultNetwork: string | null;
+  /**
+   * "Team <name>" sign-off in the cta shell (the operating org, e.g.
+   * INSTANCE_NAME "EkStep"/"ALIMCO" — per the email content sheet), NOT the
+   * network display name. Falls back to `args.fromName` when unset so
+   * sender-less test wiring keeps a sensible sign-off.
+   */
+  teamName?: string;
+  log: (message: string, meta?: Record<string, unknown>) => void;
+}
+
+/** Collapse CR/LF/tabs so a substituted subject can't inject email headers. */
+export function oneLine(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+export function createEmailSender(deps: EmailSenderDeps): EmailSender {
+  async function send(args: DispatchEmailArgs): Promise<void> {
+    const def = getEmailCase(args.caseId);
+    const messages = (await deps.getMessages()).forContext(
+      args.network ?? deps.defaultNetwork,
+      args.brand,
+    );
+
+    const vars: Record<string, string> = { ...args.variables };
+    // The styled OTP box is code-built (html token) even when the caller —
+    // e.g. packages/auth — only knows the plain code.
+    if (def.tokens.otpBox === 'html' && vars.otp !== undefined && vars.otpBox === undefined) {
+      vars.otpBox = renderOtpBox(vars.otp);
+    }
+    // Same for the platform link: always resolved (to plain text when there is
+    // no URL) so copy can never render a dead anchor or a literal {{token}}.
+    if (def.tokens.siteLink === 'html' && vars.siteLink === undefined) {
+      vars.siteLink = renderSiteLink(vars.siteUrl);
+    }
+
+    const subject = oneLine(
+      substitutePlain(messages.get(def.keys.subject), vars, def.tokens),
+    );
+    const bodyHtml = substituteHtml(messages.get(def.keys.body), vars, def.tokens);
+
+    const html =
+      def.shell === 'cta'
+        ? renderCtaShell({
+            introHtml: bodyHtml,
+            ctaUrl: args.ctaUrl ?? '',
+            ctaLabel: substitutePlain(
+              messages.get(def.keys.cta as string),
+              vars,
+              def.tokens,
+            ),
+            ctaColor: resolveBrandColor(args.network),
+            brandName: deps.teamName ?? args.fromName,
+          })
+        : renderPlainShell(bodyHtml);
+
+    await deps.notify({
+      channel: 'email',
+      template_id: 'basic_email',
+      to: args.to,
+      priority: def.priority,
+      ...(args.dedupeId ? { dedupe_id: args.dedupeId } : {}),
+      variables: {
+        fromName: args.fromName,
+        fromEmail: deps.fromEmail,
+        replyTo: args.replyTo ?? deps.defaultReplyTo,
+        subject,
+        html,
+        ...(args.cc ? { cc: args.cc } : {}),
+        ...(args.attachments?.length ? { attachments: args.attachments } : {}),
+      },
+    });
+  }
+
+  return {
+    async dispatchEmail(args: DispatchEmailArgs): Promise<{ ok: boolean }> {
+      const log = args.log ?? deps.log;
+      try {
+        await send(args);
+        return { ok: true };
+      } catch (err) {
+        if (getEmailCase(args.caseId).criticality === 'critical') throw err;
+        log('email dispatch failed', { err, caseId: args.caseId });
+        return { ok: false };
+      }
+    },
+  };
+}
