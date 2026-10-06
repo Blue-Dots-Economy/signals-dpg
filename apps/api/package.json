@@ -59,7 +59,7 @@
     "jose": "^6.2.12",
     "match_score": "workspace:*",
     "notification": "workspace:*",
-    "pg": "^8.22.0",
+    "pg": "^8.23.1",
     "schemas": "workspace:*"
   }
 }
