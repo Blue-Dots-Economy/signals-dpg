@@ -2,7 +2,11 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 
 // Guardian OTP send → no-op (no real notifier). Mocked before app import.
-vi.mock('@/utils/notificationClient', () => ({ getNotificationClient: () => ({ notify: async () => {} }) }));
+vi.mock('@/utils/notificationClient', () => ({
+  getNotificationClient: () => ({
+    send: async () => ({ ok: true, status: 202, body: { notification_event_id: 'ne', correlation_id: 'c' } }),
+  }),
+}));
 
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, consent_record } from '@api/db/postgres/schema';

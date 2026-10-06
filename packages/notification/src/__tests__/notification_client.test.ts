@@ -87,7 +87,24 @@ describe('NotificationClient.send — the request', () => {
     await client.send(EVENT);
 
     const body = JSON.parse(String(fetchImpl.mock.calls[0][1]!.body));
-    expect(body).toEqual({ ...EVENT, priority: 'normal' });
+    const { domain: _domain, ...rest } = EVENT;
+    expect(body).toEqual({ ...rest, priority: 'normal' });
+  });
+
+  it('omits a null domain on the wire: the service reads an absent domain as "no recipient domain"', async () => {
+    const { client, fetchImpl } = setup();
+    await client.send({ ...EVENT, domain: null });
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]!.body));
+    expect(body).not.toHaveProperty('domain');
+  });
+
+  it('keeps a real domain', async () => {
+    const { client, fetchImpl } = setup();
+    await client.send({ ...EVENT, domain: 'seeker' });
+
+    const body = JSON.parse(String(fetchImpl.mock.calls[0][1]!.body));
+    expect(body.domain).toBe('seeker');
   });
 
   it('keeps an explicit priority', async () => {

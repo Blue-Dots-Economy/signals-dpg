@@ -1,9 +1,7 @@
-import { apiConfig, instance, notification } from '@/config';
-import { getNotificationClient } from '@/utils/notificationClient';
+import { apiConfig } from '@/config';
 
 import { resolveBrandColor } from '../brand';
 import { getEmailCase } from './email_cases';
-import { getEmailMessages } from './messages';
 import type { EmailMessagesIndex } from './messages';
 import { renderCtaShell, renderOtpBox, renderPlainShell, renderSiteLink } from './shells';
 import { substituteHtml, substitutePlain } from './substitute';
@@ -192,36 +190,4 @@ export function getInstanceDefaultNetwork(): string | null {
     ...new Set(apiConfig.served_domains.map((binding) => binding.network)),
   ];
   return networks.length === 1 ? networks[0] : null;
-}
-
-/**
- * Preserves the previously-hardcoded auth-email sender when
- * NOTIFICATION_FROM_EMAIL is unset, so no config permutation loses email.
- */
-export const DEFAULT_FROM_EMAIL = 'hello@bluedotseconomy.org';
-
-let defaultSender: EmailSender | null | undefined;
-
-export function getDefaultEmailSender(): EmailSender | null {
-  if (defaultSender !== undefined) return defaultSender;
-  const nc = getNotificationClient();
-  if (!nc) {
-    defaultSender = null;
-    return defaultSender;
-  }
-  const fromEmail = notification.NOTIFICATION_FROM_EMAIL ?? DEFAULT_FROM_EMAIL;
-  defaultSender = createEmailSender({
-    notify: (req) => nc.notify(req),
-    getMessages: getEmailMessages,
-    fromEmail,
-    defaultReplyTo: notification.NOTIFICATION_REPLY_TO ?? fromEmail,
-    defaultNetwork: getInstanceDefaultNetwork(),
-    teamName: instance.INSTANCE_NAME || 'DPG',
-    log: (message, meta) => console.warn(message, meta ?? {}),
-  });
-  return defaultSender;
-}
-
-export function resetDefaultEmailSenderForTests(): void {
-  defaultSender = undefined;
 }

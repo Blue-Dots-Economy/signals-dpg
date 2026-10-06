@@ -33,7 +33,7 @@ describe('runAfterUserCreate', () => {
       phoneNumber: '+911234567890',
     });
     expect(sendWelcomeNotifications).toHaveBeenCalledWith(
-      { name: 'Asha', email: 'a@x.com', phoneNumber: '+911234567890' },
+      { userId: USER.id, name: 'Asha', email: 'a@x.com', phoneNumber: '+911234567890' },
       expect.objectContaining({ error: expect.any(Function) }),
       'provider',
     );

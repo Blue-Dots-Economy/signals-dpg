@@ -5,27 +5,8 @@ import {
 } from '@dpg/notification';
 import { keycloakConfig, notification } from '@/config';
 
-/**
- * Transitional: the senders still call the legacy `notify(payload)` until they
- * move to `send(event)` (Plan F2, Tasks 4–5), which deletes this subclass. It
- * keeps those call sites compiling; calling it fails loudly rather than
- * silently dropping a notification.
- *
- * @deprecated Use `send(event)`.
- */
-export class TransitionalNotificationClient extends NotificationClient {
-  /** @deprecated Use `send(event)`. */
-  notify(_payload: unknown): Promise<never> {
-    return Promise.reject(
-      new Error(
-        'NotificationClient.notify() was removed: senders move to send(event) in Plan F2 Tasks 4–5'
-      )
-    );
-  }
-}
-
 let tokens: TokenSource | undefined;
-let client: TransitionalNotificationClient | undefined;
+let client: NotificationClient | undefined;
 
 /**
  * The notification-service client, or undefined when it is not configured.
@@ -38,7 +19,7 @@ let client: TransitionalNotificationClient | undefined;
  * The client and its token source are built once per process, so every sender
  * shares one cached token.
  */
-export const getNotificationClient = (): TransitionalNotificationClient | undefined => {
+export const getNotificationClient = (): NotificationClient | undefined => {
   if (client) return client;
 
   const endpoint = notification.NOTIFICATION_SERVICE_ENDPOINT;
@@ -50,6 +31,6 @@ export const getNotificationClient = (): TransitionalNotificationClient | undefi
     clientId: keycloakConfig.api_client_id,
     clientSecret,
   });
-  client = new TransitionalNotificationClient({ baseUrl: endpoint, tokens });
+  client = new NotificationClient({ baseUrl: endpoint, tokens });
   return client;
 };

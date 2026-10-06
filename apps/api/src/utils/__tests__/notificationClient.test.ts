@@ -64,8 +64,12 @@ describe('getNotificationClient', () => {
     expect(createTokenSource).toHaveBeenCalledTimes(1);
   });
 
-  it('the legacy notify() fails loudly rather than dropping a send', async () => {
+  it('returns a plain NotificationClient with only the event API', async () => {
     const { getNotificationClient } = await freshModule();
-    await expect(getNotificationClient()!.notify({})).rejects.toThrow(/send\(event\)/);
+    const { NotificationClient } = await import('@dpg/notification');
+    const client = getNotificationClient();
+    expect(client).toBeInstanceOf(NotificationClient);
+    expect(Object.getPrototypeOf(client)).toBe(NotificationClient.prototype);
+    expect('notify' in client!).toBe(false);
   });
 });

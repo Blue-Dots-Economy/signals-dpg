@@ -166,7 +166,6 @@ function normalizeEmailList(value: string | undefined): string | undefined {
 export const supportConfig = {
   recipients: normalizeEmailList(notification.SUPPORT_EMAIL),
   cc: normalizeEmailList(notification.SUPPORT_CC_EMAIL),
-  fromEmail: notification.NOTIFICATION_FROM_EMAIL,
   // "Sub-domain link" surfaced in the support subject line.
   linkBaseUrl: notification.FRONTEND_BASE_URL,
   // Display name for the "Team <name>" sign-off. No brand short-name is

@@ -65,7 +65,6 @@ import { randomUUID, randomBytes, createHash } from 'node:crypto';
 // Guardian OTP send -> no-op (no real notifier). Mocked before app import.
 vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => ({
-    notify: async () => {},
     send: async () => ({ ok: true, status: 202, body: { notification_event_id: 'ne', correlation_id: 'c' } }),
   }),
 }));

@@ -75,35 +75,38 @@ caller:
   event per plan; `notify_retire.ts` and `notify_item_lifecycle.ts` do the
   same for their events. `send_event.ts`'s `sendBestEffort` logs a refusal as
   `ns_rejected` and a transport failure as `ns_unreachable`, and never throws.
-- `src/support/build_support_email.ts`: smaller, single-route — now just
-  `generateSupportReference` plus `buildSupportDetailsTable` (the escaped
-  `{{detailsTable}}` html token for the `support.request` case).
-  `POST /api/v1/support` (authenticated) calls
-  `getDefaultEmailSender().dispatchEmail({ caseId: 'support.request', ... })`
-  directly (no `dispatcher.ts`/`action_copy.ts` in between) and returns
-  `503 SUPPORT_NOT_CONFIGURED` when the recipient/fromEmail/sender is unset,
-  `502 SUPPORT_SEND_FAILED` if the send throws (the case is critical),
-  `429 SUPPORT_RATE_LIMITED` past 5 submissions per user per hour (the counter
-  **fails open** — a Redis outage must not silence a complaint), and one of
-  `ATTACHMENT_COUNT_EXCEEDED` / `ATTACHMENT_TOO_LARGE` /
+- **Support** (`POST /api/v1/support`, authenticated) sends one
+  `support.request` event straight from the route handler
+  (`routes/v1/support/submit_support.ts`, no `dispatcher.ts` in between):
+  the first `SUPPORT_EMAIL` address is `to`, the rest plus `SUPPORT_CC_EMAIL`
+  go in `cc` (de-duplicated, at most 10), `reply_to` is the submitter's email,
+  attachments ride beside the `variables` (never in them), and the
+  `idempotency_key` is the per-submission reference
+  (`src/support/build_support_email.ts`'s `generateSupportReference`). It
+  returns `503 SUPPORT_NOT_CONFIGURED` when `SUPPORT_EMAIL` or the NS client is
+  unset, `502 SUPPORT_SEND_FAILED` on a refusal or transport failure (the
+  send is critical), `429 SUPPORT_RATE_LIMITED` past 5 submissions per user
+  per hour (the counter **fails open** — a Redis outage must not silence a
+  complaint), and one of `ATTACHMENT_COUNT_EXCEEDED` / `ATTACHMENT_TOO_LARGE` /
   `ATTACHMENT_TYPE_NOT_ALLOWED` (400) from `src/support/attachments.ts` (#551).
   Two things there are easy to trip over: the route sets its **own**
   `bodyLimit`, derived from `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` rather than
   hardcoded (base64 inflates by 4/3, so a fixed limit would turn a raised cap
   into a silent 413) — every other route keeps Fastify's 1 MB default; and the
-  MIME allowlist is a **code constant**, not env, deliberately. Attachments ride
-  in `dispatchEmail`'s `attachments` arg, never in `variables` — `variables` are
-  copy tokens that get substituted and HTML-escaped. `GET /api/v1/support/config`
-  serves `{enabled, maxTotalBytes, maxFiles, allowedTypes}` so the UI validates
-  against the server's numbers instead of its own copy; its `enabled` mirrors the
-  submit route's 503 condition exactly, and the two must be changed together.
-- Guardian OTP and login OTP emails are likewise thin callers straight into
-  `dispatchEmail` — see `docs/operations/guardian-otp-templates.md`.
-
-Support has no `NotificationPlan`/`dispatcher.ts` layer above it — it builds
-its `DispatchEmailArgs` inline in the route handler — but every email pipeline
-converges on the same sender, so copy for every email in the system lives in
-one file and is overridable without a code change.
+  MIME allowlist is a **code constant**, not env, deliberately.
+  `GET /api/v1/support/config` serves `{enabled, maxTotalBytes, maxFiles,
+  allowedTypes}` so the UI validates against the server's numbers instead of
+  its own copy; its `enabled` mirrors the submit route's 503 condition exactly,
+  and the two must be changed together.
+- **Guardian OTP** (`services/guardian_otp.ts`) sends `guardian.otp.<kind>`
+  (or `guardian.otp.generic`) with the code only in `variables.message`,
+  priority `urgent` and no idempotency key; NS's `first_available` policy
+  picks email or the SMS `login_otp` template from the contact point. A
+  refusal or transport failure raises `NO_OTP_PROVIDER` (503). Generation and
+  verification stay in Signals.
+- **Welcome** (`notifications/welcome.ts`) sends one `user.welcome` event with
+  every contact point the user has; NS's policy fans it out to the welcome
+  email and the WhatsApp welcome. Its key is per user.
 
 The **SMS sender** (`src/notifications/sms/`, #532/#535) mirrors that shape but
 is provider-agnostic and DLT-driven, so it renders nothing on-wire itself:

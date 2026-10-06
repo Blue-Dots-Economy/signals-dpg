@@ -30,7 +30,6 @@ import { randomUUID, randomBytes, createHash } from 'node:crypto';
 
 vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => ({
-    notify: async () => {},
     send: async () => ({ ok: true, status: 202, body: { notification_event_id: 'ne', correlation_id: 'c' } }),
   }),
 }));

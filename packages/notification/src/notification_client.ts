@@ -40,7 +40,14 @@ export class NotificationClient {
   }
 
   async send(event: NotifyEvent): Promise<NotifyResult> {
-    const body = JSON.stringify({ ...event, priority: event.priority ?? 'normal' });
+    // The service reads an absent `domain` as "no recipient domain"; it does
+    // not accept `null`, so a domain-less event leaves the field out.
+    const { domain, ...rest } = event;
+    const body = JSON.stringify({
+      ...rest,
+      ...(domain != null ? { domain } : {}),
+      priority: event.priority ?? 'normal',
+    });
 
     let res = await this.post(body, event.correlation_id);
     if (res.status === 401) {

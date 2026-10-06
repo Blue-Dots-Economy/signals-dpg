@@ -15,8 +15,8 @@ function mockDeps(cfg: {
       if (cfg.authenticated !== false) req.user = { id: 'u1' };
     },
   }));
-  vi.doMock('@/notifications/email/dispatch_email', () => ({
-    getDefaultEmailSender: () => (cfg.client === false ? null : { dispatchEmail: vi.fn() }),
+  vi.doMock('@/utils/notificationClient', () => ({
+    getNotificationClient: () => (cfg.client === false ? undefined : { send: vi.fn() }),
   }));
   vi.doMock('@/config', () => ({
     supportConfig: {
@@ -77,7 +77,7 @@ describe('GET /api/v1/support/config', () => {
     await app.close();
   });
 
-  // The submit route 503s on exactly these three conditions; enabled must agree
+  // The submit route 503s on exactly these two conditions; enabled must agree
   // with it or the UI shows a form that cannot succeed.
   it('reports disabled when no recipient is configured', async () => {
     mockDeps({ recipients: undefined, fromEmail: 'from@org.com' });
@@ -86,14 +86,14 @@ describe('GET /api/v1/support/config', () => {
     await app.close();
   });
 
-  it('reports disabled when no from-address is configured', async () => {
+  it('no longer needs a from-address: the sender identity is notification-service config (F2-4)', async () => {
     mockDeps({ recipients: 'support@org.com', fromEmail: undefined });
     const app = await buildApp();
-    expect((await get(app)).json().enabled).toBe(false);
+    expect((await get(app)).json().enabled).toBe(true);
     await app.close();
   });
 
-  it('reports disabled when the email sender is unavailable', async () => {
+  it('reports disabled when the notification client is unavailable', async () => {
     mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', client: false });
     const app = await buildApp();
     expect((await get(app)).json().enabled).toBe(false);

@@ -2,16 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 
-const dispatchEmailMock = vi.fn();
+import { NotifyTransportError, SUPPORT_REQUEST } from '@dpg/notification';
+
+const ACCEPTED = { ok: true, status: 202, body: { notification_event_id: 'ne-1', correlation_id: 'c-1' } };
+const sendMock = vi.fn();
 /** Running count the mocked fixed-window counter returns (rate-limit tests). */
 const incrWithinWindowMock = vi.fn(async () => 1);
 
 function mockDeps(cfg: {
   recipients?: string;
   cc?: string;
-  fromEmail?: string;
   linkBaseUrl?: string;
-  teamName?: string;
+  /** `null` = INSTANCE_NAME unset. */
+  teamName?: string | null;
   client?: boolean;
   attachmentMaxTotalBytes?: number;
   attachmentMaxFiles?: number;
@@ -22,17 +25,15 @@ function mockDeps(cfg: {
       req.user = { id: 'u1' };
     },
   }));
-  vi.doMock('@/notifications/email/dispatch_email', () => ({
-    getDefaultEmailSender: () =>
-      cfg.client === false ? null : { dispatchEmail: dispatchEmailMock },
+  vi.doMock('@/utils/notificationClient', () => ({
+    getNotificationClient: () => (cfg.client === false ? undefined : { send: sendMock }),
   }));
   vi.doMock('@/config', () => ({
     supportConfig: {
       recipients: cfg.recipients,
       cc: cfg.cc,
-      fromEmail: cfg.fromEmail,
       linkBaseUrl: cfg.linkBaseUrl,
-      teamName: cfg.teamName ?? 'Blue Dot',
+      teamName: cfg.teamName === null ? undefined : (cfg.teamName ?? 'Blue Dot'),
       attachmentMaxTotalBytes: cfg.attachmentMaxTotalBytes ?? 5 * 1024 * 1024,
       attachmentMaxFiles: cfg.attachmentMaxFiles ?? 3,
     },
@@ -51,9 +52,11 @@ function mockDeps(cfg: {
   }));
 }
 
-async function buildApp() {
+async function buildApp(logLines?: string[]) {
   const { submit_support } = await import('../submit_support');
-  const app = Fastify();
+  const app = logLines
+    ? Fastify({ logger: { level: 'warn', stream: { write: (line: string) => void logLines.push(line) } } })
+    : Fastify();
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
   await app.register(submit_support, { prefix: '/api/v1/support' });
@@ -73,53 +76,96 @@ const validPayload = {
 describe('POST /api/v1/support', () => {
   beforeEach(() => {
     vi.resetModules();
-    dispatchEmailMock.mockReset();
-    dispatchEmailMock.mockResolvedValue({ ok: true });
+    sendMock.mockReset();
+    sendMock.mockResolvedValue(ACCEPTED);
     incrWithinWindowMock.mockReset();
     incrWithinWindowMock.mockResolvedValue(1);
   });
 
-  it('sends the support email and returns 201 with a reference', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', linkBaseUrl: 'https://x.org' });
+  it('sends the support.request event and returns 201 with a reference', async () => {
+    mockDeps({ recipients: 'support@org.com', linkBaseUrl: 'https://x.org' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
     expect(res.json().ok).toBe(true);
-    expect(res.json().reference).toMatch(/^SUP-\d{8}-/);
-    expect(dispatchEmailMock).toHaveBeenCalledTimes(1);
-    const arg = dispatchEmailMock.mock.calls[0][0];
-    expect(arg.caseId).toBe('support.request');
-    expect(arg.to).toBe('support@org.com');
-    expect(arg.replyTo).toBe('asha@example.com');
-    expect(arg.dedupeId).toBe(res.json().reference);
-    expect(arg.variables.reference).toBe(res.json().reference);
-    expect(arg.variables.type).toBe('Complaint');
-    expect(arg.variables.name).toBe('Asha');
-    expect(arg.variables.fromSite).toBe(' from https://x.org');
-    expect(arg.variables.details).toBe('It broke');
-    expect(arg.variables.teamName).toBe('Blue Dot');
-    expect(arg.variables.detailsTable).toContain('asha@example.com');
-    expect(arg.cc).toBeUndefined();
+    const reference = res.json().reference as string;
+    expect(reference).toMatch(/^SUP-\d{8}-/);
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    const arg = sendMock.mock.calls[0][0];
+    expect(arg).toEqual({
+      event_type: SUPPORT_REQUEST,
+      domain: null,
+      to: { email: 'support@org.com' },
+      reply_to: 'asha@example.com',
+      variables: {
+        reference,
+        type: 'Complaint',
+        name: 'Asha',
+        fromSite: ' from https://x.org',
+        details: 'It broke',
+        teamName: 'Blue Dot',
+        phone: '+919000000000',
+        email: 'asha@example.com',
+        submittedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        attachmentsSummary: 'none',
+      },
+      priority: 'normal',
+      idempotency_key: reference,
+    });
     await app.close();
   });
 
-  it('passes multiple recipients through to `to` and cc into the call', async () => {
-    mockDeps({
-      recipients: 'a@org.com, b@org.com',
-      cc: 'c@org.com, d@org.com',
-      fromEmail: 'from@org.com',
-    });
+  it('gives two submissions two idempotency keys (R12: the reference is the occurrence)', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    const app = await buildApp();
+    await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    const [first, second] = sendMock.mock.calls.map(([e]) => e.idempotency_key as string);
+    expect(first).not.toBe(second);
+    expect(first.length).toBeLessThanOrEqual(128);
+    await app.close();
+  });
+
+  it('sends the first recipient as `to` and the rest plus SUPPORT_CC_EMAIL as cc (F2-6)', async () => {
+    mockDeps({ recipients: 'a@org.com, b@org.com', cc: 'c@org.com, d@org.com' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
-    const arg = dispatchEmailMock.mock.calls[0][0];
-    expect(arg.to).toBe('a@org.com, b@org.com');
-    expect(arg.cc).toBe('c@org.com, d@org.com');
+    const arg = sendMock.mock.calls[0][0];
+    expect(arg.to).toEqual({ email: 'a@org.com' });
+    expect(arg.cc).toEqual(['b@org.com', 'c@org.com', 'd@org.com']);
     await app.close();
   });
 
-  it('falls back replyTo to fromEmail when only a phone is given', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+  it('de-duplicates cc (case-insensitively, and against `to`) and caps it at 10', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => `cc${i}@org.com`).join(', ');
+    mockDeps({ recipients: 'a@org.com, b@org.com, B@org.com', cc: `A@org.com, b@org.com, ${many}` });
+    const logLines: string[] = [];
+    const app = await buildApp(logLines);
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(201);
+    const arg = sendMock.mock.calls[0][0];
+    expect(arg.to).toEqual({ email: 'a@org.com' });
+    expect(arg.cc).toHaveLength(10);
+    expect(arg.cc[0]).toBe('b@org.com');
+    expect(arg.cc.slice(1)).toEqual(Array.from({ length: 9 }, (_, i) => `cc${i}@org.com`));
+    // The overflow is logged by count only, never by address.
+    const dump = logLines.join('\n');
+    expect(dump).toContain('"dropped":3');
+    expect(dump).not.toContain('@org.com');
+    await app.close();
+  });
+
+  it('omits cc when there is a single recipient and no SUPPORT_CC_EMAIL', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    const app = await buildApp();
+    await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(sendMock.mock.calls[0][0]).not.toHaveProperty('cc');
+    await app.close();
+  });
+
+  it('omits reply_to and fills the R5 "—" placeholders when only a phone is given', async () => {
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -127,8 +173,12 @@ describe('POST /api/v1/support', () => {
       payload: { name: 'Asha', phone: '+919000000000', type: 'support_request', details: 'x', consent: true },
     });
     expect(res.statusCode).toBe(201);
-    const arg = dispatchEmailMock.mock.calls[0][0];
-    expect(arg.replyTo).toBe('from@org.com');
+    const arg = sendMock.mock.calls[0][0];
+    // Replies then go to the deployment From address, as the old fallback to
+    // NOTIFICATION_FROM_EMAIL did (F2-4).
+    expect(arg).not.toHaveProperty('reply_to');
+    expect(arg.variables.email).toBe('—');
+    expect(arg.variables.phone).toBe('+919000000000');
     // No linkBaseUrl configured here: fromSite must be empty, not omitted or
     // a stray " from undefined" — this is the no-link branch of the subject.
     expect(arg.variables.fromSite).toBe('');
@@ -136,8 +186,28 @@ describe('POST /api/v1/support', () => {
     await app.close();
   });
 
+  it('fills phone with "—" when only an email is given', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    const app = await buildApp();
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { name: 'Asha', email: 'asha@example.com', type: 'complaint', details: 'x', consent: true },
+    });
+    expect(sendMock.mock.calls[0][0].variables.phone).toBe('—');
+    await app.close();
+  });
+
+  it('falls back to "Support" as teamName when INSTANCE_NAME is unset', async () => {
+    mockDeps({ recipients: 'support@org.com', teamName: null });
+    const app = await buildApp();
+    await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(sendMock.mock.calls[0][0].variables.teamName).toBe('Support');
+    await app.close();
+  });
+
   it('returns 400 CONTACT_REQUIRED when neither email nor phone is given', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -146,12 +216,12 @@ describe('POST /api/v1/support', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('CONTACT_REQUIRED');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('returns 400 when consent is not true', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -159,12 +229,12 @@ describe('POST /api/v1/support', () => {
       payload: { ...validPayload, consent: false },
     });
     expect(res.statusCode).toBe(400);
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('returns 400 when details is empty', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -176,7 +246,7 @@ describe('POST /api/v1/support', () => {
   });
 
   it('returns 400 for whitespace-only details (M2 trim)', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -184,37 +254,62 @@ describe('POST /api/v1/support', () => {
       payload: { ...validPayload, details: '   ' },
     });
     expect(res.statusCode).toBe(400);
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('returns 503 SUPPORT_NOT_CONFIGURED when SUPPORT_EMAIL is unset', async () => {
-    mockDeps({ recipients: undefined, fromEmail: 'from@org.com' });
+    mockDeps({ recipients: undefined });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('SUPPORT_NOT_CONFIGURED');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('returns 503 SUPPORT_NOT_CONFIGURED when the default email sender is unavailable', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', client: false });
+  it('returns 503 SUPPORT_NOT_CONFIGURED when the notification client is unavailable', async () => {
+    mockDeps({ recipients: 'support@org.com', client: false });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);
     expect(res.json().error).toBe('SUPPORT_NOT_CONFIGURED');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
-  it('returns 502 SUPPORT_SEND_FAILED when dispatchEmail rejects', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
-    dispatchEmailMock.mockRejectedValue(new Error('smtp down'));
+  it('returns 502 SUPPORT_SEND_FAILED when the service refuses the event (ok:false)', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    sendMock.mockResolvedValue({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+    const logLines: string[] = [];
+    const app = await buildApp(logLines);
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().error).toBe('SUPPORT_SEND_FAILED');
+    const dump = logLines.join('\n');
+    expect(dump).toContain('no_policy');
+    expect(dump).not.toContain('asha@example.com');
+    expect(dump).not.toContain('support@org.com');
+    expect(dump).not.toContain('It broke');
+    await app.close();
+  });
+
+  it('returns 502 SUPPORT_SEND_FAILED on a transport error', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    sendMock.mockRejectedValue(new NotifyTransportError('fetch failed: TypeError'));
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(502);
     expect(res.json().error).toBe('SUPPORT_SEND_FAILED');
+    await app.close();
+  });
+
+  it('returns 502 SUPPORT_SEND_FAILED on an unexpected error', async () => {
+    mockDeps({ recipients: 'support@org.com' });
+    sendMock.mockRejectedValue(new Error('boom'));
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(502);
     await app.close();
   });
 });
@@ -228,14 +323,14 @@ describe('POST /api/v1/support — attachments (#551)', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    dispatchEmailMock.mockReset();
-    dispatchEmailMock.mockResolvedValue({ ok: true });
+    sendMock.mockReset();
+    sendMock.mockResolvedValue(ACCEPTED);
     incrWithinWindowMock.mockReset();
     incrWithinWindowMock.mockResolvedValue(1);
   });
 
-  it('forwards accepted attachments and lists them in the details table', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+  it('passes accepted attachments through and summarises them in attachmentsSummary', async () => {
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -243,28 +338,28 @@ describe('POST /api/v1/support — attachments (#551)', () => {
       payload: { ...validPayload, attachments: [png(2048)] },
     });
     expect(res.statusCode).toBe(201);
-    const arg = dispatchEmailMock.mock.calls[0][0];
+    const arg = sendMock.mock.calls[0][0];
     expect(arg.attachments).toHaveLength(1);
     expect(arg.attachments[0].filename).toBe('evidence.png');
     expect(arg.attachments[0].contentType).toBe('image/png');
     expect(arg.attachments[0].data).toBe(png(2048).data);
-    expect(arg.variables.detailsTable).toContain('Attachments (1)');
-    expect(arg.variables.detailsTable).toContain('evidence.png');
+    expect(arg.attachments[0]).toEqual({ filename: 'evidence.png', contentType: 'image/png', data: png(2048).data });
+    expect(arg.variables.attachmentsSummary).toBe('evidence.png (2.0 KB)');
     await app.close();
   });
 
   it('omits the attachments key when none are submitted', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
-    expect(dispatchEmailMock.mock.calls[0][0]).not.toHaveProperty('attachments');
-    expect(dispatchEmailMock.mock.calls[0][0].variables.detailsTable).not.toContain('Attachments');
+    expect(sendMock.mock.calls[0][0]).not.toHaveProperty('attachments');
+    expect(sendMock.mock.calls[0][0].variables.attachmentsSummary).toBe('none');
     await app.close();
   });
 
   it('strips a path from the submitted filename before it reaches the email', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -275,12 +370,12 @@ describe('POST /api/v1/support — attachments (#551)', () => {
       },
     });
     expect(res.statusCode).toBe(201);
-    expect(dispatchEmailMock.mock.calls[0][0].attachments[0].filename).toBe('passwd.png');
+    expect(sendMock.mock.calls[0][0].attachments[0].filename).toBe('passwd.png');
     await app.close();
   });
 
   it('returns 400 ATTACHMENT_COUNT_EXCEEDED past the configured file count', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 2 });
+    mockDeps({ recipients: 'support@org.com', attachmentMaxFiles: 2 });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -290,14 +385,13 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('ATTACHMENT_COUNT_EXCEEDED');
     expect(res.json().message).toContain('2 files');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('returns 400 ATTACHMENT_TOO_LARGE past the configured byte budget', async () => {
     mockDeps({
       recipients: 'support@org.com',
-      fromEmail: 'from@org.com',
       attachmentMaxTotalBytes: 4096,
     });
     const app = await buildApp();
@@ -308,12 +402,12 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('ATTACHMENT_TOO_LARGE');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('returns 400 ATTACHMENT_TYPE_NOT_ALLOWED for a disallowed content type', async () => {
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -326,7 +420,7 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toBe('ATTACHMENT_TYPE_NOT_ALLOWED');
     expect(res.json().message).toContain('payload.exe');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -334,7 +428,6 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     // 64KB budget => ~85KB base64 + 256KB headroom; a 512KB payload is over it.
     mockDeps({
       recipients: 'support@org.com',
-      fromEmail: 'from@org.com',
       attachmentMaxTotalBytes: 64 * 1024,
     });
     const app = await buildApp();
@@ -344,7 +437,7 @@ describe('POST /api/v1/support — attachments (#551)', () => {
       payload: { ...validPayload, attachments: [png(512 * 1024)] },
     });
     expect(res.statusCode).toBe(413);
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -352,7 +445,7 @@ describe('POST /api/v1/support — attachments (#551)', () => {
     // The body is already buffered and parsed by the time the handler runs, so a
     // rejected submission costs the same as an accepted one. If only accepted
     // ones counted, a caller could post oversized rubbish without limit.
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 2 });
+    mockDeps({ recipients: 'support@org.com', attachmentMaxFiles: 2 });
     const app = await buildApp();
     const png = {
       filename: 'a.png',
@@ -372,7 +465,7 @@ describe('POST /api/v1/support — attachments (#551)', () => {
 
   it('429s an over-quota caller before it even looks at the attachments', async () => {
     incrWithinWindowMock.mockResolvedValue(6);
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com', attachmentMaxFiles: 1 });
+    mockDeps({ recipients: 'support@org.com', attachmentMaxFiles: 1 });
     const app = await buildApp();
     const res = await app.inject({
       method: 'POST',
@@ -385,7 +478,7 @@ describe('POST /api/v1/support — attachments (#551)', () => {
       },
     });
     expect(res.statusCode).toBe(429);
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
@@ -394,25 +487,25 @@ describe('POST /api/v1/support — attachments (#551)', () => {
 describe('POST /api/v1/support — rate limit (#551)', () => {
   beforeEach(() => {
     vi.resetModules();
-    dispatchEmailMock.mockReset();
-    dispatchEmailMock.mockResolvedValue({ ok: true });
+    sendMock.mockReset();
+    sendMock.mockResolvedValue(ACCEPTED);
     incrWithinWindowMock.mockReset();
   });
 
   it('returns 429 SUPPORT_RATE_LIMITED once the window max is passed', async () => {
     incrWithinWindowMock.mockResolvedValue(6);
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(429);
     expect(res.json().error).toBe('SUPPORT_RATE_LIMITED');
-    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    expect(sendMock).not.toHaveBeenCalled();
     await app.close();
   });
 
   it('allows the submission at the window max', async () => {
     incrWithinWindowMock.mockResolvedValue(5);
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
@@ -421,16 +514,16 @@ describe('POST /api/v1/support — rate limit (#551)', () => {
 
   it('fails open when the counter backend is down, rather than blocking a complaint', async () => {
     incrWithinWindowMock.mockRejectedValue(new Error('redis down'));
-    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    mockDeps({ recipients: 'support@org.com' });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(201);
-    expect(dispatchEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendMock).toHaveBeenCalledTimes(1);
     await app.close();
   });
 
   it('does not consume quota when support is not configured', async () => {
-    mockDeps({ recipients: undefined, fromEmail: 'from@org.com' });
+    mockDeps({ recipients: undefined });
     const app = await buildApp();
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);

@@ -1,17 +1,19 @@
 import { randomInt, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
+import { guardianEvent, NotifyTransportError, type NotifyEvent } from '@dpg/notification';
 import { getNotificationClient } from '@/utils/notificationClient';
-import { authConfig, supportConfig, notification } from '@/config';
-import { renderOrgList } from '@/notifications/email/shells';
-import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import { authConfig, supportConfig } from '@/config';
 // The fixed-window counter used by the send rate-limit and the verify throttle
 // below; shared with the support route since #551.
 import { incrWithinWindow } from '@/utils/rate_window';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
 export class GuardianOtpError extends Error {
-  constructor(public code: 'RATE_LIMITED' | 'NO_OTP_PROVIDER' | 'VERIFY_THROTTLED') {
-    super(code);
+  constructor(
+    public code: 'RATE_LIMITED' | 'NO_OTP_PROVIDER' | 'VERIFY_THROTTLED',
+    options?: { cause?: unknown },
+  ) {
+    super(code, options);
     this.name = 'GuardianOtpError';
   }
 }
@@ -19,14 +21,11 @@ export class GuardianOtpError extends Error {
 export type GuardianContactType = 'phone' | 'email';
 
 /**
- * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
- * notification template + the copy the guardian sees. Distinct from the OTP
- * mechanics — the code/TTL/throttles are identical across scenarios.
- *
- * For actions, `actionType` is taken straight from `network.json` (the gate
- * passes the interaction's own action type) — NOT hardcoded — so any action a
- * network defines derives its template automatically:
- *   `guardian_otp_<actionType>[_accept]_sms`.
+ * The parent-facing scenario a guardian OTP is issued for (#294). Its `kind`
+ * selects the `guardian.otp.<kind>` event, and so the copy the guardian sees.
+ * Distinct from the OTP mechanics — the code/TTL/throttles are identical across
+ * scenarios. `actionType` and `stage` do not change the event: every action
+ * shares the `guardian.otp.action` copy.
  */
 export type GuardianOtpScenario =
   | { kind: 'account' } // ward wants to create an account (pre-auth signup)
@@ -180,36 +179,53 @@ export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
   }
 }
 
-// Notification channel per guardian contact type (spec D7). WhatsApp is not
-// wired — do not add it here.
-const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
-  phone: 'sms',
-  email: 'email',
-};
-
-// SMS uses the ONE generic DLT-approved OTP template the instance already has
-// (`SMS_TEMPLATE_ID`, default `login_otp` — same as login). It only renders the
-// code, so there are no per-scenario SMS templates and no parent-facing SMS copy
-// — that lives in the email. Variable is `{ message: otp }`, matching login.
-const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
+/** The R5 filler when a bulk guardian OTP names no organisation. */
+const NO_ORGS = 'the selected organisations';
 
 /**
- * Maps a guardian OTP scenario to its email case + variables (#529). Pure —
- * fallback values are supplied here because the copy file has no
- * conditionals: every declared placeholder always gets a value.
+ * The provider organisations as one plain-text phrase: `A`, `A and B`,
+ * `A, B and C` (F2-2). The notification service has no loops, so the list the
+ * email used to render as HTML is now a single text variable, escaped by NS.
  */
-export function buildGuardianEmailDispatch(args: {
-  scenario?: GuardianOtpScenario;
+export function formatOrgList(names: string[]): string {
+  if (names.length === 0) return NO_ORGS;
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * Maps a guardian OTP scenario to its `/v1/notify` event. Pure.
+ *
+ * - `to` carries the one contact point the guardian gave; the policy
+ *   (`first_available`: email, then the SMS `login_otp` template) uses it.
+ * - The code travels only in `variables.message`, the name the SMS template
+ *   fixes and the email templates share (F2-8).
+ * - Fallback values are supplied here because the copy has no conditionals:
+ *   every declared placeholder always gets a value.
+ * - No idempotency key: every issue is a new challenge with a new code, so two
+ *   sends must never collapse into one (R12).
+ */
+export function buildGuardianOtpEvent(args: {
+  contact: string;
+  contactType: GuardianContactType;
   otp: string;
+  scenario?: GuardianOtpScenario;
   variables: GuardianOtpVariables;
   teamName: string;
-}): { caseId: string; variables: Record<string, string> } {
-  const { scenario, otp, variables, teamName } = args;
+}): NotifyEvent {
+  const { contact, contactType, otp, scenario, variables, teamName } = args;
+  const event = (eventType: string, vars: Record<string, string>): NotifyEvent => ({
+    event_type: eventType,
+    domain: null,
+    to: contactType === 'phone' ? { phone: contact } : { email: contact },
+    variables: vars,
+    priority: 'urgent',
+  });
   if (!scenario) {
-    return { caseId: 'otp.generic', variables: { otp } };
+    return event(guardianEvent('generic'), { message: otp });
   }
   const vars: Record<string, string> = {
-    otp,
+    message: otp,
     parentName: variables.parentName || 'there',
     domain: variables.domain || teamName,
     org: variables.providerOrgName || 'the organisation',
@@ -217,58 +233,47 @@ export function buildGuardianEmailDispatch(args: {
   };
   if (scenario.kind === 'action_bulk') {
     vars.noun = scenario.jobs ? 'jobs' : 'opportunities';
-    vars.orgList = renderOrgList(scenario.providerOrgNames);
+    vars.orgList = formatOrgList(scenario.providerOrgNames);
   }
-  return { caseId: `guardian.${scenario.kind}`, variables: vars };
+  return event(guardianEvent(scenario.kind), vars);
 }
 
 /**
- * Default dispatch: pick the channel from the guardian's contact type and send
- * via the shared notification client. Hard-fails when no provider is
- * configured — a guardian-required domain must not silently skip verification.
+ * Default dispatch: one `guardian.otp.*` event to the notification service,
+ * which picks the channel from the contact point. Hard-fails with
+ * `NO_OTP_PROVIDER` (503 at the route) when no client is configured, the
+ * service refuses the event, or it cannot be reached — a guardian-required
+ * domain must not silently skip verification.
  *
- * Email: the case + variables are mapped by `buildGuardianEmailDispatch` and
- * shipped through the central `dispatchEmail` sender (#529) — same convention
- * as the login OTP + action emails, so the copy lives in the properties file,
- * not in-repo HTML. SMS: the DLT-approved body lives in the notification
- * service, so we send a per-scenario `template_id` plus variables and let it
- * render.
+ * The error's `cause` names the service's error code or the transport failure
+ * for the route's log; it never carries the code, the contact or a variable.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
   if (!client) {
     throw new GuardianOtpError('NO_OTP_PROVIDER');
   }
-  const channel = CHANNEL_BY_CONTACT_TYPE[contactType];
-
-  if (channel === 'email') {
-    const sender = getDefaultEmailSender();
-    if (!sender) {
-      throw new GuardianOtpError('NO_OTP_PROVIDER');
-    }
-    const teamName = supportConfig.teamName ?? 'Blue Dots';
-    const dispatch = buildGuardianEmailDispatch({
-      scenario,
-      otp,
-      variables: variables ?? {},
-      teamName,
-    });
-    // Critical case: dispatchEmail rethrows on failure, so a lost guardian
-    // OTP surfaces to the caller exactly as the direct notify() did.
-    await sender.dispatchEmail({
-      caseId: dispatch.caseId,
-      to: contact,
-      fromName: teamName,
-      variables: dispatch.variables,
-    });
-    return;
-  }
-
-  await client.notify({
-    channel: 'sms',
-    template_id: notification.SMS_TEMPLATE_ID || GENERIC_SMS_TEMPLATE_ID,
-    to: contact,
-    priority: 'realtime',
-    variables: { message: otp },
+  const event = buildGuardianOtpEvent({
+    contact,
+    contactType,
+    otp,
+    scenario,
+    variables: variables ?? {},
+    teamName: supportConfig.teamName ?? 'Blue Dots',
   });
+
+  let result;
+  try {
+    result = await client.send(event);
+  } catch (err) {
+    if (err instanceof NotifyTransportError) {
+      throw new GuardianOtpError('NO_OTP_PROVIDER', { cause: err });
+    }
+    throw err;
+  }
+  if (!result.ok) {
+    throw new GuardianOtpError('NO_OTP_PROVIDER', {
+      cause: new Error(`ns_rejected ${event.event_type}: ${result.status} ${result.error}`),
+    });
+  }
 };
