@@ -84,6 +84,7 @@ const PEER_OPERATION_URLS = new Set([
 // Both are public by design — it is the *caching* that is the finding, not the
 // access. Every other public route keeps its own caching semantics.
 import { setBrowserAllowedOrigins } from '@/services/auth/oidc_flow_state';
+import { loadCountryBoundary } from '@/services/geocoding/country_boundary';
 
 const NO_STORE_PUBLIC_URLS = new Set([
   '/api/v1/auth/config',
@@ -197,6 +198,12 @@ export async function buildApp(): Promise<FastifyInstance> {
   // never throws — SMS is best-effort, and an unconfigured template just means
   // dispatchSms skips it.
   await getSmsTemplates();
+
+  // Country boundary for the supplied-coordinate check (#789), read on the same
+  // boot pass so a missing or malformed ConfigMap is a deploy-log warning, not
+  // a surprise on the first write. Never throws: an unloadable boundary only
+  // disables that check.
+  await loadCountryBoundary();
 
   const networkConfigs = await getNetworkConfigs();
 

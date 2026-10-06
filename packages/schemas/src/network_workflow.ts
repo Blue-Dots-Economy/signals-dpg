@@ -1,6 +1,6 @@
-import Ajv2020 from 'ajv/dist/2020.js';
+import Ajv2020, { type ErrorObject } from 'ajv/dist/2020.js';
 import { z } from 'zod';
-import { applyUriPatterns } from './uri_fields';
+import { applyUriPatterns, isUriField } from './uri_fields';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
@@ -636,6 +636,83 @@ export function getInstanceCustomItemSchemaUrl(
   );
 }
 
+/**
+ * A payload that failed its JSON Schema, with one readable message per field.
+ *
+ * `message` keeps the historical `Invalid <label>: …` shape (now naming each
+ * field), so callers that only read the message keep working. `fields` is the
+ * same information keyed by field path, for callers that want to point at the
+ * offending input — a bulk CSV column, a form field.
+ */
+export class JsonSchemaValidationError extends Error {
+  readonly fields: Record<string, string>;
+  constructor(label: string, fields: Record<string, string>, rootMessages: string[]) {
+    const parts = [
+      ...Object.entries(fields).map(([field, msg]) => `${field}: ${msg}`),
+      ...rootMessages,
+    ];
+    super(`Invalid ${label}: ${parts.join(', ') || 'unknown validation error'}`);
+    this.name = 'JsonSchemaValidationError';
+    this.fields = fields;
+  }
+}
+
+/** Per-field copy for a failed `pattern`, authored in network.json (mirrors the UI marker). */
+const FIELD_ERROR_MESSAGE_MARKER = 'x-error-message';
+
+/** `/address/city` → `address.city`; array indices stay as segments (`tags.0`). */
+function toFieldPath(instancePath: string, child?: string): string {
+  const segments = instancePath.split('/').filter(Boolean);
+  if (child) segments.push(child);
+  return segments.join('.');
+}
+
+/**
+ * One ajv error → `[field, message]`, worded the way the profile form words it
+ * (apps/ui/src/components/forms/field-error-message.ts). A failed `pattern`
+ * never surfaces the raw regex: the field's `x-error-message` wins, then the
+ * URL copy for an `x-uri` field, then a generic naming the field.
+ */
+function describeAjvError(error: ErrorObject): [string, string] {
+  const params = error.params as Record<string, unknown>;
+  const parent = (error.parentSchema ?? {}) as Record<string, unknown>;
+  switch (error.keyword) {
+    case 'required':
+      return [toFieldPath(error.instancePath, String(params.missingProperty)), 'is required'];
+    case 'additionalProperties':
+      return [
+        toFieldPath(error.instancePath, String(params.additionalProperty)),
+        'is not an allowed field',
+      ];
+    case 'unevaluatedProperties':
+      return [
+        toFieldPath(error.instancePath, String(params.unevaluatedProperty)),
+        'is not an allowed field',
+      ];
+    case 'enum': {
+      const allowed = Array.isArray(params.allowedValues) ? params.allowedValues : [];
+      const shown = allowed.slice(0, 10).map(String).join(', ');
+      return [
+        toFieldPath(error.instancePath),
+        `must be one of: ${shown}${allowed.length > 10 ? ', …' : ''}`,
+      ];
+    }
+    case 'pattern': {
+      const authored = parent[FIELD_ERROR_MESSAGE_MARKER];
+      if (typeof authored === 'string' && authored.trim()) {
+        return [toFieldPath(error.instancePath), authored];
+      }
+      if (isUriField(parent)) {
+        return [toFieldPath(error.instancePath), 'Please enter a valid web address.'];
+      }
+      const title = typeof parent.title === 'string' && parent.title.trim() ? parent.title : 'value';
+      return [toFieldPath(error.instancePath), `Please enter a valid ${title}.`];
+    }
+    default:
+      return [toFieldPath(error.instancePath), error.message ?? 'is invalid'];
+  }
+}
+
 export function validateAgainstJsonSchema(
   schema: Record<string, unknown>,
   payload: unknown,
@@ -664,6 +741,9 @@ export function validateAgainstJsonSchema(
   const ajv = new Ajv2020({
     strict: false,
     allErrors: true,
+    // Puts each failing keyword's own schema on the error (`parentSchema`), so a
+    // failed pattern can use the field's `x-error-message` instead of the regex.
+    verbose: true,
   });
 
   const validate = ajv.compile(finalSchema);
@@ -673,11 +753,22 @@ export function validateAgainstJsonSchema(
     return;
   }
 
-  const message =
-    validate.errors?.map((error) => error.message).filter(Boolean).join(', ') ||
-    'unknown validation error';
+  // First message per field: allErrors can report the same field more than once
+  // (e.g. a failed type then a failed pattern), and one actionable line per
+  // field reads better than a pile-up. Errors on the payload root (no field)
+  // are kept as plain messages.
+  const fields: Record<string, string> = {};
+  const rootMessages: string[] = [];
+  for (const error of validate.errors ?? []) {
+    const [field, message] = describeAjvError(error);
+    if (!field) {
+      if (!rootMessages.includes(message)) rootMessages.push(message);
+    } else if (!(field in fields)) {
+      fields[field] = message;
+    }
+  }
 
-  throw new Error(`Invalid ${label}: ${message}`);
+  throw new JsonSchemaValidationError(label, fields, rootMessages);
 }
 
 function omitObjectKeys(input: unknown, ignoredKeys: readonly string[]) {

@@ -1,5 +1,5 @@
 import type {
-  FastifyPluginAsync,
+  FastifyPluginCallback,
   FastifyReply,
   FastifyRequest,
 } from 'fastify';
@@ -49,7 +49,9 @@ import { insertLocalUser } from '@/services/auth/user_writer';
  */
 type UpsertRequest = FastifyRequest<{ Body: UpsertBody }>;
 
-export const participant: FastifyPluginAsync = async (app) => {
+// Callback-style: registering a route is synchronous, so there is nothing to
+// await (an async plugin with no await is Sonar S7503).
+export const participant: FastifyPluginCallback = (app, _opts, done) => {
   app.route({
     url: '/participant',
     method: 'POST',
@@ -60,6 +62,7 @@ export const participant: FastifyPluginAsync = async (app) => {
     },
     handler: participant_handler,
   });
+  done();
 };
 
 // ---------------------------------------------------------------------------
@@ -198,7 +201,18 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
 
 type SignUpResult =
   | { ok: true; user_id: string }
-  | { ok: false; statusCode: number; error: string; message: string };
+  | {
+      ok: false;
+      statusCode: number;
+      error: string;
+      message: string;
+      /**
+       * A typed client error's curated extras (e.g. INVALID_ITEM_STATE's
+       * per-field `fields`), merged into the error body — the same body the
+       * existing-user branches return via replyItemWriteFailure.
+       */
+      details?: Record<string, unknown>;
+    };
 
 /** Shape both branches share for classifying a write failure. */
 function isUniqueViolation(err: unknown): boolean {
@@ -399,16 +413,21 @@ function classifyOnboardFailure(
     cause?: { code?: string };
     statusCode?: number;
     errorCode?: string;
+    details?: Record<string, unknown>;
   } | null;
 
   // Propagate typed service errors (e.g. from create_profile_item, or the
-  // insert failure re-thrown above).
+  // insert failure re-thrown above). A client error keeps its curated details
+  // (INVALID_ITEM_STATE's `fields`), so a new participant's rejection carries
+  // the same body as an existing participant's.
   if (e?.statusCode && e?.errorCode) {
+    const isClientError = e.statusCode >= 400 && e.statusCode < 500;
     return {
       ok: false,
       statusCode: e.statusCode,
       error: e.errorCode,
       message: e.message ?? 'request rejected',
+      ...(isClientError && e.details ? { details: e.details } : {}),
     };
   }
 
@@ -597,12 +616,20 @@ function replyItemWriteFailure(
     fallbackMessage: string;
   },
 ) {
-  const e = err as { statusCode?: number; errorCode?: string };
+  const e = err as {
+    statusCode?: number;
+    errorCode?: string;
+    details?: Record<string, unknown>;
+  };
   const isClientError =
     typeof e.statusCode === 'number' && e.statusCode >= 400 && e.statusCode < 500;
   const logger = isClientError ? ctx.request.log.warn : ctx.request.log.error;
   logger.call(ctx.request.log, { err, ...opts.logContext }, opts.logMessage);
   return ctx.reply.code(e.statusCode ?? 500).send({
+    // A typed client error's curated extras (e.g. INVALID_ITEM_STATE's per-field
+    // `fields`) — never an untyped error's, whose shape is unknown. Spread first
+    // so it cannot override the error code or message.
+    ...(isClientError && e.errorCode ? e.details : undefined),
     error: e.errorCode ?? opts.fallbackError,
     message: e.errorCode ? (err as Error).message : opts.fallbackMessage,
   });
@@ -732,7 +759,9 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
   });
 
   if (!result.ok) {
+    // `details` spread first so it can never override the error code or message.
     return reply.code(result.statusCode).send({
+      ...result.details,
       error: result.error,
       message: result.message,
     });
@@ -1070,7 +1099,9 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
   });
 
   if (!result.ok) {
+    // `details` spread first so it can never override the error code or message.
     return reply.code(result.statusCode).send({
+      ...result.details,
       error: result.error,
       message: result.message,
     });

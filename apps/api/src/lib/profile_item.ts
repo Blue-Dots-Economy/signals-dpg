@@ -13,6 +13,7 @@
  * with `created_by: user_id` (the participant authors their own row).
  */
 import {
+  assertSuppliedLocationsInCountry,
   createItemInternal,
   type DbOrTx,
   type ItemLocation,
@@ -59,6 +60,10 @@ export const create_profile_item = async (
   // coordinates, and downstream "Get Directions"/distance features would break.
   // Coordinates the caller resolved itself take precedence and are never
   // geocoded over (see resolveLocationsForCreate).
+  // Caller-resolved coordinates skip the geocoder, so they are held to the
+  // configured country here instead (#789). Throws LOCATION_OUTSIDE_COUNTRY,
+  // which the participant route surfaces as a 400.
+  await assertSuppliedLocationsInCountry(input.item_locations);
   const item_locations = await resolveLocationsForCreate({
     item_network: input.network,
     item_domain: input.domain,

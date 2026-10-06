@@ -42,7 +42,15 @@ function loadMapsApi(apiKey: string): Promise<void> {
   return scriptPromise;
 }
 
-export function createGooglePlacesProvider(apiKey: string): GeoProvider {
+/**
+ * `country` (ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to that
+ * country (#785). `includedRegionCodes` is a hard filter — "Only include results
+ * in the specified regions". `region` would only bias the ranking and
+ * `locationRestriction` is a rectangle (India's contains Bangladesh), so neither
+ * stops a larger foreign place with the same name being suggested. Each
+ * suggestion's own country is also checked, as a backstop.
+ */
+export function createGooglePlacesProvider(apiKey: string, country?: string): GeoProvider {
   return {
     async suggest(query, signal) {
       const q = query.trim();
@@ -73,6 +81,7 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
         const { suggestions } = await places.AutocompleteSuggestion.fetchAutocompleteSuggestions({
           input: q,
           sessionToken: token,
+          ...(country ? { includedRegionCodes: [country.toLowerCase()] } : {}),
         });
 
         const top = suggestions.slice(0, 5);
@@ -86,6 +95,10 @@ export function createGooglePlacesProvider(apiKey: string): GeoProvider {
             const addrComponents = place.addressComponents ?? [];
             const findComponent = (types: string[]): string | undefined =>
               addrComponents.find((c) => types.some((t) => c.types.includes(t)))?.longText;
+            if (country) {
+              const code = addrComponents.find((c) => c.types.includes('country'))?.shortText;
+              if (code?.toUpperCase() !== country) return null;
+            }
             const components: GeoComponents = {
               locality:
                 findComponent(['sublocality', 'sublocality_level_1', 'neighborhood']) ??

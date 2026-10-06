@@ -413,6 +413,25 @@ export const GeocodingSecretsSchema = z
   .object({
     GOOGLE_GEOCODING_API_KEY: z.string().optional(),
     PHOTON_URL: z.string().optional(),
+    // Country every geocode and every caller-supplied coordinate is held to
+    // (#785), as an ISO 3166-1 alpha-2 code, e.g. `IN`. Unset (or blank — Helm
+    // renders an unset value as "") keeps the historical worldwide behaviour.
+    GEOCODING_COUNTRY: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z]{2}$/, 'GEOCODING_COUNTRY must be an ISO 3166-1 alpha-2 code, e.g. IN')
+        .transform((s) => s.toUpperCase())
+        .optional(),
+    ),
+    // GeoJSON boundary of GEOCODING_COUNTRY (#789), delivered by ConfigMap. A
+    // caller-supplied coordinate outside it is rejected. Unset → that check is
+    // skipped; the geocoder restriction above still applies.
+    GEOCODING_BOUNDARY_PATH: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.string().trim().optional(),
+    ),
     // Radius of the random offset applied to a PRIVATE (PII) primary location
     // before it is stored, so the exact address is never persisted. See
     // docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.

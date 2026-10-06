@@ -4,6 +4,8 @@ interface ImportMetaEnv {
   readonly VITE_MAP_PROVIDER: string;
   readonly VITE_GOOGLE_MAPS_API_KEY: string;
   readonly VITE_PHOTON_URL?: string;
+  /** ISO 3166-1 alpha-2 country the address search is restricted to (#785), e.g. `IN`. */
+  readonly VITE_GEO_COUNTRY?: string;
   readonly VITE_MAPBOX_ACCESS_TOKEN: string;
   readonly VITE_API_URL: string;
   readonly VITE_API_URLS: string;

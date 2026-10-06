@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // --- mocks (hoisted) -------------------------------------------------------
-const { createItemInternal, resolveLocationsForCreate } = vi.hoisted(() => ({
-  createItemInternal: vi.fn(),
-  resolveLocationsForCreate: vi.fn(),
-}));
+const { createItemInternal, resolveLocationsForCreate, assertSuppliedLocationsInCountry } =
+  vi.hoisted(() => ({
+    createItemInternal: vi.fn(),
+    resolveLocationsForCreate: vi.fn(),
+    assertSuppliedLocationsInCountry: vi.fn(),
+  }));
 
 vi.mock('@/services/item_service', () => ({
   createItemInternal: (...a: unknown[]) => createItemInternal(...a),
+  assertSuppliedLocationsInCountry: (...a: unknown[]) => assertSuppliedLocationsInCountry(...a),
 }));
 
 vi.mock('@/services/geocoding/resolve_locations_for_create', () => ({
@@ -34,6 +37,26 @@ describe('create_profile_item', () => {
     vi.clearAllMocks();
     resolveLocationsForCreate.mockResolvedValue([{ lat: 1, lon: 2 }]);
     createItemInternal.mockResolvedValue({ itemId: 'item-1' });
+    assertSuppliedLocationsInCountry.mockResolvedValue(undefined);
+  });
+
+  it('holds caller-supplied coordinates to the configured country (#789)', async () => {
+    const item_locations = [{ lat: 12.9251, lng: 77.5938 }];
+    await create_profile_item({ ...input, item_locations });
+    expect(assertSuppliedLocationsInCountry).toHaveBeenCalledWith(item_locations);
+  });
+
+  it('creates nothing when a supplied coordinate is outside the country (#789)', async () => {
+    const err = Object.assign(new Error('outside'), {
+      statusCode: 400,
+      errorCode: 'LOCATION_OUTSIDE_COUNTRY',
+    });
+    assertSuppliedLocationsInCountry.mockRejectedValue(err);
+    await expect(
+      create_profile_item({ ...input, item_locations: [{ lat: 23.81, lng: 90.41 }] }),
+    ).rejects.toBe(err);
+    expect(resolveLocationsForCreate).not.toHaveBeenCalled();
+    expect(createItemInternal).not.toHaveBeenCalled();
   });
 
   it('returns the created item id', async () => {
