@@ -689,6 +689,10 @@ function describeAjvError(error: ErrorObject): [string, string] {
         toFieldPath(error.instancePath, String(params.unevaluatedProperty)),
         'is not an allowed field',
       ];
+    case 'minLength':
+      // `minLength: 1` is how a schema says "required and not blank".
+      if (params.limit === 1) return [toFieldPath(error.instancePath), 'is required'];
+      return [toFieldPath(error.instancePath), error.message ?? 'is invalid'];
     case 'enum': {
       const allowed = Array.isArray(params.allowedValues) ? params.allowedValues : [];
       const shown = allowed.slice(0, 10).map(String).join(', ');
@@ -733,10 +737,13 @@ export function validateAgainstJsonSchema(
     : schemaWithUriPatterns;
   const finalSchema =
     ignoredKeys.length > 0
-      ? omitRequiredSchemaKeys(schemaForValidation, ignoredKeys)
+      ? relaxIgnoredProperties(omitRequiredSchemaKeys(schemaForValidation, ignoredKeys), ignoredKeys)
       : schemaForValidation;
-  const finalPayload =
-    ignoredKeys.length > 0 ? omitObjectKeys(payload, ignoredKeys) : payload;
+  // Ignored keys keep their VALUES in the payload, so an `if` condition can
+  // read them (e.g. category === 'licensed' → more fields required); their own
+  // property schemas are relaxed to `{}` in `relaxIgnoredProperties` instead,
+  // so the values are still not validated — the same outcome as dropping them.
+  const finalPayload = payload;
 
   const ajv = new Ajv2020({
     strict: false,
@@ -760,6 +767,9 @@ export function validateAgainstJsonSchema(
   const fields: Record<string, string> = {};
   const rootMessages: string[] = [];
   for (const error of validate.errors ?? []) {
+    // An `if` error only summarises its branch ("must match \"then\" schema");
+    // the branch's own errors are already in the list and name their fields.
+    if (error.keyword === 'if') continue;
     const [field, message] = describeAjvError(error);
     if (!field) {
       if (!rootMessages.includes(message)) rootMessages.push(message);
@@ -771,21 +781,40 @@ export function validateAgainstJsonSchema(
   throw new JsonSchemaValidationError(label, fields, rootMessages);
 }
 
-function omitObjectKeys(input: unknown, ignoredKeys: readonly string[]) {
-  if (!isPlainObject(input)) {
-    return input;
-  }
+/** JSON Schema keyword whose subtree `omitRequiredSchemaKeys` leaves untouched. */
+const IF_KEYWORD = new Set(['if']);
 
-  return Object.fromEntries(
-    Object.entries(input).filter(([key]) => !ignoredKeys.includes(key))
-  );
+/**
+ * Replaces each ignored key's own top-level property schema with `{}` (accept
+ * anything), keeping the key declared so `additionalProperties: false` still
+ * allows it. Paired with keeping the values in the payload, ignored keys are
+ * readable by conditions yet not validated — what dropping them achieved.
+ */
+function relaxIgnoredProperties(
+  schema: Record<string, unknown>,
+  ignoredKeys: readonly string[]
+): Record<string, unknown> {
+  const properties = schema.properties;
+  if (!isPlainObject(properties)) return schema;
+  return {
+    ...schema,
+    properties: Object.fromEntries(
+      Object.entries(properties).map(([key, value]) => [key, ignoredKeys.includes(key) ? {} : value])
+    ),
+  };
 }
 
+/**
+ * Drops `ignoredKeys` from every `required` list, so the payload may omit them —
+ * EXCEPT inside an `if` subschema. There `required` is part of a test ("is the
+ * category present and `licensed`?"), not a requirement: stripping it would turn the
+ * test vacuously true and apply its `then` to every payload.
+ */
 function omitRequiredSchemaKeys(
   schema: Record<string, unknown>,
   ignoredKeys: readonly string[]
 ): Record<string, unknown> {
-  return rewriteJsonSchema(schema, (value) => {
+  return rewriteJsonSchema(schema, IF_KEYWORD, (value) => {
     const required = value.required;
 
     if (!Array.isArray(required)) {
@@ -804,7 +833,7 @@ function omitRequiredSchemaKeys(
 function allowAdditionalProperties(
   schema: Record<string, unknown>
 ): Record<string, unknown> {
-  return rewriteJsonSchema(schema, (value) => {
+  return rewriteJsonSchema(schema, NO_SKIP, (value) => {
     const next = { ...value };
 
     if (next.additionalProperties === false) {
@@ -819,15 +848,20 @@ function allowAdditionalProperties(
   });
 }
 
+/**
+ * Rewrites every object in a schema, bottom-up. Subtrees under a key in
+ * `skipKeys` are copied unchanged (used to leave `if` conditions alone).
+ */
 function rewriteJsonSchema(
   schema: Record<string, unknown>,
+  skipKeys: ReadonlySet<string>,
   rewriteObject: (value: Record<string, unknown>) => Record<string, unknown>
 ): Record<string, unknown> {
   return rewriteObject(
     Object.fromEntries(
       Object.entries(schema).map(([key, value]) => [
         key,
-        rewriteJsonValue(value, rewriteObject),
+        skipKeys.has(key) ? value : rewriteJsonValue(value, skipKeys, rewriteObject),
       ])
     )
   );
@@ -835,18 +869,21 @@ function rewriteJsonSchema(
 
 function rewriteJsonValue(
   value: unknown,
+  skipKeys: ReadonlySet<string>,
   rewriteObject: (value: Record<string, unknown>) => Record<string, unknown>
 ): unknown {
   if (Array.isArray(value)) {
-    return value.map((entry) => rewriteJsonValue(entry, rewriteObject));
+    return value.map((entry) => rewriteJsonValue(entry, skipKeys, rewriteObject));
   }
 
   if (isPlainObject(value)) {
-    return rewriteJsonSchema(value, rewriteObject);
+    return rewriteJsonSchema(value, skipKeys, rewriteObject);
   }
 
   return value;
 }
+
+const NO_SKIP: ReadonlySet<string> = new Set();
 
 function isPlainObject(input: unknown): input is Record<string, unknown> {
   return typeof input === 'object' && input !== null && !Array.isArray(input);
