@@ -179,3 +179,62 @@ describe('SchemaForm onValidityChange detail', () => {
     expect(call?.[1]).toEqual({ valid: false, missingRequired: 0, invalidValues: 1 });
   });
 });
+
+describe('conditionally required fields (if/then), e.g. RCI → CRR Number + Type of Professional', () => {
+  const rciSchema = {
+    type: 'object',
+    required: ['organisation_name', 'provider_category'],
+    properties: {
+      organisation_name: { type: 'string', title: 'Organisation' },
+      provider_category: { type: 'string', title: 'Category', enum: ['NGO', 'RCI'] },
+      crr_number: {
+        type: 'string',
+        title: 'CRR Number',
+        pattern: '^$|^[0-9]+$',
+        'x-show-if': { provider_category: ['RCI'] },
+      },
+      professional_type: {
+        type: 'string',
+        title: 'Type of Professional',
+        enum: ['Special Educator', 'Other'],
+        'x-show-if': { provider_category: ['RCI'] },
+      },
+    },
+    allOf: [
+      {
+        if: { properties: { provider_category: { const: 'RCI' } }, required: ['provider_category'] },
+        then: { required: ['crr_number', 'professional_type'], properties: { crr_number: { minLength: 1 } } },
+      },
+    ],
+  } as unknown as RJSFSchema;
+
+  it('counts only the two missing fields — not the if summary — so the footer says "fill in"', () => {
+    const v = getSchemaFormValidity(validator, rciSchema, { organisation_name: 'X', provider_category: 'RCI' });
+    expect(v).toEqual({ valid: false, missingRequired: 2, invalidValues: 0 });
+    expect(
+      getSchemaFormValidity(validator, rciSchema, { organisation_name: 'X', provider_category: 'NGO' }),
+    ).toEqual({ valid: true, missingRequired: 0, invalidValues: 0 });
+  });
+
+  it('marks both fields required, blocks Save, and names each missing field — never the raw if summary', async () => {
+    const submit = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(
+      <SchemaForm
+        schema={rciSchema}
+        formData={{ organisation_name: 'X', provider_category: 'RCI' }}
+        onSubmit={submit}
+        submitButtonText="Save"
+      />,
+    );
+    expect(screen.getByText('CRR Number').closest('label')?.textContent).toContain('required');
+    expect(screen.getByText('Type of Professional').closest('label')?.textContent).toContain('required');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(await screen.findByText(/must have required property 'CRR Number'/)).toBeInTheDocument();
+    expect(screen.getByText(/must have required property 'Type of Professional'/)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/"then"/);
+  });
+});
