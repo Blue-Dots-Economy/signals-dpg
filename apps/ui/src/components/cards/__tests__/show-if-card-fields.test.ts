@@ -1,25 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { resolveCardFields } from '../resolve-card-fields';
 
-// ALIMCO providers: CRR Number and Type of Professional only apply to an RCI
-// provider, and `professional_type` sits in the card's default rows.
+// Licence Number and Licence Type only apply when `category` is `licensed`,
+// and `licence_type` sits in the card's default rows.
 const schema = {
   type: 'object',
   properties: {
     organisation_name: { type: 'string', title: 'Organisation' },
-    provider_category: { type: 'string', title: 'Category', enum: ['NGO', 'RCI'] },
-    crr_number: { type: 'string', title: 'CRR Number', 'x-show-if': { provider_category: ['RCI'] } },
-    professional_type: {
+    category: { type: 'string', title: 'Category', enum: ['individual', 'licensed'] },
+    licence_number: { type: 'string', title: 'Licence Number', 'x-show-if': { category: ['licensed'] } },
+    licence_type: {
       type: 'string',
-      title: 'Type of Professional',
-      'x-show-if': { provider_category: ['RCI'] },
+      title: 'Licence Type',
+      'x-show-if': { category: ['licensed'] },
     },
   },
 } as never;
 
 const card = {
   title_field: 'organisation_name',
-  default_fields: ['provider_category', 'professional_type'],
+  default_fields: ['category', 'licence_type'],
 };
 
 const keys = (r: ReturnType<typeof resolveCardFields>) => ({
@@ -31,40 +31,40 @@ describe('resolveCardFields honours x-show-if', () => {
   it('shows the conditional fields when the item satisfies the condition', () => {
     const resolved = resolveCardFields(
       schema,
-      { organisation_name: 'A', provider_category: 'RCI', crr_number: '42', professional_type: 'Other' },
+      { organisation_name: 'A', category: 'licensed', licence_number: '42', licence_type: 'Other' },
       card,
     );
     expect(keys(resolved)).toEqual({
-      default: ['provider_category', 'professional_type'],
-      extra: ['organisation_name', 'crr_number'],
+      default: ['category', 'licence_type'],
+      extra: ['organisation_name', 'licence_number'],
     });
   });
 
   it('drops an empty conditional default row instead of rendering a placeholder', () => {
-    const resolved = resolveCardFields(schema, { organisation_name: 'A', provider_category: 'NGO' }, card);
-    expect(keys(resolved).default).toEqual(['provider_category']);
+    const resolved = resolveCardFields(schema, { organisation_name: 'A', category: 'individual' }, card);
+    expect(keys(resolved).default).toEqual(['category']);
   });
 
   it('hides values left over from before the category changed', () => {
     const resolved = resolveCardFields(
       schema,
-      { organisation_name: 'A', provider_category: 'NGO', crr_number: '42', professional_type: 'Other' },
+      { organisation_name: 'A', category: 'individual', licence_number: '42', licence_type: 'Other' },
       card,
     );
-    expect(keys(resolved)).toEqual({ default: ['provider_category'], extra: ['organisation_name'] });
+    expect(keys(resolved)).toEqual({ default: ['category'], extra: ['organisation_name'] });
   });
 
   it('hides them under an explicit extra_fields list too', () => {
     const resolved = resolveCardFields(
       schema,
-      { organisation_name: 'A', provider_category: 'NGO', crr_number: '42' },
-      { ...card, extra_fields: ['crr_number', 'organisation_name'] },
+      { organisation_name: 'A', category: 'individual', licence_number: '42' },
+      { ...card, extra_fields: ['licence_number', 'organisation_name'] },
     );
     expect(keys(resolved).extra).toEqual(['organisation_name']);
   });
 
   it('leaves a field without x-show-if alone', () => {
     const resolved = resolveCardFields(schema, { organisation_name: 'A' }, card);
-    expect(keys(resolved).default).toEqual(['provider_category']);
+    expect(keys(resolved).default).toEqual(['category']);
   });
 });

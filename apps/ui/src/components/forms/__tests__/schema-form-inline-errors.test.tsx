@@ -180,39 +180,39 @@ describe('SchemaForm onValidityChange detail', () => {
   });
 });
 
-describe('conditionally required fields (if/then), e.g. RCI → CRR Number + Type of Professional', () => {
-  const rciSchema = {
+describe('conditionally required fields (if/then), e.g. licensed → Licence Number + Licence Type', () => {
+  const conditionalSchema = {
     type: 'object',
-    required: ['organisation_name', 'provider_category'],
+    required: ['organisation_name', 'category'],
     properties: {
       organisation_name: { type: 'string', title: 'Organisation' },
-      provider_category: { type: 'string', title: 'Category', enum: ['NGO', 'RCI'] },
-      crr_number: {
+      category: { type: 'string', title: 'Category', enum: ['individual', 'licensed'] },
+      licence_number: {
         type: 'string',
-        title: 'CRR Number',
+        title: 'Licence Number',
         pattern: '^$|^[0-9]+$',
-        'x-show-if': { provider_category: ['RCI'] },
+        'x-show-if': { category: ['licensed'] },
       },
-      professional_type: {
+      licence_type: {
         type: 'string',
-        title: 'Type of Professional',
-        enum: ['Special Educator', 'Other'],
-        'x-show-if': { provider_category: ['RCI'] },
+        title: 'Licence Type',
+        enum: ['Clinical', 'Other'],
+        'x-show-if': { category: ['licensed'] },
       },
     },
     allOf: [
       {
-        if: { properties: { provider_category: { const: 'RCI' } }, required: ['provider_category'] },
-        then: { required: ['crr_number', 'professional_type'], properties: { crr_number: { minLength: 1 } } },
+        if: { properties: { category: { const: 'licensed' } }, required: ['category'] },
+        then: { required: ['licence_number', 'licence_type'], properties: { licence_number: { minLength: 1 } } },
       },
     ],
   } as unknown as RJSFSchema;
 
   it('counts only the two missing fields — not the if summary — so the footer says "fill in"', () => {
-    const v = getSchemaFormValidity(validator, rciSchema, { organisation_name: 'X', provider_category: 'RCI' });
+    const v = getSchemaFormValidity(validator, conditionalSchema, { organisation_name: 'X', category: 'licensed' });
     expect(v).toEqual({ valid: false, missingRequired: 2, invalidValues: 0 });
     expect(
-      getSchemaFormValidity(validator, rciSchema, { organisation_name: 'X', provider_category: 'NGO' }),
+      getSchemaFormValidity(validator, conditionalSchema, { organisation_name: 'X', category: 'individual' }),
     ).toEqual({ valid: true, missingRequired: 0, invalidValues: 0 });
   });
 
@@ -221,20 +221,20 @@ describe('conditionally required fields (if/then), e.g. RCI → CRR Number + Typ
     const user = userEvent.setup();
     const { container } = render(
       <SchemaForm
-        schema={rciSchema}
-        formData={{ organisation_name: 'X', provider_category: 'RCI' }}
+        schema={conditionalSchema}
+        formData={{ organisation_name: 'X', category: 'licensed' }}
         onSubmit={submit}
         submitButtonText="Save"
       />,
     );
-    expect(screen.getByText('CRR Number').closest('label')?.textContent).toContain('required');
-    expect(screen.getByText('Type of Professional').closest('label')?.textContent).toContain('required');
+    expect(screen.getByText('Licence Number').closest('label')?.textContent).toContain('required');
+    expect(screen.getByText('Licence Type').closest('label')?.textContent).toContain('required');
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(submit).not.toHaveBeenCalled();
-    expect(await screen.findByText(/must have required property 'CRR Number'/)).toBeInTheDocument();
-    expect(screen.getByText(/must have required property 'Type of Professional'/)).toBeInTheDocument();
+    expect(await screen.findByText(/must have required property 'Licence Number'/)).toBeInTheDocument();
+    expect(screen.getByText(/must have required property 'Licence Type'/)).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/"then"/);
   });
 });

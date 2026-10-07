@@ -740,7 +740,7 @@ export function validateAgainstJsonSchema(
       ? relaxIgnoredProperties(omitRequiredSchemaKeys(schemaForValidation, ignoredKeys), ignoredKeys)
       : schemaForValidation;
   // Ignored keys keep their VALUES in the payload, so an `if` condition can
-  // read them (e.g. category === 'RCI' → more fields required); their own
+  // read them (e.g. category === 'licensed' → more fields required); their own
   // property schemas are relaxed to `{}` in `relaxIgnoredProperties` instead,
   // so the values are still not validated — the same outcome as dropping them.
   const finalPayload = payload;
@@ -807,7 +807,7 @@ function relaxIgnoredProperties(
 /**
  * Drops `ignoredKeys` from every `required` list, so the payload may omit them —
  * EXCEPT inside an `if` subschema. There `required` is part of a test ("is the
- * category present and RCI?"), not a requirement: stripping it would turn the
+ * category present and `licensed`?"), not a requirement: stripping it would turn the
  * test vacuously true and apply its `then` to every payload.
  */
 function omitRequiredSchemaKeys(

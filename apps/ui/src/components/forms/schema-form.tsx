@@ -489,7 +489,7 @@ function isBlank(value: unknown): boolean {
 
 /**
  * Ajv's `if` error only summarises a conditional branch — e.g. "if Category is
- * RCI then CRR Number and Type of Professional are required" adds
+ * licensed then Licence Number and Licence Type are required" adds
  * `must match "then" schema` on top of the two field-level `required` errors.
  * It names no field and says nothing the field errors don't, so every place
  * that counts or shows errors skips it.

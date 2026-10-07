@@ -450,47 +450,47 @@ describe('validateAgainstJsonSchema', () => {
   describe('conditional required (if/then) alongside ignoredKeys', () => {
     // The item service ignores every top-level required key so a draft can be
     // saved incomplete. A condition that TESTS one of those keys (category ===
-    // 'RCI' → two more fields required) must still see its value, and its own
+    // 'licensed' → two more fields required) must still see its value, and its own
     // `required` must not be stripped — it is a test, not a requirement.
-    const rciSchema = {
+    const conditionalSchema = {
       type: 'object',
       additionalProperties: false,
       properties: {
         name: { type: 'string' },
-        category: { type: 'string', enum: ['NGO', 'RCI'] },
-        crr_number: { type: 'string', pattern: '^$|^[0-9]+$' },
-        professional_type: { type: 'string', enum: ['Special Educator', 'Other'] },
+        category: { type: 'string', enum: ['individual', 'licensed'] },
+        licence_number: { type: 'string', pattern: '^$|^[0-9]+$' },
+        licence_type: { type: 'string', enum: ['Clinical', 'Other'] },
       },
       required: ['name', 'category'],
       allOf: [
         {
-          if: { properties: { category: { const: 'RCI' } }, required: ['category'] },
+          if: { properties: { category: { const: 'licensed' } }, required: ['category'] },
           then: {
-            required: ['crr_number', 'professional_type'],
-            properties: { crr_number: { minLength: 1 } },
+            required: ['licence_number', 'licence_type'],
+            properties: { licence_number: { minLength: 1 } },
           },
         },
       ],
     };
-    const serverMode = { ignoredKeys: rciSchema.required };
+    const serverMode = { ignoredKeys: conditionalSchema.required };
     const run = (payload: Record<string, unknown>) => () =>
-      validateAgainstJsonSchema(rciSchema, payload, 'item_state', serverMode);
+      validateAgainstJsonSchema(conditionalSchema, payload, 'item_state', serverMode);
 
-    it('enforces the conditional fields when the ignored condition key is RCI', () => {
+    it('enforces the conditional fields when the ignored condition key matches', () => {
       // One line per missing field, and no Ajv `if` summary ("must match
       // \"then\" schema") — it names no field and repeats what the lines say.
-      expect(run({ name: 'A', category: 'RCI' })).toThrow(
-        'Invalid item_state: crr_number: is required, professional_type: is required',
+      expect(run({ name: 'A', category: 'licensed' })).toThrow(
+        'Invalid item_state: licence_number: is required, licence_type: is required',
       );
       // minLength 1 on a string is "required, and not blank" — say that.
-      expect(run({ name: 'A', category: 'RCI', crr_number: '', professional_type: 'Other' })).toThrow(
-        'Invalid item_state: crr_number: is required',
+      expect(run({ name: 'A', category: 'licensed', licence_number: '', licence_type: 'Other' })).toThrow(
+        'Invalid item_state: licence_number: is required',
       );
-      expect(run({ name: 'A', category: 'RCI', crr_number: '123', professional_type: 'Other' })).not.toThrow();
+      expect(run({ name: 'A', category: 'licensed', licence_number: '123', licence_type: 'Other' })).not.toThrow();
     });
 
     it('does not apply the condition to any other category', () => {
-      expect(run({ name: 'A', category: 'NGO' })).not.toThrow();
+      expect(run({ name: 'A', category: 'individual' })).not.toThrow();
     });
 
     it('does not apply the condition to a draft with no category yet', () => {
@@ -507,7 +507,7 @@ describe('validateAgainstJsonSchema', () => {
       type: 'object',
       additionalProperties: false,
       properties: {
-        category: { type: 'string', enum: ['NGO', 'Government Entity'] },
+        category: { type: 'string', enum: ['individual', 'Government Entity'] },
         phone: { type: 'string', pattern: '^[0-9]{10}$' },
         city: { type: 'string' },
       },
@@ -523,19 +523,19 @@ describe('validateAgainstJsonSchema', () => {
 
     it('still accepts an ignored key whose value fails its pattern (e.g. a masked phone)', () => {
       expect(() =>
-        validateAgainstJsonSchema(schema, { category: 'NGO', phone: '987***' }, 'item_state', ignored),
+        validateAgainstJsonSchema(schema, { category: 'individual', phone: '987***' }, 'item_state', ignored),
       ).not.toThrow();
     });
 
     it('still validates every key that is not ignored', () => {
       expect(() =>
-        validateAgainstJsonSchema(schema, { category: 'NGO', phone: '987***', city: 42 }, 'item_state', ignored),
+        validateAgainstJsonSchema(schema, { category: 'individual', phone: '987***', city: 42 }, 'item_state', ignored),
       ).toThrow(/city: must be string/);
     });
 
     it('still rejects an undeclared key under additionalProperties:false', () => {
       expect(() =>
-        validateAgainstJsonSchema(schema, { category: 'NGO', extra: 1 }, 'item_state', ignored),
+        validateAgainstJsonSchema(schema, { category: 'individual', extra: 1 }, 'item_state', ignored),
       ).toThrow(/extra: is not an allowed field/);
     });
   });
