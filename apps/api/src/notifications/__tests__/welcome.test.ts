@@ -39,7 +39,7 @@ vi.mock('@/config', () => ({
 
 const { sendWelcomeNotifications, welcomeIdempotencyKey } = await import('../welcome.js');
 
-const makeLog = () => ({ error: vi.fn() });
+const makeLog = () => ({ error: vi.fn(), warn: vi.fn() });
 
 const BOTH = { userId: 'u-1', name: 'Asha', email: 'asha@example.org', phoneNumber: '+911234567890' };
 
@@ -106,20 +106,37 @@ describe('the user.welcome event', () => {
   });
 });
 
-describe('phone must be E.164 (R14)', () => {
-  it('drops a non-E.164 phone from `to` and logs welcome_phone_dropped without PII', async () => {
+describe('phone is normalised to E.164 (R14)', () => {
+  it('normalises a stored bare 10-digit phone instead of dropping it', async () => {
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: '9876543210' }, log);
+    expect(sentEvent().to).toEqual({ email: 'asha@example.org', phone: '+919876543210' });
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it('still welcomes a phone-only user whose stored phone is spaced/dashed', async () => {
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: ' 98765-43210 ' }, makeLog());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sentEvent().to).toEqual({ phone: '+919876543210' });
+  });
+
+  it('drops an unusable phone from `to` and warns welcome_phone_dropped without PII', async () => {
     const log = makeLog();
     await sendWelcomeNotifications({ ...BOTH, phoneNumber: '12345' }, log);
     expect(sentEvent().to).toEqual({ email: 'asha@example.org' });
-    expect(log.error).toHaveBeenCalledWith({ event_type: USER_WELCOME }, expect.stringContaining('welcome_phone_dropped'));
-    const dump = inspect(log.error.mock.calls);
+    expect(log.warn).toHaveBeenCalledWith({ event_type: USER_WELCOME }, expect.stringContaining('welcome_phone_dropped'));
+    expect(log.error).not.toHaveBeenCalled();
+    const dump = inspect(log.warn.mock.calls);
     expect(dump).not.toContain('12345');
     expect(dump).not.toContain('asha@example.org');
   });
 
-  it('sends nothing when the only contact is a non-E.164 phone', async () => {
-    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: 'abc' }, makeLog());
+  it('sends nothing when the only contact is an unusable phone', async () => {
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: 'abc' }, log);
     expect(send).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
   });
 });
 

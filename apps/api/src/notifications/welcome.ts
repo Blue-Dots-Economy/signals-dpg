@@ -21,7 +21,7 @@
  */
 
 import { USER_WELCOME, type NotifyEvent } from '@dpg/notification';
-import { E164_PATTERN } from '@dpg/schemas';
+import { normalizeE164Phone } from '@dpg/schemas';
 
 import { instance, notification, uiHostBindings } from '@/config';
 import { getNotificationClient } from '@/utils/notificationClient';
@@ -45,6 +45,7 @@ export interface WelcomeRecipient {
  */
 export interface WelcomeLog {
   error: (details: Record<string, unknown>, message: string) => void;
+  warn: (details: Record<string, unknown>, message: string) => void;
 }
 
 /**
@@ -91,12 +92,17 @@ export async function sendWelcomeNotifications(
   if (!nc) return;
 
   const email = recipient.email || undefined;
-  // NS accepts only E.164 (R14). A stored phone in any other form is left out
-  // so the email still goes; the WhatsApp welcome is lost for that user.
-  let phone = recipient.phoneNumber || undefined;
-  if (phone && !E164_PATTERN.test(phone)) {
-    log.error({ event_type: USER_WELCOME }, 'welcome: welcome_phone_dropped (not E.164)');
-    phone = undefined;
+  // NS accepts only E.164 (R14). A stored phone is free text trimmed at signup
+  // (`9876543210`, `98765 43210`), so it is normalised here rather than tested
+  // as-is. Only a phone that cannot be made E.164 is left out — the email
+  // still goes, the WhatsApp welcome is lost. That is a data-quality issue in
+  // one user's record, not a service fault, so it is a warning.
+  let phone: string | undefined;
+  if (recipient.phoneNumber) {
+    phone = normalizeE164Phone(recipient.phoneNumber) ?? undefined;
+    if (!phone) {
+      log.warn({ event_type: USER_WELCOME }, 'welcome: welcome_phone_dropped (not E.164)');
+    }
   }
   if (!email && !phone) return;
 
