@@ -1,85 +1,96 @@
 import { describe, it, expect } from 'vitest';
 
-import { itemLifecycleCaseId } from '../notify_item_lifecycle';
+import { itemLifecycleEventType, itemLifecycleIdempotencyKey } from '../notify_item_lifecycle';
 
 /**
- * Case-id resolution for item-lifecycle emails (#531/#534). Pure mapping —
- * seeker→profile, provider/service_provider→offer, and an aggregator
- * acting-org on create routes to the initiation email instead of the self
- * create email (so aggregator-onboarded records get one email, not two).
+ * Event selection for item-lifecycle notifications. Signals picks only the
+ * event; the profile/offer copy for the item's domain is chosen by the NS
+ * policy for (domain, event). The two choices that stay here: a draft create is
+ * `item.created_draft`, and an aggregator create is
+ * `item.onboarded_by_aggregator` instead of the self create.
  */
-describe('itemLifecycleCaseId', () => {
-  it('maps seeker → profile.* per op', () => {
-    const base = { ownerId: 'u1', domain: 'seeker', network: 'blue_dot' } as const;
-    expect(itemLifecycleCaseId({ ...base, op: 'create' })).toBe('profile.create');
-    expect(itemLifecycleCaseId({ ...base, op: 'update' })).toBe('profile.update');
-    expect(itemLifecycleCaseId({ ...base, op: 'pause' })).toBe('profile.pause');
-    expect(itemLifecycleCaseId({ ...base, op: 'retire' })).toBe('profile.retire');
+describe('itemLifecycleEventType', () => {
+  const base = { ownerId: 'u1', domain: 'seeker', network: 'blue_dot' } as const;
+
+  it('maps each op to its item event, whatever the domain', () => {
+    for (const domain of ['seeker', 'provider', 'service_provider']) {
+      expect(itemLifecycleEventType({ ...base, domain, op: 'create' })).toBe('item.created');
+      expect(itemLifecycleEventType({ ...base, domain, op: 'update' })).toBe('item.updated');
+      expect(itemLifecycleEventType({ ...base, domain, op: 'pause' })).toBe('item.paused');
+      expect(itemLifecycleEventType({ ...base, domain, op: 'retire' })).toBe('item.retired');
+    }
   });
 
-  it('maps provider + service_provider → offer.*', () => {
-    for (const domain of ['provider', 'service_provider']) {
-      expect(itemLifecycleCaseId({ ownerId: 'u1', domain, network: 'blue_dot', op: 'create' })).toBe(
-        'offer.create',
+  it('routes a draft create to item.created_draft, a live/absent-status create to item.created', () => {
+    expect(itemLifecycleEventType({ ...base, op: 'create', lifecycleStatus: 'draft' })).toBe(
+      'item.created_draft',
+    );
+    expect(itemLifecycleEventType({ ...base, op: 'create', lifecycleStatus: 'live' })).toBe(
+      'item.created',
+    );
+    expect(itemLifecycleEventType({ ...base, op: 'create' })).toBe('item.created');
+  });
+
+  it('routes an aggregator create to item.onboarded_by_aggregator, ignoring lifecycle status', () => {
+    expect(itemLifecycleEventType({ ...base, op: 'create', actingOrgType: 'aggregator' })).toBe(
+      'item.onboarded_by_aggregator',
+    );
+    expect(
+      itemLifecycleEventType({ ...base, op: 'create', actingOrgType: 'aggregator', lifecycleStatus: 'draft' }),
+    ).toBe('item.onboarded_by_aggregator');
+  });
+
+  it('does NOT re-route non-create ops even under an aggregator acting-org', () => {
+    expect(itemLifecycleEventType({ ...base, op: 'update', actingOrgType: 'aggregator' })).toBe(
+      'item.updated',
+    );
+  });
+
+  it('returns null for an unknown op', () => {
+    expect(itemLifecycleEventType({ ...base, op: 'archive' as never })).toBeNull();
+  });
+});
+
+/**
+ * NS keeps normal-priority idempotency keys for 90 days (R12). Events that
+ * repeat for the same item (update, pause) carry the UTC hour, so each hour
+ * may notify once — today's behaviour under the legacy 1-hour dedupe.
+ */
+describe('itemLifecycleIdempotencyKey', () => {
+  const HOUR = 3_600_000;
+  const T = Date.UTC(2026, 9, 6, 10, 15); // 10:15 UTC
+  const OWNER = '11111111-1111-4111-8111-111111111111';
+  const ITEM = '22222222-2222-4222-8222-222222222222';
+  const bucket = Math.floor(T / HOUR);
+
+  it('buckets item.updated and item.paused by UTC hour', () => {
+    for (const ev of ['item.updated', 'item.paused']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T)).toBe(
+        `item_lifecycle:${ev}:${OWNER}:${ITEM}:${bucket}`,
       );
-      expect(itemLifecycleCaseId({ ownerId: 'u1', domain, network: 'blue_dot', op: 'update' })).toBe(
-        'offer.update',
+      // Same hour → same key (deduped); next hour → a new key (sent).
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T + 40 * 60_000)).toBe(
+        itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T),
+      );
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T + HOUR)).not.toBe(
+        itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T),
       );
     }
   });
 
-  it('routes an aggregator create to the initiation email', () => {
-    expect(
-      itemLifecycleCaseId({
-        ownerId: 'u1',
-        domain: 'seeker',
-        network: 'blue_dot',
-        op: 'create',
-        actingOrgType: 'aggregator',
-      }),
-    ).toBe('account.aggregator_init.seeker');
-    // provider + service_provider fold into the provider activation copy.
-    expect(
-      itemLifecycleCaseId({
-        ownerId: 'u1', domain: 'provider', network: 'blue_dot', op: 'create', actingOrgType: 'aggregator',
-      }),
-    ).toBe('account.aggregator_init.provider');
-    expect(
-      itemLifecycleCaseId({
-        ownerId: 'u1', domain: 'service_provider', network: 'blue_dot', op: 'create', actingOrgType: 'aggregator',
-      }),
-    ).toBe('account.aggregator_init.provider');
+  it('leaves one-shot events unbucketed', () => {
+    for (const ev of ['item.created', 'item.created_draft', 'item.retired']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, T)).toBe(`item_lifecycle:${ev}:${OWNER}:${ITEM}`);
+    }
+    expect(itemLifecycleIdempotencyKey('item.onboarded_by_aggregator', OWNER, undefined, T)).toBe(
+      `item_lifecycle:item.onboarded_by_aggregator:${OWNER}`,
+    );
   });
 
-  it('routes a draft create to *.create_incomplete, a live/absent-status create to *.create', () => {
-    const base = { ownerId: 'u1', network: 'blue_dot', op: 'create' } as const;
-    // Draft (incomplete / gated minor) → "complete your profile" copy.
-    expect(itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'draft' })).toBe(
-      'profile.create_incomplete',
-    );
-    expect(itemLifecycleCaseId({ ...base, domain: 'provider', lifecycleStatus: 'draft' })).toBe(
-      'offer.create_incomplete',
-    );
-    // Live → the standard create copy; absent status defaults to live.
-    expect(itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'live' })).toBe(
-      'profile.create',
-    );
-    expect(itemLifecycleCaseId({ ...base, domain: 'seeker' })).toBe('profile.create');
-    // Aggregator create ignores lifecycle status — always the initiation email.
-    expect(
-      itemLifecycleCaseId({ ...base, domain: 'seeker', lifecycleStatus: 'draft', actingOrgType: 'aggregator' }),
-    ).toBe('account.aggregator_init.seeker');
-  });
-
-  it('does NOT re-route non-create ops even under an aggregator acting-org', () => {
-    expect(
-      itemLifecycleCaseId({
-        ownerId: 'u1',
-        domain: 'seeker',
-        network: 'blue_dot',
-        op: 'update',
-        actingOrgType: 'aggregator',
-      }),
-    ).toBe('profile.update');
+  it('stays within the 128-character NS key limit in the worst case', () => {
+    const farFuture = Date.UTC(9999, 11, 31, 23, 59);
+    for (const ev of ['item.created', 'item.created_draft', 'item.updated', 'item.paused', 'item.retired', 'item.onboarded_by_aggregator']) {
+      expect(itemLifecycleIdempotencyKey(ev, OWNER, ITEM, farFuture).length).toBeLessThanOrEqual(128);
+    }
   });
 });

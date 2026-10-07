@@ -266,6 +266,7 @@ describe('precreate/issue', () => {
       contactType: 'email',
       scenario: { kind: 'profile' },
       variables: { parentName: 'Parent P', domain: 'seeker' },
+      log,
     });
   });
 
@@ -425,6 +426,7 @@ describe('profile-consent/issue', () => {
       contactType: 'email',
       scenario: { kind: 'profile' },
       variables: { parentName: 'Parent P', domain: 'seeker' },
+      log,
     });
     expect(isItemOwnedBy).toHaveBeenCalledWith('u1', ITEM);
   });

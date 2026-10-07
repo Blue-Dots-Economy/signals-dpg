@@ -7730,7 +7730,8 @@
                   },
                   "guardianEmail": {
                     "type": "string",
-                    "minLength": 1
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "guardianPhone": {
                     "type": "string",
@@ -8210,7 +8211,8 @@
                   },
                   "guardianEmail": {
                     "type": "string",
-                    "minLength": 1
+                    "format": "email",
+                    "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "guardianPhone": {
                     "type": "string",

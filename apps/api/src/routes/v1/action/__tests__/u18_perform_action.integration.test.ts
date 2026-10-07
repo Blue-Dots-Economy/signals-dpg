@@ -50,7 +50,9 @@ import { randomUUID, randomBytes, createHash } from 'node:crypto';
 
 // Guardian OTP send -> no-op (no real notifier). Mocked before app import.
 vi.mock('@/utils/notificationClient', () => ({
-  getNotificationClient: () => ({ notify: async () => {} }),
+  getNotificationClient: () => ({
+    send: async () => ({ ok: true, status: 202, body: { notification_event_id: 'ne', correlation_id: 'c' } }),
+  }),
 }));
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;

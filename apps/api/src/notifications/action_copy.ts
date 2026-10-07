@@ -1,20 +1,11 @@
 /**
- * Action-email copy classification, keyed by (group × recipient role):
- *   - group: connect | apply (apply covers apply / shortlist / pre_shortlist)
- *   - recipientRole: who receives the email (seeker | provider)
- *
- * The actual copy (subject / body / cta) lives in `email/messages.default.properties`
- * (#529), looked up by case id (`email/email_cases.ts`'s `actionCaseId`) — this
- * module only resolves which case a notification maps to.
+ * Recipient-role classification for action notifications (seeker | provider).
+ * The copy itself is notification-service template content; Signals sends the
+ * true action type and the recipient's domain id, and NS policies choose the
+ * template. This role feeds the counterparty-name lookup.
  */
 
-export type CopyGroup = 'connect' | 'apply';
 export type RecipientRole = 'seeker' | 'provider';
-
-export function resolveCopyGroup(actionType: string): CopyGroup {
-  // apply / shortlist / pre_shortlist share the "apply" family copy.
-  return actionType === 'connect' ? 'connect' : 'apply';
-}
 
 /**
  * Domains that play the "provider" (offering / responder) archetype across

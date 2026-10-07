@@ -13,6 +13,7 @@ import {
   verifyGuardianOtp,
   assertVerifyAttemptAllowed,
   GuardianOtpError,
+  type GuardianOtpLog,
 } from '@/services/guardian_otp';
 
 export type GateInput = {
@@ -25,6 +26,7 @@ export type GateInput = {
   stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
   channel: 'self' | 'external'; // Boolean(request.acting_org): UI self-session vs on-behalf (#395)
   otp?: string; // body.guardian_otp
+  log?: GuardianOtpLog; // request.log — where a failed OTP send is reported
 };
 
 export type GateResult =
@@ -96,6 +98,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
           ...(parentName ? { parentName } : {}),
           ...(providerOrgName ? { providerOrgName } : {}),
         },
+        ...(input.log ? { log: input.log } : {}),
       });
       return { status: 'challenge_issued' };
     } catch (err) {
@@ -169,6 +172,8 @@ export async function guardianBulkActionGate(args: {
   items: BulkGateItem[];
   stage?: 'initiate' | 'accept';
   otp?: string;
+  /** request.log — where a failed OTP send is reported. */
+  log?: GuardianOtpLog;
 }): Promise<Map<number, GateResult>> {
   const results = new Map<number, GateResult>();
 
@@ -216,15 +221,10 @@ export async function guardianBulkActionGate(args: {
         if (!contact) throw new GuardianOtpError('NO_OTP_PROVIDER');
         const parentName = await getGuardianNamePlaintext(wardUserId);
         // Provider org names in submit order, de-duplicated, nulls dropped.
-        const names: string[] = [];
-        const seen = new Set<string>();
-        for (const item of bucket) {
-          const name = await resolveProviderServiceName(item.targetItemId, network);
-          if (name && !seen.has(name)) {
-            seen.add(name);
-            names.push(name);
-          }
-        }
+        const resolved = await Promise.all(
+          bucket.map((item) => resolveProviderServiceName(item.targetItemId, network)),
+        );
+        const names = [...new Set(resolved.filter((name): name is string => Boolean(name)))];
         await issueGuardianOtp({
           scope,
           contact: contact.contact,
@@ -239,6 +239,7 @@ export async function guardianBulkActionGate(args: {
             jobs: network === 'blue_dot',
           },
           variables: parentName ? { parentName } : {},
+          ...(args.log ? { log: args.log } : {}),
         });
         assign({ status: 'challenge_issued' });
       } catch (err) {

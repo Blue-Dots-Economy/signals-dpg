@@ -1,10 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
+import { NotifyTransportError, type NotifyEvent, type NotifyResult } from '@dpg/notification';
 
 import type { NotificationEvent } from '../build_notifications';
 import { createDirectDispatcher } from '../dispatcher';
 import type { DispatcherDeps } from '../dispatcher';
 
 const LOCAL = 'http://localhost:3000';
+
+const ACCEPTED: NotifyResult = {
+  ok: true,
+  status: 202,
+  body: { notification_event_id: 'ne-1', correlation_id: 'c-1' },
+};
+
+/** The only top-level fields an event send may carry from these senders. */
+const EVENT_FIELDS = ['event_type', 'domain', 'to', 'variables', 'priority', 'idempotency_key'];
 
 function createEvent(overrides: Partial<NotificationEvent> = {}): NotificationEvent {
   return {
@@ -15,29 +25,27 @@ function createEvent(overrides: Partial<NotificationEvent> = {}): NotificationEv
     updateCount: 0,
     currentInstanceUrl: LOCAL,
     source: { ownerUserId: 'user-source', itemId: 'item-source', domain: 'seeker', network: 'blue_dot', instanceUrl: LOCAL },
-    target: { ownerUserId: 'user-target', itemId: 'item-target', domain: 'provider', network: 'blue_dot', instanceUrl: LOCAL },
+    target: { ownerUserId: 'user-target', itemId: 'item-target', domain: 'service_provider', network: 'blue_dot', instanceUrl: LOCAL },
     ...overrides,
   };
 }
 
 function makeDeps(overrides: Partial<DispatcherDeps> = {}): {
   deps: DispatcherDeps;
-  calls: Parameters<DispatcherDeps['sendEmail']>[0][];
+  calls: NotifyEvent[];
   skips: string[];
 } {
-  const calls: Parameters<DispatcherDeps['sendEmail']>[0][] = [];
+  const calls: NotifyEvent[] = [];
   const skips: string[] = [];
   const deps: DispatcherDeps = {
-    sendEmail: vi.fn(async (args) => {
-      calls.push(args);
-      return { ok: true };
+    send: vi.fn(async (event: NotifyEvent) => {
+      calls.push(event);
+      return ACCEPTED;
     }),
     resolveEmail: vi.fn(async (userId: string) => `${userId}@example.com`),
     // Default: counterparty is a seeker → no name resolved.
     resolveCounterpartyName: vi.fn(async () => null),
-    brand: {
-      brandName: 'Blue Dot',
-    },
+    teamName: 'EkStep',
     resolveCtaUrl: (domain: string) =>
       domain === 'seeker'
         ? 'https://seeker.example.org/auth/login'
@@ -52,21 +60,68 @@ function makeDeps(overrides: Partial<DispatcherDeps> = {}): {
 }
 
 describe('DirectDispatcher', () => {
-  it('sends one email per local owner side with the correct payload', async () => {
+  it('sends a connect inbound request to a service_provider recipient as action.connect.inbound_request', async () => {
     const { deps, calls } = makeDeps();
     await createDirectDispatcher(deps).dispatch(createEvent());
 
     expect(calls).toHaveLength(2);
-
-    // INBOUND_REQUEST → provider (target); provider-facing connect copy.
-    const inbound = calls.find((c) => c.dedupeId?.endsWith('INBOUND_REQUEST'));
-    expect(inbound).toMatchObject({
-      caseId: 'action.connect.provider.inbound_request',
-      to: 'user-target@example.com',
-      fromName: 'Blue Dot',
-      dedupeId: 'action-1:0:INBOUND_REQUEST',
+    const inbound = calls.find((c) => c.event_type === 'action.connect.inbound_request');
+    expect(inbound).toEqual({
+      event_type: 'action.connect.inbound_request',
+      // The recipient's own item domain, exactly as in network.json.
+      domain: 'service_provider',
+      to: { email: 'user-target@example.com' },
+      variables: {
+        name: 'the service provider',
+        ctaUrl: 'https://provider.example.org/auth/login',
+        teamName: 'EkStep',
+      },
+      priority: 'normal',
+      idempotency_key: 'action-1:0:INBOUND_REQUEST',
     });
-    expect(inbound?.variables?.name).toBe('the service provider');
+
+    const outbound = calls.find((c) => c.event_type === 'action.connect.outbound_request');
+    expect(outbound).toMatchObject({
+      domain: 'seeker',
+      to: { email: 'user-source@example.com' },
+      idempotency_key: 'action-1:0:OUTBOUND_REQUEST',
+    });
+  });
+
+  it('sends a shortlist status change as action.shortlist.<inbound|outbound>_status with the true action type', async () => {
+    const { deps, calls } = makeDeps({
+      resolveCounterpartyName: vi.fn(async () => 'Acme Services'),
+    });
+    await createDirectDispatcher(deps).dispatch(
+      createEvent({ actionType: 'shortlist', lifecycle: 'status', status: 'accepted', updateCount: 2 }),
+    );
+
+    const inboundStatus = calls.find((c) => c.event_type === 'action.shortlist.inbound_status');
+    expect(inboundStatus).toMatchObject({
+      domain: 'seeker',
+      to: { email: 'user-source@example.com' },
+      variables: { name: 'Acme Services', teamName: 'EkStep' },
+      idempotency_key: 'action-1:2:INBOUND_STATUS',
+    });
+    expect(calls.map((c) => c.event_type).sort()).toEqual([
+      'action.shortlist.inbound_status',
+      'action.shortlist.outbound_status',
+    ]);
+  });
+
+  it('carries teamName on every action event and never sends html, subject, template or channel', async () => {
+    const { deps, calls } = makeDeps();
+    await createDirectDispatcher(deps).dispatch(createEvent());
+    await createDirectDispatcher(deps).dispatch(
+      createEvent({ lifecycle: 'status', status: 'rejected', updateCount: 1 }),
+    );
+
+    expect(calls).toHaveLength(4);
+    for (const call of calls) {
+      expect(call.variables.teamName).toBe('EkStep');
+      expect(Object.keys(call).every((k) => EVENT_FIELDS.includes(k))).toBe(true);
+      expect(Object.keys(call.variables).sort()).toEqual(['ctaUrl', 'name', 'teamName']);
+    }
   });
 
   it('skips and counts a side whose owner has no user id (no throw)', async () => {
@@ -79,7 +134,7 @@ describe('DirectDispatcher', () => {
 
     // only the source-side OUTBOUND_REQUEST goes out
     expect(calls).toHaveLength(1);
-    expect(calls[0].dedupeId).toBe('action-1:0:OUTBOUND_REQUEST');
+    expect(calls[0].idempotency_key).toBe('action-1:0:OUTBOUND_REQUEST');
     expect(skips).toContain('no_user_id');
   });
 
@@ -93,72 +148,85 @@ describe('DirectDispatcher', () => {
     await createDirectDispatcher(deps).dispatch(createEvent());
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].to).toBe('user-source@example.com');
+    expect(calls[0].to).toEqual({ email: 'user-source@example.com' });
     expect(skips).toContain('no_email');
   });
 
-  it('never throws when sendEmail rejects (fire-and-forget)', async () => {
-    const { deps } = makeDeps({
-      sendEmail: vi.fn(async () => {
-        throw new Error('NS down');
+  it('logs a 422 from NS as ns_rejected and still sends the other side (best effort)', async () => {
+    const { deps, calls } = makeDeps({
+      send: vi.fn(async (event: NotifyEvent): Promise<NotifyResult> => {
+        calls.push(event);
+        return event.event_type.endsWith('inbound_request')
+          ? { ok: false, status: 422, error: 'no_policy', kind: 'configuration' }
+          : ACCEPTED;
       }),
     });
 
-    await expect(
-      createDirectDispatcher(deps).dispatch(createEvent()),
-    ).resolves.toBeUndefined();
-    expect(deps.log).toHaveBeenCalled();
+    await expect(createDirectDispatcher(deps).dispatch(createEvent())).resolves.toBeUndefined();
+
+    expect(calls).toHaveLength(2);
+    expect(deps.log).toHaveBeenCalledWith('ns_rejected', {
+      event_type: 'action.connect.inbound_request',
+      domain: 'service_provider',
+      status: 422,
+      error: 'no_policy',
+      kind: 'configuration',
+      actionId: 'action-1',
+      shape: 'INBOUND_REQUEST',
+    });
   });
 
-  it('substitutes the resolved provider service name into seeker-facing copy', async () => {
-    const { deps, calls } = makeDeps({
-      resolveCounterpartyName: vi.fn(async () => 'Acme Services'),
+  it('logs a transport failure as ns_unreachable and never throws', async () => {
+    const { deps } = makeDeps({
+      send: vi.fn(async () => {
+        throw new NotifyTransportError('fetch failed: TypeError');
+      }),
     });
 
-    await createDirectDispatcher(deps).dispatch(
-      createEvent({ lifecycle: 'status', status: 'accepted', updateCount: 1 }),
+    await expect(createDirectDispatcher(deps).dispatch(createEvent())).resolves.toBeUndefined();
+    expect(deps.log).toHaveBeenCalledWith(
+      'ns_unreachable',
+      expect.objectContaining({ event_type: 'action.connect.inbound_request', actionId: 'action-1' }),
     );
+  });
 
-    // INBOUND_STATUS → source (seeker); seeker-facing connect copy uses {{name}}.
-    const inboundStatus = calls.find((c) => c.dedupeId?.endsWith('INBOUND_STATUS'));
-    expect(inboundStatus?.to).toBe('user-source@example.com');
-    expect(inboundStatus?.caseId).toBe('action.connect.seeker.inbound_status');
-    expect(inboundStatus?.variables?.name).toBe('Acme Services');
+  it('never throws when send rejects with an unexpected error (fire-and-forget)', async () => {
+    const { deps } = makeDeps({
+      send: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+    });
+
+    await expect(createDirectDispatcher(deps).dispatch(createEvent())).resolves.toBeUndefined();
+    expect(deps.log).toHaveBeenCalledWith('notification dispatch failed', expect.anything());
   });
 
   it('falls back to FALLBACK_SERVICE_NAME when the counterparty name is null/empty', async () => {
     const { deps, calls } = makeDeps({
-      resolveCounterpartyName: vi.fn(async () => null),
+      resolveCounterpartyName: vi.fn(async () => '   '),
     });
 
     await createDirectDispatcher(deps).dispatch(
       createEvent({ lifecycle: 'status', status: 'accepted', updateCount: 1 }),
     );
 
-    const inboundStatus = calls.find((c) => c.dedupeId?.endsWith('INBOUND_STATUS'));
-    expect(inboundStatus?.variables?.name).toBe('the service provider');
+    const inboundStatus = calls.find((c) => c.idempotency_key?.endsWith('INBOUND_STATUS'));
+    expect(inboundStatus?.variables.name).toBe('the service provider');
   });
 
   it('sends each side to its OWN portal, not the counterparty portal', async () => {
     const { deps, calls } = makeDeps();
-    // source = seeker, target = provider (see createEvent).
+    // source = seeker, target = service_provider (see createEvent).
     await createDirectDispatcher(deps).dispatch(createEvent());
 
-    const inbound = calls.find((c) => c.dedupeId?.endsWith('INBOUND_REQUEST'));
-    const outbound = calls.find((c) => c.dedupeId?.endsWith('OUTBOUND_REQUEST'));
+    const inbound = calls.find((c) => c.idempotency_key?.endsWith('INBOUND_REQUEST'));
+    const outbound = calls.find((c) => c.idempotency_key?.endsWith('OUTBOUND_REQUEST'));
 
-    // INBOUND_REQUEST goes to the TARGET (provider) → provider portal.
-    expect(inbound?.ctaUrl).toBe('https://provider.example.org/auth/login');
-    // OUTBOUND_REQUEST goes to the SOURCE (seeker) → seeker portal.
-    expect(outbound?.ctaUrl).toBe('https://seeker.example.org/auth/login');
+    expect(inbound?.variables.ctaUrl).toBe('https://provider.example.org/auth/login');
+    expect(outbound?.variables.ctaUrl).toBe('https://seeker.example.org/auth/login');
   });
 
   it('skips a recipient whose domain resolves to no URL rather than sending a dead link', async () => {
-    // Reachable once the gate accepts a map-only config: UI_HOST_BINDINGS is
-    // set (so the gate passes) but FRONTEND_BASE_URL is not, and this
-    // recipient's domain is absent from the map. `dispatch_email` would render
-    // `ctaUrl: args.ctaUrl ?? ''` into `<a href="">` — an email whose only
-    // call to action is a broken button.
     const { deps, calls, skips } = makeDeps({
       resolveCtaUrl: (domain: string) =>
         domain === 'seeker' ? 'https://seeker.example.org/auth/login' : undefined,
@@ -167,7 +235,7 @@ describe('DirectDispatcher', () => {
     await createDirectDispatcher(deps).dispatch(createEvent());
 
     expect(calls).toHaveLength(1);
-    expect(calls[0]?.ctaUrl).toBe('https://seeker.example.org/auth/login');
+    expect(calls[0]?.variables.ctaUrl).toBe('https://seeker.example.org/auth/login');
     expect(skips).toContain('no_cta_url');
   });
 });

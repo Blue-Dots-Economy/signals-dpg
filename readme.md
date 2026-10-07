@@ -151,12 +151,6 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
-# DLT-approved provider template id for OTP SMS (login + guardian OTP);
-# defaults to "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
-# CREATE_TEST_OTP is off. (Distinct from the per-event lifecycle SMS templates,
-# which live in apps/api/src/notifications/sms/*.properties.)
-SMS_TEMPLATE_ID=""
-
 # Max profiles a single user may hold (default 5). A network.json domain's
 # max_profiles_per_user overrides this per-domain.
 MAX_PROFILES_PER_USER=5
@@ -181,12 +175,6 @@ SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES=5242880
 # Grievances) in place of the __SUPPORT_EMAIL__ placeholder the consent.json
 # files ship. Distinct from SUPPORT_EMAIL above (the contact-form recipient).
 CONSENT_SUPPORT_EMAIL="hello@bluedotseconomy.org"
-
-# Optional override of the bundled email copy (subjects/bodies/CTA labels for
-# every email the API sends). Unset → bundled defaults; per-network/brand copy
-# also layers from a messages.properties beside network.json in local mode.
-# See docs/operations/email-copy-overrides.md.
-EMAIL_MESSAGES_PATH=""
 
 # Host -> "network/domain" map for a split-UI deployment, identical to the
 # string the UI ingress uses. Inverted at boot so an email CTA points the

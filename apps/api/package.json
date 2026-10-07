@@ -20,6 +20,8 @@
     "db:baseline": "node scripts/baseline.mjs",
     "db:backfill:lifecycle": "node dist/scripts/backfill_lifecycle.js",
     "db:backfill:lifecycle:dev": "tsx src/scripts/backfill_lifecycle.ts",
+    "db:backfill:guardian-ref": "node dist/scripts/backfill_guardian_ref.js",
+    "db:backfill:guardian-ref:dev": "tsx src/scripts/backfill_guardian_ref.ts",
     "db:seed:purple_dot": "tsx scripts/seed_purple_dot.ts",
     "db:seed:services": "tsx scripts/seed_service_users.ts",
     "keycloak:migrate:users": "tsx scripts/migrate_users_to_keycloak.ts",

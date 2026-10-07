@@ -1,4 +1,5 @@
 import { and, eq, ne, count, sql } from 'drizzle-orm';
+import { normalizeE164Phone } from '@dpg/schemas';
 import { db } from '@api/db/postgres/drizzle_config';
 import { minor_guardian, user } from '@api/db/postgres/schema';
 import { encryptGuardianField, decryptGuardianField, guardianRef } from '@/services/guardian_pii';
@@ -74,8 +75,9 @@ export async function isGuardianWardLimitReached(
 
 /**
  * Warn-and-ack guard: whether a guardian email/phone equals the ward's own
- * contact. Email compared case-insensitively, phone trimmed — matching how both
- * call sites normalized before this was centralized.
+ * contact. Email compared case-insensitively; phones compared in their
+ * canonical E.164 form on both sides (R14), so `98765 43210` matches
+ * `+919876543210`.
  */
 export function guardianContactMatchesWard(args: {
   wardEmail?: string | null;
@@ -84,9 +86,10 @@ export function guardianContactMatchesWard(args: {
   guardianPhone?: string | null;
 }): boolean {
   const wardEmail = args.wardEmail?.trim().toLowerCase();
-  const wardPhone = args.wardPhone?.trim();
+  const wardPhone = args.wardPhone ? canonicalGuardianPhone(args.wardPhone) : '';
+  const guardianPhone = args.guardianPhone ? canonicalGuardianPhone(args.guardianPhone) : '';
   const emailMatch = !!wardEmail && !!args.guardianEmail && args.guardianEmail.trim().toLowerCase() === wardEmail;
-  const phoneMatch = !!wardPhone && !!args.guardianPhone && args.guardianPhone.trim() === wardPhone;
+  const phoneMatch = !!wardPhone && !!guardianPhone && guardianPhone === wardPhone;
   return emailMatch || phoneMatch;
 }
 
@@ -140,15 +143,29 @@ export async function getMinorGuardian(userId: string): Promise<{
 }
 
 /**
+ * The canonical form of a guardian phone: E.164 when it can be made so (R14),
+ * else the trimmed value. Capture already rejects a non-E.164 phone, so the
+ * fallback only keeps a legacy value stable for hashing and comparison; the
+ * send path refuses it.
+ */
+export function canonicalGuardianPhone(value: string): string {
+  return normalizeE164Phone(value) ?? value.trim();
+}
+
+/**
  * Resolve the single OTP channel from the two guardian contacts — phone is
  * preferred when both are given (per the U18 spec's channel order). Throws if
- * neither is present (callers validate at least one upstream).
+ * neither is present (callers validate at least one upstream). A phone is
+ * returned in its canonical form, so the guardian ref hash and every
+ * comparison see one spelling.
  */
 export function resolveOtpChannel(input: {
   guardianEmail?: string | null;
   guardianPhone?: string | null;
 }): { contact: string; contactType: GuardianContactType } {
-  if (input.guardianPhone) return { contact: input.guardianPhone, contactType: 'phone' };
+  if (input.guardianPhone) {
+    return { contact: canonicalGuardianPhone(input.guardianPhone), contactType: 'phone' };
+  }
   if (input.guardianEmail) return { contact: input.guardianEmail, contactType: 'email' };
   throw new Error('resolveOtpChannel: at least one guardian contact is required');
 }
@@ -172,7 +189,9 @@ export async function upsertGuardianDetails(
     guardianContact: encryptGuardianField(channel.contact),
     guardianContactType: channel.contactType,
     guardianEmail: input.guardianEmail ? encryptGuardianField(input.guardianEmail) : null,
-    guardianPhone: input.guardianPhone ? encryptGuardianField(input.guardianPhone) : null,
+    guardianPhone: input.guardianPhone
+      ? encryptGuardianField(canonicalGuardianPhone(input.guardianPhone))
+      : null,
     guardianRef: ref,
     guardianVerified: false,
   };

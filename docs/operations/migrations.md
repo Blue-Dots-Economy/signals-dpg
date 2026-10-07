@@ -349,6 +349,23 @@ still existing) make it a safe no-op on a re-run or a DB that never had the
 column. Applied automatically by the deploy migrator (`migrate.mjs`) — **no
 manual DDL needed.**
 
+### Guardian phone E.164 / `guardian_ref` recompute (data, not schema)
+
+Guardian phones are canonicalised to E.164 before they are hashed into
+`minor_guardian.guardian_ref`, which the per-guardian ward cap counts by. Rows
+written before that hold the raw typed phone and a ref hashed from it, so the cap
+undercounts them until they are rewritten. The ref is an HMAC keyed with
+`SIGNALS_PII_KEY` over a decrypted contact, so SQL cannot do it; it is a compiled
+script in the api image. Run it once per environment after deploying the change:
+
+```bash
+node dist/scripts/backfill_guardian_ref.js --dry-run   # report only
+node dist/scripts/backfill_guardian_ref.js
+```
+
+Idempotent — canonical rows are not rewritten. A non-zero `failed` count means
+rows could not be decrypted (check the PII key); it exits non-zero in that case.
+
 ## Related
 
 - `docs/superpowers/plans/2026-05-21-deployment-and-automation.md` —

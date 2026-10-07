@@ -120,18 +120,12 @@ describe('NotificationSecretsSchema', () => {
   it('parses an entirely empty environment (every field optional)', () => {
     const parsed = NotificationSecretsSchema.parse({});
     expect(parsed.SUPPORT_EMAIL).toBeUndefined();
-    expect(parsed.NOTIFICATION_FROM_EMAIL).toBeUndefined();
-    expect(parsed.NOTIFICATION_REPLY_TO).toBeUndefined();
+    expect(parsed.NOTIFICATION_SERVICE_ENDPOINT).toBeUndefined();
   });
 
   it('passes values through unchanged', () => {
     const parsed = NotificationSecretsSchema.parse({
       NOTIFICATION_SERVICE_ENDPOINT: 'https://notify.example.test',
-      NOTIFICATION_SERVICE_KEY_ID: 'kid',
-      NOTIFICATION_SERVICE_SECRET: 'shh',
-      SMS_TEMPLATE_ID: 'tpl-1',
-      NOTIFICATION_FROM_EMAIL: 'no-reply@example.test',
-      NOTIFICATION_REPLY_TO: 'reply@example.test',
       FRONTEND_BASE_URL: 'https://ui.example.test',
       SUPPORT_EMAIL: 'a@example.test,b@example.test',
       SUPPORT_CC_EMAIL: 'cc@example.test',
@@ -140,6 +134,13 @@ describe('NotificationSecretsSchema', () => {
     expect(parsed.SUPPORT_EMAIL).toBe('a@example.test,b@example.test');
     expect(parsed.SUPPORT_CC_EMAIL).toBe('cc@example.test');
     expect(parsed.FRONTEND_BASE_URL).toBe('https://ui.example.test');
+    expect(parsed.NOTIFICATION_SERVICE_ENDPOINT).toBe('https://notify.example.test');
+  });
+
+  it('keeps only the notification-service endpoint: sender identity and copy are NS config', () => {
+    expect(Object.keys(NotificationSecretsSchema.shape).filter((k) => k.startsWith('NOTIFICATION_'))).toEqual([
+      'NOTIFICATION_SERVICE_ENDPOINT',
+    ]);
   });
 });
 

@@ -470,6 +470,7 @@ async function createMirror(
   try {
     await sendWelcomeNotifications(
       {
+        userId: user.id,
         name: user.name,
         email: identity.email,
         phoneNumber: identity.phoneNumber,

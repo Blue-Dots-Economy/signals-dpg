@@ -33,9 +33,12 @@ export async function runAfterUserCreate(user: CreatedUser): Promise<void> {
   });
 
   await sendWelcomeNotifications(
-    { name: user.name, email: user.email ?? null, phoneNumber: user.phoneNumber ?? null },
+    { userId: user.id, name: user.name, email: user.email ?? null, phoneNumber: user.phoneNumber ?? null },
     // No request context in a module-level hook, so failures go to the console.
-    { error: (details, message) => console.error(message, details) },
+    {
+      error: (details, message) => console.error(message, details),
+      warn: (details, message) => console.warn(message, details),
+    },
     signupDomain,
   );
 }

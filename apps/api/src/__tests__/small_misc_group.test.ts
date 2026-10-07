@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+import type { NotifyEvent } from '@dpg/notification';
+
 import type { NotificationEvent, NotificationPlan } from '@/notifications/build_notifications';
 
 /**
@@ -97,9 +99,6 @@ const {
   resolveRecipientRole,
   resolveOwnerEmail,
   resolveProviderServiceName,
-  createEmailSender,
-  getEmailMessages,
-  getInstanceDefaultNetwork,
   schemaEntries,
 } = vi.hoisted(() => {
   const buildCtaUrl = vi.fn((baseUrl: string) => `${baseUrl}/login`);
@@ -126,8 +125,6 @@ const {
   // these properties at call time, not at import time.
   cfgInstance: { INSTANCE_NAME: 'test-instance' } as { INSTANCE_NAME: string },
   cfgNotification: {} as {
-    NOTIFICATION_FROM_EMAIL?: string;
-    NOTIFICATION_REPLY_TO?: string;
     FRONTEND_BASE_URL?: string;
   },
   // Mutated in place by the notify_actions tests, same pattern as
@@ -159,14 +156,6 @@ const {
   resolveProviderServiceName: vi.fn(
     async (_itemId: string, _network: string): Promise<string | null> => null,
   ),
-  // The email-sender factory: returns a fresh dispatchEmail spy per call so
-  // each resolveNotifierConfig() build gets its own, independently-asserted
-  // sender (the notify_actions tests capture the deps passed to this factory).
-  createEmailSender: vi.fn((_deps: unknown) => ({
-    dispatchEmail: vi.fn(async (_args: unknown) => ({ ok: true })),
-  })),
-  getEmailMessages: vi.fn(async () => ({ forContext: () => ({ get: (_key: string) => '' }) })),
-  getInstanceDefaultNetwork: vi.fn((): string | null => null),
   schemaEntries: [] as {
     kind: string;
     network: string;
@@ -225,13 +214,6 @@ vi.mock('@/notifications/dispatcher', () => ({
 }));
 vi.mock('@/notifications/action_copy', () => ({
   resolveRecipientRole: (d: string) => resolveRecipientRole(d),
-}));
-vi.mock('@/notifications/email/dispatch_email', () => ({
-  createEmailSender: (deps: unknown) => createEmailSender(deps),
-  getInstanceDefaultNetwork: () => getInstanceDefaultNetwork(),
-}));
-vi.mock('@/notifications/email/messages', () => ({
-  getEmailMessages: () => getEmailMessages(),
 }));
 vi.mock('@/notifications/resolve_owner', () => ({
   resolveOwnerEmail,
@@ -299,15 +281,8 @@ beforeEach(() => {
   resolveRecipientRole.mockImplementation(() => 'seeker');
   resolveOwnerEmail.mockImplementation(async () => null);
   resolveProviderServiceName.mockImplementation(async () => null);
-  createEmailSender.mockImplementation(() => ({
-    dispatchEmail: vi.fn(async () => ({ ok: true })),
-  }));
-  getEmailMessages.mockImplementation(async () => ({ forContext: () => ({ get: () => '' }) }));
-  getInstanceDefaultNetwork.mockImplementation(() => null);
 
   cfgInstance.INSTANCE_NAME = 'test-instance';
-  delete cfgNotification.NOTIFICATION_FROM_EMAIL;
-  delete cfgNotification.NOTIFICATION_REPLY_TO;
   delete cfgNotification.FRONTEND_BASE_URL;
   cfgUiHostBindings.byDomain = {};
   cfgUiHostBindings.warnings = [];
@@ -579,22 +554,20 @@ describe('network markers handlers', () => {
 // ===========================================================================
 
 interface CapturedDeps {
-  sendEmail: (args: { caseId: string; to: string }) => Promise<{ ok: boolean }>;
+  send: (event: NotifyEvent) => Promise<unknown>;
   resolveEmail: unknown;
   resolveCounterpartyName: (plan: NotificationPlan) => Promise<string | null>;
-  brand: { brandName: string };
+  teamName: string;
   resolveCtaUrl: (domain: string) => string | undefined;
   log: (message: string, meta?: Record<string, unknown>) => void;
   onSkip: (reason: string) => void;
 }
 
-function configureNotifications(replyTo?: string) {
-  cfgNotification.NOTIFICATION_FROM_EMAIL = 'from@dpg.test';
+function configureNotifications() {
   cfgNotification.FRONTEND_BASE_URL = 'https://app.test';
-  if (replyTo) cfgNotification.NOTIFICATION_REPLY_TO = replyTo;
-  const notify = vi.fn(async (_req: unknown) => 'queued');
-  getNotificationClient.mockImplementation(() => ({ notify }));
-  return notify;
+  const send = vi.fn(async (_event: unknown) => ({ ok: true }));
+  getNotificationClient.mockImplementation(() => ({ send }));
+  return send;
 }
 
 const event: NotificationEvent = {
@@ -635,23 +608,22 @@ const plan: NotificationPlan = {
 
 describe('resolveNotifierConfig', () => {
   it('memoises the not-configured verdict (client missing) without re-probing', () => {
+    cfgNotification.FRONTEND_BASE_URL = 'https://app.test';
     expect(resolveNotifierConfig()).toBeNull();
     expect(resolveNotifierConfig()).toBeNull();
     expect(getNotificationClient).toHaveBeenCalledTimes(1);
   });
 
-  it('is not configured when the client exists but FRONTEND_BASE_URL is unset', () => {
-    cfgNotification.NOTIFICATION_FROM_EMAIL = 'from@dpg.test';
-    getNotificationClient.mockImplementation(() => ({ notify: vi.fn() }));
+  it('is not configured when the client exists but no URL source is set', () => {
+    getNotificationClient.mockImplementation(() => ({ send: vi.fn() }));
 
     expect(resolveNotifierConfig()).toBeNull();
   });
 
-  it('is not configured when the from-email is unset', () => {
-    cfgNotification.FRONTEND_BASE_URL = 'https://app.test';
-    getNotificationClient.mockImplementation(() => ({ notify: vi.fn() }));
+  it('is configured from the client and a URL source alone: the sender identity is NS deployment config', () => {
+    configureNotifications();
 
-    expect(resolveNotifierConfig()).toBeNull();
+    expect(resolveNotifierConfig()).not.toBeNull();
   });
 
   it('is configured on UI_HOST_BINDINGS alone, with FRONTEND_BASE_URL unset, and resolves via the map (#569)', () => {
@@ -660,9 +632,8 @@ describe('resolveNotifierConfig', () => {
     // sending with no error anywhere, not a single degraded link. Reverting
     // the gate to `!frontendBaseUrl`, or dropping `byDomain` from the
     // resolver wiring, must fail one of the two assertions below.
-    cfgNotification.NOTIFICATION_FROM_EMAIL = 'from@dpg.test';
     cfgUiHostBindings.byDomain = { seeker: 'https://s.test' };
-    getNotificationClient.mockImplementation(() => ({ notify: vi.fn() }));
+    getNotificationClient.mockImplementation(() => ({ send: vi.fn() }));
 
     // Fails if the gate regresses to requiring the FRONTEND_BASE_URL scalar.
     const config = resolveNotifierConfig();
@@ -671,47 +642,28 @@ describe('resolveNotifierConfig', () => {
     expect(config?.resolveCtaUrl('seeker')).toBe('https://s.test/login');
   });
 
-  it('builds the email sender with the from-email as default replyTo and delegates notify to the NS client', async () => {
-    getInstanceDefaultNetwork.mockImplementation(() => 'blue_dot');
-    const notify = configureNotifications();
+  it('delegates send to the NS client and signs off as INSTANCE_NAME', async () => {
+    const send = configureNotifications();
 
     const config = resolveNotifierConfig();
     expect(config).not.toBeNull();
     expect(config?.resolveCtaUrl('seeker')).toBe('https://app.test/login');
     expect(buildCtaUrl).toHaveBeenCalledWith('https://app.test');
+    expect(config?.teamName).toBe('test-instance');
 
-    expect(createEmailSender).toHaveBeenCalledTimes(1);
-    const senderDeps = createEmailSender.mock.calls[0][0] as {
-      notify: (req: unknown) => Promise<unknown>;
-      fromEmail: string;
-      defaultReplyTo: string;
-      defaultNetwork: string | null;
-      getMessages: () => Promise<unknown>;
-    };
-    expect(senderDeps.fromEmail).toBe('from@dpg.test');
-    expect(senderDeps.defaultReplyTo).toBe('from@dpg.test');
-    // defaultNetwork is the instance-default helper's result (#529 addendum),
-    // not derived independently here.
-    expect(senderDeps.defaultNetwork).toBe('blue_dot');
-    expect(getInstanceDefaultNetwork).toHaveBeenCalled();
-
-    await expect(senderDeps.notify({ to: 'x@y.z' } as never)).resolves.toBe('queued');
-    expect(notify).toHaveBeenCalledWith({ to: 'x@y.z' });
-
-    senderDeps.getMessages();
-    expect(getEmailMessages).toHaveBeenCalled();
+    const ev = { event_type: 'item.created', to: { email: 'x@y.z' }, variables: {} };
+    await expect(config?.send(ev)).resolves.toEqual({ ok: true });
+    expect(send).toHaveBeenCalledWith(ev);
 
     // Memoised: the second call returns the same object without re-probing.
     expect(resolveNotifierConfig()).toBe(config);
     expect(getNotificationClient).toHaveBeenCalledTimes(1);
-    expect(createEmailSender).toHaveBeenCalledTimes(1);
   });
 
-  it('prefers an explicit NOTIFICATION_REPLY_TO', () => {
-    configureNotifications('reply@dpg.test');
-    resolveNotifierConfig();
-    const senderDeps = createEmailSender.mock.calls[0][0] as { defaultReplyTo: string };
-    expect(senderDeps.defaultReplyTo).toBe('reply@dpg.test');
+  it("falls back to the 'DPG' sign-off when INSTANCE_NAME is empty", () => {
+    configureNotifications();
+    cfgInstance.INSTANCE_NAME = '';
+    expect(resolveNotifierConfig()?.teamName).toBe('DPG');
   });
 });
 
@@ -746,30 +698,32 @@ describe('dispatchActionNotifications', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it('wires the dispatcher with the per-network brand and dispatches the event', async () => {
-    configureNotifications('reply@dpg.test');
-    resolveBrandName.mockImplementation(() => 'Blue Dot');
+  it('wires the dispatcher with the team sign-off and dispatches the event', async () => {
+    configureNotifications();
 
     const log = makeLog();
     await dispatchActionNotifications(event, log as never);
 
-    expect(getNetworkConfigById).toHaveBeenCalledWith('blue_dot');
     const deps = createDirectDispatcher.mock.calls[0][0] as CapturedDeps;
-    expect(deps.brand).toEqual({ brandName: 'Blue Dot' });
+    expect(deps.teamName).toBe('test-instance');
     expect(deps.resolveCtaUrl('seeker')).toBe('https://app.test/login');
     expect(deps.resolveEmail).toBe(resolveOwnerEmail);
     expect(dispatch).toHaveBeenCalledWith(event);
   });
 
-  it('delegates sendEmail to the resolved email sender', async () => {
-    configureNotifications();
+  it('delegates send to the NS client', async () => {
+    const send = configureNotifications();
     await dispatchActionNotifications(event, makeLog() as never);
     const deps = createDirectDispatcher.mock.calls[0][0] as CapturedDeps;
 
-    const config = resolveNotifierConfig();
-    const args = { caseId: 'action.connect.seeker.inbound_request', to: 'x@y.z' };
-    await deps.sendEmail(args);
-    expect(config?.sender.dispatchEmail).toHaveBeenCalledWith(args);
+    const ev: NotifyEvent = {
+      event_type: 'action.connect.inbound_request',
+      domain: 'seeker',
+      to: { email: 'x@y.z' },
+      variables: {},
+    };
+    await deps.send(ev);
+    expect(send).toHaveBeenCalledWith(ev);
   });
 
   it('resolves the counterparty name only for provider-side counterparties', async () => {

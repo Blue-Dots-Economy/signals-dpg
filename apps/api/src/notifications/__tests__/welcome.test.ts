@@ -1,29 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { inspect } from 'node:util';
+import { NotifyTransportError, USER_WELCOME, type NotifyEvent, type NotifyResult } from '@dpg/notification';
 
 /**
- * The guarantee under test is isolation: one dead channel must not suppress the
- * other, and nothing here may ever throw into a signup or a login. That posture
- * is inherited from the better-auth hook this replaces
- * (packages/auth/src/config.ts, before G1).
+ * The welcome is ONE `user.welcome` event: the notification service's policy
+ * (mode `all`) fans it out to email and WhatsApp for whichever contact points
+ * `to` carries. The guarantee under test is that nothing here may ever throw
+ * into a signup or a login.
  */
 
-/** The subset of the notification-service payload these assertions care about. */
-interface NotifyPayload {
-  channel: string;
-  template_id: string;
-  to: string;
-  priority: string;
-  variables: Record<string, unknown>;
-}
-
-const notify = vi.fn(async (_payload: NotifyPayload): Promise<unknown> => ({}));
+const ACCEPTED: NotifyResult = {
+  ok: true,
+  status: 202,
+  body: { notification_event_id: 'ne-1', correlation_id: 'c-1' },
+};
+const send = vi.fn(async (_event: NotifyEvent): Promise<NotifyResult> => ACCEPTED);
 let clientConfigured = true;
 
 // Mutable so each test can control both the fallback base URL and the
-// per-domain bindings independently (#569) — a static object literal can't
-// represent "domain resolves to nothing", which the "omits siteUrl entirely"
-// test below needs. Reset in `beforeEach` to the values the pre-existing
-// tests expect.
+// per-domain bindings independently (#569).
 const mockNotification: { FRONTEND_BASE_URL: string | undefined } = {
   FRONTEND_BASE_URL: 'https://blue.example',
 };
@@ -33,7 +28,7 @@ const mockUiHostBindings: { byDomain: Record<string, string>; warnings: string[]
 };
 
 vi.mock('@/utils/notificationClient', () => ({
-  getNotificationClient: () => (clientConfigured ? { notify } : undefined),
+  getNotificationClient: () => (clientConfigured ? { send } : undefined),
 }));
 
 vi.mock('@/config', () => ({
@@ -42,191 +37,174 @@ vi.mock('@/config', () => ({
   uiHostBindings: mockUiHostBindings,
 }));
 
-/**
- * The welcome EMAIL goes through the central dispatcher (#529) so its copy comes
- * from the messages file; WhatsApp still uses the raw client (a pre-approved
- * content template, not email copy). Both are mocked so this file keeps testing
- * channel selection and failure isolation, not rendering.
- */
-const dispatchEmail = vi.fn(async (_args: Record<string, unknown>) => ({ ok: true }));
+const { sendWelcomeNotifications, welcomeIdempotencyKey } = await import('../welcome.js');
 
-vi.mock('../email/dispatch_email', () => ({
-  getDefaultEmailSender: () => (clientConfigured ? { dispatchEmail } : null),
-}));
+const makeLog = () => ({ error: vi.fn(), warn: vi.fn() });
 
-const { sendWelcomeNotifications } = await import('../welcome.js');
+const BOTH = { userId: 'u-1', name: 'Asha', email: 'asha@example.org', phoneNumber: '+911234567890' };
 
-const makeLog = () => ({ error: vi.fn() });
-
-const BOTH = { name: 'Asha', email: 'asha@example.org', phoneNumber: '+911234567890' };
-
-/** Channels actually attempted, in order — email via dispatcher, WhatsApp via notify. */
-const attempted = () => [
-  ...dispatchEmail.mock.calls.map(() => 'email'),
-  ...notify.mock.calls.map(([p]) => p.channel),
-];
+const sentEvent = (): NotifyEvent => send.mock.calls[0][0];
 
 beforeEach(() => {
-  notify.mockClear();
-  notify.mockImplementation(async () => ({}));
-  dispatchEmail.mockClear();
-  dispatchEmail.mockImplementation(async () => ({ ok: true }));
+  send.mockReset();
+  send.mockImplementation(async () => ACCEPTED);
   clientConfigured = true;
   mockNotification.FRONTEND_BASE_URL = 'https://blue.example';
   mockUiHostBindings.byDomain = {};
 });
 
-describe('channel selection', () => {
-  it('sends email and WhatsApp when the user has both identifiers', async () => {
+describe('the user.welcome event', () => {
+  it('sends one event carrying both contact points, so the policy fans out to email + WhatsApp', async () => {
     await sendWelcomeNotifications(BOTH, makeLog());
 
-    expect(attempted()).toEqual(['email', 'whatsapp']);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sentEvent()).toEqual({
+      event_type: USER_WELCOME,
+      domain: null,
+      to: { email: 'asha@example.org', phone: '+911234567890' },
+      variables: {
+        userName: 'Asha',
+        appName: 'Blue Dots',
+        teamName: 'Blue Dots',
+        siteUrl: 'https://blue.example',
+        '1': 'Asha',
+      },
+      priority: 'urgent',
+      idempotency_key: 'user.welcome:u-1',
+    });
   });
 
-  it('sends only WhatsApp for a phone-only user', async () => {
-    // The case that matters after the write-path change: admin-onboarded
-    // participants legitimately have email === null.
-    await sendWelcomeNotifications(
-      { name: 'Asha', email: null, phoneNumber: '+911234567890' },
-      makeLog()
-    );
-
-    expect(dispatchEmail).not.toHaveBeenCalled();
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
+  it('carries the signup domain when known', async () => {
+    await sendWelcomeNotifications(BOTH, makeLog(), 'seeker');
+    expect(sentEvent().domain).toBe('seeker');
   });
 
-  it('sends only email for an email-only user', async () => {
-    await sendWelcomeNotifications(
-      { name: 'Asha', email: 'asha@example.org', phoneNumber: null },
-      makeLog()
-    );
+  it('sends a phone-only user to: {phone}', async () => {
+    await sendWelcomeNotifications({ ...BOTH, email: null }, makeLog());
+    expect(sentEvent().to).toEqual({ phone: '+911234567890' });
+  });
 
-    expect(dispatchEmail).toHaveBeenCalledTimes(1);
-    expect(notify).not.toHaveBeenCalled();
+  it('sends an email-only user to: {email}', async () => {
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: null }, makeLog());
+    expect(sentEvent().to).toEqual({ email: 'asha@example.org' });
+  });
+
+  it('falls back to "user" for a nameless user in both the email and WhatsApp variables', async () => {
+    await sendWelcomeNotifications({ ...BOTH, name: '' }, makeLog());
+    expect(sentEvent().variables).toMatchObject({ userName: 'user', '1': 'user' });
   });
 
   it('is a no-op for a user with neither identifier', async () => {
-    await sendWelcomeNotifications({ name: 'Asha', email: null, phoneNumber: null }, makeLog());
-
-    expect(attempted()).toEqual([]);
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: null }, makeLog());
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('is a no-op when no notification client is configured', async () => {
     clientConfigured = false;
-
     await expect(sendWelcomeNotifications(BOTH, makeLog())).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 });
 
-describe('per-domain welcome copy', () => {
-  const emailOnly = { name: 'Asha', email: 'asha@example.org', phoneNumber: null };
-
-  it('uses the generic case when no domain is given', async () => {
-    await sendWelcomeNotifications(emailOnly, makeLog());
-    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome');
-  });
-
-  it('uses welcome.seeker for a seeker signup', async () => {
-    await sendWelcomeNotifications(emailOnly, makeLog(), 'seeker');
-    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.seeker');
-  });
-
-  it('uses welcome.provider for a provider signup', async () => {
-    await sendWelcomeNotifications(emailOnly, makeLog(), 'provider');
-    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
-  });
-
-  it('folds service_provider into the provider copy', async () => {
-    await sendWelcomeNotifications(emailOnly, makeLog(), 'service_provider');
-    expect(dispatchEmail.mock.calls[0][0].caseId).toBe('welcome.provider');
-  });
-});
-
-describe('failure isolation', () => {
-  it('still sends WhatsApp when the email send rejects', async () => {
-    dispatchEmail.mockRejectedValueOnce(new Error('smtp down'));
+describe('phone is normalised to E.164 (R14)', () => {
+  it('normalises a stored bare 10-digit phone instead of dropping it', async () => {
     const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: '9876543210' }, log);
+    expect(sentEvent().to).toEqual({ email: 'asha@example.org', phone: '+919876543210' });
+    expect(log.warn).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
 
-    await sendWelcomeNotifications(BOTH, log);
+  it('still welcomes a phone-only user whose stored phone is spaced/dashed', async () => {
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: ' 98765-43210 ' }, makeLog());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sentEvent().to).toEqual({ phone: '+919876543210' });
+  });
 
-    expect(notify).toHaveBeenCalledTimes(1);
-    expect(notify.mock.calls[0][0].channel).toBe('whatsapp');
+  it('drops an unusable phone from `to` and warns welcome_phone_dropped without PII', async () => {
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: '12345' }, log);
+    expect(sentEvent().to).toEqual({ email: 'asha@example.org' });
+    expect(log.warn).toHaveBeenCalledWith({ event_type: USER_WELCOME }, expect.stringContaining('welcome_phone_dropped'));
+    expect(log.error).not.toHaveBeenCalled();
+    const dump = inspect(log.warn.mock.calls);
+    expect(dump).not.toContain('12345');
+    expect(dump).not.toContain('asha@example.org');
+  });
+
+  it('sends nothing when the only contact is an unusable phone', async () => {
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, email: null, phoneNumber: 'abc' }, log);
+    expect(send).not.toHaveBeenCalled();
+    expect(log.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('idempotency (R12): one welcome per user', () => {
+  it('the key is per user, not per occurrence, so a repeat for the same user collapses', async () => {
+    await sendWelcomeNotifications(BOTH, makeLog());
+    await sendWelcomeNotifications(BOTH, makeLog(), 'seeker');
+    expect(send.mock.calls[0][0].idempotency_key).toBe(send.mock.calls[1][0].idempotency_key);
+  });
+
+  it('two users get two keys', () => {
+    expect(welcomeIdempotencyKey('u-1')).not.toBe(welcomeIdempotencyKey('u-2'));
+  });
+
+  it('stays within the 128-character key limit for a UUID user id', () => {
+    expect(welcomeIdempotencyKey('0f8fad5b-d9cb-469f-a165-70867728950e').length).toBeLessThanOrEqual(128);
+  });
+});
+
+describe('per-domain CTA (#569) and the no-siteUrl rule (F2-2)', () => {
+  it('links the welcome to the signup domain portal', async () => {
+    mockUiHostBindings.byDomain = { seeker: 'https://seeker.example.org' };
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: null }, makeLog(), 'seeker');
+    expect(sentEvent().variables.siteUrl).toBe('https://seeker.example.org/auth/login');
+  });
+
+  it('skips the send (and logs) when siteUrl is unresolvable and there is no phone', async () => {
+    mockNotification.FRONTEND_BASE_URL = undefined;
+    const log = makeLog();
+    await sendWelcomeNotifications({ ...BOTH, phoneNumber: null }, log, 'nosuchdomain');
+    expect(send).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    expect(inspect(log.error.mock.calls)).not.toContain('asha@example.org');
+  });
+
+  it('drops the email from `to` (WhatsApp still goes) when siteUrl is unresolvable but there is a phone', async () => {
+    mockNotification.FRONTEND_BASE_URL = undefined;
+    await sendWelcomeNotifications(BOTH, makeLog(), 'nosuchdomain');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sentEvent().to).toEqual({ phone: '+911234567890' });
+    expect(sentEvent().variables).not.toHaveProperty('siteUrl');
+  });
+});
+
+describe('failure handling', () => {
+  it('logs and swallows an ok:false refusal, without the recipient or variable values', async () => {
+    send.mockResolvedValueOnce({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+    const log = makeLog();
+    await expect(sendWelcomeNotifications(BOTH, log)).resolves.toBeUndefined();
+    expect(log.error).toHaveBeenCalledTimes(1);
+    const dump = inspect(log.error.mock.calls, { depth: 5 });
+    expect(dump).toContain('no_policy');
+    expect(dump).not.toContain('asha@example.org');
+    expect(dump).not.toContain('+911234567890');
+    expect(dump).not.toContain('Asha');
+  });
+
+  it('logs and swallows a transport error', async () => {
+    send.mockRejectedValueOnce(new NotifyTransportError('fetch failed: TypeError'));
+    const log = makeLog();
+    await expect(sendWelcomeNotifications(BOTH, log)).resolves.toBeUndefined();
     expect(log.error).toHaveBeenCalledTimes(1);
   });
 
-  it('never throws when every channel rejects', async () => {
-    dispatchEmail.mockRejectedValue(new Error('notification service down'));
-    notify.mockRejectedValue(new Error('notification service down'));
+  it('never throws on an unexpected error either', async () => {
+    send.mockRejectedValueOnce(new Error('boom'));
     const log = makeLog();
-
     await expect(sendWelcomeNotifications(BOTH, log)).resolves.toBeUndefined();
-    expect(log.error).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('message content', () => {
-  it('addresses the user by name and names the instance', async () => {
-    await sendWelcomeNotifications(BOTH, makeLog());
-
-    // Copy itself lives in the messages file; what this asserts is that the
-    // dispatcher is handed the right case and the right substitution values.
-    expect(dispatchEmail).toHaveBeenCalledWith({
-      caseId: 'welcome',
-      to: 'asha@example.org',
-      fromName: 'Blue Dots',
-      variables: {
-        userName: 'Asha',
-        appName: 'Blue Dots',
-        siteUrl: 'https://blue.example',
-        teamName: 'Blue Dots',
-      },
-    });
-
-    // WhatsApp is a pre-approved content template; the name is variable "1".
-    // It's the only `notify` call now that email goes via the dispatcher.
-    const wa = notify.mock.calls[0][0];
-    const waVars = wa.variables as {
-      contentSid: string;
-      contentVariables: Record<string, string>;
-    };
-    expect(wa.to).toBe('+911234567890');
-    expect(waVars.contentSid).toBe('HX3f2a5d7e4a18e5664124592a12a154eb');
-    expect(waVars.contentVariables['1']).toBe('Asha');
-  });
-});
-
-describe('per-domain CTA (#569)', () => {
-  it('links the welcome mail to the signup domain portal', async () => {
-    mockUiHostBindings.byDomain = { seeker: 'https://seeker.example.org' };
-
-    await sendWelcomeNotifications(
-      { name: 'Asha', email: 'asha@example.com', phoneNumber: null },
-      makeLog(),
-      'seeker'
-    );
-
-    const dispatched = dispatchEmail.mock.calls[0]?.[0] as
-      | { variables?: Record<string, unknown> }
-      | undefined;
-    expect(dispatched?.variables?.siteUrl).toBe('https://seeker.example.org/auth/login');
-  });
-
-  it('omits siteUrl entirely when the domain resolves to nothing', async () => {
-    // No mapping and no FRONTEND_BASE_URL: renderSiteLink(undefined) must be
-    // able to fall back to the words "the platform" rather than a dead anchor.
-    mockUiHostBindings.byDomain = {};
-    mockNotification.FRONTEND_BASE_URL = undefined;
-
-    await sendWelcomeNotifications(
-      { name: 'Asha', email: 'asha@example.com', phoneNumber: null },
-      makeLog(),
-      'nosuchdomain'
-    );
-
-    const dispatched = dispatchEmail.mock.calls[0]?.[0] as
-      | { variables?: Record<string, unknown> }
-      | undefined;
-    expect(dispatched?.variables).not.toHaveProperty('siteUrl');
+    expect(log.error).toHaveBeenCalledTimes(1);
   });
 });

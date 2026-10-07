@@ -29,7 +29,9 @@ import { and, eq, inArray, or } from 'drizzle-orm';
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 
 vi.mock('@/utils/notificationClient', () => ({
-  getNotificationClient: () => ({ notify: async () => {} }),
+  getNotificationClient: () => ({
+    send: async () => ({ ok: true, status: 202, body: { notification_event_id: 'ne', correlation_id: 'c' } }),
+  }),
 }));
 
 const pg_url = process.env.POSTGRES_URL ?? process.env.POSTGRES_USER;

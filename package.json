@@ -17,6 +17,7 @@
     "db:check:parity:api": "pnpm --filter api db:check:parity",
     "db:baseline:api": "pnpm --filter api db:baseline",
     "db:backfill:lifecycle:api": "pnpm --filter api db:backfill:lifecycle",
+    "db:backfill:guardian-ref:api": "pnpm --filter api db:backfill:guardian-ref",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:backfill:consent:api": "pnpm --filter api db:backfill:consent",
     "db:seed:purple_dot:api": "pnpm --filter api db:seed:purple_dot",
@@ -30,7 +31,7 @@
     "docker:api": "node scripts/run-api-docker.mjs",
     "schema:bundle": "node scripts/generate-schema-bundle.mjs",
     "schema:bundle:check": "node scripts/generate-schema-bundle.mjs && git diff --exit-code apps/api/db/postgres/schema.sql",
-    "typecheck": "pnpm --filter api exec tsc --noEmit && pnpm --filter ui exec tsc --noEmit",
+    "typecheck": "pnpm --filter api exec tsc --noEmit && pnpm --filter ui exec tsc --noEmit && pnpm --filter ns-catalogue typecheck",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

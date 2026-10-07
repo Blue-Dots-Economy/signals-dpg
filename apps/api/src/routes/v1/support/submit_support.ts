@@ -1,21 +1,20 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
-import { instance, supportConfig } from '@/config';
-import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import { NotifyTransportError, SUPPORT_REQUEST, type NotifyEvent } from '@dpg/notification';
+import { supportConfig } from '@/config';
+import { generateSupportReference, TYPE_LABELS } from '@/support/build_support_email';
 import {
-  buildSupportDetailsTable,
-  generateSupportReference,
-  TYPE_LABELS,
-} from '@/support/build_support_email';
-import {
+  type AcceptedSupportAttachment,
+  formatBytes,
   supportBodyLimitBytes,
   validateSupportAttachments,
 } from '@/support/attachments';
+import { getNotificationClient } from '@/utils/notificationClient';
 import { incrWithinWindow } from '@/utils/rate_window';
 
 const SubmitSupportBody = z.object({
@@ -47,6 +46,43 @@ type Body = z.infer<typeof SubmitSupportBody>;
 const SUPPORT_MAX_PER_WINDOW = 5;
 const SUPPORT_WINDOW_SEC = 3600;
 
+/** The notification service accepts at most this many cc addresses. */
+const SUPPORT_MAX_CC = 10;
+
+const splitEmailList = (value: string | undefined): string[] =>
+  (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+/**
+ * Splits the configured support inbox(es) into the event's single `to` and its
+ * `cc` (F2-6): `/v1/notify` has one `to.email`, so the first SUPPORT_EMAIL
+ * address is `to`, and the remaining ones plus SUPPORT_CC_EMAIL go to `cc`,
+ * de-duplicated (case-insensitively, and against `to`) and capped at 10. The
+ * same people receive the email; the extra inboxes now show on the Cc line.
+ */
+export function splitSupportRecipients(
+  recipients: string | undefined,
+  cc: string | undefined,
+): { to: string; cc: string[]; dropped: number } | null {
+  const [to, ...rest] = splitEmailList(recipients);
+  if (!to) return null;
+  const seen = new Set([to.toLowerCase()]);
+  const unique: string[] = [];
+  for (const address of [...rest, ...splitEmailList(cc)]) {
+    const key = address.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(address);
+  }
+  return {
+    to,
+    cc: unique.slice(0, SUPPORT_MAX_CC),
+    dropped: Math.max(0, unique.length - SUPPORT_MAX_CC),
+  };
+}
+
 export const submit_support: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
     url: '/',
@@ -75,8 +111,9 @@ export const submit_support_handler = async (
 
   const { name, email, phone, type, details } = request.body;
 
-  const sender = getDefaultEmailSender();
-  if (!supportConfig.recipients || !supportConfig.fromEmail || !sender) {
+  const nc = getNotificationClient();
+  const recipients = splitSupportRecipients(supportConfig.recipients, supportConfig.cc);
+  if (!recipients || !nc) {
     return reply.code(503).send({
       error: 'SUPPORT_NOT_CONFIGURED',
       message: 'Support is not configured on this instance.',
@@ -97,16 +134,11 @@ export const submit_support_handler = async (
   // Still after the 503: an instance with no support address should not burn
   // anyone's quota. Fails OPEN on a Redis error — a rate-limit backend outage
   // must not silence someone's complaint.
-  try {
-    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
-    if (submissions > SUPPORT_MAX_PER_WINDOW) {
-      return reply.code(429).send({
-        error: 'SUPPORT_RATE_LIMITED',
-        message: 'Too many support submissions; please try again later.',
-      });
-    }
-  } catch (err) {
-    request.log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
+  if (await isOverSupportLimit(userId, request.log)) {
+    return reply.code(429).send({
+      error: 'SUPPORT_RATE_LIMITED',
+      message: 'Too many support submissions; please try again later.',
+    });
   }
 
   const attachmentCheck = validateSupportAttachments(request.body.attachments, {
@@ -144,52 +176,123 @@ export const submit_support_handler = async (
   const reference = generateSupportReference(new Date());
   const teamName = supportConfig.teamName ?? 'Support';
 
-  try {
-    await sender.dispatchEmail({
-      caseId: 'support.request',
-      to: supportConfig.recipients,
-      fromName: `${instance.INSTANCE_NAME ?? 'DPG'} Support`,
-      replyTo: submittedEmail ?? supportConfig.fromEmail,
-      ...(supportConfig.cc ? { cc: supportConfig.cc } : {}),
-      // Per-submission dedupe key. Without it the notification-service falls
-      // back to `${channel}:${to}:${template_id}` (constant per instance), so
-      // two submissions to the same inbox within its dedupe TTL collapse and
-      // the second is silently dropped. The unique reference closes that.
-      dedupeId: reference,
-      ...(attachments.length
-        ? {
-            attachments: attachments.map(({ filename, contentType, data }) => ({
-              filename,
-              contentType,
-              data,
-            })),
-          }
-        : {}),
-      variables: {
-        reference,
-        type: TYPE_LABELS[type],
-        name,
-        fromSite: supportConfig.linkBaseUrl ? ` from ${supportConfig.linkBaseUrl}` : '',
-        details,
-        teamName,
-        detailsTable: buildSupportDetailsTable({
-          reference,
-          name,
-          email: submittedEmail ?? null,
-          phone: submittedPhone ?? null,
-          submittedAt: new Date().toISOString(),
-          attachments: attachments.map(({ filename, bytes }) => ({ filename, bytes })),
-        }),
-      },
-      log: (message, meta) => request.log.warn(meta ?? {}, message),
-    });
-  } catch (err) {
-    request.log.error({ err }, 'support email send failed');
-    return reply.code(502).send({
-      error: 'SUPPORT_SEND_FAILED',
-      message: 'Failed to send your message. Please try again later.',
-    });
+  if (recipients.dropped > 0) {
+    request.log.warn(
+      { kept: recipients.cc.length, dropped: recipients.dropped },
+      'support: more cc addresses than the notification service accepts; extra ones dropped',
+    );
+  }
+
+  const event = buildSupportEvent({
+    recipients,
+    submittedEmail,
+    submittedPhone,
+    attachments,
+    reference,
+    teamName,
+    name,
+    type,
+    details,
+  });
+
+  // Critical: a lost support request must surface to the user as a 502.
+  if (!(await deliverSupportEvent(nc, event, reference, request.log))) {
+    return sendFailed(reply);
   }
 
   return reply.code(201).send({ ok: true, reference });
 };
+
+const sendFailed = (reply: FastifyReply) =>
+  reply.code(502).send({
+    error: 'SUPPORT_SEND_FAILED',
+    message: 'Failed to send your message. Please try again later.',
+  });
+
+/** Fails OPEN on a Redis error: a rate-limit backend outage must not silence a complaint. */
+async function isOverSupportLimit(userId: string, log: FastifyBaseLogger): Promise<boolean> {
+  try {
+    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
+    return submissions > SUPPORT_MAX_PER_WINDOW;
+  } catch (err) {
+    log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
+    return false;
+  }
+}
+
+/** The `/v1/notify` event for one support submission. Pure. */
+function buildSupportEvent(args: {
+  recipients: { to: string; cc: string[] };
+  submittedEmail: string | undefined;
+  submittedPhone: string | undefined;
+  attachments: readonly AcceptedSupportAttachment[];
+  reference: string;
+  teamName: string;
+  name: string;
+  type: Body['type'];
+  details: string;
+}): NotifyEvent {
+  const { recipients, submittedEmail, submittedPhone, attachments, reference, teamName, name, type, details } = args;
+  return {
+    event_type: SUPPORT_REQUEST,
+    domain: null,
+    to: { email: recipients.to },
+    ...(recipients.cc.length ? { cc: recipients.cc } : {}),
+    // With no submitted email, replies go to the deployment's From address.
+    ...(submittedEmail ? { reply_to: submittedEmail } : {}),
+    // Attachments ride beside the variables, never in them.
+    ...(attachments.length
+      ? {
+          attachments: attachments.map(({ filename, contentType, data }) => ({
+            filename,
+            contentType,
+            data,
+          })),
+        }
+      : {}),
+    variables: {
+      reference,
+      type: TYPE_LABELS[type],
+      name,
+      fromSite: supportConfig.linkBaseUrl ? ` from ${supportConfig.linkBaseUrl}` : '',
+      details,
+      teamName,
+      // The contact-details rows are fixed template rows, so each always gets
+      // a value (R5).
+      phone: submittedPhone ?? '—',
+      email: submittedEmail ?? '—',
+      submittedAt: new Date().toISOString(),
+      attachmentsSummary: attachments.length
+        ? attachments.map(({ filename, bytes }) => `${filename} (${formatBytes(bytes)})`).join(', ')
+        : 'none',
+    },
+    priority: 'normal',
+    // The reference is unique per submission, so a second request is a second
+    // send (R12), while a retry of this one cannot deliver it twice.
+    idempotency_key: reference,
+  };
+}
+
+/** Sends the event; logs and returns false when it was not accepted. */
+async function deliverSupportEvent(
+  nc: NonNullable<ReturnType<typeof getNotificationClient>>,
+  event: NotifyEvent,
+  reference: string,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
+  try {
+    const result = await nc.send(event);
+    if (result.ok) return true;
+    log.error(
+      { event_type: SUPPORT_REQUEST, reference, status: result.status, error: result.error, kind: result.kind },
+      'support: ns_rejected',
+    );
+  } catch (err) {
+    if (err instanceof NotifyTransportError) {
+      log.error({ event_type: SUPPORT_REQUEST, reference, error: err.message }, 'support: ns_unreachable');
+    } else {
+      log.error({ err, reference }, 'support: send failed');
+    }
+  }
+  return false;
+}

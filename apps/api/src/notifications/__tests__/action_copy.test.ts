@@ -1,17 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { resolveCopyGroup, resolveRecipientRole } from '../action_copy';
-
-describe('resolveCopyGroup', () => {
-  it('maps connect to its own group', () => {
-    expect(resolveCopyGroup('connect')).toBe('connect');
-  });
-  it('maps apply / shortlist / pre_shortlist to the apply family', () => {
-    expect(resolveCopyGroup('apply')).toBe('apply');
-    expect(resolveCopyGroup('shortlist')).toBe('apply');
-    expect(resolveCopyGroup('pre_shortlist')).toBe('apply');
-  });
-});
+import { resolveRecipientRole } from '../action_copy';
 
 describe('resolveRecipientRole', () => {
   it('maps provider-like domains across networks to provider', () => {

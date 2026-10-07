@@ -549,8 +549,10 @@ describe('welcome notifications (G1 — the other half of afterUserCreate)', () 
 
     expect(sendWelcomeNotifications).toHaveBeenCalledTimes(1);
     const [recipient] = sendWelcomeNotifications.mock.calls[0] as unknown as [
-      { name: string; email: string | null; phoneNumber: string | null },
+      { userId: string; name: string; email: string | null; phoneNumber: string | null },
     ];
+    // Keys the one-per-user welcome idempotency key.
+    expect(recipient.userId).toBeTruthy();
     expect(recipient.email).toBe('asha@example.org');
     expect(recipient.phoneNumber).toBe('+911234567890');
     expect(recipient.name).toBeTruthy();

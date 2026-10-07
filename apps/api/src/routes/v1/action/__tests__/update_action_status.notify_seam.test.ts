@@ -10,21 +10,23 @@ import {
  * §11 integration test — UPDATE seam (POST /api/v1/action/update-status).
  *
  * Proves the notification dispatch can't break the status response:
- *   (a) the action returns 200 even when `nc.notify` rejects, and
+ *   (a) the action returns 200 even when `nc.send` fails, and
  *   (b) `insertActionEvent` is called exactly once (no double insert from
  *       the dispatch path).
  *
  * Notifications are configured (unlike update_action_status.test.ts, which
- * stubs `notification: {}`) so the real dispatch runs and reaches the throwing
- * notify client.
+ * stubs `notification: {}`) so the real dispatch runs and reaches the failing
+ * send.
  */
 
 const KNOWN_ACTION_ID = '00000000-0000-4000-8000-000000000aaa';
 
 // Shared with vi.mock factories (hoisted above top-level consts).
-const { notifySpy, insertActionEventSpy } = vi.hoisted(() => ({
-  notifySpy: vi.fn(async () => {
-    throw new Error('NS down');
+const { sendSpy, insertActionEventSpy } = vi.hoisted(() => ({
+  sendSpy: vi.fn(async (_event: unknown): Promise<unknown> => {
+    // A transport failure (NS unreachable): the client throws this type.
+    const { NotifyTransportError } = await import('@dpg/notification');
+    throw new NotifyTransportError('fetch failed: TypeError');
   }),
   insertActionEventSpy: vi.fn(async () => ({
     event_id: 'evt_1',
@@ -48,16 +50,15 @@ vi.mock('@/config', () => ({
   matchScoreConfig: { provider: 'noop', signals_search: {} },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
+  // The sender identity is NS deployment config, so no from-address here.
   notification: {
-    NOTIFICATION_FROM_EMAIL: 'from@test.local',
-    NOTIFICATION_REPLY_TO: 'reply@test.local',
     FRONTEND_BASE_URL: 'http://fe.test',
   },
   uiHostBindings: { byDomain: {}, warnings: [] },
 }));
 
 vi.mock('@/utils/notificationClient', () => ({
-  getNotificationClient: () => ({ notify: notifySpy }),
+  getNotificationClient: () => ({ send: sendSpy }),
 }));
 
 vi.mock('@/notifications/resolve_owner', () => ({
@@ -198,11 +199,11 @@ const buildApp = (): FastifyInstance => {
 
 describe('POST /api/v1/action/update-status — notification fire-and-forget', () => {
   beforeEach(() => {
-    notifySpy.mockClear();
+    sendSpy.mockClear();
     insertActionEventSpy.mockClear();
   });
 
-  it('returns 200 even when nc.notify rejects, and inserts the event exactly once', async () => {
+  it('returns 200 even when nc.send fails, and inserts the event exactly once', async () => {
     const res = await buildApp().inject({
       method: 'POST',
       url: '/update-status',
@@ -216,8 +217,28 @@ describe('POST /api/v1/action/update-status — notification fire-and-forget', (
     // (b) Exactly one insertActionEvent — dispatch must not insert again.
     expect(insertActionEventSpy).toHaveBeenCalledTimes(1);
 
-    // Dispatch ran and reached the (throwing) notify; the rejection is
-    // swallowed by the per-plan catch and never surfaces to the route.
-    await vi.waitFor(() => expect(notifySpy).toHaveBeenCalled());
+    // The dispatch ran and sent a status event with the true action type.
+    await vi.waitFor(() => expect(sendSpy).toHaveBeenCalled());
+    const events = sendSpy.mock.calls.map(([e]) => e as Record<string, unknown>);
+    for (const e of events) {
+      expect(Object.keys(e).sort()).toEqual(
+        ['domain', 'event_type', 'idempotency_key', 'priority', 'to', 'variables'],
+      );
+    }
+    for (const e of events) {
+      expect(e.event_type).toMatch(/^action\.apply\.(inbound|outbound)_status$/);
+    }
+  });
+
+  it('returns 200 when NS answers 422 (a configuration error is logged, never surfaced)', async () => {
+    sendSpy.mockResolvedValue({ ok: false, status: 422, error: 'no_policy', kind: 'configuration' });
+    const res = await buildApp().inject({
+      method: 'POST',
+      url: '/update-status',
+      payload: [VALID_BODY],
+    });
+
+    expect(res.statusCode).toBe(200);
+    await vi.waitFor(() => expect(sendSpy).toHaveBeenCalled());
   });
 });

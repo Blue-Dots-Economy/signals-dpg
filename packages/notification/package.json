@@ -9,10 +9,15 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "echo \"no tests yet\""
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "packageManager": "pnpm@11.1.2"
+  "packageManager": "pnpm@11.1.2",
+  "devDependencies": {
+    "vitest": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.11"
+  }
 }

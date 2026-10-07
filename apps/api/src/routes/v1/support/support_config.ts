@@ -3,11 +3,11 @@ import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { supportConfig } from '@/config';
-import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
 import {
   SUPPORT_ALLOWED_CONTENT_TYPES,
   SUPPORT_ALLOWED_EXTENSIONS,
 } from '@/support/attachments';
+import { getNotificationClient } from '@/utils/notificationClient';
 
 /**
  * `GET /api/v1/support/config` (#551) — what the support form is allowed to
@@ -50,9 +50,7 @@ export const support_config_handler = async (request: FastifyRequest, reply: Fas
 
   // Mirrors the submit route's 503 condition exactly, so `enabled: false` and a
   // SUPPORT_NOT_CONFIGURED reply can never disagree.
-  const enabled = Boolean(
-    supportConfig.recipients && supportConfig.fromEmail && getDefaultEmailSender(),
-  );
+  const enabled = Boolean(supportConfig.recipients && getNotificationClient());
 
   return reply.code(200).send({
     enabled,

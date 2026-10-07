@@ -1,16 +1,13 @@
+import { actionEvent, type ActionEventShape } from '@dpg/notification';
+
 import { buildNotifications } from './build_notifications';
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
-import type { DispatchEmailArgs } from './email/dispatch_email';
-import {
-  FALLBACK_SERVICE_NAME,
-  resolveCopyGroup,
-  resolveRecipientRole,
-} from './action_copy';
-import { actionCaseId } from './email/email_cases';
+import { FALLBACK_SERVICE_NAME } from './action_copy';
+import { sendBestEffort, type SendEvent } from './send_event';
 
 export interface DispatcherDeps {
-  /** Sends one rendered email (the central email sender, #529). */
-  sendEmail: (args: DispatchEmailArgs) => Promise<{ ok: boolean }>;
+  /** Posts one event to the notification service, which picks the copy and channel. */
+  send: SendEvent;
   /** Resolves a local owner's email by user id; null when unknown/phone-only. */
   resolveEmail: (userId: string) => Promise<string | null>;
   /**
@@ -18,9 +15,8 @@ export interface DispatcherDeps {
    * copy (the provider's Service Name); null for provider-facing copy.
    */
   resolveCounterpartyName: (plan: NotificationPlan) => Promise<string | null>;
-  brand: {
-    brandName: string;
-  };
+  /** "Team <name>" sign-off carried on every event (`variables.teamName`). */
+  teamName: string;
   /**
    * The login URL for a recipient in `domain`. Per-recipient, not per-process:
    * on a split deployment each domain has its own portal host (#569).
@@ -36,8 +32,9 @@ export interface DirectDispatcher {
 }
 
 /**
- * Resolves recipients and hands each plan to the central email sender.
- * Fire-and-forget by contract: a failure for any plan is logged and never
+ * Resolves recipients and sends one `action.<actionType>.<shape>` event per
+ * plan. The notification service's policy for the recipient's domain picks
+ * the copy (connect/apply, seeker/provider). Fire-and-forget by contract: a failure for any plan is logged and never
  * propagates, so it can never fail or slow the action route. The Phase-2
  * transport (Kafka/registry) swaps in behind this same interface.
  */
@@ -62,12 +59,10 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
       return;
     }
 
-    // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
-    // unresolved URL ships an `<a href="">` whose button does nothing. That is
-    // now reachable: the gate below accepts a map-only config, so a domain
-    // missing from UI_HOST_BINDINGS with no FRONTEND_BASE_URL set has no
-    // answer. Send nothing rather than a mail whose only CTA is broken — the
-    // boot-time unknown-domain warning is the operator-facing signal.
+    // A missing URL would leave the email's only call to action broken, so
+    // send nothing; the boot-time unknown-domain warning is the operator-facing
+    // signal. The gate accepts a map-only config (UI_HOST_BINDINGS without
+    // FRONTEND_BASE_URL), so a domain absent from the map has no answer.
     //
     // The RECIPIENT's own domain, never the counterparty's — keying off
     // `counterpartyDomain` here would send each party to the other's portal.
@@ -84,20 +79,27 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
 
     const counterpartyName = await deps.resolveCounterpartyName(plan);
 
-    await deps.sendEmail({
-      caseId: actionCaseId(
-        resolveCopyGroup(plan.actionType),
-        resolveRecipientRole(plan.recipientDomain),
-        plan.shape,
-      ),
-      to: email,
-      fromName: deps.brand.brandName,
-      network: plan.counterpartyNetwork,
-      ctaUrl,
-      dedupeId: `${plan.actionId}:${plan.updateCount}:${plan.shape}`,
-      variables: { name: counterpartyName?.trim() || FALLBACK_SERVICE_NAME },
-      log: deps.log,
-    });
+    const event_type = actionEvent(
+      plan.actionType,
+      plan.shape.toLowerCase() as ActionEventShape,
+    );
+    await sendBestEffort(
+      deps.send,
+      {
+        event_type,
+        domain: plan.recipientDomain,
+        to: { email },
+        variables: {
+          name: counterpartyName?.trim() || FALLBACK_SERVICE_NAME,
+          ctaUrl,
+          teamName: deps.teamName,
+        },
+        priority: 'normal',
+        idempotency_key: `${plan.actionId}:${plan.updateCount}:${plan.shape}`,
+      },
+      deps.log,
+      { actionId: plan.actionId, shape: plan.shape },
+    );
   }
 
   return {
