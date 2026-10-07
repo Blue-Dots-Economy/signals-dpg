@@ -57,9 +57,11 @@ export const user = pgTable('user', {
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
   // Extensible support/ops markers on the user. Keyed jsonb so new flags can
-  // be added without a migration. Current key: `is_test` (boolean) — marks a
+  // be added without a migration. Current keys: `is_test` (boolean) — marks a
   // user (and, by the created_by/owner join, their profiles, posts, and
-  // applications) as test data for analysis + later bulk cleanup.
+  // applications) as test data for analysis + later bulk cleanup;
+  // `app_first_login_at` (ISO string) — first browser login to the app, see
+  // services/auth/app_first_login.ts.
   tags: jsonb('tags').notNull().default({}),
 }, (table) => [
   index('user_onboarded_by_org_via_idx').on(

@@ -2096,6 +2096,7 @@ export function HomePage() {
         // control in this browse chrome honours. It is a primary action on the
         // list, so it gets the same treatment.
         className="pointer-coarse:min-h-11"
+        data-tour="bulk-select"
         onClick={() =>
           browseSelection.selectMode
             ? browseSelection.exitSelect()
@@ -2296,7 +2297,8 @@ export function HomePage() {
     const baseItemId = marker.id.split('#')[0];
     const titleField = network?.domains.find((d) => d.id === marker.domain)?.card?.title_field;
     if (mapDetailItem?.item_id === baseItemId && titleField) {
-      const title = String(mapDetailItem.item_state[titleField] ?? '').trim();
+      const raw = mapDetailItem.item_state[titleField];
+      const title = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
       if (title) return title;
     }
     return marker.label;
@@ -2559,7 +2561,7 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <div className="relative h-full">
+              <div data-tour="map" className="relative h-full">
                 <MapErrorBoundary>
                 <MapView
                   schema={activeSchema!}

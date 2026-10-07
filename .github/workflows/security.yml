@@ -52,7 +52,7 @@ jobs:
       contents: read
       security-events: write
       packages: read
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@d6a39c5b22be14b4b4aeaa78fc1d86c1f67bb555  # feature 2026-09-25 -- repin to @main once promoted
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@edee0fb9633edc46e6dad93ff94e250cb69a4abe  # feature 2026-09-25 -- repin to @main once promoted
     with:
       language: ts
       node-version: "24"   # matches engines.node (>=24) and ci.yaml

@@ -214,7 +214,7 @@ describe('GET /api/v1/action/fetch — filter/sort/ownership (#439)', () => {
 
   it('owned item_id passes the guard and proceeds to 200', async () => {
     dbState.selectResults = [
-      [{ created_by: USER_ID }], // ownership check
+      [{ item_id: ITEM_ID, created_by: USER_ID }], // ownership check
       [{ count: 0 }], // count
       [], // rows
     ];

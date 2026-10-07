@@ -1,4 +1,5 @@
-import z from '@dpg/schemas';
+import z, { EXPORT_ACTION_IDS_MAX } from '@dpg/schemas';
+import { isValidTimeZone } from './time_zone';
 import { ConfigError } from './config_error.js';
 
 export const InstanceSecretsSchema = z.object({
@@ -346,6 +347,23 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .default('false')
     .transform((val) => val === 'true'),
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
+  // Row cap for one bulk engagement export (#639 / #769). Above it the export
+  // endpoint refuses with 413 rather than streaming an unbounded decrypt.
+  // Capped at the export body's own bound, so every configured value is
+  // reachable (a larger one fails at boot instead of silently not applying).
+  EXPORT_MAX_ROWS: z.coerce.number().int().positive().max(EXPORT_ACTION_IDS_MAX).default(10000),
+  // Per-user bulk exports allowed per rolling hour, shared across pods via
+  // Redis. Bulk decrypt is the obvious scraping route.
+  EXPORT_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
+  // IANA zone for bulk-export timestamps (filename, file dates, generated-at).
+  // The filename and generated-at carry the offset; date cells are wall-clock
+  // times in this zone, named in their column heading.
+  EXPORT_TIMEZONE: z
+    .string()
+    .default('Asia/Kolkata')
+    .refine(isValidTimeZone, {
+      message: 'EXPORT_TIMEZONE must be an IANA time zone, e.g. Asia/Kolkata',
+    }),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
   // Global default cap on profiles a single user may own per (network, domain,

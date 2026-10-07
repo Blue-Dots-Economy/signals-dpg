@@ -30,6 +30,11 @@ export interface User {
   banExpires: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * This browser session is the person's first in the app (from
+   * `/auth/me`). Plays the welcome tours; absent when not known.
+   */
+  firstLogin?: boolean;
 }
 
 export interface VerifyOtpResponse {
@@ -182,6 +187,8 @@ export interface MeResponse {
   email: string;
   name: string;
   role: string | null;
+  /** True only in the person's first browser session in the app. */
+  first_login: boolean;
 }
 
 /**
