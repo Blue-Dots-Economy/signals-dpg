@@ -8,10 +8,11 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { consent_record } from '@api/db/postgres/schema';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
+import { resolveUserConsentVariant } from '@/services/consent_variant';
 
 type Req = FastifyRequest<{ Querystring: { network: string } }>;
 
-export const get_consent_status: FastifyPluginAsyncZod = async (fastify) => {
+export const get_consent_status: FastifyPluginAsyncZod = (fastify) => {
   fastify.route({
     url: '/status',
     method: 'GET',
@@ -25,6 +26,8 @@ export const get_consent_status: FastifyPluginAsyncZod = async (fastify) => {
     },
     handler: get_consent_status_handler,
   });
+  // Plugins return a promise; nothing here awaits (the route registers synchronously).
+  return Promise.resolve();
 };
 
 export const get_consent_status_handler = async (
@@ -68,11 +71,18 @@ export const get_consent_status_handler = async (
       }
     }
 
+    // A known minor must be gated against the U18 document set, not the adult
+    // one (#626). Resolved here rather than by the client: the client has no
+    // access to the age, and letting it choose would let it choose which terms
+    // it is bound by.
+    const variant = await resolveUserConsentVariant(userId);
+
     return reply.code(200).send({
       statuses: {
         terms: Array.from(termsSet).sort((a, b) => a - b),
         privacy: Array.from(privacySet).sort((a, b) => a - b),
       },
+      variant,
     });
   } catch (err) {
     request.log.error({ err }, 'consent status read failed');
