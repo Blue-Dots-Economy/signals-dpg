@@ -221,15 +221,10 @@ export async function guardianBulkActionGate(args: {
         if (!contact) throw new GuardianOtpError('NO_OTP_PROVIDER');
         const parentName = await getGuardianNamePlaintext(wardUserId);
         // Provider org names in submit order, de-duplicated, nulls dropped.
-        const names: string[] = [];
-        const seen = new Set<string>();
-        for (const item of bucket) {
-          const name = await resolveProviderServiceName(item.targetItemId, network);
-          if (name && !seen.has(name)) {
-            seen.add(name);
-            names.push(name);
-          }
-        }
+        const resolved = await Promise.all(
+          bucket.map((item) => resolveProviderServiceName(item.targetItemId, network)),
+        );
+        const names = [...new Set(resolved.filter((name): name is string => Boolean(name)))];
         await issueGuardianOtp({
           scope,
           contact: contact.contact,

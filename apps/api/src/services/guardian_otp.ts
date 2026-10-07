@@ -221,7 +221,7 @@ const NO_ORGS = 'the selected organisations';
 export function formatOrgList(names: string[]): string {
   if (names.length === 0) return NO_ORGS;
   if (names.length === 1) return names[0];
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
 /**

@@ -1,6 +1,6 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { user } from '@api/db/postgres/schema/auth';
@@ -9,6 +9,7 @@ import { NotifyTransportError, SUPPORT_REQUEST, type NotifyEvent } from '@dpg/no
 import { supportConfig } from '@/config';
 import { generateSupportReference, TYPE_LABELS } from '@/support/build_support_email';
 import {
+  type AcceptedSupportAttachment,
   formatBytes,
   supportBodyLimitBytes,
   validateSupportAttachments,
@@ -133,16 +134,11 @@ export const submit_support_handler = async (
   // Still after the 503: an instance with no support address should not burn
   // anyone's quota. Fails OPEN on a Redis error — a rate-limit backend outage
   // must not silence someone's complaint.
-  try {
-    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
-    if (submissions > SUPPORT_MAX_PER_WINDOW) {
-      return reply.code(429).send({
-        error: 'SUPPORT_RATE_LIMITED',
-        message: 'Too many support submissions; please try again later.',
-      });
-    }
-  } catch (err) {
-    request.log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
+  if (await isOverSupportLimit(userId, request.log)) {
+    return reply.code(429).send({
+      error: 'SUPPORT_RATE_LIMITED',
+      message: 'Too many support submissions; please try again later.',
+    });
   }
 
   const attachmentCheck = validateSupportAttachments(request.body.attachments, {
@@ -187,7 +183,57 @@ export const submit_support_handler = async (
     );
   }
 
-  const event: NotifyEvent = {
+  const event = buildSupportEvent({
+    recipients,
+    submittedEmail,
+    submittedPhone,
+    attachments,
+    reference,
+    teamName,
+    name,
+    type,
+    details,
+  });
+
+  // Critical: a lost support request must surface to the user as a 502.
+  if (!(await deliverSupportEvent(nc, event, reference, request.log))) {
+    return sendFailed(reply);
+  }
+
+  return reply.code(201).send({ ok: true, reference });
+};
+
+const sendFailed = (reply: FastifyReply) =>
+  reply.code(502).send({
+    error: 'SUPPORT_SEND_FAILED',
+    message: 'Failed to send your message. Please try again later.',
+  });
+
+/** Fails OPEN on a Redis error: a rate-limit backend outage must not silence a complaint. */
+async function isOverSupportLimit(userId: string, log: FastifyBaseLogger): Promise<boolean> {
+  try {
+    const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
+    return submissions > SUPPORT_MAX_PER_WINDOW;
+  } catch (err) {
+    log.warn({ err }, 'support rate-limit check unavailable; allowing submission');
+    return false;
+  }
+}
+
+/** The `/v1/notify` event for one support submission. Pure. */
+function buildSupportEvent(args: {
+  recipients: { to: string; cc: string[] };
+  submittedEmail: string | undefined;
+  submittedPhone: string | undefined;
+  attachments: readonly AcceptedSupportAttachment[];
+  reference: string;
+  teamName: string;
+  name: string;
+  type: Body['type'];
+  details: string;
+}): NotifyEvent {
+  const { recipients, submittedEmail, submittedPhone, attachments, reference, teamName, name, type, details } = args;
+  return {
     event_type: SUPPORT_REQUEST,
     domain: null,
     to: { email: recipients.to },
@@ -225,31 +271,28 @@ export const submit_support_handler = async (
     // send (R12), while a retry of this one cannot deliver it twice.
     idempotency_key: reference,
   };
+}
 
-  // Critical: a lost support request must surface to the user as a 502.
+/** Sends the event; logs and returns false when it was not accepted. */
+async function deliverSupportEvent(
+  nc: NonNullable<ReturnType<typeof getNotificationClient>>,
+  event: NotifyEvent,
+  reference: string,
+  log: FastifyBaseLogger,
+): Promise<boolean> {
   try {
     const result = await nc.send(event);
-    if (!result.ok) {
-      request.log.error(
-        { event_type: SUPPORT_REQUEST, reference, status: result.status, error: result.error, kind: result.kind },
-        'support: ns_rejected',
-      );
-      return sendFailed(reply);
-    }
+    if (result.ok) return true;
+    log.error(
+      { event_type: SUPPORT_REQUEST, reference, status: result.status, error: result.error, kind: result.kind },
+      'support: ns_rejected',
+    );
   } catch (err) {
     if (err instanceof NotifyTransportError) {
-      request.log.error({ event_type: SUPPORT_REQUEST, reference, error: err.message }, 'support: ns_unreachable');
+      log.error({ event_type: SUPPORT_REQUEST, reference, error: err.message }, 'support: ns_unreachable');
     } else {
-      request.log.error({ err, reference }, 'support: send failed');
+      log.error({ err, reference }, 'support: send failed');
     }
-    return sendFailed(reply);
   }
-
-  return reply.code(201).send({ ok: true, reference });
-};
-
-const sendFailed = (reply: FastifyReply) =>
-  reply.code(502).send({
-    error: 'SUPPORT_SEND_FAILED',
-    message: 'Failed to send your message. Please try again later.',
-  });
+  return false;
+}

@@ -31,47 +31,52 @@ export async function dispatchRetireCancelNotifications(
 
   // Dedupe: one notice per counterparty per connection.
   const seen = new Set<string>();
+  const unique = counterparties.filter((cp): cp is RetireCancelledCounterparty & { ownerUserId: string } => {
+    if (!cp.ownerUserId) return false;
+    const key = `${cp.actionId}:${cp.ownerUserId}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 
-  for (const cp of counterparties) {
-    try {
-      if (!cp.ownerUserId) continue;
-      const key = `${cp.actionId}:${cp.ownerUserId}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+  // Each counterparty is independent; one failure never blocks the others.
+  await Promise.all(
+    unique.map(async (cp) => {
+      try {
+        const email = await resolveOwnerEmail(cp.ownerUserId);
+        if (!email) return;
 
-      const email = await resolveOwnerEmail(cp.ownerUserId);
-      if (!email) continue;
+        // The counterparty's own domain — this mail goes to THEM, so it links
+        // to their portal, not the retiring owner's (#569). A missing URL would
+        // leave the only call to action broken, so skip this counterparty.
+        const ctaUrl = config.resolveCtaUrl(cp.domain);
+        if (!ctaUrl) {
+          log.warn(
+            { actionId: cp.actionId, domain: cp.domain },
+            'retire notification skipped: no CTA url for counterparty domain',
+          );
+          return;
+        }
 
-      // The counterparty's own domain — this mail goes to THEM, so it links
-      // to their portal, not the retiring owner's (#569). A missing URL would
-      // leave the only call to action broken, so skip this counterparty.
-      const ctaUrl = config.resolveCtaUrl(cp.domain);
-      if (!ctaUrl) {
-        log.warn(
-          { actionId: cp.actionId, domain: cp.domain },
-          'retire notification skipped: no CTA url for counterparty domain',
+        await sendBestEffort(
+          config.send,
+          {
+            event_type: ACTION_CANCELLED_BY_RETIRE,
+            domain: cp.domain,
+            to: { email },
+            variables: { ctaUrl, teamName: config.teamName },
+            priority: 'normal',
+            idempotency_key: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
+          },
+          (message, meta) => log.warn(meta, message),
+          { actionId: cp.actionId },
         );
-        continue;
+      } catch (err) {
+        log.warn(
+          { err, actionId: cp.actionId },
+          'retire counterparty notification failed',
+        );
       }
-
-      await sendBestEffort(
-        config.send,
-        {
-          event_type: ACTION_CANCELLED_BY_RETIRE,
-          domain: cp.domain,
-          to: { email },
-          variables: { ctaUrl, teamName: config.teamName },
-          priority: 'normal',
-          idempotency_key: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
-        },
-        (message, meta) => log.warn(meta, message),
-        { actionId: cp.actionId },
-      );
-    } catch (err) {
-      log.warn(
-        { err, actionId: cp.actionId },
-        'retire counterparty notification failed',
-      );
-    }
-  }
+    }),
+  );
 }
