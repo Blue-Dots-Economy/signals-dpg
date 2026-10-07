@@ -17,6 +17,7 @@
     "db:check:parity:api": "pnpm --filter api db:check:parity",
     "db:baseline:api": "pnpm --filter api db:baseline",
     "db:backfill:lifecycle:api": "pnpm --filter api db:backfill:lifecycle",
+    "db:backfill:guardian-ref:api": "pnpm --filter api db:backfill:guardian-ref",
     "db:seed:services:api": "pnpm --filter api db:seed:services",
     "db:backfill:consent:api": "pnpm --filter api db:backfill:consent",
     "db:seed:purple_dot:api": "pnpm --filter api db:seed:purple_dot",

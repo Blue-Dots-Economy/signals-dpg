@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'tsup';
 
 export default defineConfig({
-  entry: ['src/server.ts', 'src/scripts/backfill_lifecycle.ts'],
+  entry: ['src/server.ts', 'src/scripts/backfill_lifecycle.ts', 'src/scripts/backfill_guardian_ref.ts'],
   tsconfig: './tsconfig.json',
   format: ['esm'],
   platform: 'node',
