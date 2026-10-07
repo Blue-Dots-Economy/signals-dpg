@@ -141,6 +141,13 @@
       "when": 1790256625933,
       "tag": "0019_organization_type_allowed",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790703401450,
+      "tag": "0020_app_first_login_backfill",
+      "breakpoints": true
     }
   ]
 }

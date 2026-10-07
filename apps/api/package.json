@@ -39,6 +39,7 @@
     "@types/pg": "^8.23.1",
     "@vitest/coverage-v8": "^4.1.11",
     "drizzle-kit": "^0.31.11",
+    "read-excel-file": "^9.3.10",
     "tsx": "^4.23.15",
     "vitest": "^4.1.11"
   },
@@ -60,6 +61,7 @@
     "match_score": "workspace:*",
     "notification": "workspace:*",
     "pg": "^8.23.1",
-    "schemas": "workspace:*"
+    "schemas": "workspace:*",
+    "write-excel-file": "^4.1.1"
   }
 }

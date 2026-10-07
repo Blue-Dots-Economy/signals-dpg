@@ -1073,6 +1073,39 @@
           },
           {
             "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "item_ids",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "in": "query",
+            "name": "q",
+            "required": false
+          },
+          {
+            "schema": {
               "default": "recent",
               "type": "string",
               "enum": [
@@ -1092,6 +1125,10 @@
               "items": {
                 "type": "object",
                 "properties": {
+                  "domain": {
+                    "type": "string",
+                    "minLength": 1
+                  },
                   "field": {
                     "type": "string",
                     "minLength": 1
@@ -1112,6 +1149,32 @@
             },
             "in": "query",
             "name": "facets",
+            "required": false
+          },
+          {
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "counts",
+                    "column_fields"
+                  ]
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "counts",
+                      "column_fields"
+                    ]
+                  }
+                }
+              ]
+            },
+            "in": "query",
+            "name": "include",
             "required": false
           },
           {
@@ -1174,6 +1237,10 @@
                               "items": {
                                 "type": "object",
                                 "properties": {
+                                  "domain": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
                                   "field": {
                                     "type": "string",
                                     "minLength": 1
@@ -1192,6 +1259,9 @@
                                 ],
                                 "additionalProperties": false
                               }
+                            },
+                            "q": {
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -1199,6 +1269,30 @@
                             "statuses",
                             "types",
                             "facets"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "counts": {
+                          "type": "object",
+                          "properties": {
+                            "all": {
+                              "type": "number"
+                            },
+                            "needs_response": {
+                              "type": "number"
+                            },
+                            "ready_to_export": {
+                              "type": "number"
+                            },
+                            "sent": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "all",
+                            "needs_response",
+                            "ready_to_export",
+                            "sent"
                           ],
                           "additionalProperties": false
                         }
@@ -1355,6 +1449,32 @@
                           "distance_m": {
                             "nullable": true,
                             "type": "number"
+                          },
+                          "counterparty": {
+                            "nullable": true,
+                            "type": "object",
+                            "properties": {
+                              "network": {
+                                "type": "string"
+                              },
+                              "domain": {
+                                "type": "string"
+                              },
+                              "item_type": {
+                                "type": "string"
+                              },
+                              "column_fields": {
+                                "type": "object",
+                                "additionalProperties": {}
+                              }
+                            },
+                            "required": [
+                              "network",
+                              "domain",
+                              "item_type",
+                              "column_fields"
+                            ],
+                            "additionalProperties": false
                           }
                         },
                         "required": [
@@ -2832,6 +2952,196 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/api/v1/action/export": {
+      "post": {
+        "tags": [
+          "action"
+        ],
+        "description": "Download the counterparty profiles of the caller’s engagements as an Excel workbook (.xlsx). Human session only. One counterparty type per file; only statuses the network reveals on are exportable, and private fields are revealed per row under the same gate as contact-details. Row and skip counts are in the X-Export-* response headers.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filters": {
+                    "default": {
+                      "ownership_role": "all"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "action_type": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "action_status": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "ownership_role": {
+                        "default": "all",
+                        "type": "string",
+                        "enum": [
+                          "all",
+                          "initiated",
+                          "received"
+                        ]
+                      },
+                      "item_id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                      },
+                      "item_ids": {
+                        "minItems": 1,
+                        "maxItems": 50,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "q": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "counterparty_network": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "counterparty_domain": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "counterparty_item_type": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "action_ids": {
+                        "minItems": 1,
+                        "maxItems": 50000,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "format": "uuid",
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        }
+                      },
+                      "facets": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "domain": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "field": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "values": {
+                              "minItems": 1,
+                              "maxItems": 100,
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "required": [
+                            "field",
+                            "values"
+                          ]
+                        }
+                      },
+                      "updated_from": {},
+                      "updated_to": {}
+                    },
+                    "additionalProperties": false
+                  },
+                  "projection": {
+                    "default": {
+                      "fields": "*"
+                    },
+                    "type": "object",
+                    "properties": {
+                      "fields": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "*"
+                            ]
+                          },
+                          {
+                            "minItems": 1,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "fields"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "include": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "match_score"
+                      ]
+                    }
+                  },
+                  "format": {
+                    "default": "xlsx",
+                    "type": "string",
+                    "enum": [
+                      "xlsx"
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-acting-org-id",
+            "required": false,
+            "description": "Organization this request acts on behalf of. Optional: a non-admin actor can perform an action without acting for an org."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
           }
         }
       }
@@ -8105,13 +8415,17 @@
                     "role": {
                       "nullable": true,
                       "type": "string"
+                    },
+                    "first_login": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "id",
                     "email",
                     "name",
-                    "role"
+                    "role",
+                    "first_login"
                   ],
                   "additionalProperties": false
                 }

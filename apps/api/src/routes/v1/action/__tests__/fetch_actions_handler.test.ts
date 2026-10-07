@@ -72,6 +72,11 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
               orderBy: (...ob: unknown[]) => {
                 call.orderBy = ob;
                 return {
+                  // Enriched path: every matching row, no LIMIT/OFFSET.
+                  then: (
+                    res: (v: unknown) => unknown,
+                    rej?: (e: unknown) => unknown,
+                  ) => next(n).then(res, rej),
                   limit: (l: number) => {
                     call.limit = l;
                     return {
@@ -90,6 +95,13 @@ vi.mock('@api/db/postgres/drizzle_config', () => {
     },
   };
 });
+
+// The saved-view counts service has its own tests (grouped query); here only
+// its wiring into the response is asserted.
+const countOwnedActionsForViews = vi.fn(async () => ({ all: 5, needs_response: 2, ready_to_export: 1, sent: 3 }));
+vi.mock('@/services/actions/owned_action_counts', () => ({
+  countOwnedActionsForViews: (...a: unknown[]) => countOwnedActionsForViews(...(a as [])),
+}));
 
 vi.mock('@/network_configs', () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -204,14 +216,14 @@ function primeDb(
   count: unknown,
   rows: unknown[],
   itemRows: unknown[] = [],
-  opts: { itemOwner?: string | null } = {},
+  opts: { itemOwner?: string | null; itemId?: string } = {},
 ): void {
   // #439 Task 6: an `item_id` query runs an ownership pre-check on `items`
   // BEFORE the count/page/items queries, so its result has to be queued first.
   // `itemOwner: null` = no such row (the not-found → same-403 path).
   if ('itemOwner' in opts) {
     dbState.queue.push(
-      opts.itemOwner === null ? [] : [{ created_by: opts.itemOwner }],
+      opts.itemOwner === null ? [] : [{ item_id: opts.itemId, created_by: opts.itemOwner }],
     );
   }
   dbState.queue.push([{ count }], rows, itemRows);
@@ -416,7 +428,7 @@ describe('fetch_actions_handler — filters', () => {
   // The ownership pre-check is query 0 for every `item_id` request (#439), so
   // the action WHERE these assert on is query 1.
   it('item_id alone matches the item on EITHER side of the action', async () => {
-    primeDb(1, [], [], { itemOwner: USER });
+    primeDb(1, [], [], { itemOwner: USER, itemId: 'src-1' });
 
     await call({ item_id: 'src-1' });
 
@@ -428,7 +440,7 @@ describe('fetch_actions_handler — filters', () => {
   });
 
   it('item_id + initiated narrows to source_item_id', async () => {
-    primeDb(1, [], [], { itemOwner: USER });
+    primeDb(1, [], [], { itemOwner: USER, itemId: 'src-1' });
 
     await call({ item_id: 'src-1', ownership_role: 'initiated' });
 
@@ -439,7 +451,7 @@ describe('fetch_actions_handler — filters', () => {
   });
 
   it('item_id + received narrows to target_item_id', async () => {
-    primeDb(1, [], [], { itemOwner: USER });
+    primeDb(1, [], [], { itemOwner: USER, itemId: 'tgt-1' });
 
     await call({ item_id: 'tgt-1', ownership_role: 'received' });
 
@@ -759,5 +771,112 @@ describe('fetch_actions_handler — failures', () => {
 
     expect(reply.statusCode).toBe(500);
     expect(bodyOf(reply).error).toBe('INTERNAL_SERVER_ERROR');
+  });
+});
+
+// --- My Actions revamp: search, counterparty column fields ------------------------
+// The caller owns the provider (target); the counterparty is the seeker, whose
+// name is private. Search/column-field rows go through the enriched path: rows
+// query, then items query (no count query).
+describe('fetch_actions_handler — search on unmasked names only', () => {
+  const received = (status: string) =>
+    actionRow({ action_status: status, source_item_owner: OTHER, target_item_owner: USER });
+
+  it('matches a private counterparty name once it is revealed', async () => {
+    ciphers['cipher-src-1'] = { beneficiary_name: 'Meera Kumari' };
+    dbState.queue.push([received('accepted')], [seekerItem(), providerItem()]);
+
+    const reply = await call({ q: 'meera' });
+
+    expect(reply.statusCode).toBe(200);
+    expect(bodyOf(reply).meta.total).toBe(1);
+  });
+
+  it('never matches a name that is still masked — not even by its mask', async () => {
+    ciphers['cipher-src-1'] = { beneficiary_name: 'Meera Kumari' };
+    dbState.queue.push([received('created')], [seekerItem(), providerItem()]);
+
+    const reply = await call({ q: 'm' });
+
+    // "Mobility World India" is the caller's own public name, so search the
+    // seeker's real first letters instead of a shared prefix.
+    expect(bodyOf(reply).meta.total).toBe(1);
+    const miss = await (async () => {
+      dbState.queue.push([received('created')], [seekerItem(), providerItem()]);
+      return call({ q: 'meera' });
+    })();
+    expect(bodyOf(miss).meta.total).toBe(0);
+    expect(decryptItemPrivate).not.toHaveBeenCalled();
+  });
+});
+
+describe('fetch_actions_handler — include=column_fields', () => {
+  it('returns only the interaction column fields the schema declares non-private', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      ...NETWORK_CONFIG,
+      domains: [
+        NETWORK_CONFIG.domains[0],
+        {
+          id: 'seeker',
+          item_schemas: {
+            'profile_1.0': {
+              properties: {
+                beneficiary_name: { type: 'string', private: true },
+                gender: { type: 'string' },
+              },
+            },
+          },
+        },
+      ],
+      actions: {
+        connect: {
+          interactions: [
+            {
+              ...NETWORK_CONFIG.actions.connect.interactions[0],
+              column_fields: { from: ['gender', 'beneficiary_name', 'undeclared'], to: [] },
+            },
+          ],
+        },
+      },
+    });
+    primeDb(
+      1,
+      [actionRow({ source_item_owner: OTHER, target_item_owner: USER })],
+      [seekerItem({ item_state: { beneficiary_name: 'M***', gender: 'Female' } }), providerItem()],
+    );
+
+    const reply = await call({ include: ['column_fields'] });
+
+    expect(bodyOf(reply).actions[0].counterparty).toEqual({
+      network: 'test_net',
+      domain: 'seeker',
+      item_type: 'profile_1.0',
+      column_fields: { gender: 'Female' },
+    });
+  });
+
+  it('omits counterparty unless asked for', async () => {
+    primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
+    const reply = await call({});
+    expect(bodyOf(reply).actions[0]).not.toHaveProperty('counterparty');
+  });
+});
+
+describe('fetch_actions_handler — include=counts', () => {
+  it('adds the saved-view counts to meta, scoped by profile and action type', async () => {
+    primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
+    const reply = await call({ include: ['counts'], action_type: ['connect'] });
+    expect(bodyOf(reply).meta.counts).toEqual({ all: 5, needs_response: 2, ready_to_export: 1, sent: 3 });
+    expect(countOwnedActionsForViews).toHaveBeenCalledWith(
+      USER,
+      expect.objectContaining({ action_type: ['connect'], item_ids: [] }),
+    );
+  });
+
+  it('leaves counts out unless asked for', async () => {
+    primeDb(1, [actionRow()], [seekerItem(), providerItem()]);
+    const reply = await call({});
+    expect(bodyOf(reply).meta).not.toHaveProperty('counts');
+    expect(countOwnedActionsForViews).not.toHaveBeenCalled();
   });
 });

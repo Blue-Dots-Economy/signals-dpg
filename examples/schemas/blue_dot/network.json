@@ -1357,6 +1357,10 @@
           "from_domain": "seeker",
           "to_network": "blue_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": ["educationCategory", "workExperience", "natureOfJobsInterestedIn", "languageSpoken"],
+            "to": ["role", "natureOfJob", "positions"]
+          },
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Job Application Requirement",
@@ -1381,6 +1385,7 @@
                   "created",
                   "submitted",
                   "accepted",
+                  "completed",
                   "rejected",
                   "cancelled"
                 ]
@@ -1396,7 +1401,8 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         }
       ]
     },
@@ -1408,6 +1414,10 @@
           "from_domain": "provider",
           "to_network": "blue_dot",
           "to_domain": "provider",
+          "column_fields": {
+            "from": ["role", "natureOfJob", "positions"],
+            "to": ["role", "natureOfJob", "positions"]
+          },
           "requirement_schema": { "type": "object", "properties": {} },
           "event_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -1418,19 +1428,24 @@
             "properties": {
               "status": {
                 "type": "string",
-                "enum": ["created", "accepted", "rejected", "cancelled"]
+                "enum": ["created", "accepted", "completed", "rejected", "cancelled"]
               },
               "remark": { "type": "string" }
             }
           },
           "metric_categories": null,
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         },
         {
           "from_network": "blue_dot",
           "from_domain": "provider",
           "to_network": "blue_dot",
           "to_domain": "seeker",
+          "column_fields": {
+            "from": ["role", "natureOfJob", "positions"],
+            "to": ["educationCategory", "workExperience", "natureOfJobsInterestedIn", "languageSpoken"]
+          },
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Interview Invitation Requirement",
@@ -1479,6 +1494,7 @@
                   "created",
                   "invited",
                   "accepted",
+                  "completed",
                   "rejected",
                   "cancelled"
                 ]
@@ -1494,7 +1510,8 @@
             "reject": ["rejected"],
             "cancel": ["cancelled"]
           },
-          "reveals_pii_on_status": ["accepted"]
+          "reveals_pii_on_status": ["accepted", "completed"],
+          "export": { "requester_domains": ["provider"] }
         }
       ]
     }

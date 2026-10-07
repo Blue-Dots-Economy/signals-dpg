@@ -316,6 +316,7 @@ export function AppSidebar({
                                         of the profile, not floating on the row. */}
                                     {profile.lifecycle_status && (
                                       <span
+                                        data-tour="profile-status"
                                         className={[
                                           'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
                                           profile.lifecycle_status === 'live'
