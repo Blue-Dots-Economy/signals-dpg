@@ -59,6 +59,36 @@ export function welcomeIdempotencyKey(userId: string): string {
 }
 
 /**
+ * The recipient's phone in E.164, or undefined. NS accepts only E.164 (R14). A
+ * stored phone is free text trimmed at signup (`9876543210`, `98765 43210`), so
+ * it is normalised here rather than tested as-is. Only a phone that cannot be
+ * made E.164 is left out — the email still goes, the WhatsApp welcome is lost.
+ * That is a data-quality issue in one user's record, not a service fault, so it
+ * is a warning.
+ */
+function welcomePhone(phoneNumber: string | null, log: WelcomeLog): string | undefined {
+  if (!phoneNumber) return undefined;
+  const phone = normalizeE164Phone(phoneNumber) ?? undefined;
+  if (!phone) {
+    log.warn({ event_type: USER_WELCOME }, 'welcome: welcome_phone_dropped (not E.164)');
+  }
+  return phone;
+}
+
+/**
+ * The welcome link: the signup domain's portal on a split deployment, else
+ * FRONTEND_BASE_URL. May be empty/undefined when neither is configured.
+ */
+function welcomeSiteUrl(domain: string | null | undefined) {
+  return domain
+    ? createCtaUrlResolver({
+        byDomain: uiHostBindings.byDomain,
+        fallbackBaseUrl: notification.FRONTEND_BASE_URL,
+      })(domain)
+    : notification.FRONTEND_BASE_URL;
+}
+
+/**
  * Send the welcome for a newly-created user as ONE `user.welcome` event. The
  * notification service's policy (mode `all`) fans it out to the welcome email
  * and the WhatsApp welcome for whichever contact points `to` carries.
@@ -92,27 +122,11 @@ export async function sendWelcomeNotifications(
   if (!nc) return;
 
   const email = recipient.email || undefined;
-  // NS accepts only E.164 (R14). A stored phone is free text trimmed at signup
-  // (`9876543210`, `98765 43210`), so it is normalised here rather than tested
-  // as-is. Only a phone that cannot be made E.164 is left out — the email
-  // still goes, the WhatsApp welcome is lost. That is a data-quality issue in
-  // one user's record, not a service fault, so it is a warning.
-  let phone: string | undefined;
-  if (recipient.phoneNumber) {
-    phone = normalizeE164Phone(recipient.phoneNumber) ?? undefined;
-    if (!phone) {
-      log.warn({ event_type: USER_WELCOME }, 'welcome: welcome_phone_dropped (not E.164)');
-    }
-  }
+  const phone = welcomePhone(recipient.phoneNumber, log);
   if (!email && !phone) return;
 
   try {
-    const siteUrl = domain
-      ? createCtaUrlResolver({
-          byDomain: uiHostBindings.byDomain,
-          fallbackBaseUrl: notification.FRONTEND_BASE_URL,
-        })(domain)
-      : notification.FRONTEND_BASE_URL;
+    const siteUrl = welcomeSiteUrl(domain);
 
     if (!siteUrl && !phone) {
       log.error(

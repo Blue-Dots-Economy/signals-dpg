@@ -37,9 +37,10 @@ async function main() {
   }
 }
 
-main()
-  .then(() => process.exit(process.exitCode ?? 0))
-  .catch((err) => {
-    console.error('backfill_guardian_ref failed:', err);
-    process.exit(1);
-  });
+try {
+  await main();
+} catch (err) {
+  console.error('backfill_guardian_ref failed:', err);
+  process.exit(1);
+}
+process.exit(process.exitCode ?? 0);

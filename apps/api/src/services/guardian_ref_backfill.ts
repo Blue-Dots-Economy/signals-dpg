@@ -66,6 +66,54 @@ function canonicalFields(row: PhoneRow & { guardianContact: string }) {
   };
 }
 
+type RowOutcome = Exclude<keyof GuardianRefBackfillStats, 'scanned'>;
+
+/** One keyset page of phone-contact rows after `after`, in primary-key order. */
+function fetchPhoneRows(after: string, batchSize: number): Promise<PhoneRow[]> {
+  return db
+    .select({
+      userId: minor_guardian.userId,
+      guardianContact: minor_guardian.guardianContact,
+      guardianPhone: minor_guardian.guardianPhone,
+      guardianRef: minor_guardian.guardianRef,
+    })
+    .from(minor_guardian)
+    .where(
+      and(
+        eq(minor_guardian.guardianContactType, 'phone'),
+        isNotNull(minor_guardian.guardianContact),
+        gt(minor_guardian.userId, after),
+      ),
+    )
+    .orderBy(asc(minor_guardian.userId))
+    .limit(batchSize);
+}
+
+/**
+ * Canonicalise one row and, unless a dry run, write it back. Returns the stats
+ * bucket the row falls into, or null for a row with no contact (scanned only).
+ */
+async function backfillRow(row: PhoneRow, dryRun: boolean): Promise<RowOutcome | null> {
+  const blob = row.guardianContact;
+  if (!blob) return null;
+
+  let next: ReturnType<typeof canonicalFields>;
+  try {
+    next = canonicalFields({ ...row, guardianContact: blob });
+  } catch {
+    return 'failed';
+  }
+  if (!next) return 'unchanged';
+  if (dryRun) return 'updated';
+
+  const written = await db
+    .update(minor_guardian)
+    .set({ ...next, updatedAt: new Date() })
+    .where(and(eq(minor_guardian.userId, row.userId), eq(minor_guardian.guardianContact, blob)))
+    .returning({ userId: minor_guardian.userId });
+  return written.length > 0 ? 'updated' : 'raced';
+}
+
 export async function backfillGuardianRefs(
   opts: { dryRun?: boolean; batchSize?: number } = {},
 ): Promise<GuardianRefBackfillStats> {
@@ -76,56 +124,20 @@ export async function backfillGuardianRefs(
   // Keyset pagination on the primary key; the update never changes it.
   let after = '';
   for (;;) {
-    const rows: PhoneRow[] = await db
-      .select({
-        userId: minor_guardian.userId,
-        guardianContact: minor_guardian.guardianContact,
-        guardianPhone: minor_guardian.guardianPhone,
-        guardianRef: minor_guardian.guardianRef,
-      })
-      .from(minor_guardian)
-      .where(
-        and(
-          eq(minor_guardian.guardianContactType, 'phone'),
-          isNotNull(minor_guardian.guardianContact),
-          gt(minor_guardian.userId, after),
-        ),
-      )
-      .orderBy(asc(minor_guardian.userId))
-      .limit(batchSize);
+    const rows = await fetchPhoneRows(after, batchSize);
 
     for (const row of rows) {
       stats.scanned++;
-      const blob = row.guardianContact;
-      if (!blob) continue;
-
-      let next: ReturnType<typeof canonicalFields>;
-      try {
-        next = canonicalFields({ ...row, guardianContact: blob });
-      } catch {
-        stats.failed++;
-        continue;
-      }
-      if (!next) {
-        stats.unchanged++;
-        continue;
-      }
-      if (dryRun) {
-        stats.updated++;
-        continue;
-      }
-
-      const written = await db
-        .update(minor_guardian)
-        .set({ ...next, updatedAt: new Date() })
-        .where(and(eq(minor_guardian.userId, row.userId), eq(minor_guardian.guardianContact, blob)))
-        .returning({ userId: minor_guardian.userId });
-      if (written.length > 0) stats.updated++;
-      else stats.raced++;
+      // Sequential on purpose: a one-off backfill that writes one row at a
+      // time keeps a single connection busy instead of fanning a whole page of
+      // conditional updates out across the pool of a live API database.
+      const outcome = await backfillRow(row, dryRun); // NOSONAR
+      if (outcome) stats[outcome]++;
     }
 
-    if (rows.length < batchSize) break;
-    after = rows[rows.length - 1].userId;
+    const last = rows.at(-1);
+    if (!last || rows.length < batchSize) break;
+    after = last.userId;
   }
 
   return stats;
