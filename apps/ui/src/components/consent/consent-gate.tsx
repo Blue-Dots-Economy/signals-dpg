@@ -8,9 +8,10 @@
  * mode; this component only needs to work inside that flex column (desktop
  * dialog or, on phones, a vaul Drawer).
  */
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Markdown } from '@/components/consent/markdown';
@@ -35,7 +36,16 @@ export interface ConsentGateBodyProps {
   docs: ConsentGateDoc[];
   /** Called when the reader accepts, after the checkbox has been ticked. */
   onAccept: () => void;
+  /**
+   * Full-screen reading layout: larger type, a compact tracker, and the
+   * agreement + button on one row so the reader gets almost all the height.
+   */
+  expanded?: boolean;
 }
+
+/** Type scale for the expanded reader, merged over the Markdown defaults. */
+const EXPANDED_PROSE =
+  'text-lg leading-8 space-y-4 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_table]:text-base';
 
 /**
  * Renders the scrollable multi-document reader, its progress tracker, and
@@ -47,12 +57,29 @@ export interface ConsentGateBodyProps {
 export function ConsentGateBody({
   docs,
   onAccept,
+  expanded = false,
 }: Readonly<ConsentGateBodyProps>): React.JSX.Element {
   const { t } = useTranslation();
   const readerRef = useRef<HTMLElement>(null);
   const [checked, setChecked] = useState(false);
   const docIds = useMemo(() => docs.map((d) => d.id), [docs]);
   const progress = useReadProgress(readerRef, docIds);
+
+  // Toggling `expanded` reflows the text, so a raw scrollTop would land the
+  // reader somewhere else. Keep the scroll *fraction* instead: tracked on every
+  // scroll, restored right after the layout switch, before paint.
+  const scrollFraction = useRef(0);
+  useLayoutEffect(() => {
+    const el = readerRef.current;
+    if (!el) return;
+    const max = el.scrollHeight - el.clientHeight;
+    if (max > 0) el.scrollTop = scrollFraction.current * max;
+  }, [expanded]);
+  const trackScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    const max = el.scrollHeight - el.clientHeight;
+    scrollFraction.current = max > 0 ? el.scrollTop / max : 0;
+  };
   /**
    * Single source of truth for "may this be actioned". Both controls below
    * report it via `aria-disabled` AND guard their handler on it — they are
@@ -66,7 +93,9 @@ export function ConsentGateBody({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 sm:gap-4">
-      <ConsentProgressTracker docs={docs} progress={progress} />
+      <div className={expanded ? 'mx-auto w-full max-w-md' : undefined}>
+        <ConsentProgressTracker docs={docs} progress={progress} />
+      </div>
 
       {/*
        * Keyboard reachability: with the checkbox/button disabled until
@@ -91,6 +120,7 @@ export function ConsentGateBody({
         data-testid="consent-reader"
         aria-label={t('consent.reader_label')}
         tabIndex={0}
+        onScroll={trackScroll}
         // `relative` is defense in depth, not the fix: read-progress.ts
         // measures section geometry with getBoundingClientRect deltas, which
         // are correct regardless of the positioned ancestor. But this class
@@ -99,7 +129,10 @@ export function ConsentGateBody({
         // scroller, not the dialog/drawer's `fixed` wrapper several levels
         // up — the mistake that made the gate unreachable in every real
         // browser while every stubbed unit test stayed green.
-        className="relative min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-muted/20 p-4 sm:p-5"
+        className={cn(
+          'relative min-h-0 flex-1 overflow-y-auto rounded-md border border-border bg-muted/20 p-4 sm:p-5',
+          expanded && 'sm:px-10 sm:py-8',
+        )}
       >
         {docs.map((doc, i) => (
           <section
@@ -107,8 +140,15 @@ export function ConsentGateBody({
             data-consent-section={doc.id}
             className={i > 0 ? 'mt-6 border-t border-border pt-5' : undefined}
           >
-            <h3 className="mb-2 text-base font-semibold text-foreground">{doc.title}</h3>
-            <Markdown>{doc.body}</Markdown>
+            <h3
+              className={cn(
+                'mb-2 font-semibold text-foreground',
+                expanded ? 'mb-3 text-2xl' : 'text-base',
+              )}
+            >
+              {doc.title}
+            </h3>
+            <Markdown className={expanded ? EXPANDED_PROSE : undefined}>{doc.body}</Markdown>
           </section>
         ))}
       </section>
@@ -136,38 +176,48 @@ export function ConsentGateBody({
           {progress.allRead ? t('consent.hint_done') : t('consent.hint_scroll')}
         </p>
 
-        <div className="flex items-start gap-2">
-          <Checkbox
-            id="consent-agree"
-            checked={checked}
-            aria-disabled={!canTick}
-            aria-describedby="consent-scroll-hint"
-            className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-            onCheckedChange={(value) => {
-              // Enforcement, not decoration: `aria-disabled` alone leaves the
-              // control operable, so the gate would be bypassable without this.
-              if (!canTick) return;
-              setChecked(value === true);
-            }}
-          />
-          <Label htmlFor="consent-agree" className="text-sm leading-snug cursor-pointer">
-            {t('consent.agree_label')}
-          </Label>
-        </div>
-
-        <button
-          type="button"
-          aria-disabled={!canAccept}
-          aria-describedby="consent-scroll-hint"
-          onClick={() => {
-            // See the checkbox: `aria-disabled` does not block activation.
-            if (!canAccept) return;
-            onAccept();
-          }}
-          className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all aria-disabled:opacity-60 aria-disabled:cursor-not-allowed bg-brand-cta hover:brightness-110 h-11"
+        <div
+          className={cn(
+            'flex flex-col gap-3',
+            expanded && 'sm:flex-row sm:items-center sm:justify-between sm:gap-6',
+          )}
         >
-          {t('consent.accept_continue')}
-        </button>
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id="consent-agree"
+              checked={checked}
+              aria-disabled={!canTick}
+              aria-describedby="consent-scroll-hint"
+              className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+              onCheckedChange={(value) => {
+                // Enforcement, not decoration: `aria-disabled` alone leaves the
+                // control operable, so the gate would be bypassable without this.
+                if (!canTick) return;
+                setChecked(value === true);
+              }}
+            />
+            <Label htmlFor="consent-agree" className="text-sm leading-snug cursor-pointer">
+              {t('consent.agree_label')}
+            </Label>
+          </div>
+
+          <button
+            type="button"
+            aria-disabled={!canAccept}
+            aria-describedby="consent-scroll-hint"
+            onClick={() => {
+              // See the checkbox: `aria-disabled` does not block activation.
+              if (!canAccept) return;
+              onAccept();
+            }}
+            className={cn(
+              'flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all aria-disabled:opacity-60 aria-disabled:cursor-not-allowed bg-brand-cta hover:brightness-110 h-11',
+              expanded && 'sm:w-auto sm:shrink-0 sm:px-10',
+            )}
+          >
+            {t('consent.accept_continue')}
+          </button>
+        </div>
       </div>
     </div>
   );

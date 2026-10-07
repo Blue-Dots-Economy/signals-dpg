@@ -539,6 +539,8 @@
   "consent.cap_privacy": "Privacy",
   "consent.cap_terms": "Terms",
   "consent.reader_label": "Terms and privacy documents",
+  "consent.expand": "Expand to full screen",
+  "consent.collapse": "Exit full screen",
   "consent.agree_short": "I agree",
   "consent.profile_title": "Confirm your profile consent",
   "consent.profile_title_minor": "Guardian confirmation needed",
