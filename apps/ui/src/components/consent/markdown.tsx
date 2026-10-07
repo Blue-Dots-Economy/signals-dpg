@@ -24,7 +24,10 @@ const PROSE = [
 
 // `className` is merged over PROSE (tailwind-merge), so a caller can scale the
 // type up — e.g. the expanded consent gate's `text-lg`.
-export function Markdown({ children, className }: { children: string; className?: string }) {
+export function Markdown({
+  children,
+  className,
+}: Readonly<{ children: string; className?: string }>) {
   return (
     <div className={cn(PROSE, className)}>
       <ReactMarkdown

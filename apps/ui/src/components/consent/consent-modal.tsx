@@ -37,6 +37,30 @@ function getCurrentVersion(doc: ConsentConfigDocument['documents']['terms'] | Co
   return doc.versions.find((v) => v.version === doc.current_version);
 }
 
+interface ExpandToggleProps {
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+/** Top-right button that switches the consent gate in and out of full screen. */
+function ExpandToggle({ expanded, onToggle }: Readonly<ExpandToggleProps>) {
+  const { t } = useTranslation();
+  const label = expanded ? t('consent.collapse') : t('consent.expand');
+  const Icon = expanded ? Minimize2 : Maximize2;
+  return (
+    <button
+      type="button"
+      aria-pressed={expanded}
+      aria-label={label}
+      title={label}
+      onClick={onToggle}
+      className="absolute top-4 right-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+    </button>
+  );
+}
+
 export function ConsentModal({
   open,
   mode,
@@ -49,15 +73,15 @@ export function ConsentModal({
   const { theme } = useNetworkTheme();
   const { t } = useTranslation();
   const isMobile = useIsMobile();
-  const [expandedState, setExpanded] = useState(false);
+  const [expandRequested, setExpandRequested] = useState(false);
   // Gate-only, desktop-only: on phones the Drawer is already ~90dvh, and
   // ResponsiveDialog ignores contentClassName there anyway.
   const canExpand = mode === 'gate' && !isMobile;
-  const expanded = canExpand && expandedState;
+  const expanded = canExpand && expandRequested;
 
   // Every open starts at the normal size.
   useEffect(() => {
-    if (!open) setExpanded(false);
+    if (!open) setExpandRequested(false);
   }, [open]);
 
   const docs = variant === 'u18' && config.u18_documents ? config.u18_documents : config.documents;
@@ -102,7 +126,7 @@ export function ConsentModal({
       onEscapeKeyDown={(e) => {
         if (mode === 'gate') e.preventDefault();
         // Esc never dismisses the gate, but it does leave full screen.
-        if (expanded) setExpanded(false);
+        if (expanded) setExpandRequested(false);
       }}
     >
         <DialogHeader
@@ -167,20 +191,7 @@ export function ConsentModal({
             the first tab stop so Radix's open autofocus lands on it (see the
             focus note in consent-gate.tsx). */}
         {canExpand && (
-          <button
-            type="button"
-            aria-pressed={expanded}
-            aria-label={expanded ? t('consent.collapse') : t('consent.expand')}
-            title={expanded ? t('consent.collapse') : t('consent.expand')}
-            onClick={() => setExpanded((v) => !v)}
-            className="absolute top-4 right-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {expanded ? (
-              <Minimize2 className="h-4 w-4" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="h-4 w-4" aria-hidden="true" />
-            )}
-          </button>
+          <ExpandToggle expanded={expanded} onToggle={() => setExpandRequested((v) => !v)} />
         )}
     </ResponsiveDialog>
   );
