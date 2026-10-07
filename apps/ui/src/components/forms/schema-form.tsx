@@ -488,6 +488,17 @@ function isBlank(value: unknown): boolean {
 }
 
 /**
+ * Ajv's `if` error only summarises a conditional branch — e.g. "if Category is
+ * licensed then Licence Number and Licence Type are required" adds
+ * `must match "then" schema` on top of the two field-level `required` errors.
+ * It names no field and says nothing the field errors don't, so every place
+ * that counts or shows errors skips it.
+ */
+function isConditionalSummary(error: { name?: string }): boolean {
+  return error.name === 'if';
+}
+
+/**
  * Classify a form's AJV errors into "you have not filled this in" versus "what
  * you typed is not valid". A single boolean cannot tell those apart, and the two
  * need different copy — telling someone to "fill in all the required fields"
@@ -500,7 +511,7 @@ export function getSchemaFormValidity(
   schema: RJSFSchema,
   data: Record<string, unknown>,
 ): SchemaFormValidity {
-  const { errors } = v.validateFormData(data, schema);
+  const errors = v.validateFormData(data, schema).errors.filter((e) => !isConditionalSummary(e));
   let missingRequired = 0;
   let invalidValues = 0;
   for (const error of errors) {
@@ -594,7 +605,7 @@ export function SchemaForm({
 
   const transformErrors = React.useCallback(
     (errors: RJSFValidationError[]) =>
-      errors.map((error) => {
+      errors.filter((error) => !isConditionalSummary(error)).map((error) => {
         if (error.name !== 'pattern') return error;
         const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
         const message = patternMessageFor(field);
@@ -667,6 +678,12 @@ export function SchemaForm({
         .filter(Boolean),
     );
     const readable: Record<string, unknown> = { ...errorSchema };
+    // A conditional branch's `if` summary lands on the form root; drop it so it
+    // never renders (the branch's own field errors already say what is wrong).
+    const ifMessages = new Set(errors.filter(isConditionalSummary).map((e) => e.message));
+    const rootErrors = (readable.__errors as string[] | undefined)?.filter((m) => !ifMessages.has(m));
+    if (rootErrors && rootErrors.length > 0) readable.__errors = rootErrors;
+    else delete readable.__errors;
     for (const property of patternFields) {
       readable[property] = { __errors: [patternMessageFor(property)] };
     }

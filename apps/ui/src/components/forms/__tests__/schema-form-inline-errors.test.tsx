@@ -179,3 +179,62 @@ describe('SchemaForm onValidityChange detail', () => {
     expect(call?.[1]).toEqual({ valid: false, missingRequired: 0, invalidValues: 1 });
   });
 });
+
+describe('conditionally required fields (if/then), e.g. licensed → Licence Number + Licence Type', () => {
+  const conditionalSchema = {
+    type: 'object',
+    required: ['organisation_name', 'category'],
+    properties: {
+      organisation_name: { type: 'string', title: 'Organisation' },
+      category: { type: 'string', title: 'Category', enum: ['individual', 'licensed'] },
+      licence_number: {
+        type: 'string',
+        title: 'Licence Number',
+        pattern: '^$|^[0-9]+$',
+        'x-show-if': { category: ['licensed'] },
+      },
+      licence_type: {
+        type: 'string',
+        title: 'Licence Type',
+        enum: ['Clinical', 'Other'],
+        'x-show-if': { category: ['licensed'] },
+      },
+    },
+    allOf: [
+      {
+        if: { properties: { category: { const: 'licensed' } }, required: ['category'] },
+        then: { required: ['licence_number', 'licence_type'], properties: { licence_number: { minLength: 1 } } },
+      },
+    ],
+  } as unknown as RJSFSchema;
+
+  it('counts only the two missing fields — not the if summary — so the footer says "fill in"', () => {
+    const v = getSchemaFormValidity(validator, conditionalSchema, { organisation_name: 'X', category: 'licensed' });
+    expect(v).toEqual({ valid: false, missingRequired: 2, invalidValues: 0 });
+    expect(
+      getSchemaFormValidity(validator, conditionalSchema, { organisation_name: 'X', category: 'individual' }),
+    ).toEqual({ valid: true, missingRequired: 0, invalidValues: 0 });
+  });
+
+  it('marks both fields required, blocks Save, and names each missing field — never the raw if summary', async () => {
+    const submit = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(
+      <SchemaForm
+        schema={conditionalSchema}
+        formData={{ organisation_name: 'X', category: 'licensed' }}
+        onSubmit={submit}
+        submitButtonText="Save"
+      />,
+    );
+    expect(screen.getByText('Licence Number').closest('label')?.textContent).toContain('required');
+    expect(screen.getByText('Licence Type').closest('label')?.textContent).toContain('required');
+
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(await screen.findByText(/must have required property 'Licence Number'/)).toBeInTheDocument();
+    expect(screen.getByText(/must have required property 'Licence Type'/)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/"then"/);
+  });
+});
