@@ -1,6 +1,7 @@
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotCardConfig } from '@/engine/types';
 import { isUriField } from '@dpg/schemas/uri_fields';
+import { isFieldVisible } from '@/lib/show-if';
 
 /**
  * A single resolved card row. `isEmpty` is true when the item has no value for
@@ -81,6 +82,17 @@ export function getInitials(label: string): string {
   return (words[0][0] + words[1][0]).toUpperCase();
 }
 
+/**
+ * A field whose `x-show-if` this item does not satisfy is not on the card — the
+ * same rule the form uses to hide it. Covers both a conditional default row
+ * that would otherwise render a `—` placeholder on every card, and a value
+ * left over from before the controlling field changed (the API merges an edit
+ * onto the stored state, so clearing a hidden field never removes it).
+ */
+function isShown(key: string, props: Record<string, RJSFSchema>, data: Record<string, unknown>): boolean {
+  return !isHidden(key) && isFieldVisible((props[key] ?? {}) as Record<string, unknown>, data);
+}
+
 function schemaProperties(schema?: RJSFSchema | null): Record<string, RJSFSchema> {
   return (schema?.properties as Record<string, RJSFSchema> | undefined) ?? {};
 }
@@ -150,7 +162,7 @@ export function resolveCardFields(
 
   // Pull default rows from config where keys exist in this schema.
   const configured = (cardConfig?.default_fields ?? []).filter(
-    (key) => key in props && !isHidden(key)
+    (key) => key in props && isShown(key, props, data)
   );
 
   let defaultKeys = configured;
@@ -158,7 +170,7 @@ export function resolveCardFields(
     // Fallback: first N non-hidden, non-empty fields (today's behavior).
     const source = hasSchemaProps ? Object.keys(props) : Object.keys(data);
     defaultKeys = source
-      .filter((key) => !isHidden(key) && !isEmptyValue(data[key]))
+      .filter((key) => isShown(key, props, data) && !isEmptyValue(data[key]))
       .slice(0, FALLBACK_DEFAULT_COUNT);
   }
 
@@ -172,14 +184,14 @@ export function resolveCardFields(
     extraKeys = cardConfig.extra_fields.filter(
       (key) =>
         (key in props || key in data) &&
-        !isHidden(key) &&
+        isShown(key, props, data) &&
         !defaultSet.has(key) &&
         !isEmptyValue(data[key])
     );
   } else {
     const extraSource = hasSchemaProps ? Object.keys(props) : Object.keys(data);
     extraKeys = extraSource.filter(
-      (key) => !isHidden(key) && !defaultSet.has(key) && !isEmptyValue(data[key])
+      (key) => isShown(key, props, data) && !defaultSet.has(key) && !isEmptyValue(data[key])
     );
   }
 
