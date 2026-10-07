@@ -398,6 +398,8 @@
   "consent.cap_privacy": "गोपनीयता",
   "consent.cap_terms": "शर्तें",
   "consent.reader_label": "शर्तें और गोपनीयता दस्तावेज़",
+  "consent.expand": "पूरी स्क्रीन पर देखें",
+  "consent.collapse": "पूरी स्क्रीन से बाहर निकलें",
   "consent.agree_short": "मैं सहमत हूँ",
   "consent.profile_title": "अपनी प्रोफ़ाइल सहमति की पुष्टि करें",
   "consent.profile_for": "यह सहमति आपकी प्रोफ़ाइल के लिए है: {{name}}",

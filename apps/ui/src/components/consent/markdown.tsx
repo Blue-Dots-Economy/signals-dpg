@@ -1,5 +1,6 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { cn } from '@/lib/utils';
 
 // Descendant selectors (`[&_x]`), NOT child (`[&>x]`): markdown nests links
 // inside paragraphs/list-items/table-cells and cells inside table/thead/tbody,
@@ -21,9 +22,11 @@ const PROSE = [
   '[&_hr]:border-border',
 ].join(' ');
 
-export function Markdown({ children }: { children: string }) {
+// `className` is merged over PROSE (tailwind-merge), so a caller can scale the
+// type up — e.g. the expanded consent gate's `text-lg`.
+export function Markdown({ children, className }: { children: string; className?: string }) {
   return (
-    <div className={PROSE}>
+    <div className={cn(PROSE, className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
