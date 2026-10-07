@@ -316,7 +316,16 @@ function passesFacets(input: BuildExportInput, c: Candidate): boolean {
   return stateMatchesFacets(c.counterparty.item_state, allowed);
 }
 
-/** The counterparty reveal gate — the same condition `buildRecord` applies. */
+/**
+ * The counterparty reveal gate — the same condition `buildRecord` applies.
+ *
+ * The status leg is a backstop, not the gate: `collectCandidates` already
+ * skips any row whose status is not in ITS OWN interaction's
+ * `reveals_pii_on_status`, so no candidate reaches here on a non-revealing
+ * status. That per-row check is what keeps a requester's stricter network
+ * from inheriting a laxer network's statuses (the route admits the union) —
+ * see "reveal statuses differ across the requester's networks" in the tests.
+ */
 function revealGate(c: Candidate): boolean {
   return (
     c.revealStatuses.includes(c.row.action_status) &&

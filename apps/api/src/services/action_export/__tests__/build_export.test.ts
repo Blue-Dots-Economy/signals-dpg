@@ -31,45 +31,47 @@ const inter = (from: string, to: string, requester: string[]) => ({
 });
 const rules = [{ status: 'new', when: 'default' }];
 
+const DOMAINS = [
+  {
+    id: 'seeker',
+    status_rules: rules,
+    item_schemas: {
+      [T]: {
+        type: 'object',
+        properties: {
+          beneficiary_name: { type: 'string', private: true },
+          mobile_number: { type: 'string', private: true },
+          gender: { type: 'string' },
+          looking_for: { type: 'array', items: { type: 'string' } },
+        },
+      },
+    },
+  },
+  {
+    id: 'provider',
+    status_rules: rules,
+    item_schemas: {
+      [T]: {
+        type: 'object',
+        properties: {
+          contact_name: { type: 'string', private: true },
+          organisation_name: { type: 'string' },
+        },
+      },
+    },
+  },
+  {
+    id: 'service_provider',
+    status_rules: rules,
+    item_schemas: {
+      [T]: { type: 'object', properties: { org: { type: 'string' } } },
+    },
+  },
+];
+
 const CFG = parseNetworkConfigDocument({
   id: NET,
-  domains: [
-    {
-      id: 'seeker',
-      status_rules: rules,
-      item_schemas: {
-        [T]: {
-          type: 'object',
-          properties: {
-            beneficiary_name: { type: 'string', private: true },
-            mobile_number: { type: 'string', private: true },
-            gender: { type: 'string' },
-            looking_for: { type: 'array', items: { type: 'string' } },
-          },
-        },
-      },
-    },
-    {
-      id: 'provider',
-      status_rules: rules,
-      item_schemas: {
-        [T]: {
-          type: 'object',
-          properties: {
-            contact_name: { type: 'string', private: true },
-            organisation_name: { type: 'string' },
-          },
-        },
-      },
-    },
-    {
-      id: 'service_provider',
-      status_rules: rules,
-      item_schemas: {
-        [T]: { type: 'object', properties: { org: { type: 'string' } } },
-      },
-    },
-  ],
+  domains: DOMAINS,
   actions: {
     connect: {
       interactions: [
@@ -304,6 +306,74 @@ describe('buildExport — reveal gate', () => {
     expect(r.records[0][col(r, 'beneficiary_name')]).toBe('M***');
     expect(r.counts).toMatchObject({ revealed_count: 0, masked_count: 1 });
     expect(onDecryptError).toHaveBeenCalledWith(expect.any(Error), 's-a');
+  });
+});
+
+describe('buildExport — reveal statuses differ across the requester’s networks', () => {
+  // bluedots-schemas#45 widens blue_dot to reveal on `completed`; a network
+  // still on `accepted` alone must not inherit that. The route admits the
+  // UNION of the requester's networks' exportable statuses, so the per-row,
+  // per-interaction rules here are what keep the stricter network's row out.
+  const STRICT = 'purple_dot';
+  const withStatuses = (id: string, reveals: string[]) =>
+    parseNetworkConfigDocument({
+      id,
+      domains: DOMAINS,
+      actions: {
+        connect: {
+          interactions: [
+            {
+              ...inter('seeker', 'provider', ['provider']),
+              event_schema: {
+                type: 'object',
+                properties: {
+                  status: { type: 'string', enum: ['created', 'accepted', 'completed', 'rejected'] },
+                },
+              },
+              reveals_pii_on_status: reveals,
+            },
+          ],
+        },
+      },
+    });
+  const LENIENT_CFG = withStatuses(NET, ['accepted', 'completed']);
+  const STRICT_CFG = withStatuses(STRICT, ['accepted']);
+  const onNetwork = (r: ExportActionRow, network: string): ExportActionRow => ({
+    ...r,
+    source_item_network: network,
+    target_item_network: network,
+  });
+
+  it('a completed row from the network that reveals only on accepted is not exported, and leaks nothing', () => {
+    const lenientRow = onNetwork(row(seekerA, myProvider, 'completed'), NET);
+    const strictRow = onNetwork(
+      row({ id: 's-b-strict', domain: 'seeker', owner: OTHER }, { id: 'p-me-strict', domain: 'provider', owner: ME }, 'completed'),
+      STRICT,
+    );
+    const items = baseItems();
+    items.set('s-b-strict', { ...item('s-b-strict', 'seeker', { beneficiary_name: 'R***', mobile_number: '98******11' }), item_network: STRICT });
+    items.set('p-me-strict', { ...item('p-me-strict', 'provider', { organisation_name: 'Mine (strict)' }), item_network: STRICT });
+
+    const r = okOf(
+      buildExport(
+        input({
+          rows: [lenientRow, strictRow],
+          items,
+          getNetworkConfig: (id) => (id === NET ? LENIENT_CFG : id === STRICT ? STRICT_CFG : null),
+          decrypt: (it) => ({ ...REAL['s-b'], ...REAL[it.item_id] }),
+        }),
+      ),
+    );
+
+    // The lenient network's completed row is exported and revealed…
+    expect(r.records.map((rec) => rec[col(r, 'counterparty_item_id')])).toEqual(['s-a']);
+    expect(r.records.flat()).toContain('Meera Kumari');
+    // …the strict network's completed row never reaches the file, revealed or masked.
+    expect(r.records.flat()).not.toContain('s-b-strict');
+    expect(r.records.flat()).not.toContain('Ravi Das');
+    expect(r.records.flat()).not.toContain('9876543211');
+    expect(r.counts.skipped_not_enabled).toBe(1);
+    expect(r.counts.revealed_count).toBe(1);
   });
 });
 
