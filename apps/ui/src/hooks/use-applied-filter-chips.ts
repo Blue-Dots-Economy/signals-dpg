@@ -23,12 +23,7 @@ export interface UseAppliedFilterChipsInput {
    * resolved title ("Years of Work Experience") for the same field.
    */
   fieldLabels: Record<string, string>;
-  /**
-   * Display text per option value, `field.key` → value → text (already
-   * translated), for fields whose stored values are not human-readable (a
-   * `filterable` boolean's `"true"`/`"false"` → Yes/No). Fields absent here
-   * print their values as-is.
-   */
+  /** Translated option text per field, e.g. a boolean's "true" → Yes. */
   optionLabels?: Record<string, Record<string, string>>;
   area: BrowseArea;
   setArea: (next: BrowseArea) => void;

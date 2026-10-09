@@ -33,27 +33,11 @@ export interface EnumFilterField {
    * per item). `false` when it is a simple `enum` (single value per item).
    */
   isArray: boolean;
-  /**
-   * i18n key per option value, when the value itself is not display text —
-   * a `filterable` boolean's `"true"`/`"false"` read as Yes/No. Absent for
-   * enum fields, whose values are already human-readable.
-   */
+  /** i18n key per option value, e.g. a boolean's "true" → Yes. */
   optionLabels?: Record<string, string>;
-  /**
-   * How the panel renders the field (infra#57); absent means `chips`:
-   *   - `chips`  — multi-select chips (or a searchable list when long).
-   *   - `radio`  — one value at a time; used for a field with
-   *                `x-filter-include-values`, whose catch-all ("Any") is
-   *                added server-side, so picking two values adds nothing.
-   *   - `toggle` — a `filterable` boolean: on filters to `true`, off clears.
-   *   - `range`  — `x-range-filter` bucket chips, any number at once;
-   *                options are the bucket labels, resolved to bounds by
-   *                the server.
-   */
+  /** Panel control; absent means `chips`. */
   widget?: 'chips' | 'radio' | 'toggle' | 'range';
-  /** The field's `x-range-filter`, for `widget: 'range'`. */
   range?: RangeFilter;
-  /** The field's `x-filter-include-values`, applied by client-side filtering. */
   includeValues?: string[];
 }
 
@@ -100,11 +84,7 @@ export function humanizeKey(key: string): string {
 function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   const fields: EnumFilterField[] = [];
 
-  // `getFilterFieldEntries` (shared with the API's facet guards) already
-  // applies both gates: `private: true` is never a filter (#203 Task 7, the
-  // enumeration guard), and once the schema marks any field
-  // `filterable: true` only the marked fields are (infra#57). A schema with
-  // no marker keeps every non-private enum field, as before.
+  // Same private/`filterable` rule as the API facet guards.
   for (const { field: key, property, range, includeValues } of getFilterFieldEntries(schema)) {
     const prop = property as RJSFSchema;
     const label = typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key);
@@ -122,9 +102,7 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
       continue;
     }
 
-    // Boolean: only when explicitly marked — an unmarked schema never had
-    // boolean filters, and must not grow them. A toggle only ever filters to
-    // `true`; "off" means no filter, not "false".
+    // Booleans only when explicitly marked; the toggle filters to `true` only.
     if (prop.type === 'boolean') {
       if ((property as { filterable?: unknown }).filterable === true) {
         fields.push({
@@ -338,11 +316,7 @@ function numericValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-/**
- * Mirrors the server's overlap rule for `x-range-filter`: the item's
- * [field, maxField] range overlaps at least one selected bucket. An item
- * missing a bound the bucket needs does not match.
- */
+/** Same overlap rule as the server: the item's [min, max] overlaps a selected bucket. */
 function itemOverlapsRangeBuckets(
   data: Record<string, unknown>,
   key: string,

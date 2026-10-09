@@ -1,35 +1,5 @@
-/**
- * Marker-driven filter-field selection (infra-deployments#57).
- *
- *   "filterable": true   — the property is offered as a filter (UI) and
- *                          accepted as a facet (API).
- *
- * Opt-in per item schema: as soon as ONE property of a schema carries
- * `filterable: true`, only the marked properties of that schema are filters.
- * A schema with no marker keeps the pre-marker behaviour (every declared,
- * non-private property is a facet), so networks that have not adopted the
- * marker are unchanged. `private: true` always wins — a private property is
- * never a filter, marked or not; it is the enumeration guard for private
- * values and must stay.
- *
- * Text search is deliberately NOT gated by this marker: free-text `q` still
- * matches every non-private field (see `resolveTextSearchFields`).
- *
- * Two optional markers refine HOW a filter field matches:
- *
- *   "x-range-filter": { title?, max_field, buckets: [{ label, min?, max? }] }
- *       — on the lower-bound field of a min/max pair (e.g. `salaryMin`). The
- *         filter value is a bucket LABEL; the server resolves its bounds from
- *         this schema and matches an item whose [field, max_field] range
- *         overlaps the bucket. A client therefore can never send arbitrary
- *         numbers, only a bucket the schema declares.
- *   "x-filter-include-values": ["Any"]
- *       — values that also match whenever the field is filtered at all, so a
- *         seeker choosing "Female" still sees jobs open to "Any" gender.
- *
- * Shared by the UI (filter panels, chip pruning) and the API (facet guards),
- * so both sides always agree on what a filter is.
- */
+// Schema filter markers (infra#57): `filterable`, `x-range-filter`, `x-filter-include-values`.
+// Shared by UI and API; a schema with no `filterable` marker keeps every non-private field.
 
 type FilterPropertySchema = { filterable?: unknown; private?: unknown; type?: unknown };
 
@@ -56,9 +26,7 @@ export interface RangeFilterBucket {
 }
 
 export interface RangeFilter {
-  /** Group heading for the filter; the field's own title when absent. */
   title?: string;
-  /** The upper-bound field paired with the marked (lower-bound) field. */
   maxField: string;
   buckets: RangeFilterBucket[];
 }
@@ -66,9 +34,7 @@ export interface RangeFilter {
 export interface FilterFieldEntry {
   field: string;
   property: Record<string, unknown>;
-  /** Present when the property declares a valid `x-range-filter`. */
   range?: RangeFilter;
-  /** `x-filter-include-values`, when the property declares any. */
   includeValues?: string[];
 }
 
@@ -82,18 +48,12 @@ function parseRangeBucket(raw: unknown): RangeFilterBucket | null {
   }
   const min = isFiniteNumber(raw.min) ? raw.min : undefined;
   const max = isFiniteNumber(raw.max) ? raw.max : undefined;
-  // A bucket with no bound at all would match everything.
   if (min === undefined && max === undefined) return null;
   if (min !== undefined && max !== undefined && min > max) return null;
   return { label: raw.label, ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
 }
 
-/**
- * The `x-range-filter` of one property, or undefined when it has none or it
- * is malformed. `max_field` must be a declared, non-private property of the
- * same schema: the overlap match reads it, so a private upper bound would
- * let a caller probe a private value through found/not-found results.
- */
+// `max_field` must be declared and non-private, or it could be probed through results.
 function parseRangeFilter(
   property: Record<string, unknown>,
   properties: Record<string, unknown>
@@ -124,10 +84,7 @@ function parseIncludeValues(property: Record<string, unknown>): string[] | undef
   return values.length > 0 ? values : undefined;
 }
 
-/**
- * The properties of ONE item schema that are filters, in declaration order.
- * See the module comment for the opt-in rule.
- */
+/** The filter fields of one item schema, in declaration order. */
 export function getFilterFieldEntries(schema: unknown): FilterFieldEntry[] {
   const properties = propertiesOf(schema);
   const markersInUse = hasFilterableMarkers(schema);
@@ -152,11 +109,7 @@ export function getFilterFieldEntries(schema: unknown): FilterFieldEntry[] {
   return entries;
 }
 
-/**
- * The selected values plus the field's `x-filter-include-values`, deduped.
- * An empty selection stays empty: it means "match nothing", and widening it
- * would turn that into "match Any".
- */
+/** Selected values plus `x-filter-include-values`; an empty selection stays empty. */
 export function expandFilterValues<T>(
   entry: Pick<FilterFieldEntry, 'includeValues'>,
   values: T[]
@@ -169,7 +122,7 @@ export function expandFilterValues<T>(
   return out;
 }
 
-/** The declared buckets matching the selected labels; unknown labels drop. */
+/** Declared buckets matching the labels; unknown labels are ignored. */
 export function resolveRangeBuckets(range: RangeFilter, labels: unknown[]): RangeFilterBucket[] {
   const wanted = new Set(labels.map(String));
   return range.buckets.filter((bucket) => wanted.has(bucket.label));

@@ -50,14 +50,7 @@ export function resolveAllowedFacetFields(
   return allowed;
 }
 
-/**
- * The facet fields a caller may FILTER on for an item schema (infra#57): the
- * declared, non-private fields above, narrowed to the ones marked
- * `filterable: true` once the schema uses that marker at all — see
- * `getFilterFieldEntries` in `@dpg/schemas`. `booleanValued` lets
- * `resolveAllowedFacetFilters` turn the UI's `"true"`/`"false"` into JSON
- * booleans, which signals-search compares type-strictly.
- */
+/** Fields a caller may filter on (infra#57 `filterable` rule, via `getFilterFieldEntries`). */
 export function resolveFilterableFacetFields(
   itemSchema: Record<string, unknown>
 ): Map<string, { arrayValued: boolean; booleanValued: boolean; entry: FilterFieldEntry }> {
@@ -75,13 +68,8 @@ export function resolveFilterableFacetFields(
   return allowed;
 }
 
-/**
- * One `[min, max]` covering every selected bucket. signals-search ANDs its
- * filter clauses, so it cannot OR two buckets; their envelope is exact for
- * adjacent buckets but also matches the gap between non-adjacent ones
- * (0-3 + 10-15 LPA includes 3-10 LPA jobs). The native path ORs the buckets
- * and is exact. An open bound on any bucket stays open.
- */
+// signals-search can't OR clauses, so several buckets become one envelope range;
+// non-adjacent buckets also match the gap between them (the native path is exact).
 function bucketEnvelope(buckets: RangeFilterBucket[]): { min?: number; max?: number } {
   const mins = buckets.map((bucket) => bucket.min);
   const maxes = buckets.map((bucket) => bucket.max);
@@ -124,10 +112,7 @@ export function resolveAllowedFacetFilters(
 
     const { range } = meta.entry;
     if (range) {
-      // Labels the schema doesn't declare are ignored. If none survive, send
-      // the labels as a plain value match — a label is never a stored number,
-      // so it matches nothing, as the native path's `false` does. Dropping
-      // the filter instead would silently widen it to every item.
+      // No declared bucket: send the labels as values so it matches nothing, not everything.
       const buckets = resolveRangeBuckets(range, selection.values);
       if (buckets.length === 0) {
         return [{ field: selection.field, values: selection.values, arrayValued: false }];

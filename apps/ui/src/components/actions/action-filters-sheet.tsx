@@ -86,9 +86,7 @@ export function ActionFiltersSheet({
 }: Readonly<ActionFiltersSheetProps>) {
   const { t } = useTranslation();
 
-  // Range buckets are resolved only by the browse endpoints (discover /
-  // markers); the actions list compares values as-is, so a bucket label
-  // would match nothing there.
+  // The actions list can't resolve range buckets.
   const enumFilterFields = React.useMemo(
     () => getEnumFilterFieldsForDomains(domains).filter((field) => field.widget !== 'range'),
     [domains],

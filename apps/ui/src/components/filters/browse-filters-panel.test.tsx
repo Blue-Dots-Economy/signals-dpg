@@ -4,10 +4,8 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain } from '@/engine/types';
 import { BrowseFiltersPanel } from './browse-filters-panel';
 
-// #394: the MAP (`viewMode="map"`) and the LIST offer the SAME facet set —
-// every declared, non-private enum field for these unmarked schemas (a schema
-// using the infra#57 `filterable` marker narrows both alike). A single domain
-// (`domains.length === 1`) also hides the domain chip group, isolating these
+// #394: map and list offer the same facet set for these unmarked schemas.
+// A single domain (`domains.length === 1`) also hides the domain chip group, isolating these
 // assertions to the enum-field behavior. See #360 for the proper long-term
 // schema-driven search/filter declaration.
 function domainWithPlainEnum(): DotNetworkDomain {

@@ -43,11 +43,8 @@ export type ItemFetchFilters = {
    * went through an unguarded `item_state @> {...}` containment check
    * instead, which let a single-value filter enumerate a private/undeclared
    * field — #394 closed that hole by unifying both shapes onto this one
-   * guarded `= ANY` path, with no remaining unguarded branch. Since
-   * infra#57 a schema that marks any field `filterable: true` narrows this
-   * to the marked fields, and an
-   * `x-range-filter` field takes bucket labels rather than values — see
-   * `resolveAllowedFacetFields` below.
+   * guarded `= ANY` path, with no remaining unguarded branch. infra#57
+   * markers narrow and extend this — see `resolveAllowedFacetFields` below.
    */
   item_state?: Record<string, unknown>;
   /**
@@ -132,10 +129,8 @@ const itemResponseColumns = {
  * from the request — a client cannot expand its own allowed facet set by
  * naming more fields.
  *
- * infra#57: a schema that marks any field `filterable: true` narrows this to
- * the marked fields; a schema with no marker keeps every declared,
- * non-private field (the #394 behaviour) — see `getFilterFieldEntries`. The `private !== true` check below is the
- * enumeration guard and MUST stay: it is the only thing standing between a
+ * infra#57: narrowed to `filterable: true` fields when the schema marks any.
+ * The `private !== true` check below is the enumeration guard and MUST stay: it is the only thing standing between a
  * client and using found/not-found responses to enumerate a private field's
  * values. The proper long-term schema-driven search/filter declaration is
  * tracked in #360 — this function is the code to revisit when that lands.
@@ -164,8 +159,7 @@ async function resolveAllowedFacetFields(
   }
 
   for (const schema of Object.values(domainConfig.item_schemas)) {
-    // First item_type to declare a field wins — its range/include markers
-    // are the ones applied.
+    // First item_type to declare a field wins.
     for (const entry of getFilterFieldEntries(schema)) {
       if (!allowed.has(entry.field)) allowed.set(entry.field, entry);
     }
@@ -202,20 +196,12 @@ async function hasSearchIndexRows(
   return rows[0]?.has_rows === true;
 }
 
-/**
- * `item_state.<field>` as a number, or NULL when it is absent or not a JSON
- * number. The CASE keeps a stray non-numeric value from raising a cast error;
- * Postgres does not promise to evaluate an AND's type check before the cast.
- */
+// CASE, not AND: Postgres may run the cast before the type check.
 function numericStateField(field: string) {
   return sql`(CASE WHEN jsonb_typeof(${items.item_state} -> ${field}) = 'number' THEN (${items.item_state} ->> ${field})::numeric END)`;
 }
 
-/**
- * The item's [minField, maxField] range overlaps the bucket. Same rule the
- * signals-search path sends as `lte`/`gte` clauses; a missing bound on the
- * item compares as NULL, so an item without that value does not match.
- */
+/** Item's [minField, maxField] overlaps the bucket; a missing value never matches. */
 function rangeOverlapClause(minField: string, maxField: string, bucket: RangeFilterBucket) {
   const parts = [
     ...(bucket.max === undefined ? [] : [sql`${numericStateField(minField)} <= ${bucket.max}`]),
@@ -317,8 +303,7 @@ async function buildWhereClause(
 
         const { range } = entry;
         if (range) {
-          // `x-range-filter` (infra#57): the values are bucket labels. Labels
-          // the schema doesn't declare match nothing rather than widening.
+          // Values are bucket labels; undeclared labels match nothing.
           const buckets = resolveRangeBuckets(range, requestedValues);
           conditions.push(
             buckets.length === 0

@@ -109,9 +109,7 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
   },
 }));
 
-// The real `@dpg/schemas` barrel builds drizzle-zod schemas from `items`,
-// which the `@dpg/database` mock above can't satisfy; this module only needs
-// the dependency-free filter-field rule.
+// The real barrel needs the unmocked `@dpg/database`.
 vi.mock('@dpg/schemas', () => import('../../../../../packages/schemas/src/filter_fields'));
 
 vi.mock('@/network_configs', () => ({

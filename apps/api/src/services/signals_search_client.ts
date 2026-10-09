@@ -37,12 +37,7 @@ export interface SignalsSearchFacetInput {
    * silently return zero results if it used `in`.
    */
   arrayValued?: boolean;
-  /**
-   * A schema-resolved `x-range-filter` bucket (infra#57) — set instead of
-   * using `values` when the field is the lower bound of a min/max pair. The
-   * item matches when its range overlaps the bucket: `field <= max` and
-   * `maxField >= min`. Either bound may be open.
-   */
+  /** `x-range-filter` bucket: matches `field <= max` and `maxField >= min`; either may be open. */
   range?: { maxField: string; min?: number; max?: number };
 }
 
@@ -256,8 +251,7 @@ function clampOffset(offset: number): number {
   return Math.max(Math.trunc(offset), 0);
 }
 
-// A range becomes one or two numeric clauses, which signals-search ANDs with
-// every other filter — an open bound contributes no clause.
+// An open bound adds no clause.
 function buildRangeClauses(
   field: string,
   range: NonNullable<SignalsSearchFacetInput['range']>

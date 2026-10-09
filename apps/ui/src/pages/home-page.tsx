@@ -1128,11 +1128,8 @@ export function HomePage() {
   // still applies `search` itself via `buildFilteredCardsForDomain` below;
   // the two are independent filters over the same query, not one deriving
   // from the other. `BrowseFiltersPanel`'s enum-field facets, by contrast,
-  // drive the map server-side directly via `activeFieldFilters` — every
-  // field the panel offers (the same set the list uses,
-  // `getEnumFilterFieldsForDomains`: declared, non-private, and
-  // `filterable: true` once the schema marks any, infra#57) is sent and
-  // applied by the server's facet guard (`resolveAllowedFacetFields`). The domain
+  // drive the map server-side directly via `activeFieldFilters`, checked by the
+  // server's facet guard (`resolveAllowedFacetFields`). The domain
   // multi-select below (a client-side array-membership check on the
   // already-fetched markers) remains client/list-only; free-text search, per
   // the comment above, is sent to the server for both the map and the list.

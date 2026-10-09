@@ -57,11 +57,7 @@ describe('getEnumFilterFields — private field exclusion (#203 Task 7)', () => 
   });
 });
 
-// #394: the map and the list get the same fields from this one function (the
-// map-only `{ filterableOnly: true }` option was removed). For a schema with
-// no `filterable` marker that is every declared, non-private enum field; a
-// schema that marks any narrows to the marked ones (infra#57, tested below). See #360 for the proper long-term
-// schema-driven search/filter declaration.
+// Unmarked schemas: every declared, non-private enum field (#394). Marked: see infra#57 tests below.
 describe('getEnumFilterFieldsForDomains — all declared enum fields, no filterable gate (#394)', () => {
   function domainWithSchema(id: string, properties: Record<string, unknown>): DotNetworkDomain {
     return {

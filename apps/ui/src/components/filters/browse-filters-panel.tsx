@@ -171,10 +171,7 @@ export function BrowseFiltersPanel({
   // (defaults to the visible domains) so the filters can reflect the
   // counterpart being browsed independently of the domain chip selector.
   //
-  // The MAP and the LIST offer the SAME set (#394): every declared,
-  // non-private enum field, or only the `filterable: true` ones once the
-  // schema marks any (infra#57) — the same rule the server's facet guard
-  // applies, via the shared `getFilterFieldEntries`.
+  // Same field set for map and list, and the same rule as the server's facet guard.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
     () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
     [filterFieldDomains, domains],
