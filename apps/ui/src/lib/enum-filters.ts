@@ -196,6 +196,78 @@ export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): Enum
   return getEnumFilterFields(schemas);
 }
 
+// ─── Cross-domain field matching ────────────────────────────────────────────────
+
+// Fraction of shared options (of the larger set) needed to treat two differently-named fields as the same concept.
+const ENUM_OVERLAP_THRESHOLD = 0.75;
+
+// Best-overlapping target field for viewerField by shared OPTIONS, not name, clearing ENUM_OVERLAP_THRESHOLD.
+function bestMatchingField(
+  viewerField: EnumFilterField,
+  targetFields: EnumFilterField[],
+): EnumFilterField | undefined {
+  const viewerOptions = new Set(viewerField.options);
+  let best: EnumFilterField | undefined;
+  let bestRatio = 0;
+
+  for (const target of targetFields) {
+    const targetOptions = new Set(target.options);
+    const commonCount = [...viewerOptions].filter((o) => targetOptions.has(o)).length;
+    const ratio = commonCount / Math.max(viewerOptions.size, targetOptions.size);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      best = target;
+    }
+  }
+
+  return bestRatio >= ENUM_OVERLAP_THRESHOLD ? best : undefined;
+}
+
+// Whether any viewer field corresponds to a target field, ignoring profile DATA — only used to decide if the toggle shows at all.
+export function hasMatchableFields(
+  viewerSchema: RJSFSchema | undefined,
+  targetFilterFields: EnumFilterField[],
+): boolean {
+  if (!viewerSchema || targetFilterFields.length === 0) return false;
+  const viewerFields = getEnumFilterFields([viewerSchema]);
+  return viewerFields.some((vf) => bestMatchingField(vf, targetFilterFields) !== undefined);
+}
+
+// Maps the viewer's own field values onto targetFilterFields via bestMatchingField; {} when nothing corresponds or carries a valid value.
+export function resolveProfileMatchFilters(
+  viewerSchema: RJSFSchema | undefined,
+  viewerData: Record<string, unknown> | undefined,
+  targetFilterFields: EnumFilterField[],
+): Record<string, string[]> {
+  if (!viewerSchema || !viewerData || targetFilterFields.length === 0) return {};
+
+  const result: Record<string, string[]> = {};
+
+  for (const viewerField of getEnumFilterFields([viewerSchema])) {
+    const rawValue = viewerData[viewerField.key];
+    if (rawValue === null || rawValue === undefined) continue;
+
+    const candidates = Array.isArray(rawValue)
+      ? rawValue.filter((v): v is string => typeof v === 'string' && v.length > 0)
+      : typeof rawValue === 'string' && rawValue.length > 0
+        ? [rawValue]
+        : [];
+    if (candidates.length === 0) continue;
+
+    const target = bestMatchingField(viewerField, targetFilterFields);
+    if (!target) continue;
+
+    const targetOptions = new Set(target.options);
+    const values = candidates.filter((v) => targetOptions.has(v));
+    if (values.length === 0) continue;
+
+    const existing = result[target.key] ?? [];
+    result[target.key] = [...new Set([...existing, ...values])];
+  }
+
+  return result;
+}
+
 // ─── Filter application ───────────────────────────────────────────────────────
 
 /**
