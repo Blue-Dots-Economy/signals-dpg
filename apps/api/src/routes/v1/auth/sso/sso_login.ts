@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyRequest } from 'fastify';
 import z from '@dpg/schemas';
-import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { type FastifyPluginCallbackZod } from 'fastify-type-provider-zod';
 import { getCurrentApiBaseUrl, ssoConfig } from '@/config';
 import { public_rate_limit } from '@/middleware/public_rate_limit';
 import { startLoginFlow } from '@/routes/v1/auth/login_flow';
@@ -75,7 +75,7 @@ function canonicalRedirect(request: FastifyRequest): string | null {
   const q = request.url.indexOf('?');
   return `${canonical.origin}${SSO_LOGIN_PATH}${q >= 0 ? request.url.slice(q) : ''}`;
 }
-export const auth_sso_login: FastifyPluginAsyncZod = async (fastify) => {
+export const auth_sso_login: FastifyPluginCallbackZod = (fastify, _opts, done) => {
   fastify.route({
     url: '/login',
     method: 'GET',
@@ -163,4 +163,5 @@ export const auth_sso_login: FastifyPluginAsyncZod = async (fastify) => {
       );
     },
   });
+  done();
 };

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import z from '@dpg/schemas';
-import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { type FastifyPluginCallbackZod } from 'fastify-type-provider-zod';
 import { ssoConfig } from '@/config';
 import {
   ErrorResponseSchema,
@@ -108,7 +108,7 @@ function idTokenClaims(identity: SsoIdentity, preferredUsername: string, nonce: 
   };
 }
 
-export const auth_sso_oidc: FastifyPluginAsyncZod = async (fastify) => {
+export const auth_sso_oidc: FastifyPluginCallbackZod = (fastify, _opts, done) => {
   // Keycloak posts the token request as a form. Scoped to this plugin, so no
   // other route starts accepting form bodies.
   fastify.addContentTypeParser(
@@ -246,5 +246,6 @@ export const auth_sso_oidc: FastifyPluginAsyncZod = async (fastify) => {
       });
     },
   });
+  done();
 };
 
