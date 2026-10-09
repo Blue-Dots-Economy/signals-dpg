@@ -120,6 +120,20 @@ describe('URLs the BROWSER is sent to', () => {
     expect(url.searchParams.has('prompt')).toBe(false);
   });
 
+  it('adds kc_idp_hint only when an identity provider is named', () => {
+    const base = {
+      redirectUri: 'http://localhost:2742/api/v1/auth/session/callback',
+      state: 'st',
+      nonce: 'no',
+      challenge: 'ch',
+    };
+    expect(new URL(buildAuthorizeUrl(base)).searchParams.has('kc_idp_hint')).toBe(false);
+    const hinted = new URL(buildAuthorizeUrl({ ...base, idpHint: 'signals-sso' }));
+    expect(hinted.searchParams.get('kc_idp_hint')).toBe('signals-sso');
+    // The SSO path must not reintroduce `prompt` either (see the test above).
+    expect(hinted.searchParams.has('prompt')).toBe(false);
+  });
+
   it('builds the end-session URL on the public issuer', () => {
     const url = new URL(
       buildEndSessionUrl({ postLogoutRedirectUri: 'http://localhost:3000/auth/login' }),

@@ -1,4 +1,10 @@
 import type { RJSFSchema } from '@rjsf/utils';
+import {
+  expandFilterValues,
+  getFilterFieldEntries,
+  resolveRangeBuckets,
+  type RangeFilter,
+} from '@dpg/schemas/filter_fields';
 import type { DotNetworkDomain } from '@/engine/types';
 
 /**
@@ -27,7 +33,28 @@ export interface EnumFilterField {
    * per item). `false` when it is a simple `enum` (single value per item).
    */
   isArray: boolean;
+  /** i18n key per option value, e.g. a boolean's "true" → Yes. */
+  optionLabels?: Record<string, string>;
+  /** Panel control; absent means `chips`. */
+  widget?: 'chips' | 'radio' | 'toggle' | 'range';
+  range?: RangeFilter;
+  includeValues?: string[];
 }
+
+/** Display text for one option of a filter field, translated via `t`. */
+export function filterOptionLabel(
+  field: Pick<EnumFilterField, 'optionLabels'>,
+  option: string,
+  t: (key: string) => string,
+): string {
+  const key = field.optionLabels?.[option];
+  return key ? t(key) : option;
+}
+
+const BOOLEAN_OPTION_LABELS: Record<string, string> = {
+  true: 'filters.option_yes',
+  false: 'filters.option_no',
+};
 
 // ─── Humanization ─────────────────────────────────────────────────────────────
 
@@ -55,29 +82,43 @@ export function humanizeKey(key: string): string {
  *   - Any other shape is ignored.
  */
 function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
-  if (!schema.properties || typeof schema.properties !== 'object') return [];
-
   const fields: EnumFilterField[] = [];
 
-  for (const [key, rawProp] of Object.entries(schema.properties)) {
-    // JSON Schema properties can be boolean (true/false) when using additionalProperties
-    if (typeof rawProp !== 'object' || rawProp === null) continue;
-    const prop = rawProp as RJSFSchema & { private?: boolean };
+  // Same private/`filterable` rule as the API facet guards.
+  for (const { field: key, property, range, includeValues } of getFilterFieldEntries(schema)) {
+    const prop = property as RJSFSchema;
+    const label = typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key);
 
-    // Defense-in-depth (#203 Task 7, restated #394): never offer a
-    // `private: true` field as a filter option, even though the server's
-    // facet guard (`resolveAllowedFacetFields`) would silently drop any
-    // filter request on one anyway. No currently-configured network schema
-    // declares both `private: true` and `enum` on the same property
-    // (verified across every `examples/schemas/*/network.json`), so this
-    // doesn't change any network's filter options today — it just stops a
-    // future schema edit from silently surfacing an inert-but-visible filter
-    // for a private field. This is the ONLY gate now — #394 removed the
-    // separate `filterable: true` marker that used to additionally restrict
-    // the map's offered/sent facets; every declared, non-private enum field
-    // is a filter again in both views. Proper schema-driven search/filter
-    // declaration is tracked in #360.
-    if (prop.private === true) continue;
+    // `x-range-filter`: the options are the schema's bucket labels.
+    if (range) {
+      fields.push({
+        key,
+        label: range.title ?? label,
+        options: range.buckets.map((bucket) => bucket.label),
+        isArray: false,
+        widget: 'range',
+        range,
+      });
+      continue;
+    }
+
+    // Booleans only when explicitly marked; the toggle filters to `true` only.
+    if (prop.type === 'boolean') {
+      if ((property as { filterable?: unknown }).filterable === true) {
+        fields.push({
+          key,
+          label,
+          options: ['true'],
+          isArray: false,
+          optionLabels: BOOLEAN_OPTION_LABELS,
+          widget: 'toggle',
+        });
+      }
+      continue;
+    }
+
+    const enumWidget = includeValues ? ('radio' as const) : ('chips' as const);
+    const enumExtras = includeValues ? { includeValues } : {};
 
     // Single-value enum: string or number property with a top-level `enum` array
     if (Array.isArray(prop.enum) && prop.enum.length > 0) {
@@ -85,12 +126,7 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
         .filter((v): v is string | number => typeof v === 'string' || typeof v === 'number')
         .map(String);
       if (options.length > 0) {
-        fields.push({
-          key,
-          label: typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key),
-          options,
-          isArray: false,
-        });
+        fields.push({ key, label, options, isArray: false, widget: enumWidget, ...enumExtras });
       }
       continue;
     }
@@ -108,12 +144,7 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
           .filter((v): v is string | number => typeof v === 'string' || typeof v === 'number')
           .map(String);
         if (options.length > 0) {
-          fields.push({
-            key,
-            label: typeof prop.title === 'string' && prop.title.trim() ? prop.title.trim() : humanizeKey(key),
-            options,
-            isArray: true,
-          });
+          fields.push({ key, label, options, isArray: true, widget: enumWidget, ...enumExtras });
         }
       }
     }
@@ -139,7 +170,16 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
   // Map from key → accumulated field (mutable during the loop)
   const byKey = new Map<
     string,
-    { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }
+    {
+      label: string;
+      optionsSet: Set<string>;
+      options: string[];
+      isArray: boolean;
+      optionLabels?: Record<string, string>;
+      widget: EnumFilterField['widget'];
+      range?: RangeFilter;
+      includeValues?: string[];
+    }
   >();
 
   for (const schema of schemas) {
@@ -151,6 +191,10 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
           optionsSet: new Set(field.options),
           options: [...field.options],
           isArray: field.isArray,
+          optionLabels: field.optionLabels,
+          widget: field.widget,
+          range: field.range,
+          includeValues: field.includeValues,
         });
       } else {
         // Union options, preserving insertion order, deduping by value
@@ -164,21 +208,25 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
     }
   }
 
-  return Array.from(byKey.entries()).map(([key, { label, options, isArray }]) => ({
-    key,
-    label,
-    options,
-    isArray,
-  }));
+  return Array.from(byKey.entries()).map(
+    ([key, { label, options, isArray, optionLabels, widget, range, includeValues }]) => ({
+      key,
+      label,
+      options,
+      isArray,
+      widget,
+      ...(optionLabels ? { optionLabels } : {}),
+      ...(range ? { range } : {}),
+      ...(includeValues ? { includeValues } : {}),
+    }),
+  );
 }
 
 /**
  * Convenience helper: extract all item_schemas from the given visible domains,
  * then derive enum filter fields. Both the map and list views use this same
- * full set — every declared, non-private enum field is a filter in both
- * (#394 dropped the `filterable: true` gate that used to additionally
- * restrict what the map offered/sent; proper schema-driven search/filter
- * declaration is tracked in #360).
+ * set: the schema's `filterable: true` fields when it marks any, else every
+ * declared, non-private enum field (infra#57; see `getFilterFieldEntries`).
  */
 export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): EnumFilterField[] {
   const schemas: RJSFSchema[] = [];
@@ -234,25 +282,52 @@ export function itemPassesEnumFilters(
 
     const itemValue = data[key];
     const meta = fieldMeta.get(key);
+
+    if (meta?.range) {
+      if (!itemOverlapsRangeBuckets(data, key, meta.range, selectedValues)) return false;
+      continue;
+    }
+
     const isArray = meta?.isArray ?? Array.isArray(itemValue);
+    const wanted = meta ? expandFilterValues(meta, selectedValues).map(String) : selectedValues;
 
     if (isArray) {
       // Array field: passes if any of the item's values is in the selected set
       if (!Array.isArray(itemValue)) {
         // Malformed data — treat the single value as a one-element array
         const strVal = String(itemValue);
-        if (!selectedValues.includes(strVal)) return false;
+        if (!wanted.includes(strVal)) return false;
       } else {
         const itemArr = (itemValue as unknown[]).map(String);
-        const intersects = itemArr.some((v) => selectedValues.includes(v));
+        const intersects = itemArr.some((v) => wanted.includes(v));
         if (!intersects) return false;
       }
     } else {
       // Single-value field: passes if the item's value is in the selected set
       const strVal = itemValue === null || itemValue === undefined ? '' : String(itemValue);
-      if (!selectedValues.includes(strVal)) return false;
+      if (!wanted.includes(strVal)) return false;
     }
   }
 
   return true;
+}
+
+function numericValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** Same overlap rule as the server: the item's [min, max] overlaps a selected bucket. */
+function itemOverlapsRangeBuckets(
+  data: Record<string, unknown>,
+  key: string,
+  range: RangeFilter,
+  selectedLabels: string[],
+): boolean {
+  const itemMin = numericValue(data[key]);
+  const itemMax = numericValue(data[range.maxField]);
+  return resolveRangeBuckets(range, selectedLabels).some(
+    (bucket) =>
+      (bucket.max === undefined || (itemMin !== undefined && itemMin <= bucket.max)) &&
+      (bucket.min === undefined || (itemMax !== undefined && itemMax >= bucket.min)),
+  );
 }

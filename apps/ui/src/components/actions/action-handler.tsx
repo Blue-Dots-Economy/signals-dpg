@@ -8,6 +8,7 @@ import { ActionAbortedError } from '@/lib/action-abort';
 import { BulkSingleError } from '@/lib/bulk';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import { toast } from 'sonner';
+import { openExternalApply } from '@/lib/external-apply';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import {
@@ -66,6 +67,8 @@ interface ActionHandlerProps {
    * — so the guardian OTP isn't dispatched until the ward opts in.
    */
   guardianConfirmRequired?: boolean;
+  /** Partner-portal URL for this action + target (opened instead); null = in-app. */
+  resolveExternalUrl?: (type: string, targetItemId: string) => string | null;
 }
 
 /** State for a pending action that's mid guardian-OTP challenge/response. */
@@ -76,7 +79,12 @@ interface GuardianChallenge {
   formData: Record<string, unknown>;
 }
 
-export function ActionHandler({ children, onActionSubmit, guardianConfirmRequired }: ActionHandlerProps) {
+export function ActionHandler({
+  children,
+  onActionSubmit,
+  guardianConfirmRequired,
+  resolveExternalUrl,
+}: Readonly<ActionHandlerProps>) {
   const { t } = useTranslation();
   const { signOut } = useAuth();
   const [activeAction, setActiveAction] = React.useState<{
@@ -98,6 +106,12 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
 
   const triggerAction = React.useCallback(
     (type: string, schema: DotActionSchema, targetItemId: string) => {
+      // Synchronous: window.open must run inside the click or it is blocked.
+      const externalUrl = resolveExternalUrl?.(type, targetItemId);
+      if (externalUrl) {
+        openExternalApply(externalUrl);
+        return;
+      }
       if (!schema.requirement_schema) {
         // No form needed, submit directly
         handleDirectSubmit(type, schema, targetItemId);
@@ -105,7 +119,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
       }
       setActiveAction({ type, schema, targetItemId });
     },
-    []
+    [resolveExternalUrl]
   );
 
   /**

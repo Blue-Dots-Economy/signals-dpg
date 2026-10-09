@@ -63,6 +63,31 @@ describe('buildSignalsSearchRequest — envelope construction', () => {
     ]);
   });
 
+  it('maps a range facet to lte on the field and gte on its max field', () => {
+    const req = buildSignalsSearchRequest({
+      ...baseInput,
+      filters: [
+        { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 25000, max: 50000 } },
+      ],
+    });
+
+    expect(req.message.intent.filters).toEqual([
+      { op: 'lte', target: 'item_state.salaryMin', value: 50000 },
+      { op: 'gte', target: 'item_state.salaryMax', value: 25000 },
+    ]);
+  });
+
+  it('sends no clause for an open range bound', () => {
+    const req = buildSignalsSearchRequest({
+      ...baseInput,
+      filters: [{ field: 'salaryMin', values: ['25+ LPA'], range: { maxField: 'salaryMax', min: 208333 } }],
+    });
+
+    expect(req.message.intent.filters).toEqual([
+      { op: 'gte', target: 'item_state.salaryMax', value: 208333 },
+    ]);
+  });
+
   it('maps a multi-value array-valued facet to op "contains_any"', () => {
     const req = buildSignalsSearchRequest({
       ...baseInput,

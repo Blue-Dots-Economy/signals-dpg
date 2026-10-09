@@ -37,6 +37,8 @@ export interface SignalsSearchFacetInput {
    * silently return zero results if it used `in`.
    */
   arrayValued?: boolean;
+  /** `x-range-filter` bucket: matches `field <= max` and `maxField >= min`; either may be open. */
+  range?: { maxField: string; min?: number; max?: number };
 }
 
 export interface SearchSignalsInput {
@@ -97,6 +99,8 @@ const SignalsSearchFilterClauseSchema = z.object({
   target: z.string(),
   value: z.unknown(),
 });
+
+type SignalsSearchFilterClause = z.infer<typeof SignalsSearchFilterClauseSchema>;
 
 // Two ops, discriminated on `op` (contract §1.5). A DISCRIMINATED union, not
 // a plain one, so adding a third op makes the compiler point at every site
@@ -247,17 +251,36 @@ function clampOffset(offset: number): number {
   return Math.max(Math.trunc(offset), 0);
 }
 
-function buildFilterClause(facet: SignalsSearchFacetInput) {
+// An open bound adds no clause.
+function buildRangeClauses(
+  field: string,
+  range: NonNullable<SignalsSearchFacetInput['range']>
+): SignalsSearchFilterClause[] {
+  return [
+    ...(range.max === undefined
+      ? []
+      : [{ op: 'lte' as const, target: `item_state.${field}`, value: range.max }]),
+    ...(range.min === undefined
+      ? []
+      : [{ op: 'gte' as const, target: `item_state.${range.maxField}`, value: range.min }]),
+  ];
+}
+
+function buildFilterClauses(facet: SignalsSearchFacetInput): SignalsSearchFilterClause[] {
+  if (facet.range) return buildRangeClauses(facet.field, facet.range);
+
   // Array fields → `contains_any` regardless of how many values are selected
   // (see SignalsSearchFacetInput.arrayValued): a single-value selection on an
   // array facet must NOT use `in`, which would never match.
   const useContainsAny = Boolean(facet.arrayValued);
 
-  return {
-    op: useContainsAny ? ('contains_any' as const) : ('in' as const),
-    target: `item_state.${facet.field}`,
-    value: facet.values,
-  };
+  return [
+    {
+      op: useContainsAny ? ('contains_any' as const) : ('in' as const),
+      target: `item_state.${facet.field}`,
+      value: facet.values,
+    },
+  ];
 }
 
 /**
@@ -323,7 +346,7 @@ function buildOrderingCenter(input: SearchSignalsInput) {
 export function buildSignalsSearchRequest(
   input: SearchSignalsInput
 ): SignalsSearchRequest {
-  const filters = (input.filters ?? []).map(buildFilterClause);
+  const filters = (input.filters ?? []).flatMap(buildFilterClauses);
   const spatial = buildSpatialClause(input);
   const orderingCenter = buildOrderingCenter(input);
 

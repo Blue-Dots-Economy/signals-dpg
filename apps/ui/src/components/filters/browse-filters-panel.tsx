@@ -9,7 +9,7 @@ import { DrawerTitle } from '@/components/ui/drawer';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 import type { DotNetworkDomain, ViewMode } from '@/engine/types';
-import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import { filterOptionLabel, getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import type { EnumFilterField } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
 
@@ -85,6 +85,43 @@ function Chip({ label, selected, onToggle, title, ariaLabel }: Readonly<ChipProp
   );
 }
 
+// ─── Toggle switch (a `filterable` boolean) ───────────────────────────────────
+
+interface ToggleRowProps {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function ToggleRow({ label, checked, onChange }: Readonly<ToggleRowProps>) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+        {label}
+      </span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border transition-colors duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1',
+          checked ? 'border-primary bg-primary' : 'border-border bg-muted',
+        )}
+      >
+        <span
+          className={cn(
+            'inline-block size-3.5 rounded-full bg-background shadow transition-transform duration-150',
+            checked ? 'translate-x-4' : 'translate-x-0.5',
+          )}
+        />
+      </button>
+    </div>
+  );
+}
+
 // ─── Filter group (always expanded, chip-based) ───────────────────────────────
 
 interface FilterGroupProps {
@@ -134,11 +171,7 @@ export function BrowseFiltersPanel({
   // (defaults to the visible domains) so the filters can reflect the
   // counterpart being browsed independently of the domain chip selector.
   //
-  // #394: the MAP and the LIST now offer the SAME full set of declared,
-  // non-private enum fields (restoring pre-Map-PR behavior) — the server's
-  // facet guard (`resolveAllowedFacetFields`) applies every one of them, not
-  // just a `filterable: true`-marked subset (that marker has been removed;
-  // see #360 for the proper long-term schema-driven declaration).
+  // Same field set for map and list, and the same rule as the server's facet guard.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
     () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
     [filterFieldDomains, domains],
@@ -161,11 +194,7 @@ export function BrowseFiltersPanel({
     onFieldsChange({});
   };
 
-  const toggleEnumValue = (fieldKey: string, value: string) => {
-    const current = selectedFields[fieldKey] ?? [];
-    const next = current.includes(value)
-      ? current.filter((v) => v !== value)
-      : [...current, value];
+  const setFieldValues = (fieldKey: string, next: string[]) => {
     const updated = { ...selectedFields };
     if (next.length === 0) {
       delete updated[fieldKey];
@@ -174,6 +203,15 @@ export function BrowseFiltersPanel({
     }
     onFieldsChange(updated);
   };
+
+  const toggleEnumValue = (fieldKey: string, value: string) => {
+    const current = selectedFields[fieldKey] ?? [];
+    setFieldValues(
+      fieldKey,
+      current.includes(value) ? current.filter((v) => v !== value) : [...current, value],
+    );
+  };
+
 
   // Nothing to filter — don't render the pill at all. Facets are now the only
   // group (domain moved to the toolbar's DomainControl), so this is the sole
@@ -263,6 +301,58 @@ export function BrowseFiltersPanel({
         {enumFilterFields.map((field) => {
           const fieldSelected = selectedFields[field.key] ?? [];
 
+          if (field.widget === 'toggle') {
+            return (
+              <ToggleRow
+                key={field.key}
+                label={field.label}
+                checked={fieldSelected.includes('true')}
+                onChange={(checked) => setFieldValues(field.key, checked ? ['true'] : [])}
+              />
+            );
+          }
+
+          if (field.widget === 'radio') {
+            return (
+              <div key={field.key} className="space-y-2" role="radiogroup" aria-label={field.label}>
+                <span className="block text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  {field.label}
+                </span>
+                {field.options.map((option) => (
+                  <label key={option} className="flex cursor-pointer items-center gap-2 text-xs">
+                    <input
+                      type="radio"
+                      name={`filter-${field.key}`}
+                      className="size-3.5 cursor-pointer accent-primary"
+                      checked={fieldSelected.includes(option)}
+                      onChange={() => setFieldValues(field.key, [option])}
+                      onClick={() => {
+                        if (fieldSelected.includes(option)) setFieldValues(field.key, []);
+                      }}
+                    />
+                    <span>{filterOptionLabel(field, option, t)}</span>
+                  </label>
+                ))}
+              </div>
+            );
+          }
+
+          if (field.widget === 'range') {
+            return (
+              <FilterGroup key={field.key} title={field.label}>
+                {field.options.map((option) => (
+                  <Chip
+                    key={option}
+                    label={option}
+                    selected={fieldSelected.includes(option)}
+                    onToggle={() => toggleEnumValue(field.key, option)}
+                    ariaLabel={`Filter by ${field.label}: ${option}`}
+                  />
+                ))}
+              </FilterGroup>
+            );
+          }
+
           // Many options → compact searchable dropdown; few → inline chips.
           if (field.options.length > CHIP_THRESHOLD) {
             return (
@@ -281,10 +371,10 @@ export function BrowseFiltersPanel({
               {field.options.map((option) => (
                 <Chip
                   key={option}
-                  label={option}
+                  label={filterOptionLabel(field, option, t)}
                   selected={fieldSelected.includes(option)}
                   onToggle={() => toggleEnumValue(field.key, option)}
-                  ariaLabel={`Filter by ${field.label}: ${option}`}
+                  ariaLabel={`Filter by ${field.label}: ${filterOptionLabel(field, option, t)}`}
                 />
               ))}
             </FilterGroup>

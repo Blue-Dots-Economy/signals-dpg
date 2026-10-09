@@ -1,7 +1,13 @@
 import {
+  expandFilterValues,
   getDomainItemSchema,
   getDomainItemTypes,
+  getFilterFieldEntries,
+  isBooleanProperty,
+  resolveRangeBuckets,
+  type FilterFieldEntry,
   type NetworkConfigDocument,
+  type RangeFilterBucket,
 } from '@dpg/schemas';
 import type {
   FacetValue,
@@ -44,10 +50,45 @@ export function resolveAllowedFacetFields(
   return allowed;
 }
 
+/** Fields a caller may filter on (infra#57 `filterable` rule, via `getFilterFieldEntries`). */
+export function resolveFilterableFacetFields(
+  itemSchema: Record<string, unknown>
+): Map<string, { arrayValued: boolean; booleanValued: boolean; entry: FilterFieldEntry }> {
+  const allowed = new Map<
+    string,
+    { arrayValued: boolean; booleanValued: boolean; entry: FilterFieldEntry }
+  >();
+  for (const entry of getFilterFieldEntries(itemSchema)) {
+    allowed.set(entry.field, {
+      arrayValued: entry.property.type === 'array',
+      booleanValued: isBooleanProperty(entry.property),
+      entry,
+    });
+  }
+  return allowed;
+}
+
+// signals-search can't OR clauses, so several buckets become one envelope range;
+// non-adjacent buckets also match the gap between them (the native path is exact).
+function bucketEnvelope(buckets: RangeFilterBucket[]): { min?: number; max?: number } {
+  const mins = buckets.map((bucket) => bucket.min);
+  const maxes = buckets.map((bucket) => bucket.max);
+  const min = mins.includes(undefined) ? undefined : Math.min(...(mins as number[]));
+  const max = maxes.includes(undefined) ? undefined : Math.max(...(maxes as number[]));
+  return { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
+}
+
+function toBooleanFacetValue(value: FacetValue): FacetValue {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}
+
 /**
  * Server-resolved private/undeclared-facet guard for the discover BFF (#203).
  * Drops any client-supplied filter whose field is not a declared, non-private
- * facet on the network config's item schema — the client's field list is
+ * (and, where the schema uses the marker, `filterable: true`) facet on the
+ * network config's item schema — the client's field list is
  * never trusted. Defense-in-depth: `item_state` is already the masked public
  * projection, but undeclared fields (typos, fields dropped from a newer
  * schema, etc.) must not reach signals-search either.
@@ -63,15 +104,39 @@ export function resolveAllowedFacetFilters(
     domain,
     itemType
   ) as Record<string, unknown>;
-  const allowed = resolveAllowedFacetFields(itemSchema);
+  const allowed = resolveFilterableFacetFields(itemSchema);
 
-  return selections
-    .filter((selection) => allowed.has(selection.field))
-    .map((selection) => ({
-      field: selection.field,
-      values: selection.values,
-      arrayValued: allowed.get(selection.field)?.arrayValued,
-    }));
+  return selections.flatMap((selection): SignalsSearchFacetInput[] => {
+    const meta = allowed.get(selection.field);
+    if (!meta) return [];
+
+    const { range } = meta.entry;
+    if (range) {
+      // No declared bucket: send the labels as values so it matches nothing, not everything.
+      const buckets = resolveRangeBuckets(range, selection.values);
+      if (buckets.length === 0) {
+        return [{ field: selection.field, values: selection.values, arrayValued: false }];
+      }
+      return [
+        {
+          field: selection.field,
+          values: buckets.map((bucket) => bucket.label),
+          range: { maxField: range.maxField, ...bucketEnvelope(buckets) },
+        },
+      ];
+    }
+
+    const values = meta.booleanValued
+      ? selection.values.map(toBooleanFacetValue)
+      : selection.values;
+    return [
+      {
+        field: selection.field,
+        values: expandFilterValues(meta.entry, values),
+        arrayValued: meta.arrayValued,
+      },
+    ];
+  });
 }
 
 /**

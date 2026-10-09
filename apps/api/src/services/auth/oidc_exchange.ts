@@ -58,6 +58,8 @@ export function buildAuthorizeUrl(input: {
   state: string;
   nonce: string;
   challenge: string;
+  /** Keycloak identity provider to skip straight to (`kc_idp_hint`). */
+  idpHint?: string;
 }): string {
   const url = new URL(`${realmUrl(keycloakConfig.base_url)}/auth`);
   url.searchParams.set('client_id', keycloakConfig.ui_client_id);
@@ -68,6 +70,7 @@ export function buildAuthorizeUrl(input: {
   url.searchParams.set('nonce', input.nonce);
   url.searchParams.set('code_challenge', input.challenge);
   url.searchParams.set('code_challenge_method', 'S256');
+  if (input.idpHint) url.searchParams.set('kc_idp_hint', input.idpHint);
   return url.toString();
 }
 
@@ -171,6 +174,28 @@ async function postToken(body: URLSearchParams): Promise<OidcTokens> {
  * is likewise transient.
  */
 /**
+ * A string claim from an id token's payload, or null. Decodes without
+ * verifying: the token came straight from Keycloak's token endpoint over the
+ * back channel, and callers use this for binding checks (nonce) and bookkeeping
+ * (sid), never to authorise a request.
+ */
+export function idTokenClaim(idToken: string | undefined, name: string): string | null {
+  if (!idToken) return null;
+  const payload = idToken.split('.')[1];
+  if (!payload) return null;
+  try {
+    const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as Record<
+      string,
+      unknown
+    >;
+    const value = claims[name];
+    return typeof value === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The `nonce` claim carried by an id token, or null when there is none.
  *
  * The token comes straight from Keycloak's token endpoint over TLS, so the
@@ -178,17 +203,7 @@ async function postToken(body: URLSearchParams): Promise<OidcTokens> {
  * re-verifying a signature the channel has established.
  */
 export function idTokenNonce(idToken: string | undefined): string | null {
-  if (!idToken) return null;
-  const payload = idToken.split('.')[1];
-  if (!payload) return null;
-  try {
-    const claims = JSON.parse(
-      Buffer.from(payload, 'base64url').toString('utf8')
-    ) as { nonce?: unknown };
-    return typeof claims.nonce === 'string' ? claims.nonce : null;
-  } catch {
-    return null;
-  }
+  return idTokenClaim(idToken, 'nonce');
 }
 
 export class OidcExchangeError extends Error {

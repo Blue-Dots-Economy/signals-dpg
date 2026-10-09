@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { DotNetworkDomain } from '@/engine/types';
-import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import { filterOptionLabel, getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
 import {
   ACTION_STATUS_FILTERS,
@@ -86,7 +86,11 @@ export function ActionFiltersSheet({
 }: Readonly<ActionFiltersSheetProps>) {
   const { t } = useTranslation();
 
-  const enumFilterFields = React.useMemo(() => getEnumFilterFieldsForDomains(domains), [domains]);
+  // The actions list can't resolve range buckets.
+  const enumFilterFields = React.useMemo(
+    () => getEnumFilterFieldsForDomains(domains).filter((field) => field.widget !== 'range'),
+    [domains],
+  );
 
   const toggleActionType = (value: ActionTypeFilter) => {
     onActionTypesChange(
@@ -216,9 +220,9 @@ export function ActionFiltersSheet({
                       <Checkbox
                         checked={fieldSelected.includes(option)}
                         onCheckedChange={() => toggleFacetValue(field.key, option)}
-                        aria-label={option}
+                        aria-label={filterOptionLabel(field, option, t)}
                       />
-                      <span>{option}</span>
+                      <span>{filterOptionLabel(field, option, t)}</span>
                     </label>
                   ))}
                 </div>

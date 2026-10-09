@@ -69,6 +69,23 @@ describe('public_rate_limit', () => {
     expect((reply.body as { error: string }).error).toBe('RATE_LIMITED');
   });
 
+  it('hands a limited request to onLimited instead of the JSON 429', async () => {
+    rlState.count = 101;
+    const reply = makeReply();
+    const onLimited = vi.fn((_req: FastifyRequest, r: FastifyReply) => r);
+
+    await public_rate_limit('demo', 100, 60, onLimited)(makeRequest(), reply);
+
+    expect(onLimited).toHaveBeenCalledTimes(1);
+    expect(reply.code).not.toHaveBeenCalled();
+  });
+
+  it('does not call onLimited under the cap', async () => {
+    const onLimited = vi.fn((_req: FastifyRequest, r: FastifyReply) => r);
+    await public_rate_limit('demo', 100, 60, onLimited)(makeRequest(), makeReply());
+    expect(onLimited).not.toHaveBeenCalled();
+  });
+
   it('allows the request exactly at the cap — the cap is inclusive', async () => {
     rlState.count = 100;
     const reply = makeReply();

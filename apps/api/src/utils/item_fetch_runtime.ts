@@ -1,6 +1,13 @@
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
+import {
+  expandFilterValues,
+  getFilterFieldEntries,
+  resolveRangeBuckets,
+  type FilterFieldEntry,
+  type RangeFilterBucket,
+} from '@dpg/schemas';
 import { decryptItemPrivate } from './item_decrypt';
 import { getNetworkConfigById } from '@/network_configs';
 import { splitLngRange } from '@/utils/lng_chunks';
@@ -36,11 +43,8 @@ export type ItemFetchFilters = {
    * went through an unguarded `item_state @> {...}` containment check
    * instead, which let a single-value filter enumerate a private/undeclared
    * field — #394 closed that hole by unifying both shapes onto this one
-   * guarded `= ANY` path, with no remaining unguarded branch. (There used to
-   * be an additional `filterable: true` marker gating this further; a prior
-   * #394 change dropped it — every declared, non-private field is a filter
-   * again. The proper schema-driven search/filter declaration is tracked in
-   * #360.)
+   * guarded `= ANY` path, with no remaining unguarded branch. infra#57
+   * markers narrow and extend this — see `resolveAllowedFacetFields` below.
    */
   item_state?: Record<string, unknown>;
   /**
@@ -125,11 +129,8 @@ const itemResponseColumns = {
  * from the request — a client cannot expand its own allowed facet set by
  * naming more fields.
  *
- * #394: this used to additionally require `filterable: true` (a per-field
- * marker in network.json). That gate has been removed — every declared,
- * non-private enum field is a filter again in both the map and list views
- * (restoring pre-Map-PR behavior). The `private !== true` check below is the
- * enumeration guard and MUST stay: it is the only thing standing between a
+ * infra#57: narrowed to `filterable: true` fields when the schema marks any.
+ * The `private !== true` check below is the enumeration guard and MUST stay: it is the only thing standing between a
  * client and using found/not-found responses to enumerate a private field's
  * values. The proper long-term schema-driven search/filter declaration is
  * tracked in #360 — this function is the code to revisit when that lands.
@@ -142,8 +143,8 @@ const itemResponseColumns = {
 async function resolveAllowedFacetFields(
   networkId: string,
   domain: string
-): Promise<Set<string>> {
-  const allowed = new Set<string>();
+): Promise<Map<string, FilterFieldEntry>> {
+  const allowed = new Map<string, FilterFieldEntry>();
 
   let networkConfig;
   try {
@@ -158,17 +159,9 @@ async function resolveAllowedFacetFields(
   }
 
   for (const schema of Object.values(domainConfig.item_schemas)) {
-    const properties = (schema as { properties?: unknown }).properties;
-    if (!properties || typeof properties !== 'object') continue;
-
-    for (const [field, definition] of Object.entries(
-      properties as Record<string, unknown>
-    )) {
-      if (!definition || typeof definition !== 'object') continue;
-      const declared = definition as { private?: unknown };
-      if (declared.private !== true) {
-        allowed.add(field);
-      }
+    // First item_type to declare a field wins.
+    for (const entry of getFilterFieldEntries(schema)) {
+      if (!allowed.has(entry.field)) allowed.set(entry.field, entry);
     }
   }
 
@@ -201,6 +194,20 @@ async function hasSearchIndexRows(
     ? (result as Array<{ has_rows: boolean }>)
     : ((result as { rows?: Array<{ has_rows: boolean }> }).rows ?? []);
   return rows[0]?.has_rows === true;
+}
+
+// CASE, not AND: Postgres may run the cast before the type check.
+function numericStateField(field: string) {
+  return sql`(CASE WHEN jsonb_typeof(${items.item_state} -> ${field}) = 'number' THEN (${items.item_state} ->> ${field})::numeric END)`;
+}
+
+/** Item's [minField, maxField] overlaps the bucket; a missing value never matches. */
+function rangeOverlapClause(minField: string, maxField: string, bucket: RangeFilterBucket) {
+  const parts = [
+    ...(bucket.max === undefined ? [] : [sql`${numericStateField(minField)} <= ${bucket.max}`]),
+    ...(bucket.min === undefined ? [] : [sql`${numericStateField(maxField)} >= ${bucket.min}`]),
+  ];
+  return sql`(${sql.join(parts, sql.raw(' AND '))})`;
 }
 
 async function buildWhereClause(
@@ -273,25 +280,43 @@ async function buildWhereClause(
         filters.item_domain
       );
 
-      for (const [field, values] of facetEntries) {
-        if (!allowedFacetFields.has(field)) {
+      for (const [field, requestedValues] of facetEntries) {
+        const entry = allowedFacetFields.get(field);
+        if (!entry) {
           log?.debug(
             {
               item_network: filters.item_network,
               item_domain: filters.item_domain,
               field,
             },
-            'Dropping item_state facet filter: field is not declared and non-private for this domain'
+            'Dropping item_state facet filter: field is not a declared, non-private filter field for this domain'
           );
           continue;
         }
 
-        if (values.length === 0) {
+        if (requestedValues.length === 0) {
           // An explicit empty value set matches nothing — distinct from
           // "field not present", which applies no restriction at all.
           conditions.push(sql`false`);
           continue;
         }
+
+        const { range } = entry;
+        if (range) {
+          // Values are bucket labels; undeclared labels match nothing.
+          const buckets = resolveRangeBuckets(range, requestedValues);
+          conditions.push(
+            buckets.length === 0
+              ? sql`false`
+              : sql`(${sql.join(
+                  buckets.map((bucket) => rangeOverlapClause(field, range.maxField, bucket)),
+                  sql.raw(' OR ')
+                )})`
+          );
+          continue;
+        }
+
+        const values = expandFilterValues(entry, requestedValues);
 
         const valuesArrayLiteral = sql.join(
           values.map((value) => sql`${value}`),

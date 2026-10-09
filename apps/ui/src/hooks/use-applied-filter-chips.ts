@@ -23,6 +23,8 @@ export interface UseAppliedFilterChipsInput {
    * resolved title ("Years of Work Experience") for the same field.
    */
   fieldLabels: Record<string, string>;
+  /** Translated option text per field, e.g. a boolean's "true" → Yes. */
+  optionLabels?: Record<string, Record<string, string>>;
   area: BrowseArea;
   setArea: (next: BrowseArea) => void;
 }
@@ -63,6 +65,7 @@ export function useAppliedFilterChips(
     activeFieldFilters,
     setFieldFilters,
     fieldLabels,
+    optionLabels,
     area,
     setArea,
   } = input;
@@ -78,13 +81,15 @@ export function useAppliedFilterChips(
       out.push({
         kind: 'facet',
         id: `facet:${field}`,
-        label: `${fieldLabels[field] ?? field}: ${values.join(', ')}`,
+        label: `${fieldLabels[field] ?? field}: ${values
+          .map((value) => optionLabels?.[field]?.[value] ?? value)
+          .join(', ')}`,
         removable: true,
       });
     }
 
     return out;
-  }, [search, activeFieldFilters, fieldLabels]);
+  }, [search, activeFieldFilters, fieldLabels, optionLabels]);
 
   const onRemove = React.useCallback(
     (chip: AppliedChip) => {

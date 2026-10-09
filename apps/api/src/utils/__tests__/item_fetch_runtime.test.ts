@@ -109,6 +109,9 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
   },
 }));
 
+// The real barrel needs the unmocked `@dpg/database`.
+vi.mock('@dpg/schemas', () => import('../../../../../packages/schemas/src/filter_fields'));
+
 vi.mock('@/network_configs', () => ({
   getNetworkConfigById: (...a: unknown[]) => getNetworkConfigById(...a),
 }));
@@ -339,7 +342,7 @@ describe('item_state facet guard', () => {
     expect(log.debug).toHaveBeenCalledTimes(1);
     expect(log.debug).toHaveBeenCalledWith(
       { item_network: 'blue_dot', item_domain: 'student', field: 'phone' },
-      'Dropping item_state facet filter: field is not declared and non-private for this domain'
+      'Dropping item_state facet filter: field is not a declared, non-private filter field for this domain'
     );
   });
 
@@ -384,6 +387,77 @@ describe('item_state facet guard', () => {
 
     expect(getNetworkConfigById).not.toHaveBeenCalled();
     expect(conditions()).toHaveLength(2);
+  });
+});
+
+// --- range and include-value filters (infra#57) ------------------------
+
+describe('range and include-value filters', () => {
+  const jobs = { ...base, item_domain: 'provider' };
+
+  beforeEach(() => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [
+        {
+          id: 'provider',
+          item_schemas: {
+            'job_posting_1.0': {
+              properties: {
+                salaryMin: {
+                  type: 'number',
+                  filterable: true,
+                  'x-range-filter': {
+                    max_field: 'salaryMax',
+                    buckets: [
+                      { label: '0-3 LPA', min: 0, max: 25000 },
+                      { label: '25+ LPA', min: 208333 },
+                    ],
+                  },
+                },
+                salaryMax: { type: 'number' },
+                genderPreference: {
+                  type: 'string',
+                  filterable: true,
+                  'x-filter-include-values': ['Any'],
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+  });
+
+  it('matches a range bucket by overlap on the min and max fields', async () => {
+    await countLocalItems({ ...jobs, item_state: { salaryMin: ['0-3 LPA'] } });
+
+    const text = whereText();
+    expect(text).toContain("jsonb_typeof(items.item_state -> 'salaryMin') = 'number'");
+    expect(text).toMatch(/'salaryMin'\)::numeric END\) <= 25000/);
+    expect(text).toMatch(/'salaryMax'\)::numeric END\) >= 0/);
+  });
+
+  it('ORs several buckets and leaves an open bound out', async () => {
+    await countLocalItems({ ...jobs, item_state: { salaryMin: ['0-3 LPA', '25+ LPA'] } });
+
+    const text = whereText();
+    expect(text).toMatch(/>= 0\) OR \(.*>= 208333\)\)$/);
+    expect(text).not.toContain('<= 208333');
+  });
+
+  it('matches nothing when no label is a declared bucket', async () => {
+    await countLocalItems({ ...jobs, item_state: { salaryMin: ['30000'] } });
+
+    expect(whereText()).toContain('false');
+    expect(whereText()).not.toContain('numeric');
+  });
+
+  it('adds the include values to an enum selection', async () => {
+    await countLocalItems({ ...jobs, item_state: { genderPreference: ['Female'] } });
+
+    expect(whereText()).toContain(
+      "items.item_state ->> 'genderPreference' = ANY(ARRAY['Female', 'Any'])"
+    );
   });
 });
 

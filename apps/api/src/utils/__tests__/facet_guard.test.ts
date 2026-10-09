@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   resolveAllowedFacetFields,
   resolveAllowedFacetFilters,
+  resolveFilterableFacetFields,
   resolveTextSearchFields,
 } from '../facet_guard';
 
@@ -124,5 +125,125 @@ describe('resolveTextSearchFields (#394, moved from markers.ts for reuse by disc
 
   it('fails closed (empty array) for an undefined domain rather than throwing', () => {
     expect(resolveTextSearchFields(networkConfig, 'not_a_domain', 'profile_1.0')).toEqual([]);
+  });
+});
+
+// infra#57: a schema that marks any field `filterable: true` narrows the
+// facets a caller may filter on to the marked ones; text search is unaffected.
+describe('filterable marker (infra#57)', () => {
+  const jobSchema = {
+    type: 'object',
+    properties: {
+      natureOfJob: { type: 'string', enum: ['Full-time', 'Part-time'], filterable: true },
+      category: { type: 'string', enum: ['GEN', 'OBC'] },
+      isGovernmentJob: { type: 'boolean', filterable: true },
+      role: { type: 'string' },
+      phone: { type: 'string', private: true, filterable: true },
+    },
+  };
+  const jobNetwork = {
+    id: 'blue_dot',
+    domains: [{ id: 'provider', item_schemas: { 'job_posting_1.0': jobSchema } }],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  it('keeps only marked, non-private fields', () => {
+    expect([...resolveFilterableFacetFields(jobSchema).keys()]).toEqual([
+      'natureOfJob',
+      'isGovernmentJob',
+    ]);
+  });
+
+  it('keeps every non-private field when no field is marked', () => {
+    expect([...resolveFilterableFacetFields(itemSchema).keys()]).toEqual(['city', 'skills']);
+  });
+
+  it('drops a filter on an unmarked field', () => {
+    const out = resolveAllowedFacetFilters(jobNetwork, 'provider', 'job_posting_1.0', [
+      { field: 'natureOfJob', values: ['Full-time'] },
+      { field: 'category', values: ['GEN'] },
+      { field: 'phone', values: ['1'] },
+    ]);
+    expect(out.map((f) => f.field)).toEqual(['natureOfJob']);
+  });
+
+  it('sends a boolean facet as JSON booleans', () => {
+    const out = resolveAllowedFacetFilters(jobNetwork, 'provider', 'job_posting_1.0', [
+      { field: 'isGovernmentJob', values: ['true', 'false'] },
+    ]);
+    expect(out).toEqual([{ field: 'isGovernmentJob', values: [true, false], arrayValued: false }]);
+  });
+
+  it('leaves text search on every non-private field', () => {
+    expect(resolveTextSearchFields(jobNetwork, 'provider', 'job_posting_1.0').sort()).toEqual(
+      ['category', 'isGovernmentJob', 'natureOfJob', 'role'],
+    );
+  });
+});
+
+describe('range and include-value filters (infra#57)', () => {
+  const jobSchema = {
+    type: 'object',
+    properties: {
+      salaryMin: {
+        type: 'number',
+        filterable: true,
+        'x-range-filter': {
+          max_field: 'salaryMax',
+          buckets: [
+            { label: '0-3 LPA', min: 0, max: 25000 },
+            { label: '3-6 LPA', min: 25000, max: 50000 },
+            { label: '25+ LPA', min: 208333 },
+          ],
+        },
+      },
+      salaryMax: { type: 'number' },
+      genderPreference: {
+        type: 'string',
+        enum: ['Male', 'Female', 'Any'],
+        filterable: true,
+        'x-filter-include-values': ['Any'],
+      },
+    },
+  };
+  const jobNetwork = {
+    id: 'blue_dot',
+    domains: [{ id: 'provider', item_schemas: { 'job_posting_1.0': jobSchema } }],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+  const resolve = (selections: Array<{ field: string; values: string[] }>) =>
+    resolveAllowedFacetFilters(jobNetwork, 'provider', 'job_posting_1.0', selections);
+
+  it('turns a bucket label into the bucket bounds', () => {
+    expect(resolve([{ field: 'salaryMin', values: ['3-6 LPA'] }])).toEqual([
+      { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 25000, max: 50000 } },
+    ]);
+  });
+
+  it('keeps an open upper bound open', () => {
+    expect(resolve([{ field: 'salaryMin', values: ['25+ LPA'] }])[0].range).toEqual({
+      maxField: 'salaryMax',
+      min: 208333,
+    });
+  });
+
+  it('covers several buckets with one envelope', () => {
+    expect(resolve([{ field: 'salaryMin', values: ['0-3 LPA', '3-6 LPA'] }])[0].range).toEqual({
+      maxField: 'salaryMax',
+      min: 0,
+      max: 50000,
+    });
+  });
+
+  it('matches nothing, rather than everything, when no label is a declared bucket', () => {
+    expect(resolve([{ field: 'salaryMin', values: ['100 LPA'] }])).toEqual([
+      { field: 'salaryMin', values: ['100 LPA'], arrayValued: false },
+    ]);
+  });
+
+  it('adds the include values to an enum selection', () => {
+    expect(resolve([{ field: 'genderPreference', values: ['Female'] }])).toEqual([
+      { field: 'genderPreference', values: ['Female', 'Any'], arrayValued: false },
+    ]);
   });
 });
