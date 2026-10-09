@@ -23,6 +23,13 @@ export interface UseAppliedFilterChipsInput {
    * resolved title ("Years of Work Experience") for the same field.
    */
   fieldLabels: Record<string, string>;
+  /**
+   * Display text per option value, `field.key` → value → text (already
+   * translated), for fields whose stored values are not human-readable (a
+   * `filterable` boolean's `"true"`/`"false"` → Yes/No). Fields absent here
+   * print their values as-is.
+   */
+  optionLabels?: Record<string, Record<string, string>>;
   area: BrowseArea;
   setArea: (next: BrowseArea) => void;
 }
@@ -63,6 +70,7 @@ export function useAppliedFilterChips(
     activeFieldFilters,
     setFieldFilters,
     fieldLabels,
+    optionLabels,
     area,
     setArea,
   } = input;
@@ -78,13 +86,15 @@ export function useAppliedFilterChips(
       out.push({
         kind: 'facet',
         id: `facet:${field}`,
-        label: `${fieldLabels[field] ?? field}: ${values.join(', ')}`,
+        label: `${fieldLabels[field] ?? field}: ${values
+          .map((value) => optionLabels?.[field]?.[value] ?? value)
+          .join(', ')}`,
         removable: true,
       });
     }
 
     return out;
-  }, [search, activeFieldFilters, fieldLabels]);
+  }, [search, activeFieldFilters, fieldLabels, optionLabels]);
 
   const onRemove = React.useCallback(
     (chip: AppliedChip) => {

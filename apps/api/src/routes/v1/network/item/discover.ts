@@ -465,7 +465,8 @@ const discover_items_handler = async (
     // as a 5xx, so this falls back to the native, distance/recency-ordered
     // paged fetch `/network/item/fetch` uses — but now applying `q`/`filters`
     // natively too (value-match on public item_state + declared, non-private
-    // facet fields; #394 dropped the `filterable` gate — see
+    // facet fields, narrowed to `filterable: true` fields where the schema
+    // marks any (infra#57) — see
     // `resolveTextSearchFields`/`resolveAllowedFacetFilters` in `facet_guard.ts`,
     // applied by `buildWhereClause`), the same mechanisms `/markers` uses. So
     // only relevance RANKING is unavailable; `meta.source: 'native_fallback'`/

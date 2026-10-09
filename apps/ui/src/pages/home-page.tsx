@@ -57,7 +57,7 @@ import {
   computeOpenActionItemIds,
 } from '@/lib/profile-actions';
 import type { TFunction } from 'i18next';
-import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import { filterOptionLabel, getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   anchorItemIdForTarget,
@@ -1128,13 +1128,11 @@ export function HomePage() {
   // still applies `search` itself via `buildFilteredCardsForDomain` below;
   // the two are independent filters over the same query, not one deriving
   // from the other. `BrowseFiltersPanel`'s enum-field facets, by contrast,
-  // drive the map server-side directly via `activeFieldFilters` — #394
-  // removed the `filterable: true` gate that used to additionally restrict
-  // this to a network.json-marked subset; every declared, non-private enum
-  // field the panel offers (the same full set the list uses,
-  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
-  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
-  // long-term schema-driven search/filter declaration. The domain
+  // drive the map server-side directly via `activeFieldFilters` — every
+  // field the panel offers (the same set the list uses,
+  // `getEnumFilterFieldsForDomains`: declared, non-private, and
+  // `filterable: true` once the schema marks any, infra#57) is sent and
+  // applied by the server's facet guard (`resolveAllowedFacetFields`). The domain
   // multi-select below (a client-side array-membership check on the
   // already-fetched markers) remains client/list-only; free-text search, per
   // the comment above, is sent to the server for both the map and the list.
@@ -1620,6 +1618,17 @@ export function HomePage() {
   // can never disagree about what counts as a valid facet. Mirrors the
   // server's allowlist (declared + non-private) rather than the narrower
   // enum-only set the filter panel renders — see `resolveFacetFieldLabels`.
+  const facetOptionLabels = React.useMemo(
+    () =>
+      Object.fromEntries(
+        enumFilterFields.flatMap((f) =>
+          f.optionLabels
+            ? [[f.key, Object.fromEntries(f.options.map((o) => [o, filterOptionLabel(f, o, t)]))]]
+            : [],
+        ),
+      ),
+    [enumFilterFields, t],
+  );
   const facetFieldLabels = React.useMemo(
     () => resolveFacetFieldLabels(filterFieldDomains),
     [filterFieldDomains],
@@ -1688,6 +1697,7 @@ export function HomePage() {
     // re-seeded the very filters the user had just cleared.
     setFieldFilters: handleMapFieldsChange,
     fieldLabels: facetFieldLabels,
+    optionLabels: facetOptionLabels,
     area,
     setArea,
   });

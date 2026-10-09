@@ -14,6 +14,10 @@ export default defineConfig({
         find: '@dpg/schemas/uri_fields',
         replacement: path.resolve(__dirname, '../../packages/schemas/src/uri_fields.ts'),
       },
+      {
+        find: '@dpg/schemas/filter_fields',
+        replacement: path.resolve(__dirname, '../../packages/schemas/src/filter_fields.ts'),
+      },
       { find: /^@dpg\/(.*)$/, replacement: path.resolve(__dirname, '../../packages/$1/src') },
       { find: '@', replacement: path.resolve(__dirname, './src') },
     ],

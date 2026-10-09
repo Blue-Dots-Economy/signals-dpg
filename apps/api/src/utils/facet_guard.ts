@@ -1,7 +1,13 @@
 import {
+  expandFilterValues,
   getDomainItemSchema,
   getDomainItemTypes,
+  getFilterFieldEntries,
+  isBooleanProperty,
+  resolveRangeBuckets,
+  type FilterFieldEntry,
   type NetworkConfigDocument,
+  type RangeFilterBucket,
 } from '@dpg/schemas';
 import type {
   FacetValue,
@@ -45,9 +51,56 @@ export function resolveAllowedFacetFields(
 }
 
 /**
+ * The facet fields a caller may FILTER on for an item schema (infra#57): the
+ * declared, non-private fields above, narrowed to the ones marked
+ * `filterable: true` once the schema uses that marker at all — see
+ * `getFilterFieldEntries` in `@dpg/schemas`. `booleanValued` lets
+ * `resolveAllowedFacetFilters` turn the UI's `"true"`/`"false"` into JSON
+ * booleans, which signals-search compares type-strictly.
+ */
+export function resolveFilterableFacetFields(
+  itemSchema: Record<string, unknown>
+): Map<string, { arrayValued: boolean; booleanValued: boolean; entry: FilterFieldEntry }> {
+  const allowed = new Map<
+    string,
+    { arrayValued: boolean; booleanValued: boolean; entry: FilterFieldEntry }
+  >();
+  for (const entry of getFilterFieldEntries(itemSchema)) {
+    allowed.set(entry.field, {
+      arrayValued: entry.property.type === 'array',
+      booleanValued: isBooleanProperty(entry.property),
+      entry,
+    });
+  }
+  return allowed;
+}
+
+/**
+ * One `[min, max]` covering every selected bucket. signals-search ANDs its
+ * filter clauses, so it cannot OR two buckets; their envelope is exact for
+ * adjacent buckets but also matches the gap between non-adjacent ones
+ * (0-3 + 10-15 LPA includes 3-10 LPA jobs). The native path ORs the buckets
+ * and is exact. An open bound on any bucket stays open.
+ */
+function bucketEnvelope(buckets: RangeFilterBucket[]): { min?: number; max?: number } {
+  const mins = buckets.map((bucket) => bucket.min);
+  const maxes = buckets.map((bucket) => bucket.max);
+  const min = mins.includes(undefined) ? undefined : Math.min(...(mins as number[]));
+  const max = maxes.includes(undefined) ? undefined : Math.max(...(maxes as number[]));
+  return { ...(min === undefined ? {} : { min }), ...(max === undefined ? {} : { max }) };
+}
+
+function toBooleanFacetValue(value: FacetValue): FacetValue {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return value;
+}
+
+/**
  * Server-resolved private/undeclared-facet guard for the discover BFF (#203).
  * Drops any client-supplied filter whose field is not a declared, non-private
- * facet on the network config's item schema — the client's field list is
+ * (and, where the schema uses the marker, `filterable: true`) facet on the
+ * network config's item schema — the client's field list is
  * never trusted. Defense-in-depth: `item_state` is already the masked public
  * projection, but undeclared fields (typos, fields dropped from a newer
  * schema, etc.) must not reach signals-search either.
@@ -63,15 +116,42 @@ export function resolveAllowedFacetFilters(
     domain,
     itemType
   ) as Record<string, unknown>;
-  const allowed = resolveAllowedFacetFields(itemSchema);
+  const allowed = resolveFilterableFacetFields(itemSchema);
 
-  return selections
-    .filter((selection) => allowed.has(selection.field))
-    .map((selection) => ({
-      field: selection.field,
-      values: selection.values,
-      arrayValued: allowed.get(selection.field)?.arrayValued,
-    }));
+  return selections.flatMap((selection): SignalsSearchFacetInput[] => {
+    const meta = allowed.get(selection.field);
+    if (!meta) return [];
+
+    const { range } = meta.entry;
+    if (range) {
+      // Labels the schema doesn't declare are ignored. If none survive, send
+      // the labels as a plain value match — a label is never a stored number,
+      // so it matches nothing, as the native path's `false` does. Dropping
+      // the filter instead would silently widen it to every item.
+      const buckets = resolveRangeBuckets(range, selection.values);
+      if (buckets.length === 0) {
+        return [{ field: selection.field, values: selection.values, arrayValued: false }];
+      }
+      return [
+        {
+          field: selection.field,
+          values: buckets.map((bucket) => bucket.label),
+          range: { maxField: range.maxField, ...bucketEnvelope(buckets) },
+        },
+      ];
+    }
+
+    const values = meta.booleanValued
+      ? selection.values.map(toBooleanFacetValue)
+      : selection.values;
+    return [
+      {
+        field: selection.field,
+        values: expandFilterValues(meta.entry, values),
+        arrayValued: meta.arrayValued,
+      },
+    ];
+  });
 }
 
 /**
