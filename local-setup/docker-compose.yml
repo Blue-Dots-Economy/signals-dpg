@@ -285,6 +285,10 @@ services:
       CREATE_TEST_OTP: "true"
       SERVED_DOMAINS: ${SERVED_DOMAINS:-blue_dot/seeker,blue_dot/provider}
       SELF_SIGNUP_MODE: ${SELF_SIGNUP_MODE:-allowed}
+      # Bulk export limits (optional; defaults match packages/config).
+      EXPORT_MAX_ROWS: ${EXPORT_MAX_ROWS:-10000}
+      EXPORT_TIMEZONE: ${EXPORT_TIMEZONE:-Asia/Kolkata}
+      EXPORT_RATE_LIMIT_PER_HOUR: ${EXPORT_RATE_LIMIT_PER_HOUR:-20}
       NETWORK_CONFIG_SOURCE: local
       # Relative to the container CWD (/app for the built API, /repo for the
       # bootstrap) — both have examples/ at that root.

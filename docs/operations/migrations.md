@@ -61,7 +61,7 @@ From a clean checkout:
 
 ```bash
 docker compose up -d db redis      # bring up postgres + redis
-pnpm db:push:api                   # drizzle-kit push → auth tables
+pnpm db:push:api                   # drizzle-kit push → declarative schema tables
 pnpm db:init:api                   # apply create_items.sql + create_actions_events.sql
 ```
 
@@ -80,8 +80,8 @@ Script wiring:
   ```ts
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
-  `db_init.ts` doesn't include the better-auth tables because local dev uses
-  `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
+  `db_init.ts` doesn't include the declarative (Drizzle-schema) tables because
+  local dev uses `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
   applied by the single Drizzle ledger via `migrate.mjs` (see "Deployed" below),
   not by this local script. The script is idempotent and safe to re-run.
 
@@ -359,7 +359,7 @@ manual DDL needed.**
   `POSTGRES_PORT` / `POSTGRES_DB` wiring consumed by both
   `apps/api/scripts/db_init.ts` and the helm migrate-Job.
 - `apps/api/drizzle.config.ts` — Drizzle Kit configuration for the
-  better-auth schema.
+  declarative schema (`apps/api/db/postgres/schema/`).
 - `apps/api/scripts/db_init.ts` — local idempotent SQL applier.
 - `dpg/charts/api/templates/migrate-job.yaml` (charts repo) —
   deploy-time Job.

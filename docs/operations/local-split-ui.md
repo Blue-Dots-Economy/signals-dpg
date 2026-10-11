@@ -180,11 +180,12 @@ point in `/tmp/signals-api.log`.** Tracing the code:
 - `sendWelcomeNotifications()` (`apps/api/src/notifications/welcome.ts`) has
   the identical `if (!nc) return;` shape for the welcome-email path.
 
-Empirically: triggering `/api/auth/unified-otp/request` +
-`/api/auth/unified-otp/verify` against a running API with no notification
-credentials produces the normal Fastify `"incoming request"` /
-`"request completed"` log pairs and **nothing else** — no notification,
-email, or CTA-related line appears, confirming the trace above. (In this
+Empirically: signing up through the OTP login flow (at the time, the
+better-auth `/api/auth/unified-otp/*` routes, removed by #517; login is now
+Keycloak-only) against a running API with no notification credentials
+produced the normal Fastify `"incoming request"` / `"request completed"` log
+pairs and **nothing else** — no notification, email, or CTA-related line
+appeared, confirming the trace above. (In this
 session self-signup was additionally gated off — `SELF_SIGNUP_DISABLED` —
 which is unrelated to notification config and is a separate instance
 setting; it stopped a real welcome-email from being generated, but the log

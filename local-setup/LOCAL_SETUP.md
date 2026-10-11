@@ -1,7 +1,8 @@
 # Local Setup Guide — signals-dpg (Signals Stack)
 
 A single, self-contained guide for bringing up **signals-dpg alone** — the API,
-the UI, and only its own backing dependencies (Postgres + Redis) — on a fresh
+the UI, and only its own backing dependencies (Postgres, Redis, Keycloak +
+Mailpit) — on a fresh
 machine. Two tracks:
 
 | Track               | You want to…                                                    | Follow            |
@@ -12,7 +13,8 @@ machine. Two tracks:
 
 This tooling (`docker-compose.yml`, `.env.example`, `infra/`) lives **inside the
 signals-dpg repo at `signals-dpg/local-setup/`** and builds only this repo — no
-sibling repos, no aggregator, no Keycloak. Run everything from **`local-setup/`**
+sibling repos, no aggregator. Keycloak + Mailpit come from this same compose
+(`--profile keycloak`). Run everything from **`local-setup/`**
 (Track A) or the repo root (Track B).
 
 > **⚠️ Memory guidance.** Track A builds **3 images** (bootstrap tools, API, UI)
@@ -73,7 +75,7 @@ SIGNALS_PII_KEY=<openssl rand -base64 32>   # must decode to exactly 32 bytes
 ### 2.2 Bring it up
 
 ```bash
-docker compose up -d --build
+docker compose --profile keycloak up -d --build
 docker compose ps            # wait until signals-api is up
 ```
 
@@ -88,7 +90,8 @@ Follow logs if anything looks stuck:
 
 ```bash
 docker compose logs -f signals-bootstrap   # schema push + db:init
-docker compose logs -f signals-api         # API boot; test OTP codes print here
+docker compose logs -f signals-api         # API boot
+docker compose logs -f keycloak            # phone login OTPs print here
 ```
 
 ### 2.3 URLs
@@ -103,7 +106,9 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
 
 | Service     | URL                   | Credentials / notes                          |
 | ----------- | --------------------- | -------------------------------------------- |
-| Signals API | http://localhost:2742 | `/api/reference` for Swagger; test OTP in logs   |
+| Signals API | http://localhost:2742 | `/api/reference` for Swagger                     |
+| Keycloak    | http://localhost:8080 | realm `bluedots`; admin `admin` / `KC_BOOTSTRAP_ADMIN_PASSWORD` |
+| Mailpit     | http://localhost:8025 | email login OTPs land here                   |
 | Postgres    | localhost:5432        | `postgres` / `POSTGRES_PASSWORD` from `.env` |
 | Redis       | localhost:5555        | password-protected (`REDIS_PASSWORD`)        |
 | Search API  | localhost:3100        | only with `--profile search` (§7); `POST /v1/search` needs `x-api-key` |
@@ -115,8 +120,9 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
 
 ```
 1. http://localhost:5173  → the UI loads (browse is empty until you add data).
-2. Sign in with any test identity — the OTP code is printed to the API logs:
-   docker compose logs signals-api | grep -i otp
+2. Sign in with any test identity — read the OTP from Mailpit
+   (http://localhost:8025) for email, or for phone:
+   docker compose logs keycloak | grep -i otp
 3. Optional demo data — note there is NO shell in the api image (it is a Docker
    Hardened Image), so `exec ... sh -lc` fails. Use exec form, which runs the
    node binary directly and needs no shell:
@@ -136,6 +142,9 @@ docker compose logs -f signals-api         # API boot; test OTP codes print here
 ---
 
 ## 3. Day-to-day commands (Track A)
+
+Add `--profile keycloak` to `ps`, `up`, `stop` and `down` so Keycloak + Mailpit
+are included — compose ignores profiled services without it.
 
 ```bash
 docker compose ps                       # status
@@ -158,14 +167,15 @@ docker compose up -d --build   # rebuild; re-runs schema + db:init
 
 ## 4. Track B — hybrid dev (hot-reload)
 
-Run **Postgres + Redis in Docker**, and the **API + UI from source** with
-`pnpm dev`. Two steps.
+Run **Postgres, Redis, Keycloak + Mailpit in Docker**, and the **API + UI from
+source** with `pnpm dev`. Two steps.
 
-Ports: API `:2742`, UI `:5173`, Postgres `:5432`, Redis `:5555`.
+Ports: API `:2742`, UI `:5173`, Postgres `:5432`, Redis `:5555`, Keycloak `:8080`,
+Mailpit `:8025`.
 
 ### Step 1 — Backing services in Docker
 
-Start only Postgres + Redis from the `local-setup/` compose (this uses the
+Start Postgres + Redis (and the Keycloak services) from the `local-setup/` compose (this uses the
 pgvector+postgis image `db:init` needs — the repo's stock `docker-compose.yaml`
 does **not** have those extensions):
 
@@ -173,7 +183,8 @@ does **not** have those extensions):
 cd signals-dpg/local-setup
 cp .env.example .env                 # set SIGNALS_PII_KEY + the two passwords
 docker compose up -d postgres redis
-docker compose ps                    # wait until both are healthy
+docker compose --profile keycloak up -d keycloak mailpit keycloak-init
+docker compose --profile keycloak ps # wait until all are healthy
 ```
 
 Note the `POSTGRES_PASSWORD` and `REDIS_PASSWORD` you set here — the host-run
@@ -225,15 +236,18 @@ Apply the schema, then run it (two terminals):
 pnpm db:push:api      # apply Drizzle schema (confirm the prompt)
 pnpm db:init:api      # extensions + partitioned items/actions/events tables
 
-pnpm dev:api          # API on :2742   (terminal 1) — test OTP codes print here
+pnpm dev:api          # API on :2742   (terminal 1)
 pnpm dev:ui           # UI  on :5173   (terminal 2)
 ```
 
 Open **http://localhost:5173**. Editing source in either app hot-reloads it.
 
-> **Login OTP in dev:** with `CREATE_TEST_OTP=true` the code is printed to the
-> `pnpm dev:api` terminal — grep it there. Set `AUTH_MIDDLEWARE_ENABLED=false`
-> to bypass auth entirely for seed/migration scripts.
+> **Login OTP in dev:** Keycloak mints it, so it never appears in the
+> `pnpm dev:api` terminal and `CREATE_TEST_OTP` has no effect on it. Email codes
+> land in Mailpit (http://localhost:8025); phone codes are in
+> `docker compose logs keycloak | grep -i otp` (from `local-setup/`). The
+> guardian/U18 OTP is still `000000` with `CREATE_TEST_OTP=true`. Set
+> `AUTH_MIDDLEWARE_ENABLED=false` to bypass auth entirely for seed/migration scripts.
 
 **Optional demo data:** `pnpm db:seed:purple_dot:api` (or run a different
 network — set `SIGNALS_NETWORK` / `SERVED_DOMAINS` and the matching
@@ -271,7 +285,7 @@ by default.
 | `signals-bootstrap` fails on `SIGNALS_PII_KEY` | It must be base64 that decodes to exactly 32 bytes: `openssl rand -base64 32`. |
 | `signals-api` restarts / "relation does not exist" | `signals-bootstrap` didn't finish. Check `docker compose logs signals-bootstrap`; re-run `docker compose up -d --force-recreate signals-bootstrap signals-api`. |
 | UI loads but API calls fail with CORS | The UI must be served on `:5173` — the API allow-list is `3000/5173/2742` only. Don't remap the UI host port. |
-| Login OTP never arrives | It's not sent anywhere in dev — it's printed: `docker compose logs signals-api \| grep -i otp` (Track A) or the `pnpm dev:api` terminal (Track B). |
+| Login OTP never arrives | Keycloak sends it, not the API. Check the `keycloak` profile is up (`docker compose --profile keycloak ps`), then read email codes in Mailpit (http://localhost:8025) and phone codes in `docker compose logs keycloak \| grep -i otp`. |
 | Track B: API can't connect to Postgres/Redis | The host app's `POSTGRES_*` / `REDIS_*` in the repo-root `.env` must match the passwords + ports in `local-setup/.env` (host `127.0.0.1`, Postgres `5432`, Redis `5555`). |
 | First `up --build` is very slow | Normal — three images build from source. Subsequent ups are cached. |
 
