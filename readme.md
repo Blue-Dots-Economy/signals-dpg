@@ -151,11 +151,18 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="gated"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
-# DLT-approved provider template id for OTP SMS (login + guardian OTP);
-# defaults to "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
-# CREATE_TEST_OTP is off. (Distinct from the per-event lifecycle SMS templates,
+# DLT-approved provider template id for the guardian/U18 OTP SMS; defaults to
+# "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
+# CREATE_TEST_OTP is off. (The login OTP is minted and sent by Keycloak.) (Distinct from the per-event lifecycle SMS templates,
 # which live in apps/api/src/notifications/sms/*.properties.)
 SMS_TEMPLATE_ID=""
+
+# Bulk engagement export (POST /action/export). Optional; defaults shown.
+# Max rows per export (above it: 413), IANA zone for export timestamps, and
+# exports one user may run per hour (above it: 429 EXPORT_RATE_LIMITED).
+# EXPORT_MAX_ROWS=10000
+# EXPORT_TIMEZONE="Asia/Kolkata"
+# EXPORT_RATE_LIMIT_PER_HOUR=20
 
 # Max profiles a single user may hold (default 5). A network.json domain's
 # max_profiles_per_user overrides this per-domain.
@@ -215,11 +222,29 @@ Or use `SCHEMA_REGISTRY_URL` with either:
 - one base URL
 - comma-separated `network=url` mappings
 
-### 3. Start PostgreSQL and Redis
+### 3. Start PostgreSQL, Redis and Keycloak
 
 ```bash
 docker compose up -d db redis
 ```
+
+Keycloak is **required** — it is the only login provider (#517), and the API
+refuses to start without `KEYCLOAK_BASE_URL`. The root compose file does not
+define it; bring up Keycloak and Mailpit from the `local-setup/` compose
+(`local-setup/.env` must exist — copy it from `local-setup/.env.example`):
+
+```bash
+cd local-setup
+docker compose --profile keycloak up -d keycloak mailpit keycloak-init
+cd ..
+```
+
+Keycloak serves on http://localhost:8080 (realm `bluedots`). The login OTP is
+minted by Keycloak, not the API: email codes land in Mailpit at
+http://localhost:8025, and phone codes are logged by the Keycloak container
+(`docker compose logs keycloak | grep -i otp` from `local-setup/`).
+`CREATE_TEST_OTP` does not affect login; it only fixes the guardian/U18 OTP to
+`000000`.
 
 ### 4. Set up the database (first time only)
 

@@ -225,7 +225,8 @@ In the default Helm install the UI's nginx reverse-proxies `/api/*` to
   `internal-secrets.json` **and** the matching env var on the api pod in the
   same deploy, otherwise HMAC verification will fail on one side.
 - `SIGNALS_SEARCH_API_KEY`: rotate the key in the shared Signals `apikey`
-  store (via better-auth) **and** the env var on the api pod together; a
+  table (a new row, verified by `verify_api_key.ts` against the stored hash)
+  **and** the env var on the api pod together; a
   mismatch makes signals-search reject match-score requests with `401`.
 
 ## Anti-patterns we've already hit

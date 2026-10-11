@@ -65,10 +65,11 @@ environment via a test script. Subsequent admin calls pick it up automatically.
 
 ## Caveats
 
-- **OTP test mode**: the `test_otp = 000000` shortcut only works when the API
-  is started with `CREATE_TEST_OTP=true` in its `.env`. Without that, real
-  OTPs are generated and dispatched via SMS / email and you must enter what
-  the messaging integration delivered.
+- **OTP test mode**: the `test_otp = 000000` shortcut applies only to the
+  guardian/U18 OTP, and only when the API is started with
+  `CREATE_TEST_OTP=true` in its `.env`. The login OTP is minted by Keycloak
+  and is never `000000` — locally, read email codes from Mailpit
+  (http://localhost:8025) and phone codes from the Keycloak container logs.
 - **Cookie jar**: required for seeker/provider session calls (Self Fetch,
   Apply, Accept/Reject). When acting as the seeker, do **not** send
   `x-api-key` — the API's auth middleware short-circuits to `403

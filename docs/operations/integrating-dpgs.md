@@ -876,9 +876,9 @@ deferred.
 
 The intended path when this is picked up:
 
-- Encode the allowlist in the better-auth `member.permissions` text column
-  (or a sibling table, depending on how granular the policy turns out to
-  need to be).
+- Encode the allowlist in a new column on `member` (today it carries only
+  `role` and `team_id` — there is no permissions column) or a sibling table,
+  depending on how granular the policy turns out to need to be.
 - Add the membership-vs-acting-org check between the org-lookup and
   member-lookup steps in `acting_org.ts`.
 - Surface a new error code (e.g. `SERVICE_USER_NOT_AUTHORIZED_FOR_ORG`,
