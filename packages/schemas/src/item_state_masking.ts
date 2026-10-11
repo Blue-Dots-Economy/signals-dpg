@@ -75,6 +75,13 @@ const MASKING_RULES: MaskingRule[] = [
       /^official_address$/i.test(k),
     apply: () => '***',
   },
+  {
+    // age / gender: fully redacted. The first-char fallback leaks the value
+    // outright — gender is a short enum (M***/F***) and age's first digit
+    // gives away its decade.
+    test: (k) => /^(age|gender)$/i.test(k),
+    apply: () => '***',
+  },
 ];
 
 function maskLeaf(key: string, propSchema: JsonRecord, value: unknown): unknown {

@@ -33,6 +33,7 @@ import {
   refreshConsumedSchemas,
 } from '@/network_schema_cache';
 import { getEmailMessages } from '@/notifications/email/messages';
+import { getSmsTemplates } from '@/notifications/sms/templates';
 import { registerRawBodyCapture } from '@/plugins/raw_body';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
@@ -82,6 +83,7 @@ const PEER_OPERATION_URLS = new Set([
 // Both are public by design — it is the *caching* that is the finding, not the
 // access. Every other public route keeps its own caching semantics.
 import { setBrowserAllowedOrigins } from '@/services/auth/oidc_flow_state';
+import { loadCountryBoundary } from '@/services/geocoding/country_boundary';
 
 const NO_STORE_PUBLIC_URLS = new Set([
   '/api/v1/auth/config',
@@ -189,6 +191,18 @@ export async function buildApp(): Promise<FastifyInstance> {
   // in NETWORK_CONFIG_SOURCE=remote mode and in the OpenAPI dump, where
   // SCHEMA_CACHE_WARMUP_ENABLED=false only gates the DB-backed warmup.
   await getEmailMessages();
+
+  // SMS templates load on the same boot pass so a bad registry shows up in
+  // deploy logs immediately, not on the first send. Unlike the copy above this
+  // never throws — SMS is best-effort, and an unconfigured template just means
+  // dispatchSms skips it.
+  await getSmsTemplates();
+
+  // Country boundary for the supplied-coordinate check (#789), read on the same
+  // boot pass so a missing or malformed ConfigMap is a deploy-log warning, not
+  // a surprise on the first write. Never throws: an unloadable boundary only
+  // disables that check.
+  await loadCountryBoundary();
 
   const networkConfigs = await getNetworkConfigs();
 

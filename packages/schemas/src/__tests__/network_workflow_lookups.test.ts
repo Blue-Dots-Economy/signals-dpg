@@ -7,6 +7,7 @@ import {
   getDomainMinimumCacheTtlSeconds,
   getInstanceCustomItemSchemaUrl,
   validateAgainstJsonSchema,
+  JsonSchemaValidationError,
 } from '../network_workflow';
 
 const defaultTail = [{ status: 'new', when: 'default' }];
@@ -268,7 +269,7 @@ describe('validateAgainstJsonSchema', () => {
     ).not.toThrow();
   });
 
-  it('throws an "Invalid <label>" error listing every ajv message', () => {
+  it('throws an "Invalid <label>" error naming the field behind every failure', () => {
     let message = '';
     try {
       validateAgainstJsonSchema(profileSchema, { city: 42, extra: true }, 'item_state');
@@ -276,15 +277,120 @@ describe('validateAgainstJsonSchema', () => {
       message = (err as Error).message;
     }
     expect(message).toContain('Invalid item_state:');
-    expect(message).toContain("must have required property 'full_name'");
-    expect(message).toContain('must be string');
-    expect(message).toContain('must NOT have additional properties');
+    expect(message).toContain('full_name: is required');
+    expect(message).toContain('city: must be string');
+    expect(message).toContain('extra: is not an allowed field');
+  });
+
+  it('exposes a per-field map on a typed error', () => {
+    let caught: unknown;
+    try {
+      validateAgainstJsonSchema(profileSchema, { city: 42, extra: true }, 'item_state');
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(JsonSchemaValidationError);
+    expect((caught as JsonSchemaValidationError).fields).toEqual({
+      full_name: 'is required',
+      city: 'must be string',
+      extra: 'is not an allowed field',
+    });
+  });
+
+  it("uses the field's x-error-message for a failed pattern, never the raw regex", () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        mobile_number: {
+          type: 'string',
+          pattern: '^[0-9]{10}$',
+          'x-error-message': 'Enter a 10-digit mobile number, no spaces.',
+        },
+        pincode: { type: 'string', pattern: '^[0-9]{6}$', title: 'Pincode' },
+      },
+    };
+    let caught: JsonSchemaValidationError | undefined;
+    try {
+      validateAgainstJsonSchema(schema, { mobile_number: '12', pincode: 'x' }, 'item_state');
+    } catch (err) {
+      caught = err as JsonSchemaValidationError;
+    }
+    expect(caught?.fields).toEqual({
+      mobile_number: 'Enter a 10-digit mobile number, no spaces.',
+      pincode: 'Please enter a valid Pincode.',
+    });
+    expect(caught?.message).not.toContain('[0-9]');
+  });
+
+  it('uses the URL copy for a failed x-uri field without its own x-error-message', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        website: { type: 'string', 'x-uri': true, title: 'Website' },
+        portfolio: { type: 'string', 'x-uri': true, 'x-error-message': 'Link your portfolio.' },
+      },
+    };
+    let caught: JsonSchemaValidationError | undefined;
+    try {
+      validateAgainstJsonSchema(
+        schema,
+        { website: 'not a url', portfolio: 'not a url' },
+        'item_state',
+      );
+    } catch (err) {
+      caught = err as JsonSchemaValidationError;
+    }
+    expect(caught?.fields).toEqual({
+      website: 'Please enter a valid web address.',
+      portfolio: 'Link your portfolio.',
+    });
+  });
+
+  it('keeps the first message when one field fails more than once', () => {
+    // ajv reports minLength before pattern for the same string.
+    const schema = {
+      type: 'object',
+      properties: { pin: { type: 'string', minLength: 6, pattern: '^[0-9]+$', title: 'PIN' } },
+    };
+    let caught: JsonSchemaValidationError | undefined;
+    try {
+      validateAgainstJsonSchema(schema, { pin: 'ab' }, 'item_state');
+    } catch (err) {
+      caught = err as JsonSchemaValidationError;
+    }
+    expect(caught?.fields).toEqual({ pin: 'must NOT have fewer than 6 characters' });
+  });
+
+  it('lists the allowed values for a failed enum', () => {
+    const schema = {
+      type: 'object',
+      properties: { gender: { type: 'string', enum: ['Male', 'Female'] } },
+    };
+    expect(() => validateAgainstJsonSchema(schema, { gender: 'X' }, 'item_state')).toThrow(
+      'gender: must be one of: Male, Female',
+    );
+  });
+
+  it('names nested fields with a dotted path', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'object',
+          properties: { city: { type: 'string' } },
+          required: ['city'],
+        },
+      },
+    };
+    expect(() => validateAgainstJsonSchema(schema, { address: {} }, 'item_state')).toThrow(
+      'address.city: is required',
+    );
   });
 
   it('rejects extra properties by default but accepts them with allowAdditionalProperties', () => {
     const payload = { full_name: 'Asha', surprise: 1 };
     expect(() => validateAgainstJsonSchema(profileSchema, payload, 'item_state')).toThrow(
-      /must NOT have additional properties/,
+      /surprise: is not an allowed field/,
     );
     expect(() =>
       validateAgainstJsonSchema(profileSchema, payload, 'item_state', {
@@ -325,7 +431,7 @@ describe('validateAgainstJsonSchema', () => {
     // stray key — ignoring it must drop it from the requirement AND the payload.
     expect(() =>
       validateAgainstJsonSchema(profileSchema, { city: 'Pune' }, 'item_state'),
-    ).toThrow(/must have required property 'full_name'/);
+    ).toThrow(/full_name: is required/);
 
     expect(() =>
       validateAgainstJsonSchema(profileSchema, { city: 'Pune' }, 'item_state', {
@@ -341,6 +447,99 @@ describe('validateAgainstJsonSchema', () => {
     ).not.toThrow();
   });
 
+  describe('conditional required (if/then) alongside ignoredKeys', () => {
+    // The item service ignores every top-level required key so a draft can be
+    // saved incomplete. A condition that TESTS one of those keys (category ===
+    // 'licensed' → two more fields required) must still see its value, and its own
+    // `required` must not be stripped — it is a test, not a requirement.
+    const conditionalSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: { type: 'string' },
+        category: { type: 'string', enum: ['individual', 'licensed'] },
+        licence_number: { type: 'string', pattern: '^$|^[0-9]+$' },
+        licence_type: { type: 'string', enum: ['Clinical', 'Other'] },
+      },
+      required: ['name', 'category'],
+      allOf: [
+        {
+          if: { properties: { category: { const: 'licensed' } }, required: ['category'] },
+          then: {
+            required: ['licence_number', 'licence_type'],
+            properties: { licence_number: { minLength: 1 } },
+          },
+        },
+      ],
+    };
+    const serverMode = { ignoredKeys: conditionalSchema.required };
+    const run = (payload: Record<string, unknown>) => () =>
+      validateAgainstJsonSchema(conditionalSchema, payload, 'item_state', serverMode);
+
+    it('enforces the conditional fields when the ignored condition key matches', () => {
+      // One line per missing field, and no Ajv `if` summary ("must match
+      // \"then\" schema") — it names no field and repeats what the lines say.
+      expect(run({ name: 'A', category: 'licensed' })).toThrow(
+        'Invalid item_state: licence_number: is required, licence_type: is required',
+      );
+      // minLength 1 on a string is "required, and not blank" — say that.
+      expect(run({ name: 'A', category: 'licensed', licence_number: '', licence_type: 'Other' })).toThrow(
+        'Invalid item_state: licence_number: is required',
+      );
+      expect(run({ name: 'A', category: 'licensed', licence_number: '123', licence_type: 'Other' })).not.toThrow();
+    });
+
+    it('does not apply the condition to any other category', () => {
+      expect(run({ name: 'A', category: 'individual' })).not.toThrow();
+    });
+
+    it('does not apply the condition to a draft with no category yet', () => {
+      expect(run({ name: 'A' })).not.toThrow();
+      expect(run({})).not.toThrow();
+    });
+  });
+
+  describe('ignoredKeys keeps today\'s behaviour for existing data', () => {
+    // Regression guards: the fix keeps ignored keys' VALUES in the payload (so
+    // a condition can read them) but must still not validate them, exactly as
+    // when they were dropped from the payload.
+    const schema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        category: { type: 'string', enum: ['individual', 'Government Entity'] },
+        phone: { type: 'string', pattern: '^[0-9]{10}$' },
+        city: { type: 'string' },
+      },
+      required: ['category', 'phone'],
+    };
+    const ignored = { ignoredKeys: schema.required };
+
+    it('still accepts a stored value outside an ignored key\'s enum (e.g. a retired option)', () => {
+      expect(() =>
+        validateAgainstJsonSchema(schema, { category: 'Government Body', phone: '9876543210' }, 'item_state', ignored),
+      ).not.toThrow();
+    });
+
+    it('still accepts an ignored key whose value fails its pattern (e.g. a masked phone)', () => {
+      expect(() =>
+        validateAgainstJsonSchema(schema, { category: 'individual', phone: '987***' }, 'item_state', ignored),
+      ).not.toThrow();
+    });
+
+    it('still validates every key that is not ignored', () => {
+      expect(() =>
+        validateAgainstJsonSchema(schema, { category: 'individual', phone: '987***', city: 42 }, 'item_state', ignored),
+      ).toThrow(/city: must be string/);
+    });
+
+    it('still rejects an undeclared key under additionalProperties:false', () => {
+      expect(() =>
+        validateAgainstJsonSchema(schema, { category: 'individual', extra: 1 }, 'item_state', ignored),
+      ).toThrow(/extra: is not an allowed field/);
+    });
+  });
+
   it('strips ignoredKeys from nested required arrays too', () => {
     const nested = {
       type: 'object',
@@ -350,7 +549,7 @@ describe('validateAgainstJsonSchema', () => {
       required: ['inner'],
     };
     expect(() => validateAgainstJsonSchema(nested, { inner: {} }, 'requirement')).toThrow(
-      /must have required property 'secret'/,
+      /inner.secret: is required/,
     );
     expect(() =>
       validateAgainstJsonSchema(nested, { inner: {} }, 'requirement', {

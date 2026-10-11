@@ -117,8 +117,53 @@ describe('maskPrivateState', () => {
   });
 
   it('stringifies non-string scalars before masking', () => {
-    const schema = { type: 'object', properties: { age: { type: 'number', private: true } } };
-    const out = maskPrivateState(schema, { age: 42 });
-    expect(out.age).toBe('4***');
+    const schema = { type: 'object', properties: { score: { type: 'number', private: true } } };
+    const out = maskPrivateState(schema, { score: 42 });
+    expect(out.score).toBe('4***');
+  });
+
+  describe('age and gender (#763)', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        age: { type: 'integer', private: true },
+        gender: { type: 'string', enum: ['Male', 'Female', 'Other'], private: true },
+        guardian: {
+          type: 'object',
+          properties: {
+            age: { type: 'integer', private: true },
+            gender: { type: 'string', private: true },
+          },
+        },
+        stage: { type: 'string', private: true },
+        gender_identity: { type: 'string', private: true },
+      },
+    };
+
+    it('fully redacts age instead of revealing its first digit', () => {
+      expect(maskPrivateState(schema, { age: 42 }).age).toBe('***');
+    });
+
+    it('fully redacts gender instead of revealing its first letter', () => {
+      expect(maskPrivateState(schema, { gender: 'Male' }).gender).toBe('***');
+      expect(maskPrivateState(schema, { gender: 'Female' }).gender).toBe('***');
+    });
+
+    it('fully redacts age and gender inside nested objects', () => {
+      const out = maskPrivateState(schema, { guardian: { age: 38, gender: 'Female' } });
+      expect(out.guardian).toEqual({ age: '***', gender: '***' });
+    });
+
+    it('matches the exact key only, leaving look-alike keys on the fallback', () => {
+      const out = maskPrivateState(schema, { stage: 'Applied', gender_identity: 'Woman' });
+      expect(out.stage).toBe('A***');
+      expect(out.gender_identity).toBe('W***');
+    });
+
+    it('passes null and undefined through unchanged', () => {
+      const out = maskPrivateState(schema, { age: null, gender: undefined });
+      expect(out.age).toBeNull();
+      expect(out.gender).toBeUndefined();
+    });
   });
 });

@@ -19,6 +19,7 @@ const {
   dispatchItemLifecycleNotification,
   resolveGoLiveGates,
   resolveLocationsForCreate,
+  assertSuppliedLocationsInCountry,
   getWardAge,
   guardianConsentRequired,
   getNetworkConfigById,
@@ -73,6 +74,7 @@ const {
     dispatchItemLifecycleNotification: vi.fn(),
     resolveGoLiveGates: vi.fn(),
     resolveLocationsForCreate: vi.fn(),
+    assertSuppliedLocationsInCountry: vi.fn(),
     getWardAge: vi.fn(),
     guardianConsentRequired: vi.fn(),
     getNetworkConfigById: vi.fn(),
@@ -163,6 +165,7 @@ vi.mock('@/services/item_service', () => ({
     return createItemInternal(...a);
   },
   resolveGoLiveGates: (...a: unknown[]) => resolveGoLiveGates(...a),
+  assertSuppliedLocationsInCountry: (...a: unknown[]) => assertSuppliedLocationsInCountry(...a),
 }));
 
 // The create seam lazy-imports this; the mock intercepts the dynamic import.
@@ -257,6 +260,7 @@ beforeEach(() => {
   isServedDomainBinding.mockReturnValue(true);
   ensureItemPartition.mockResolvedValue(undefined);
   resolveLocationsForCreate.mockResolvedValue([]);
+  assertSuppliedLocationsInCountry.mockResolvedValue(undefined);
   resolveConsentVersion.mockResolvedValue(3);
   // Default: the domain gates go-live on consent_required, so the create-time
   // CONSENT_REQUIRED guard is active (config-driven per #344 go_live_required).
@@ -771,6 +775,26 @@ describe('consent capture and U18 gating', () => {
 describe('error mapping', () => {
   const consentBody = () =>
     baseBody({ consent: { category: 'profile_creation', version: 1 } });
+
+  it('400 LOCATION_OUTSIDE_COUNTRY for a supplied coordinate outside the country, nothing created (#789)', async () => {
+    assertSuppliedLocationsInCountry.mockRejectedValue(
+      new FakeItemServiceError(
+        400,
+        'LOCATION_OUTSIDE_COUNTRY',
+        'Location 23.81, 90.41 is outside the allowed region (IN).',
+      ),
+    );
+
+    const reply = await call({
+      user: { id: 'u1' },
+      body: { ...consentBody(), item_locations: [{ lat: 23.81, lng: 90.41 }] },
+    });
+
+    expect(reply.statusCode).toBe(400);
+    expect(bodyOf(reply).error).toBe('LOCATION_OUTSIDE_COUNTRY');
+    expect(bodyOf(reply).message).toBe('Location 23.81, 90.41 is outside the allowed region (IN).');
+    expect(createItemInternal).not.toHaveBeenCalled();
+  });
 
   it('propagates an ItemServiceError status and error code verbatim', async () => {
     createItemInternal.mockRejectedValue(
