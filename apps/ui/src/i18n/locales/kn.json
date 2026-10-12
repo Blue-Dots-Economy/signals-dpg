@@ -483,6 +483,8 @@
   "consent.cap_privacy": "ಗೌಪ್ಯತೆ",
   "consent.cap_terms": "ನಿಯಮಗಳು",
   "consent.reader_label": "ನಿಯಮಗಳು ಮತ್ತು ಗೌಪ್ಯತಾ ದಾಖಲೆಗಳು",
+  "consent.expand": "ಪೂರ್ಣ ಪರದೆಯಲ್ಲಿ ನೋಡಿ",
+  "consent.collapse": "ಪೂರ್ಣ ಪರದೆಯಿಂದ ನಿರ್ಗಮಿಸಿ",
   "consent.agree_short": "ನಾನು ಒಪ್ಪುತ್ತೇನೆ",
   "consent.profile_title": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಒಪ್ಪಿಗೆಯನ್ನು ದೃಢೀಕರಿಸಿ",
   "consent.profile_for": "ಈ ಒಪ್ಪಿಗೆ ನಿಮ್ಮ ಪ್ರೊಫೈಲ್‌ಗಾಗಿ: {{name}}",
