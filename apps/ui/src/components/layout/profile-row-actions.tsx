@@ -72,12 +72,13 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
     'flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-sidebar-accent hover:text-foreground disabled:opacity-40';
 
   return (
-    <div className="flex items-center gap-0.5">
+    <div data-tour="profile-actions" className="flex items-center gap-0.5">
       <ShareProfileButton item={profile} />
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
+            data-tour="profile-edit"
             aria-label={t('profile.btn_edit', 'Edit profile')}
             className={iconBtn}
             onClick={(e) => { e.stopPropagation(); onEdit(); }}
@@ -93,6 +94,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
           <TooltipTrigger asChild>
             <button
               type="button"
+              data-tour="profile-pause"
               aria-label={t('profile.btn_pause', 'Pause profile')}
               className={iconBtn}
               disabled={busy}
@@ -110,6 +112,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
           <TooltipTrigger asChild>
             <button
               type="button"
+              data-tour="profile-resume"
               aria-label={t('profile.btn_unpause', 'Resume profile')}
               className={iconBtn}
               disabled={busy}
@@ -126,6 +129,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
         <TooltipTrigger asChild>
           <button
             type="button"
+            data-tour="profile-retire"
             aria-label={t('profile.btn_retire', 'Retire profile')}
             className={`${iconBtn} hover:text-destructive`}
             disabled={busy}

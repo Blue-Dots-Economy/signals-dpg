@@ -11,14 +11,31 @@ import { ConfigError } from '../config_error.js';
 const REQUIRED_AUTH = { AUTH_SECRET: 'a-secret-long-enough' };
 
 describe('AUTH_PROVIDER', () => {
-  it('defaults to betterauth so merging the build track changes nothing', () => {
-    expect(AuthSecretsSchema.parse(REQUIRED_AUTH).AUTH_PROVIDER).toBe('betterauth');
+  it('defaults to keycloak — the only provider since #517', () => {
+    expect(AuthSecretsSchema.parse(REQUIRED_AUTH).AUTH_PROVIDER).toBe('keycloak');
   });
 
-  it.each(['betterauth', 'keycloak'] as const)('accepts %s', (mode) => {
+  it.each(['keycloak'] as const)('accepts %s', (mode) => {
     expect(
       AuthSecretsSchema.parse({ ...REQUIRED_AUTH, AUTH_PROVIDER: mode }).AUTH_PROVIDER
     ).toBe(mode);
+  });
+
+  it('rejects the removed betterauth mode rather than coercing it', () => {
+    // Same reasoning as `dual` below: a deployed instance may still carry this
+    // value, and silently defaulting it to keycloak would flip an instance's
+    // identity provider during an upgrade with no signal.
+    expect(() =>
+      AuthSecretsSchema.parse({ ...REQUIRED_AUTH, AUTH_PROVIDER: 'betterauth' })
+    ).toThrow();
+  });
+
+  it('explains what to do when an instance is still set to betterauth', () => {
+    expect(() => assertAuthProviderSupported('betterauth')).toThrow(ConfigError);
+    expect(() => assertAuthProviderSupported('betterauth')).toThrow(/has been removed/);
+    expect(() =>
+      assertAuthProviderSupported('betterauth')
+    ).toThrow(/keycloak:migrate:users/);
   });
 
   it('rejects the removed dual mode', () => {
@@ -37,7 +54,7 @@ describe('AUTH_PROVIDER', () => {
     expect(() => assertAuthProviderSupported('dual')).toThrow(/keycloak:migrate:users/);
   });
 
-  it.each([undefined, 'betterauth', 'keycloak'])('allows %s through', (value) => {
+  it.each([undefined, 'keycloak'])('allows %s through', (value) => {
     expect(() => assertAuthProviderSupported(value)).not.toThrow();
   });
 
@@ -127,12 +144,6 @@ describe('assertKeycloakConfigured', () => {
     KEYCLOAK_BASE_URL: 'http://localhost:8080',
     KEYCLOAK_ACCEPTED_CLIENT_IDS: 'signals-ui,signals-api',
   };
-
-  it('is a no-op on betterauth even with nothing configured', () => {
-    expect(() =>
-      assertKeycloakConfigured('betterauth', { KEYCLOAK_ACCEPTED_CLIENT_IDS: '' })
-    ).not.toThrow();
-  });
 
   it.each(['keycloak'] as const)(
     'throws on %s when KEYCLOAK_BASE_URL is missing',

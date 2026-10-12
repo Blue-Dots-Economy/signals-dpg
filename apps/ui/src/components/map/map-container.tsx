@@ -17,6 +17,14 @@ interface MapViewProps {
    */
   items: Array<{ id: string; domain?: string; data: Record<string, unknown> }>;
   onMarkerClick?: (id: string) => void;
+  /**
+   * Like `onMarkerClick`, but hands over the whole rendered marker (id with its
+   * `#locationIndex` suffix, domain, precision, coordinates) — what a caller
+   * needs to show the marker's details itself when `showPopup` is off.
+   */
+  onMarkerSelect?: (marker: MapMarker) => void;
+  /** Draw the provider's own popup on marker click. Default true. */
+  showPopup?: boolean;
   center?: [number, number];
   zoom?: number;
   /**
@@ -159,6 +167,8 @@ export function MapView({
   schema,
   items,
   onMarkerClick,
+  onMarkerSelect,
+  showPopup = true,
   center = DEFAULT_CENTER,
   zoom = DEFAULT_ZOOM,
   focusPoint,
@@ -276,7 +286,7 @@ export function MapView({
       }
     }
 
-    resolveMarkers();
+    void resolveMarkers();
     return () => { cancelled = true; };
   }, [items, schema, resolveMarkerLabel, selfLocation]);
 
@@ -303,7 +313,18 @@ export function MapView({
         center={effectiveCenter}
         zoom={effectiveZoom}
         markers={markers}
-        onMarkerClick={onMarkerClick}
+        // Only wrapped when a caller asked for one: the providers' default
+        // popup shows a "View details" link exactly when this is set.
+        onMarkerClick={
+          onMarkerSelect
+            ? (id) => {
+                onMarkerClick?.(id);
+                const marker = markers.find((m) => m.id === id);
+                if (marker) onMarkerSelect(marker);
+              }
+            : onMarkerClick
+        }
+        showPopup={showPopup}
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
         closePopupNonce={closePopupNonce}
@@ -325,6 +346,7 @@ export function MapView({
           variant="outline"
           size="icon"
           className="h-8 w-8 bg-background/95 shadow-md backdrop-blur-sm"
+          data-tour="map-maximize"
           onClick={() => setIsMaximized((v) => !v)}
           aria-label={isMaximized ? t('map.minimize') : t('map.maximize')}
           title={isMaximized ? t('map.minimize') : t('map.maximize')}

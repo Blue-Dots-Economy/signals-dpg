@@ -92,12 +92,30 @@ docker compose ps        # dpg-db and dpg-redis should be (healthy)
 
 (Redis is the cache. Docker sets it up for you — nothing else to do.)
 
+**Keycloak + Mailpit (required).** Keycloak is the only login provider (#517),
+and the API refuses to start without `KEYCLOAK_BASE_URL` (pre-filled in `.env`
+as `http://localhost:8080`). The root compose file doesn't define Keycloak, so
+start it — with Mailpit, which catches the login emails — from `local-setup/`:
+
+```bash
+cd local-setup
+cp .env.example .env     # compose needs this file; the dev defaults are fine
+docker compose --profile keycloak up -d keycloak mailpit keycloak-init
+cd ..
+```
+
+Keycloak serves on http://localhost:8080 (realm `bluedots`, admin console
+`admin` / `KC_BOOTSTRAP_ADMIN_PASSWORD` from `local-setup/.env`); Mailpit on
+http://localhost:8025. Only start `keycloak mailpit keycloak-init` here — a bare
+`docker compose up` in `local-setup/` would also start a second Postgres/Redis
+on the same ports as Step 3.
+
 ## Step 4 — Set up the database (first time only)
 
 Run from the repo root, in order:
 
 ```bash
-pnpm db:push:api           # apply better-auth + Drizzle schema
+pnpm db:push:api           # apply the Drizzle schema
 pnpm db:init:api           # apply partitioned items / actions / events tables
 pnpm db:seed:services:api  # create the service user + apikey
 ```
@@ -262,6 +280,9 @@ make logs
 
 The aggregator runs its **own** Postgres (`:5433`), Redis (`:6379`), Keycloak
 (`:8080`), MinIO, and Mailpit (`:8025`) — independent of the Signals containers.
+Its Keycloak and Mailpit use the same host ports as the Signals ones from
+Step 3, so stop those first (or remap `KEYCLOAK_PORT` / `MAILPIT_UI_PORT` in
+`local-setup/.env` and point `KEYCLOAK_BASE_URL` in the root `.env` at the new port).
 
 **5. Verify the integration** — exercise the aggregator → Signals auth path
 directly with the seed secrets:
@@ -315,9 +336,10 @@ Add-Content -Path "$env:windir\System32\drivers\etc\hosts" -Value "127.0.0.1 key
 ## Daily / restart cheatsheet
 
 ```bash
-# Signals (host processes + 2 containers)
+# Signals (host processes + db/redis + Keycloak/Mailpit containers)
 cd Signals-DPG
 docker compose up -d db redis
+(cd local-setup && docker compose --profile keycloak up -d keycloak mailpit keycloak-init)
 pnpm dev:api          # terminal 1
 pnpm dev:ui           # terminal 2
 
@@ -339,7 +361,7 @@ make up               # or: make down (stop), make reset (DESTROYS volumes)
 | `PARTITION_SETUP_FAILED` | You skipped Step 4. Run `pnpm db:init:api`. |
 | Page won't load / database error | Docker not up. Run `docker compose up -d db redis` and wait for `healthy`. |
 | Port already in use | Change `API_PORT` (API), `VITE_UI_PORT` (UI), `DATABASE_PORT`, or `REDIS_PORT` in `.env`. |
-| Can't log in | In `.env` set `CREATE_TEST_OTP=true`, restart the API, then use the test OTP. |
+| Can't log in | Login runs through Keycloak — check it is up (`docker compose --profile keycloak ps` in `local-setup/`). The OTP is a random code minted by Keycloak, not `000000`: email codes land in Mailpit (http://localhost:8025); phone codes are in `docker compose logs keycloak \| grep -i otp`. `CREATE_TEST_OTP` only affects the guardian/U18 OTP. |
 | CORS error / "No 'Access-Control-Allow-Origin'" / 500 on every API call | The UI is on a port other than 5173 (e.g. 5174 — a **duplicate** `dev:ui` took 5173). Kill extra dev servers (`pkill -f vite; pkill -f "tsx watch src/server.ts"`), start one `pnpm dev:ui`, and open **http://localhost:5173**. Only `3000/5173/2742` are CORS-allowed. |
 | Aggregator can't reach Signals | Use `SIGNALSTACK_BASE_URL=http://host.docker.internal:2742` (not `localhost`) — the aggregator is in Docker. |
 

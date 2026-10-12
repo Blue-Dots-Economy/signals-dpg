@@ -2,7 +2,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useActions, useReceivedActions, useInitiatedActions } from '../use-actions';
+import { useActions, useReceivedActions, useInitiatedActions, useOwnedActionsPage } from '../use-actions';
 
 vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({ isAuthenticated: true }),
@@ -151,5 +151,23 @@ describe('useInitiatedActions (#439 per-profile scoping + infinite paging)', () 
       }),
       expect.anything(),
     );
+  });
+});
+
+describe('useOwnedActionsPage (My Actions revamp)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('fetches exactly the query it is given', async () => {
+    vi.mocked(fetchMyActions).mockResolvedValue({ actions: [], meta: { total: 0, limit: 25, offset: 25 } });
+    const query = { ownership_role: 'all' as const, item_ids: ['p1'], q: 'asha', limit: 25, offset: 25, include: ['counts' as const] };
+    const { result } = renderHook(() => useOwnedActionsPage(query), { wrapper });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(fetchMyActions).toHaveBeenCalledWith(query, expect.anything());
+  });
+
+  it('stays idle while disabled', async () => {
+    renderHook(() => useOwnedActionsPage({ ownership_role: 'all' }, false), { wrapper });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fetchMyActions).not.toHaveBeenCalled();
   });
 });

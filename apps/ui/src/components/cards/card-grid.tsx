@@ -93,7 +93,7 @@ export function CardGrid({
   }
 
   return (
-    <div ref={gridRef} className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <div ref={gridRef} data-tour="card-grid" className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => {
         // Find the full Item object if available
         const fullItem = fullItems.find((i) => i.item_id === item.id);

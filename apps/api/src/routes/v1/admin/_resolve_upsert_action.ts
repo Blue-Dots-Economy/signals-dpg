@@ -1,6 +1,6 @@
 type ActingOrg = {
   org_id: string;
-  org_type: 'aggregator' | 'voice' | 'network_service';
+  org_type: 'aggregator' | 'network_service';
   service_user_id: string;
 };
 
@@ -50,18 +50,17 @@ export const resolve_upsert_action = (input: ResolveUpsertActionInput): UpsertVe
     return { kind: 'rejected', status: 403, error: 'INVALID_ACTING_ORG' };
   }
 
-  // `voice` joins aggregator and network_service: voice-dpg is an integrating
-  // DPG on the same client-credentials footing, and the layers below already
-  // admit it (`SERVICE_ORG_TYPES`, `ALLOWED_ORG_TYPES`).
+  // Only `aggregator` picks up the ownership rule below — `aggregator_owns_user`
+  // is consulted for that type alone, so a `network_service` caller may upsert
+  // any user. That is deliberate: "the aggregator that onboarded this person"
+  // has no service-tier equivalent.
   //
-  // It does NOT pick up the aggregator ownership rule below — `aggregator_owns_user`
-  // is only consulted for `org_type === 'aggregator'`, so voice behaves like
-  // network_service and may upsert any user. That is deliberate: "the
-  // aggregator that onboarded this person" has no voice equivalent.
+  // The check is written out rather than left to the union above because
+  // `organization.type` is plain nullable text; a row carrying a retired or
+  // unknown type reaches here at runtime and must be refused (#518).
   if (
     acting_org.org_type !== 'aggregator' &&
-    acting_org.org_type !== 'network_service' &&
-    acting_org.org_type !== 'voice'
+    acting_org.org_type !== 'network_service'
   ) {
     return { kind: 'rejected', status: 403, error: 'ACTING_ORG_TYPE_NOT_ALLOWED' };
   }

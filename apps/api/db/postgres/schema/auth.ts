@@ -57,9 +57,11 @@ export const user = pgTable('user', {
   onboardedSourceId: text('onboarded_source_id'),
   onboardedAt: timestamp('onboarded_at'),
   // Extensible support/ops markers on the user. Keyed jsonb so new flags can
-  // be added without a migration. Current key: `is_test` (boolean) — marks a
+  // be added without a migration. Current keys: `is_test` (boolean) — marks a
   // user (and, by the created_by/owner join, their profiles, posts, and
-  // applications) as test data for analysis + later bulk cleanup.
+  // applications) as test data for analysis + later bulk cleanup;
+  // `app_first_login_at` (ISO string) — first browser login to the app, see
+  // services/auth/app_first_login.ts.
   tags: jsonb('tags').notNull().default({}),
 }, (table) => [
   index('user_onboarded_by_org_via_idx').on(
@@ -69,37 +71,6 @@ export const user = pgTable('user', {
   // GIN index accelerates `tags @> '{"is_test": true}'` containment lookups.
   index('user_tags_gin_idx').using('gin', table.tags),
 ]);
-
-export const account = pgTable('account', {
-  id: text('id').primaryKey(),
-  accountId: text('account_id').notNull(),
-  providerId: text('provider_id').notNull(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  accessToken: text('access_token'),
-  refreshToken: text('refresh_token'),
-  idToken: text('id_token'),
-  accessTokenExpiresAt: timestamp('access_token_expires_at'),
-  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
-  scope: text('scope'),
-  password: text('password'),
-  createdAt: timestamp('created_at').notNull(),
-  updatedAt: timestamp('updated_at').notNull(),
-});
-
-export const verification = pgTable('verification', {
-  id: text('id').primaryKey(),
-  identifier: text('identifier').notNull(),
-  value: text('value').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  createdAt: timestamp('created_at').$defaultFn(
-    () => /* @__PURE__ */ new Date()
-  ),
-  updatedAt: timestamp('updated_at').$defaultFn(
-    () => /* @__PURE__ */ new Date()
-  ),
-});
 
 export const organization = pgTable('organization', {
   id: text('id').primaryKey(),
@@ -130,6 +101,23 @@ export const organization = pgTable('organization', {
   check(
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
+  ),
+  // #518: `type` is plain text, so narrowing the TypeScript union stopped the
+  // app ACCEPTING a retired value without stopping the database STORING one.
+  // Without this, a row inserted by hand or by a script written against the old
+  // docs is only discovered as a `403 ACTING_ORG_TYPE_NOT_ALLOWED` at request
+  // time, far from whoever caused it. The constraint moves that failure to the
+  // INSERT.
+  //
+  // NULL stays permitted: the column is nullable and pre-existing rows rely on
+  // it (the acting-org preHandler refuses a null type on its own).
+  //
+  // Adding a value here is a migration, deliberately — an org type is an
+  // authorization tier, and `_resolve_acting_actor.ts` must be taught what
+  // reach it has in the same change.
+  check(
+    'organization_type_allowed',
+    sql`${table.type} IS NULL OR ${table.type} IN ('aggregator', 'network_service')`,
   ),
   // NO global "one default per instance" index any more.
   //
@@ -170,40 +158,11 @@ export const member = pgTable('member', {
   createdAt: timestamp('created_at').notNull(),
 });
 
-export const invitation = pgTable('invitation', {
-  id: text('id').primaryKey(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organization.id, { onDelete: 'cascade' }),
-  email: text('email').notNull(),
-  role: text('role'),
-  teamId: text('team_id'),
-  status: text('status').default('pending').notNull(),
-  expiresAt: timestamp('expires_at').notNull(),
-  inviterId: text('inviter_id')
-    .notNull()
-    .references(() => user.id, { onDelete: 'cascade' }),
-});
-
-export const team = pgTable('team', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  organizationId: text('organization_id')
-    .notNull()
-    .references(() => organization.id, { onDelete: 'cascade' }),
-  createdAt: timestamp('created_at').notNull(),
-  updatedAt: timestamp('updated_at'),
-});
-
-export const teamMember = pgTable('team_member', {
-  id: text('id').primaryKey(),
-  teamId: text('team_id').notNull(),
-  userId: text('user_id')
-    .notNull()
-    .references(() => user.id, { onDelete: 'cascade' }),
-  createdAt: timestamp('created_at'),
-});
-
+// `account`, `verification`, `invitation`, `team` and `team_member` lived here
+// until #517. All five were better-auth's own bookkeeping, all five were empty,
+// and nothing referenced them — see the DROP migration alongside this change.
+// What is left (`user`, `organization`, `member`, `apikey`) outlived the library
+// because it is domain data, not auth plumbing.
 export const apikey = pgTable('apikey', {
   id: text('id').primaryKey(),
   configId: text('config_id').notNull().default('default'),

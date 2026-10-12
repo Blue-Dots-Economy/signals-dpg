@@ -50,8 +50,9 @@ context and the reactor needs the QueryClient:
    cookie session that code is `UNAUTHORIZED`, which an anonymous caller also
    receives, so the trigger additionally requires `getCsrfToken() !== null` —
    the non-React signal that this browser held a session.
-   `TOKEN_EXPIRED`/`NO_ACTIVE_SESSION` are kept for the betterauth and service
-   paths. Narrow on purpose: a 401 from a route the user merely may not call has
+   `TOKEN_EXPIRED` covers the Bearer-token path (`resolve_session.ts`), which
+   carries no CSRF token; `NO_ACTIVE_SESSION` is no longer emitted by the API
+   (#517 retired betterauth) and is matched only as a leftover. Narrow on purpose: a 401 from a route the user merely may not call has
    to stay an ordinary error, and a 5xx never qualifies (the API answers a
    dependency outage with 503 precisely so it does NOT read as a logout — see
    `bff-session.ts`'s `unknown`).

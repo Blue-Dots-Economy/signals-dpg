@@ -1,7 +1,7 @@
 /**
- * Local-dev seed for the aggregator-dpg integrating-DPG service user.
+ * Local-dev seed for the integrating-DPG service users.
  *
- * The service user lives inside an organization with type='network_service'
+ * Each service user lives inside an organization with type='network_service'
  * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
  * tables exist.
  *
@@ -13,8 +13,9 @@
  *
  * For production (k8s), the deploy-time migrate-job (in the separate
  * charts repo) applies `provision_service_users.sql` on every
- * install/upgrade, reading the raw key from the AGGREGATOR_DPG_API_KEY
- * Secret. The cluster Secret is the source of truth there.
+ * install/upgrade, reading each raw key from its own Secret
+ * (AGGREGATOR_DPG_API_KEY, RAYA_VOICE_BOT_API_KEY, ...). The cluster
+ * Secrets are the source of truth there.
  */
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -50,8 +51,16 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
+//
+// Slugs must match `provision_service_users.sql` in the charts repo, which is
+// what production actually runs — the slug is also the lookup key that
+// `service_account.ts` resolves a Keycloak client id against. Note the voice
+// bot's org is `raya-voice-bot`, NOT `voice-dpg`: `voice-dpg` is the name of
+// its Keycloak client, and the two were named independently. Renaming either
+// to match the other is its own change.
 const SERVICES = [
   { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
+  { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local' },
 ] as const;
 
 const ensure_org = async (slug: string, name: string): Promise<string> => {
@@ -123,11 +132,15 @@ const ensure_apikey = async (
     return { minted: false, raw_key: null };
   }
   const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
-  // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
-  // and compares the hash at verify time. We must insert the hash, not the
-  // raw key. See node_modules/@better-auth/api-key/dist/index.mjs
-  // `defaultKeyHasher`. Node's `digest('base64url')` is unpadded by default,
-  // matching better-auth's `base64Url.encode(..., { padding: false })`.
+  // The `apikey` table stores SHA-256(key) base64url-encoded (no padding) and
+  // the hash is compared at verify time, so we insert the hash, never the raw
+  // key. Node's `digest('base64url')` is unpadded and uses the `-_` alphabet,
+  // which is exactly the scheme. Three places must agree on it and none of them
+  // share code: this script, `plugins/auth/verify_api_key.ts`, and the
+  // automation's `provision_service_users.sql` (raw Postgres `digest()`).
+  // signals-search is a fourth, in another repo (#516). Originally inherited
+  // from `@better-auth/api-key`'s `defaultKeyHasher`; #517 removed that library
+  // but deliberately kept the scheme so no partner had to rotate a key.
   const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
   const now = new Date();
   await db.insert(apikey).values({

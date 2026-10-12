@@ -21,8 +21,6 @@
  *   --probe             Answer the §6.3 spike-1 question against THIS Keycloak:
  *                       does POST /users honour a client-supplied id? Creates
  *                       and deletes one throwaway user. Run this first.
- *   --audit-passwords   Risk R6: report whether any real password accounts
- *                       exist, which the no-credentials assumption relies on.
  *   (default)           Dry run: report what would happen. Writes nothing.
  *   --apply             Actually create the users.
  *   --reconcile         Verify every local user has a Keycloak match by id.
@@ -42,7 +40,6 @@
  * ── Run ────────────────────────────────────────────────────────────────────
  *   cd apps/api
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts --probe
- *   pnpm tsx scripts/migrate_users_to_keycloak.ts --audit-passwords
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts               # dry run
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts --apply
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts --reconcile
@@ -107,7 +104,7 @@ const pgUrl =
 const pool = new Pool({ connectionString: pgUrl, ssl: false });
 const db = drizzle(pool);
 
-import { account, member, user as userTable } from '../db/postgres/schema/auth.js';
+import { member, user as userTable } from '../db/postgres/schema/auth.js';
 import {
   KeycloakAdminClient,
   type KeycloakAdminConfig,
@@ -117,7 +114,6 @@ import {
   runMigration,
   runReconcile,
   runProbe,
-  runPasswordAudit,
   type MigrationData,
   type MigrationOptions,
 } from '../src/services/auth/migrate_core.js';
@@ -131,13 +127,11 @@ const value = (name: string): string | undefined =>
 
 const MODE = has('--probe')
   ? 'probe'
-  : has('--audit-passwords')
-    ? 'audit-passwords'
-    : has('--reconcile')
-      ? 'reconcile'
-      : has('--apply')
-        ? 'apply'
-        : 'dry-run';
+  : has('--reconcile')
+    ? 'reconcile'
+    : has('--apply')
+      ? 'apply'
+      : 'dry-run';
 
 const OPTS: MigrationOptions = {
   strategy: value('strategy') === 'import' ? 'import' : 'create',
@@ -209,20 +203,11 @@ const data: MigrationData = {
     return rows[0]?.n ?? 0;
   },
 
-  async fetchPasswordAccountRows(): Promise<Array<{ providerId: string; n: number }>> {
-    return db
-      .select({ providerId: account.providerId, n: sql<number>`count(*)::int` })
-      .from(account)
-      .where(and(isNotNull(account.password), sql`${account.password} <> ''`))
-      .groupBy(account.providerId);
-  },
 };
 
 // ── main ───────────────────────────────────────────────────────────────────
 
 const main = async (): Promise<number> => {
-  if (MODE === 'audit-passwords') return (await runPasswordAudit(data)).code;
-
   const client = new KeycloakAdminClient(loadKeycloakConfig());
   switch (MODE) {
     case 'probe':

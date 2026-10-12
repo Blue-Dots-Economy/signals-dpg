@@ -95,6 +95,7 @@ export function DomainControl({
     // using the native element (Sonar S6819). `min-w-0 p-0 m-0 border-0` resets
     // the UA's default fieldset chrome so the border below is ours.
     <fieldset
+      data-tour="domain-control"
       aria-label={t('browse.domain_group')}
       // Horizontal scroll rather than wrap: wrapping a 4+ domain network would
       // eat a phone screen. up-gzb (production) has three.

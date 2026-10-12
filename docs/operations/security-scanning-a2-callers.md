@@ -122,9 +122,13 @@ Pass their refs as a JSON array — useful for scheduled re-scans of what's live
     uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/security-scan.yml@main
     with:
       language: ts
-      image-refs: '["ghcr.io/blue-dots-economy/signals-dpg/api:develop","ghcr.io/blue-dots-economy/signals-dpg/ui:develop"]'
+      image-refs: '["ghcr.io/blue-dots-economy/signals-dpg/api:202609-s1-rc3","ghcr.io/blue-dots-economy/signals-dpg/ui:202609-s1-rc3"]'
     secrets: inherit
 ```
+
+signals-dpg publishes api/ui images only on release tags (`v*.*.*`,
+`20*-s*-rc*`) and manual runs (#756), so there is no `:develop` tag to scan —
+pin the release tag (or immutable `sha-` tag) that is actually deployed.
 
 Per-repo image sets: signals-dpg = api+ui · aggregator = api+web+worker(+keycloak) ·
 signals-search = app+**tei-bge-m3** · notification-service = 1 · ai-diffusion = 11 ·

@@ -18,6 +18,7 @@ import { useNetworkTheme } from '@/theme/theme-provider';
 import { setStoredSignupDomain, type SignupExtras } from '@/lib/signup-domain';
 import { setUserDomains } from '@/lib/user-api';
 import { resolvePostLoginLanding } from '@/lib/post-login-landing';
+import { preLoginConsentApplies } from './pre-login-consent';
 
 interface AuthState extends AuthIdentifier {
   userExists: boolean;
@@ -96,7 +97,12 @@ export function OtpPage() {
       // Persist consent that was accepted pre-OTP on the login page.
       // The write is best-effort: on failure we toast but still navigate
       // (the user is authenticated; they will be re-prompted next login).
-      if (state.pendingConsent) {
+      // A known minor was shown the adult copy pre-OTP; they are asked again
+      // with the U18 documents after sign-in instead (#626).
+      if (
+        state.pendingConsent &&
+        (await preLoginConsentApplies(state.pendingConsent.network, state.pendingConsent.brand ?? null))
+      ) {
         try {
           await acceptConsent(state.pendingConsent);
         } catch {

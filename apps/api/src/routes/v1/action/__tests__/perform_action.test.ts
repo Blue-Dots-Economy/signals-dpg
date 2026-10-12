@@ -326,8 +326,6 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
   });
 
   it('422 ACTING_ORG_TYPE_NOT_ALLOWED for an org type outside the allowed set', async () => {
-    // voice used to be the example here; it is now an admitted integrating
-    // DPG, so this needs a type that genuinely is not allowed.
     const app = buildApp({
       org_id: 'org_employer_1',
       org_type: 'employer' as unknown as 'aggregator',
@@ -343,21 +341,22 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     expect(fetchCalls).toHaveLength(0);
   });
 
-  it('accepts a voice acting_org acting on behalf of a user', async () => {
+  it('accepts a network_service acting_org acting on behalf of a user', async () => {
     dbState.userRows = [{ id: 'usr_target', onboardedByOrgId: 'org_agg_2' }];
     const app = buildApp({
-      org_id: 'org_voice_1',
-      org_type: 'voice',
-      service_user_id: 'svc_voice_1',
+      org_id: 'org_signals_1',
+      org_type: 'network_service',
+      service_user_id: 'svc_ns_1',
     });
     const res = await app.inject({
       method: 'POST',
       url: '/perform/bulk',
       payload: [{ ...VALID_BODY, acting_as_user_id: 'usr_target' }],
     });
-    // Not rejected on org type — voice reaches the action itself. The target
-    // is onboarded by a different org on purpose: voice is network-wide, so
-    // the aggregator's ownership rule must not apply to it.
+    // Not rejected on org type — the service tier reaches the action itself.
+    // The target is onboarded by a different org on purpose: network_service
+    // is network-wide, so the aggregator's ownership rule must not apply.
+    // (This is the path the voice bot takes since #518 retired `voice`.)
     expect(res.json().results[0]).not.toMatchObject({
       error: 'ACTING_ORG_TYPE_NOT_ALLOWED',
     });

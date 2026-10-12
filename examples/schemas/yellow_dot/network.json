@@ -257,6 +257,10 @@
           "from_domain": "student",
           "to_network": "onest_yellow_dot",
           "to_domain": "individual_tutor_weera_counsellor",
+          "column_fields": {
+            "from": ["Grade", "Academic Stream", "Service Looking For"],
+            "to": ["Service Offered", "Grade Bands Served", "Academic Streams Served"]
+          },
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Student To Individual Tutor Connect Requirement",
@@ -329,6 +333,10 @@
           "from_domain": "individual_tutor_weera_counsellor",
           "to_network": "onest_yellow_dot",
           "to_domain": "student",
+          "column_fields": {
+            "from": ["Service Offered", "Grade Bands Served", "Academic Streams Served"],
+            "to": ["Grade", "Academic Stream", "Service Looking For"]
+          },
           "requirement_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "title": "Individual Tutor To Student Connect Requirement",
