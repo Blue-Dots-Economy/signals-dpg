@@ -175,14 +175,14 @@ describe('range and include-value filters (infra#57)', () => {
     properties: {
       salaryMin: {
         type: 'number',
-        title: 'Monthly salary min',
+        title: 'Annual salary min',
         filterable: true,
         'x-range-filter': {
           title: 'Salary Ranges',
           max_field: 'salaryMax',
           buckets: [
-            { label: '0-3 LPA', min: 0, max: 25000 },
-            { label: '3-6 LPA', min: 25000, max: 50000 },
+            { label: '0-3 LPA', min: 0, max: 300000 },
+            { label: '3-6 LPA', min: 300000, max: 600000 },
           ],
         },
       },
@@ -212,9 +212,10 @@ describe('range and include-value filters (infra#57)', () => {
 
   it('matches a job whose salary range overlaps the bucket', () => {
     const pick = { salaryMin: ['3-6 LPA'] };
-    expect(itemPassesEnumFilters({ salaryMin: 20000, salaryMax: 30000 }, pick, fields)).toBe(true);
-    expect(itemPassesEnumFilters({ salaryMin: 60000, salaryMax: 80000 }, pick, fields)).toBe(false);
-    expect(itemPassesEnumFilters({ salaryMin: 30000 }, pick, fields)).toBe(false);
+    expect(itemPassesEnumFilters({ salaryMin: 250000, salaryMax: 350000 }, pick, fields)).toBe(true);
+    expect(itemPassesEnumFilters({ salaryMin: 700000, salaryMax: 900000 }, pick, fields)).toBe(false);
+    expect(itemPassesEnumFilters({ salaryMin: 350000 }, pick, fields)).toBe(false);
+    expect(itemPassesEnumFilters({ salaryMax: 350000 }, pick, fields)).toBe(false);
   });
 
   it('lets an "Any" job through a specific gender selection', () => {

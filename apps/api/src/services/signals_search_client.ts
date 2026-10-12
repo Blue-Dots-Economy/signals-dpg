@@ -37,7 +37,7 @@ export interface SignalsSearchFacetInput {
    * silently return zero results if it used `in`.
    */
   arrayValued?: boolean;
-  /** `x-range-filter` bucket: matches `field <= max` and `maxField >= min`; either may be open. */
+  /** `x-range-filter` bucket: matches `field <= max` and `maxField >= min`; either may be open, but both fields must be set. */
   range?: { maxField: string; min?: number; max?: number };
 }
 
@@ -251,18 +251,20 @@ function clampOffset(offset: number): number {
   return Math.max(Math.trunc(offset), 0);
 }
 
-// An open bound adds no clause.
+// signals-search has no "field exists" op. A missing field never satisfies a
+// numeric comparison, so comparing against a bound every number passes stands
+// in for one: an open bucket still requires both fields to be set.
+const ANY_NUMBER_UPPER_BOUND = Number.MAX_SAFE_INTEGER;
+const ANY_NUMBER_LOWER_BOUND = Number.MIN_SAFE_INTEGER;
+
+// Both fields must be set; an open bound only checks that its field is present.
 function buildRangeClauses(
   field: string,
   range: NonNullable<SignalsSearchFacetInput['range']>
 ): SignalsSearchFilterClause[] {
   return [
-    ...(range.max === undefined
-      ? []
-      : [{ op: 'lte' as const, target: `item_state.${field}`, value: range.max }]),
-    ...(range.min === undefined
-      ? []
-      : [{ op: 'gte' as const, target: `item_state.${range.maxField}`, value: range.min }]),
+    { op: 'lte', target: `item_state.${field}`, value: range.max ?? ANY_NUMBER_UPPER_BOUND },
+    { op: 'gte', target: `item_state.${range.maxField}`, value: range.min ?? ANY_NUMBER_LOWER_BOUND },
   ];
 }
 

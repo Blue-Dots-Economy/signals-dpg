@@ -191,9 +191,9 @@ describe('range and include-value filters (infra#57)', () => {
         'x-range-filter': {
           max_field: 'salaryMax',
           buckets: [
-            { label: '0-3 LPA', min: 0, max: 25000 },
-            { label: '3-6 LPA', min: 25000, max: 50000 },
-            { label: '25+ LPA', min: 208333 },
+            { label: '0-3 LPA', min: 0, max: 300000 },
+            { label: '3-6 LPA', min: 300000, max: 600000 },
+            { label: '25+ LPA', min: 2500000 },
           ],
         },
       },
@@ -216,14 +216,14 @@ describe('range and include-value filters (infra#57)', () => {
 
   it('turns a bucket label into the bucket bounds', () => {
     expect(resolve([{ field: 'salaryMin', values: ['3-6 LPA'] }])).toEqual([
-      { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 25000, max: 50000 } },
+      { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 300000, max: 600000 } },
     ]);
   });
 
   it('keeps an open upper bound open', () => {
     expect(resolve([{ field: 'salaryMin', values: ['25+ LPA'] }])[0].range).toEqual({
       maxField: 'salaryMax',
-      min: 208333,
+      min: 2500000,
     });
   });
 
@@ -231,7 +231,7 @@ describe('range and include-value filters (infra#57)', () => {
     expect(resolve([{ field: 'salaryMin', values: ['0-3 LPA', '3-6 LPA'] }])[0].range).toEqual({
       maxField: 'salaryMax',
       min: 0,
-      max: 50000,
+      max: 600000,
     });
   });
 

@@ -74,8 +74,8 @@ describe('isBooleanProperty', () => {
 
 describe('x-range-filter (infra#57)', () => {
   const buckets = [
-    { label: '0-3 LPA', min: 0, max: 25000 },
-    { label: '25+ LPA', min: 208333 },
+    { label: '0-3 LPA', min: 0, max: 300000 },
+    { label: '25+ LPA', min: 2500000 },
   ];
   const schemaWith = (rangeFilter: unknown, maxField: Record<string, unknown> = { type: 'number' }) => ({
     properties: {

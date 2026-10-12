@@ -67,24 +67,37 @@ describe('buildSignalsSearchRequest — envelope construction', () => {
     const req = buildSignalsSearchRequest({
       ...baseInput,
       filters: [
-        { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 25000, max: 50000 } },
+        { field: 'salaryMin', values: ['3-6 LPA'], range: { maxField: 'salaryMax', min: 300000, max: 600000 } },
       ],
     });
 
     expect(req.message.intent.filters).toEqual([
-      { op: 'lte', target: 'item_state.salaryMin', value: 50000 },
-      { op: 'gte', target: 'item_state.salaryMax', value: 25000 },
+      { op: 'lte', target: 'item_state.salaryMin', value: 600000 },
+      { op: 'gte', target: 'item_state.salaryMax', value: 300000 },
     ]);
   });
 
-  it('sends no clause for an open range bound', () => {
+  it('still requires the min field to be set for a bucket with no upper bound', () => {
     const req = buildSignalsSearchRequest({
       ...baseInput,
-      filters: [{ field: 'salaryMin', values: ['25+ LPA'], range: { maxField: 'salaryMax', min: 208333 } }],
+      filters: [{ field: 'salaryMin', values: ['25+ LPA'], range: { maxField: 'salaryMax', min: 2500000 } }],
     });
 
     expect(req.message.intent.filters).toEqual([
-      { op: 'gte', target: 'item_state.salaryMax', value: 208333 },
+      { op: 'lte', target: 'item_state.salaryMin', value: Number.MAX_SAFE_INTEGER },
+      { op: 'gte', target: 'item_state.salaryMax', value: 2500000 },
+    ]);
+  });
+
+  it('still requires the max field to be set for a bucket with no lower bound', () => {
+    const req = buildSignalsSearchRequest({
+      ...baseInput,
+      filters: [{ field: 'salaryMin', values: ['Up to 3 LPA'], range: { maxField: 'salaryMax', max: 300000 } }],
+    });
+
+    expect(req.message.intent.filters).toEqual([
+      { op: 'lte', target: 'item_state.salaryMin', value: 300000 },
+      { op: 'gte', target: 'item_state.salaryMax', value: Number.MIN_SAFE_INTEGER },
     ]);
   });
 

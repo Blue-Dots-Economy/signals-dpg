@@ -277,16 +277,20 @@ export function itemPassesEnumFilters(
   for (const [key, selectedValues] of Object.entries(selectedFields)) {
     if (selectedValues.length === 0) continue; // no selection → don't filter
 
+    const meta = fieldMeta.get(key);
+
+    // A range filter owns two fields; an item carrying either one is in scope
+    // and must have both to match.
+    if (meta?.range) {
+      if (!(key in data) && !(meta.range.maxField in data)) continue;
+      if (!itemOverlapsRangeBuckets(data, key, meta.range, selectedValues)) return false;
+      continue;
+    }
+
     // Absent field → passes (domain-safe)
     if (!(key in data)) continue;
 
     const itemValue = data[key];
-    const meta = fieldMeta.get(key);
-
-    if (meta?.range) {
-      if (!itemOverlapsRangeBuckets(data, key, meta.range, selectedValues)) return false;
-      continue;
-    }
 
     const isArray = meta?.isArray ?? Array.isArray(itemValue);
     const wanted = meta ? expandFilterValues(meta, selectedValues).map(String) : selectedValues;
@@ -316,7 +320,10 @@ function numericValue(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-/** Same overlap rule as the server: the item's [min, max] overlaps a selected bucket. */
+/**
+ * Same overlap rule as the server: the item's [min, max] overlaps a selected
+ * bucket. An item missing either value never matches, even an open bucket.
+ */
 function itemOverlapsRangeBuckets(
   data: Record<string, unknown>,
   key: string,
@@ -325,9 +332,10 @@ function itemOverlapsRangeBuckets(
 ): boolean {
   const itemMin = numericValue(data[key]);
   const itemMax = numericValue(data[range.maxField]);
+  if (itemMin === undefined || itemMax === undefined) return false;
   return resolveRangeBuckets(range, selectedLabels).some(
     (bucket) =>
-      (bucket.max === undefined || (itemMin !== undefined && itemMin <= bucket.max)) &&
-      (bucket.min === undefined || (itemMax !== undefined && itemMax >= bucket.min)),
+      (bucket.max === undefined || itemMin <= bucket.max) &&
+      (bucket.min === undefined || itemMax >= bucket.min),
   );
 }

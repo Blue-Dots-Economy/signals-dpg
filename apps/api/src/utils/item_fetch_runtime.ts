@@ -201,9 +201,14 @@ function numericStateField(field: string) {
   return sql`(CASE WHEN jsonb_typeof(${items.item_state} -> ${field}) = 'number' THEN (${items.item_state} ->> ${field})::numeric END)`;
 }
 
-/** Item's [minField, maxField] overlaps the bucket; a missing value never matches. */
+/**
+ * Item's [minField, maxField] overlaps the bucket. Both fields must be set:
+ * an item missing either is left out even for an open bucket ("25+ LPA").
+ */
 function rangeOverlapClause(minField: string, maxField: string, bucket: RangeFilterBucket) {
   const parts = [
+    sql`${numericStateField(minField)} IS NOT NULL`,
+    sql`${numericStateField(maxField)} IS NOT NULL`,
     ...(bucket.max === undefined ? [] : [sql`${numericStateField(minField)} <= ${bucket.max}`]),
     ...(bucket.min === undefined ? [] : [sql`${numericStateField(maxField)} >= ${bucket.min}`]),
   ];

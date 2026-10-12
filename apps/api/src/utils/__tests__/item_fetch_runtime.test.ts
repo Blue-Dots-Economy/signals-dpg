@@ -409,8 +409,8 @@ describe('range and include-value filters', () => {
                   'x-range-filter': {
                     max_field: 'salaryMax',
                     buckets: [
-                      { label: '0-3 LPA', min: 0, max: 25000 },
-                      { label: '25+ LPA', min: 208333 },
+                      { label: '0-3 LPA', min: 0, max: 300000 },
+                      { label: '25+ LPA', min: 2500000 },
                     ],
                   },
                 },
@@ -433,16 +433,25 @@ describe('range and include-value filters', () => {
 
     const text = whereText();
     expect(text).toContain("jsonb_typeof(items.item_state -> 'salaryMin') = 'number'");
-    expect(text).toMatch(/'salaryMin'\)::numeric END\) <= 25000/);
+    expect(text).toMatch(/'salaryMin'\)::numeric END\) <= 300000/);
     expect(text).toMatch(/'salaryMax'\)::numeric END\) >= 0/);
+  });
+
+  it('requires both range fields to be set, even for an open bucket', async () => {
+    await countLocalItems({ ...jobs, item_state: { salaryMin: ['25+ LPA'] } });
+
+    const text = whereText();
+    expect(text).toMatch(/'salaryMin'\)::numeric END\) IS NOT NULL/);
+    expect(text).toMatch(/'salaryMax'\)::numeric END\) IS NOT NULL/);
+    expect(text).toMatch(/'salaryMax'\)::numeric END\) >= 2500000/);
   });
 
   it('ORs several buckets and leaves an open bound out', async () => {
     await countLocalItems({ ...jobs, item_state: { salaryMin: ['0-3 LPA', '25+ LPA'] } });
 
     const text = whereText();
-    expect(text).toMatch(/>= 0\) OR \(.*>= 208333\)\)$/);
-    expect(text).not.toContain('<= 208333');
+    expect(text).toMatch(/>= 0\) OR \(.*>= 2500000\)\)$/);
+    expect(text).not.toContain('<= 2500000');
   });
 
   it('matches nothing when no label is a declared bucket', async () => {
