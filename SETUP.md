@@ -143,9 +143,11 @@ Open **http://localhost:5173** in your browser.
 
 ### Self-signup & login channels
 
-- `SELF_SIGNUP_MODE` (default `gated`) — the public OTP login flow will NOT create
-  new accounts. Onboard participants via `POST /api/v1/admin/participant`
-  (aggregator/voice). Set `SELF_SIGNUP_MODE=allowed` to permit self-registration.
+- `SELF_SIGNUP_MODE` — `.env.example` sets `allowed` so local setups can
+  self-register. Unset, the code default is `gated`: the public OTP login flow
+  will NOT create new accounts, and participants are onboarded via
+  `POST /api/v1/admin/participant` (aggregator/voice). Use `gated` for shared or
+  prod environments.
 - `LOGIN_CHANNELS` (default `email,phone`) — restrict login identifiers. e.g.
   `LOGIN_CHANNELS=phone` shows only the phone input and rejects email OTP.
 - Admin-domain emails (`ADMIN_DOMAINS`) are exempt from the self-signup gate.

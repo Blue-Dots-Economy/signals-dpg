@@ -145,10 +145,10 @@ chars) and is **not** yet in `.env.example` — set it before starting the API:
 INSTANCE_SHARED_SECRET="<shared 32+ char secret>"
 PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 
-# Self-signup + login. gated (default): no self-service signup via the public
-# OTP flow — onboard participants via POST /api/v1/admin/participant.
-# allowed: opens public self-registration.
-SELF_SIGNUP_MODE="gated"
+# Self-signup + login. allowed: public self-registration (local default).
+# gated (code default when unset): no self-service signup via the public OTP
+# flow — onboard participants via POST /api/v1/admin/participant.
+SELF_SIGNUP_MODE="allowed"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
 # DLT-approved provider template id for OTP SMS (login + guardian OTP);
