@@ -256,6 +256,23 @@ describe('validateActionEventPayload', () => {
     ).toBeUndefined();
   });
 
+  it('accepts consent when a closed event schema does not declare it (#798 regression)', () => {
+    mutableConfig.allow_extra_schema_data = false;
+    const closedSchema = {
+      type: 'object',
+      additionalProperties: false,
+      properties: { status: { type: 'string' }, remark: { type: 'string' } },
+      required: ['status', 'remark'],
+    };
+    const consent = { acknowledged: true, version: 1, consented_at: '2026-10-13T00:00:00.000Z' };
+    expect(
+      validateActionEventPayload(closedSchema, { status: 'created', remark: 'r', consent })
+    ).toBeUndefined();
+    expect(
+      validateActionEventPayload(closedSchema, { status: 'accepted', remark: 'r', consent })
+    ).toBeUndefined();
+  });
+
   it('allows undeclared extra keys when allow_extra_schema_data is true', () => {
     mutableConfig.allow_extra_schema_data = true;
     expect(

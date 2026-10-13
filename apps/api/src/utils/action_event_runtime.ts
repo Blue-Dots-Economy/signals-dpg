@@ -237,7 +237,9 @@ export function validateActionEventPayload(
     return;
   }
 
-  validateAgainstJsonSchema(eventSchema, eventPayload, 'event payload', {
+  // Consent is validated at the request boundary (ConsentAckSchema), not by the network schema.
+  const { consent: _drop, ...networkPayload } = eventPayload;
+  validateAgainstJsonSchema(eventSchema, networkPayload, 'event payload', {
     allowAdditionalProperties: apiConfig.allow_extra_schema_data,
     ignoredKeys: actionEventSystemPayloadKeys,
   });
