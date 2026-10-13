@@ -275,6 +275,32 @@ describe('self-signup gate (R2) — the gate must not reopen at the Keycloak lay
     expect(result.user.id).toBe(SUB);
   });
 
+  it('creates the mirror when gated if the caller vouches for the signup (SSO)', async () => {
+    // A verified partner-portal login: the SSO callback passes allowSignup
+    // because the partner, not the public OTP form, onboarded this person.
+    mockAuthConfig.allow_self_signup = false;
+    queueSelect(userTable, []);
+    queueSelect(userTable, []);
+
+    const result = await provisionUserFromClaims(claims(), makeLog(), { allowSignup: true });
+
+    expect(result.ok).toBe(true);
+    expect(insertsInto(userTable)).toHaveLength(1);
+  });
+
+  it('the bypass does not skip the identifier-collision check', async () => {
+    mockAuthConfig.allow_self_signup = false;
+    queueSelect(userTable, []);
+    queueSelect(userTable, [{ id: 'someone-else' }]);
+
+    const result = await provisionUserFromClaims(claims(), makeLog(), { allowSignup: true });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('IDENTITY_CONFLICT');
+    expect(insertsInto(userTable)).toHaveLength(0);
+  });
+
   it('creates the mirror when SELF_SIGNUP_MODE=allowed', async () => {
     mockAuthConfig.allow_self_signup = true;
     queueSelect(userTable, []);

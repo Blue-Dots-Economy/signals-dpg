@@ -393,6 +393,64 @@ describe('deleteUser', () => {
   });
 });
 
+describe('user searches', () => {
+  const capture = () => {
+    const urls: string[] = [];
+    handler = (url) => {
+      if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
+      urls.push(url);
+      return json([{ id: USER_ID, username: 'u' }]);
+    };
+    return urls;
+  };
+
+  it('findByPhone searches the phoneNumber attribute', async () => {
+    const urls = capture();
+    await makeClient().findByPhone('+919730862967');
+    expect(new URL(urls[0] as string).searchParams.get('q')).toBe('phoneNumber:+919730862967');
+  });
+
+  it('throws on a failed search', async () => {
+    handler = (url) => {
+      if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
+      return new Response('boom', { status: 500 });
+    };
+    await expect(makeClient().findByPhone('x')).rejects.toThrow(/by phone/);
+  });
+});
+
+describe('federatedIdentities', () => {
+  it('returns the links, or [] for an unknown user', async () => {
+    handler = (url) => {
+      if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
+      if (url.endsWith(`/users/${USER_ID}/federated-identity`)) {
+        return json([{ identityProvider: 'signals-sso', userId: 'ncs:1' }]);
+      }
+      return new Response(null, { status: 404 });
+    };
+    expect(await makeClient().federatedIdentities(USER_ID)).toEqual([
+      { identityProvider: 'signals-sso', userId: 'ncs:1' },
+    ]);
+    expect(await makeClient().federatedIdentities('missing')).toEqual([]);
+  });
+});
+
+describe('deleteSession', () => {
+  it('DELETEs the session and tolerates a 404', async () => {
+    const calls: Array<[string, string | undefined]> = [];
+    handler = (url, init) => {
+      if (url === TOKEN_URL) return json({ access_token: 't', expires_in: 300 });
+      calls.push([url, init?.method]);
+      return new Response(null, { status: 404 });
+    };
+    await expect(makeClient().deleteSession('sess-1')).resolves.toBeUndefined();
+    expect(calls[0]).toEqual([
+      'http://keycloak:8080/auth/admin/realms/bluedots/sessions/sess-1',
+      'DELETE',
+    ]);
+  });
+});
+
 describe('createUserPreservingId', () => {
   /**
    * The id-preserving create. Goes through partialImport because plain

@@ -919,7 +919,8 @@ describe('BrowseFiltersPanel — searchable dropdown for large option sets', () 
     const toggle = districtToggle();
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).toHaveTextContent('District');
-    expect(toggle).toHaveTextContent('Any');
+    // Nothing selected → just the +/− icon, no "Any" text.
+    expect(toggle).not.toHaveTextContent('Any');
     // Collapsed → no option is rendered as a chip.
     expect(screen.queryByRole('button', { name: 'Mysuru' })).not.toBeInTheDocument();
 

@@ -414,6 +414,14 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/uri_fields.ts',
           ),
         },
+        // Same again for the shared `filterable` marker rule (infra#57).
+        {
+          find: '@dpg/schemas/filter_fields',
+          replacement: path.resolve(
+            __dirname,
+            '../../packages/schemas/src/filter_fields.ts',
+          ),
+        },
         {
           find: /^@dpg\/(.*)$/,
           replacement: path.resolve(__dirname, '../../packages/$1/src'),

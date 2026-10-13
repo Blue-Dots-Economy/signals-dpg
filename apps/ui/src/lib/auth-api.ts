@@ -205,6 +205,12 @@ export interface KeycloakPublicConfig {
   clientId: string;
 }
 
+/** Partner-portal Apply redirect; `urlTemplate` has one `{field}` placeholder. */
+export interface ExternalApplyConfig {
+  actionType: string;
+  urlTemplate: string;
+}
+
 export interface AuthConfigResponse {
   selfSignupAllowed: boolean;
   loginChannels: LoginChannel[];
@@ -218,6 +224,8 @@ export interface AuthConfigResponse {
    */
   authProvider?: 'betterauth' | 'keycloak';
   keycloak?: KeycloakPublicConfig | null;
+  /** Absent or null = in-app Apply. */
+  externalApply?: ExternalApplyConfig | null;
 }
 
 export interface SignupResponse {

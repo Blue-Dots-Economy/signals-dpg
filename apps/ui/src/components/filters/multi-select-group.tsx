@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Check, Search } from 'lucide-react';
+import { Check, Minus, Plus, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 
@@ -49,8 +49,8 @@ export function MultiSelectGroup({ title, options, selected, onToggle }: Readonl
           {title}
         </span>
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          {count > 0 ? t('filters.selected', { count }) : t('filters.any')}
-          <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
+          {count > 0 && t('filters.selected', { count })}
+          {open ? <Minus className="size-3.5" aria-hidden /> : <Plus className="size-3.5" aria-hidden />}
         </span>
       </button>
 

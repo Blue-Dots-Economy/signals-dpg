@@ -71,8 +71,8 @@ const FetchItemsSchemaBase = z.object({
   // item_fetch_runtime's buildWhereClause normalizes a scalar `v` to `[v]`
   // and applies EVERY entry (scalar or array) the same guarded way:
   // `item_state ->> field = ANY(...)`, gated by the declared/non-private
-  // facet guard (see `resolveAllowedFacetFields`; #394 dropped the additional
-  // `filterable` marker that guard used to also require, and separately
+  // facet guard (see `resolveAllowedFacetFields`; since infra#57 also narrowed
+  // to `filterable: true` fields where the schema marks any; #394 separately
   // closed a hole where a scalar value bypassed the guard entirely via an
   // unguarded `item_state @> jsonb` containment check — there is no such
   // unguarded branch any more). Left as `z.unknown()` rather than a narrower

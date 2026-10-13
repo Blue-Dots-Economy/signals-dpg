@@ -177,6 +177,16 @@ function channelAllowed(identity: TokenIdentity): boolean {
   return false;
 }
 
+export interface ProvisioningOptions {
+  /**
+   * Create the mirror even when SELF_SIGNUP_MODE=gated. Set only by the SSO
+   * callback, for a login a partner portal has verified: the partner onboarded
+   * this person, which is what the gate exists to require. Every other gate
+   * (channel, identifier collision, ban) still applies.
+   */
+  allowSignup?: boolean;
+}
+
 /**
  * Resolve a Keycloak token's subject to a local `user` row, creating the mirror
  * on first login. Returns the row shaped for `request.user`.
@@ -186,7 +196,8 @@ function channelAllowed(identity: TokenIdentity): boolean {
  */
 export async function provisionUserFromClaims(
   claims: KeycloakClaims,
-  log: FastifyBaseLogger
+  log: FastifyBaseLogger,
+  options: ProvisioningOptions = {}
 ): Promise<ProvisioningResult> {
   const identity = readIdentity(claims);
 
@@ -241,7 +252,7 @@ export async function provisionUserFromClaims(
     return refreshed;
   }
 
-  return createMirror(identity, log);
+  return createMirror(identity, log, options);
 }
 
 /**
@@ -331,12 +342,13 @@ async function refreshMirror(
  */
 async function createMirror(
   identity: TokenIdentity,
-  log: FastifyBaseLogger
+  log: FastifyBaseLogger,
+  options: ProvisioningOptions
 ): Promise<ProvisioningResult> {
   // R2. A gated instance creates participants through the admin path, which
   // writes the local row itself; reaching here with no row means this subject
-  // was not onboarded by signals.
-  if (!authConfig.allow_self_signup) {
+  // was not onboarded by signals — unless a verified SSO login vouches for it.
+  if (!authConfig.allow_self_signup && !options.allowSignup) {
     log.warn(
       { sub: identity.sub },
       'provisioning: refused to create a user mirror — self-signup is gated',

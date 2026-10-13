@@ -1,0 +1,3 @@
+# Shell scripts run inside Linux containers (e.g. infra/keycloak/init/*.sh);
+# a CRLF checkout on Windows breaks them with "sh: \r: not found".
+*.sh text eol=lf

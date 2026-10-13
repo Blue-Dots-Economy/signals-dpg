@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import { hmacSha256Hex, safeEqual, sha256Hex } from '@/utils/secure_crypto';
 import { peerConfig } from '@/config';
 
 export const INSTANCE_TOKEN_HEADER = 'x-instance-token';
@@ -18,7 +18,7 @@ export type VerifyResult =
   | { ok: false; reason: VerifyFailureReason };
 
 function hashBody(body: string): string {
-  return createHash('sha256').update(body).digest('hex');
+  return sha256Hex(body);
 }
 
 // The token binds timestamp + path + a hash of the exact request body, so a
@@ -30,9 +30,7 @@ function computeToken(
   targetPath: string,
   body: string
 ): string {
-  return createHmac('sha256', secret)
-    .update(`${timestamp}.${targetPath}.${hashBody(body)}`)
-    .digest('hex');
+  return hmacSha256Hex(secret, `${timestamp}.${targetPath}.${hashBody(body)}`);
 }
 
 /** Sender side. Returns the HMAC token + unix-second timestamp to send. */
@@ -102,15 +100,6 @@ export function verifyInstanceToken(input: {
   const expected = computeToken(secret, ts, input.targetPath, input.body);
   const provided = input.token;
 
-  // Length check first (length is not secret); timingSafeEqual throws on
-  // mismatched lengths. Both are 64-char sha256 hex when well-formed.
-  if (provided.length !== expected.length) {
-    return { ok: false, reason: 'bad_signature' };
-  }
-
-  const equal = timingSafeEqual(
-    Buffer.from(provided, 'utf8'),
-    Buffer.from(expected, 'utf8')
-  );
+  const equal = safeEqual(provided, expected);
   return equal ? { ok: true } : { ok: false, reason: 'bad_signature' };
 }

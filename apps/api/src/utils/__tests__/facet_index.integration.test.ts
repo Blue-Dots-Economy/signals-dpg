@@ -14,8 +14,8 @@
  * an index scan rather than a sequential scan, at a scale (several thousand
  * rows in one leaf partition) where the seq-scan cost would otherwise
  * dominate. These indexes were originally added for fields marked
- * `filterable: true` in network.json; #394 removed that gate (every
- * declared, non-private field is a facet filter again), but the index still
+ * `filterable: true` in network.json; #394 removed that gate and infra#57
+ * brought it back as an opt-in per schema, but the index still
  * exists and still accelerates these same 3 seeder fields' queries — this
  * test is unaffected by that change.
  *

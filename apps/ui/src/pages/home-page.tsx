@@ -57,7 +57,7 @@ import {
   computeOpenActionItemIds,
 } from '@/lib/profile-actions';
 import type { TFunction } from 'i18next';
-import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import { filterOptionLabel, getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   anchorItemIdForTarget,
@@ -113,6 +113,7 @@ import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
+import { useExternalApply } from '@/lib/external-apply';
 
 /**
  * True when the map covers so much longitude that "zoom out" is not a usable
@@ -1127,13 +1128,8 @@ export function HomePage() {
   // still applies `search` itself via `buildFilteredCardsForDomain` below;
   // the two are independent filters over the same query, not one deriving
   // from the other. `BrowseFiltersPanel`'s enum-field facets, by contrast,
-  // drive the map server-side directly via `activeFieldFilters` — #394
-  // removed the `filterable: true` gate that used to additionally restrict
-  // this to a network.json-marked subset; every declared, non-private enum
-  // field the panel offers (the same full set the list uses,
-  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
-  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
-  // long-term schema-driven search/filter declaration. The domain
+  // drive the map server-side directly via `activeFieldFilters`, checked by the
+  // server's facet guard (`resolveAllowedFacetFields`). The domain
   // multi-select below (a client-side array-membership check on the
   // already-fetched markers) remains client/list-only; free-text search, per
   // the comment above, is sent to the server for both the map and the list.
@@ -1344,6 +1340,18 @@ export function HomePage() {
       return { ...item, distanceMeters: meters };
     });
   }, [singleDomainList.items, singleDomainList.sortApplied, localProfileItemIds, browseCoords]);
+
+  // Same target lookup as onActionSubmit below.
+  const externalApply = useExternalApply(!!user);
+  const resolveExternalUrl = React.useCallback(
+    (type: string, targetItemId: string) => {
+      const target =
+        singleDomainItems.find((i) => i.item_id === targetItemId) ??
+        (mapDetailItem?.item_id === targetItemId ? mapDetailItem : undefined);
+      return externalApply(type, target?.item_state);
+    },
+    [externalApply, singleDomainItems, mapDetailItem]
+  );
 
   // Single-domain: bottom sentinel advances the paged fetch. Server already
   // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
@@ -1607,6 +1615,17 @@ export function HomePage() {
   // can never disagree about what counts as a valid facet. Mirrors the
   // server's allowlist (declared + non-private) rather than the narrower
   // enum-only set the filter panel renders — see `resolveFacetFieldLabels`.
+  const facetOptionLabels = React.useMemo(
+    () =>
+      Object.fromEntries(
+        enumFilterFields.flatMap((f) =>
+          f.optionLabels
+            ? [[f.key, Object.fromEntries(f.options.map((o) => [o, filterOptionLabel(f, o, t)]))]]
+            : [],
+        ),
+      ),
+    [enumFilterFields, t],
+  );
   const facetFieldLabels = React.useMemo(
     () => resolveFacetFieldLabels(filterFieldDomains),
     [filterFieldDomains],
@@ -1675,6 +1694,7 @@ export function HomePage() {
     // re-seeded the very filters the user had just cleared.
     setFieldFilters: handleMapFieldsChange,
     fieldLabels: facetFieldLabels,
+    optionLabels: facetOptionLabels,
     area,
     setArea,
   });
@@ -2271,6 +2291,7 @@ export function HomePage() {
         />
       )}
       <ActionHandler
+          resolveExternalUrl={resolveExternalUrl}
           // Minor on a guardian-gated domain → confirm before the guardian OTP
           // is dispatched (server issues it on the first submit).
           guardianConfirmRequired={

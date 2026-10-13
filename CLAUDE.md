@@ -15,6 +15,7 @@ Other load-bearing docs:
 - `docs/operations/integrating-dpgs.md` — the two-header service-auth model used by aggregator-dpg / voice-dpg
 - `docs/operations/migrations.md`, `docs/operations/secrets.md`
 - `docs/operations/digilocker-integration.md` — what the DigiLocker wallet import does (pre-fills a profile form; not a login, not verification), the external "agent" service it depends on, and its current security caveats
+- `docs/operations/partner-sso.md` — partner-portal SSO (NCS): `/api/v1/auth/sso/login` verifies the partner link, then the Signals API acts as the `signals-sso` OIDC identity provider Keycloak brokers to (`/api/v1/auth/sso/oidc/*`); config, Keycloak init script, failure codes
 - `docs/operations/email-copy-overrides.md` — how every email the API sends gets its copy from an overridable messages file (`EMAIL_MESSAGES_PATH`, plus per-network/brand layering); the single-sender pipeline lives at `apps/api/src/notifications/email/` (see `apps/api/CLAUDE.md`)
 - `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md` — the Keycloak IAM migration; the code ships **dormant** behind `AUTH_PROVIDER=betterauth` (default) and is a hard prerequisite of consent convergence
 

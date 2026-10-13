@@ -49,4 +49,14 @@ export {
   type LocationPoint,
 } from './location_fields';
 export * from './u18_consent';
+export {
+  hasFilterableMarkers,
+  getFilterFieldEntries,
+  isBooleanProperty,
+  expandFilterValues,
+  resolveRangeBuckets,
+  type FilterFieldEntry,
+  type RangeFilter,
+  type RangeFilterBucket,
+} from './filter_fields';
 export default z;

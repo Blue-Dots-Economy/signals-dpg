@@ -11,6 +11,7 @@ import { auth_config } from '@/routes/v1/auth/auth_config';
 import { auth_me } from '@/routes/v1/auth/me';
 import { auth_session } from '@/routes/v1/auth/session';
 import { auth_signup } from '@/routes/v1/auth/signup';
+import { auth_sso } from '@/routes/v1/auth/sso/sso_routes';
 import { u18_precheck } from '@/routes/v1/auth/u18_precheck';
 import { user_domains } from '@/routes/v1/user/user_domains';
 import { submit_support } from '@/routes/v1/support/submit_support';
@@ -29,6 +30,7 @@ const v1_routes: FastifyPluginAsyncZod = async (fastify) => {
   fastify.register(auth_me, { prefix: '/auth' });
   fastify.register(auth_session, { prefix: '/auth' });
   fastify.register(auth_signup, { prefix: '/auth' });
+  fastify.register(auth_sso, { prefix: '/auth/sso' });
   fastify.register(u18_precheck, { prefix: '/auth' });
   fastify.register(user_domains, { prefix: '/user' });
   fastify.register(submit_support, { prefix: '/support' });

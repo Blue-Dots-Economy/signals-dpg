@@ -24,9 +24,14 @@ const mockKeycloakConfig = {
   ui_client_id: 'signals-ui',
 };
 
+const mockSsoConfig = {
+  ncs: { apply_url_template: null as string | null },
+};
+
 vi.mock('@/config', () => ({
   authConfig: mockAuthConfig,
   keycloakConfig: mockKeycloakConfig,
+  ssoConfig: mockSsoConfig,
 }));
 
 async function get() {
@@ -49,6 +54,7 @@ beforeEach(() => {
   mockKeycloakConfig.base_url = '';
   mockKeycloakConfig.realm = 'bluedots';
   mockKeycloakConfig.ui_client_id = 'signals-ui';
+  mockSsoConfig.ncs.apply_url_template = null;
 });
 
 describe('GET /api/v1/auth/config', () => {
@@ -89,6 +95,22 @@ describe('GET /api/v1/auth/config', () => {
     const res = await get();
 
     expect(res.json().keycloak).toBeNull();
+  });
+
+  it('keeps Apply in-app when no external apply template is configured', async () => {
+    const res = await get();
+    expect(res.json().externalApply).toBeNull();
+  });
+
+  it('advertises the partner-portal Apply redirect when configured', async () => {
+    mockSsoConfig.ncs.apply_url_template = 'https://ncs.gov.in/job-listing/applying/{ncsJobId}';
+
+    const res = await get();
+
+    expect(res.json().externalApply).toEqual({
+      actionType: 'apply',
+      urlTemplate: 'https://ncs.gov.in/job-listing/applying/{ncsJobId}',
+    });
   });
 
   it('never exposes the API client secret', async () => {

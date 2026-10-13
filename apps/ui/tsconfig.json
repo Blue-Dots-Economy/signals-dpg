@@ -30,6 +30,9 @@
       "@dpg/schemas/uri_fields": [
         "../../packages/schemas/src/uri_fields"
       ],
+      "@dpg/schemas/filter_fields": [
+        "../../packages/schemas/src/filter_fields"
+      ],
       "@dpg/*": [
         "../../packages/*/src"
       ]

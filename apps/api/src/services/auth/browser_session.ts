@@ -1,5 +1,5 @@
 import z from '@dpg/schemas';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
 
 /**
@@ -93,18 +93,8 @@ export function newCsrfToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
-/**
- * Constant-time compare for the CSRF double-submit check.
- *
- * `!==` on secrets leaks position through timing. Lengths are compared first
- * because `timingSafeEqual` throws on a mismatch — length is not the secret.
- */
-export function safeEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, 'utf8');
-  const bufB = Buffer.from(b, 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
+/** Constant-time compare for the CSRF double-submit check. Shared implementation. */
+export { safeEqual } from '@/utils/secure_crypto';
 
 export async function createSession(
   sessionId: string,
