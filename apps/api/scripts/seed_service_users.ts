@@ -50,18 +50,26 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
+// `api_key_env` / `org_id_env` let a scripted setup pre-agree the raw key and
+// org id with the integrating DPG instead of copying them from this output.
+// Unset → random values, as before. Only applied when the row is created.
 const SERVICES = [
-  { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
+  {
+    slug: 'aggregator-dpg',
+    user_email: 'aggregator-dpg-svc@signals.local',
+    api_key_env: 'AGGREGATOR_DPG_API_KEY',
+    org_id_env: 'AGGREGATOR_DPG_ORG_ID',
+  },
 ] as const;
 
-const ensure_org = async (slug: string, name: string): Promise<string> => {
+const ensure_org = async (slug: string, name: string, fixed_id?: string): Promise<string> => {
   const [existing] = await db
     .select({ id: organization.id })
     .from(organization)
     .where(eq(organization.slug, slug))
     .limit(1);
   if (existing) return existing.id;
-  const id = `org_${randomUUID()}`;
+  const id = fixed_id || `org_${randomUUID()}`;
   await db.insert(organization).values({
     id,
     slug,
@@ -113,6 +121,7 @@ const ensure_member = async (user_id: string, org_id: string): Promise<string> =
 const ensure_apikey = async (
   user_id: string,
   name: string,
+  fixed_key?: string,
 ): Promise<{ minted: boolean; raw_key: string | null }> => {
   const [existing] = await db
     .select({ id: apikey.id })
@@ -122,7 +131,7 @@ const ensure_apikey = async (
   if (existing) {
     return { minted: false, raw_key: null };
   }
-  const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  const raw_key = fixed_key || `sk_signals_${randomBytes(24).toString('hex')}`;
   // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
   // and compares the hash at verify time. We must insert the hash, not the
   // raw key. See node_modules/@better-auth/api-key/dist/index.mjs
@@ -152,10 +161,11 @@ const main = async () => {
     const org_id = await ensure_org(
       svc.slug,
       `${svc.slug} (network service)`,
+      process.env[svc.org_id_env],
     );
     const user_id = await ensure_user(svc.user_email, svc.slug);
     const member_id = await ensure_member(user_id, org_id);
-    const apikey_result = await ensure_apikey(user_id, svc.slug);
+    const apikey_result = await ensure_apikey(user_id, svc.slug, process.env[svc.api_key_env]);
 
     // Always print the IDs so operators don't need psql to find them.
     // Raw key is printed ONLY on mint — re-runs show '(existing — capture
