@@ -99,17 +99,19 @@ Run from the repo root, in order:
 ```bash
 pnpm db:push:api           # apply better-auth + Drizzle schema
 pnpm db:init:api           # apply partitioned items / actions / events tables
-pnpm db:seed:services:api  # create the service user + apikey
+pnpm db:seed:services:api  # create the service users (aggregator-dpg org, signals-search apikey)
 ```
 
 - `db:push` may **prompt to confirm** — accept to proceed.
-- The seed is **idempotent**. The raw apikey is printed **only on first mint** —
-  capture it if you'll run the aggregator (see below). If lost, delete the
-  `apikey` row and re-run the seed.
+- The seed is **idempotent**. The signals-search apikey comes from
+  `SIGNALS_SEARCH_API_KEY` if set; otherwise a random one is printed **only on
+  first mint**. If lost, delete the `apikey` row and re-run the seed.
+- aggregator-dpg gets an org but **no apikey**: it authenticates with a Keycloak
+  client-credentials token (`SIGNALSTACK_AUTH_MODE=bearer`), mapped to the org
+  whose slug equals its client id.
 
-> **Only if integrating the aggregator:** the seed prints an `org_id` and an
-> `apikey` (`sk_signals_…`). Keep both — you'll paste them into the aggregator's
-> env in the [aggregator section](#optional--run-with-the-aggregator-dpg).
+> **Only if integrating the aggregator:** the seed prints the aggregator-dpg
+> `org_id`. Keep it — it's the aggregator's `SIGNALSTACK_ACTING_ORG_ID`.
 
 ## Step 5 — Run it
 
