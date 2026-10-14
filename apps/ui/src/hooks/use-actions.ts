@@ -1,4 +1,5 @@
 import {
+  keepPreviousData,
   useQuery,
   useInfiniteQuery,
   useMutation,
@@ -329,4 +330,23 @@ export function useReceivedActions(
   params: UseOwnedActionsParams = {},
 ) {
   return useOwnedActionsInfinite('received', itemId, params);
+}
+
+/**
+ * One page of the caller's sent + received actions (My Actions revamp):
+ * offset/limit paging, filters and `include` parts exactly as the query says.
+ * Keeps the previous page on screen while the next loads, so paging and
+ * filtering don't flash an empty table.
+ */
+export function useOwnedActionsPage(query: FetchMyActionsQuery, enabled = true) {
+  const { isAuthenticated } = useAuth();
+  return useQuery({
+    queryKey: actionKeys.list(query),
+    queryFn: ({ signal }) => fetchMyActions(query, signal),
+    placeholderData: keepPreviousData,
+    refetchInterval: POLLING_INTERVAL,
+    refetchIntervalInBackground: false,
+    staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
+    enabled: isAuthenticated && enabled,
+  });
 }

@@ -12,7 +12,7 @@ matches the running build.
 
 | Migration | Kind | Owns |
 |-----------|------|------|
-| `0000_*.sql` | **generated** by `drizzle-kit generate` | the 12 declarative relational tables (better-auth ×9 + `item_metrics` + `pii_reveal_audit` + `consent_record`). Drift-detected. |
+| `0000_*.sql` | **generated** by `drizzle-kit generate` | the declarative relational tables it created at the time (better-auth ×9 + `item_metrics` + `pii_reveal_audit` + `consent_record`). **Five of those nine were dropped again by `0018`** (#517), so a fresh migrate ends with 7. Drift-detected. |
 | `0001_core.sql` | **hand-written custom** (`drizzle-kit generate --custom`) | `items` / `item_actions` / `action_events` — LIST-partitioned parents. Drizzle has no `PARTITION BY` API. |
 | `0002_item_search.sql` | **hand-written custom** | `item_search` — `vector(1024)` + `geography(MultiPoint,4326)` + hnsw/gist. Types Drizzle can't express; co-owned by signals-search. |
 | `NNNN_*.sql` (future) | generated *or* custom | version-specific schema migrations. |

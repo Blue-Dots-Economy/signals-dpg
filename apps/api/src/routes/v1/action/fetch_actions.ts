@@ -1,20 +1,40 @@
-import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { asc, desc, inArray, sql } from 'drizzle-orm';
 import { item_actions, items } from '@dpg/database';
 import z, {
+  ActionFacetSelectionSchema,
   ActionSortKeySchema,
   FetchOwnedActionsQuerySchema,
+  OwnedActionCountsSchema,
   OwnedItemActionSchema,
+  getDomainItemSchema,
   getInteractionPiiRevealStatuses,
+  getInteractionColumnFields,
+  interactionInputOf,
 } from '@dpg/schemas';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from 'fastify';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { db } from '@api/db/postgres/drizzle_config';
-import { getNetworkConfigById } from '@/network_configs';
 import { resolve_display_name } from '@/services/metrics/resolve_display_name';
-import { resolveAllowedFacetFilters, type FacetSelection } from '@/utils/facet_guard';
+import {
+  resolveAllowedFacetFields,
+  resolveAllowedFacetFilters,
+  type FacetSelection,
+} from '@/utils/facet_guard';
 import { nearestDistanceMeters } from '@/utils/geo_distance';
+import {
+  buildOwnedActionsWhere,
+  counterpartyItemId,
+  facetsForDomain,
+  matchesActionSearch,
+  ownItemId,
+  scopedItemIds,
+  stateMatchesFacets,
+} from '@/services/actions/owned_actions';
+import { countOwnedActionsForViews } from '@/services/actions/owned_action_counts';
+import { PRIVATE_NAME_FIELDS, privateNameShown } from '@/services/actions/visible_name';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
+import { memoizeNetworkConfigs } from '@/utils/network_config_memo';
 
 type FetchOwnedActionsRequest = FastifyRequest<{
   Querystring: z.infer<typeof FetchOwnedActionsQuerySchema>;
@@ -32,17 +52,16 @@ const FetchOwnedActionsResponseSchema = z.object({
       sort: ActionSortKeySchema,
       statuses: z.string().array(),
       types: z.string().array(),
-      facets: z
-        .array(
-          z.object({ field: z.string().min(1), values: z.array(z.string()).min(1) })
-        )
-        .default([]),
+      facets: z.array(ActionFacetSelectionSchema).default([]),
+      q: z.string().optional(),
     }),
+    // `include=counts` only.
+    counts: OwnedActionCountsSchema.optional(),
   }),
   actions: OwnedItemActionSchema.array(),
 });
 
-export const fetch_actions: FastifyPluginAsyncZod = async function (fastify) {
+export const fetch_actions: FastifyPluginAsyncZod = function (fastify) {
   fastify.route({
     url: '/fetch',
     method: 'GET',
@@ -56,6 +75,8 @@ export const fetch_actions: FastifyPluginAsyncZod = async function (fastify) {
     },
     handler: fetch_actions_handler,
   });
+  // Plugins return a promise; nothing here awaits (routes register synchronously).
+  return Promise.resolve();
 };
 
 const fetch_actions_handler = async (
@@ -76,53 +97,29 @@ const fetch_actions_handler = async (
     action_type,
     action_status,
     item_id,
+    item_ids,
     ownership_role,
+    q,
     sort,
     facets,
+    include,
     limit,
     offset,
   } = request.query;
+  const scopedIds = scopedItemIds({ item_id, item_ids });
+  const includes: readonly string[] = include ?? [];
 
   // Note: no partition pruning here (deliberate). This is an owner-scoped
   // fetch across the caller's own actions, not a single-network browse — there
   // is no one network to prune on, so we rely on the owner+status indexes
   // instead of inventing a network param.
-  const conditions = [];
-
-  if (action_id) conditions.push(eq(item_actions.action_id, action_id));
-  if (action_type?.length) conditions.push(inArray(item_actions.action_type, action_type));
-  if (action_status?.length)
-    conditions.push(inArray(item_actions.action_status, action_status));
-
-  if (item_id) {
-    if (ownership_role === 'initiated') {
-      conditions.push(eq(item_actions.source_item_id, item_id));
-    } else if (ownership_role === 'received') {
-      conditions.push(eq(item_actions.target_item_id, item_id));
-    } else {
-      conditions.push(
-        or(
-          eq(item_actions.source_item_id, item_id),
-          eq(item_actions.target_item_id, item_id)
-        )
-      );
-    }
-  }
-
-  if (ownership_role === 'initiated') {
-    conditions.push(eq(item_actions.source_item_owner, userId));
-  } else if (ownership_role === 'received') {
-    conditions.push(eq(item_actions.target_item_owner, userId));
-  } else {
-    conditions.push(
-      or(
-        eq(item_actions.source_item_owner, userId),
-        eq(item_actions.target_item_owner, userId)
-      )
-    );
-  }
-
-  const whereClause = conditions.length ? and(...conditions) : undefined;
+  const whereClause = buildOwnedActionsWhere(userId, {
+    action_id,
+    action_type,
+    action_status,
+    item_ids: scopedIds,
+    ownership_role,
+  });
 
   // Sort fast path (#439 Task 6). 'distance' has no SQL-orderable column
   // here — distance is computed at read time from item locations in the
@@ -149,13 +146,15 @@ const fetch_actions_handler = async (
     // inside this try (not before it) so a DB error from this query hits the
     // same structured-500 + logged catch as the count/rows queries below,
     // rather than rejecting unhandled (routes-never-throw).
-    if (item_id) {
-      const [ownedItem] = await db
-        .select({ created_by: items.created_by })
+    if (scopedIds.length > 0) {
+      const owned = await db
+        .select({ item_id: items.item_id, created_by: items.created_by })
         .from(items)
-        .where(eq(items.item_id, item_id))
-        .limit(1);
-      if (ownedItem?.created_by !== userId) {
+        .where(inArray(items.item_id, scopedIds));
+      const ownedIds = new Set(
+        owned.filter((o) => o.created_by === userId).map((o) => o.item_id),
+      );
+      if (!scopedIds.every((id) => ownedIds.has(id))) {
         return reply.code(403).send({
           error: 'FORBIDDEN_ITEM',
           message: 'item_id is not owned by the caller',
@@ -173,8 +172,8 @@ const fetch_actions_handler = async (
     //   one profile's actions, no cross-profile scan), filters/sorts in
     //   memory, and slices the page itself. `total` becomes the *filtered*
     //   count, not the raw SQL match count.
-    const facetsList: FacetSelection[] = facets ?? [];
-    const useEnrichedPath = facetsList.length > 0 || sort === 'distance';
+    const facetsList: Array<FacetSelection & { domain?: string }> = facets ?? [];
+    const useEnrichedPath = facetsList.length > 0 || sort === 'distance' || Boolean(q);
 
     let matchingRows;
     let total: number;
@@ -217,7 +216,7 @@ const fetch_actions_handler = async (
     //   the already-masked value is used.
     // - `meta` (item_state + item_locations) is the non-PII facet/geo
     //   projection Task 7 filters and sorts on — never the masked name.
-    const { names: resolvedNames, meta: itemMeta } = await resolveItemNames(matchingRows);
+    const { names: resolvedNames, meta: itemMeta } = await resolveItemNames(matchingRows, request.log);
 
     // Pre-resolve reveals_pii_on_status per action row. Mirrors the gate used
     // by /api/v1/action/:id/contact-details so the list view never reveals a
@@ -225,32 +224,16 @@ const fetch_actions_handler = async (
     // back to an empty set (mask), matching the contact-details fail-closed
     // posture. Shared with the Task 7 facet-schema lookup below — both key off
     // network id.
-    const networkConfigCache = new Map<
-      string,
-      Awaited<ReturnType<typeof getNetworkConfigById>> | null
-    >();
-    const getNetworkConfigCached = async (network: string) => {
-      if (networkConfigCache.has(network)) {
-        return networkConfigCache.get(network) ?? null;
-      }
-      try {
-        const cfg = await getNetworkConfigById(network);
-        networkConfigCache.set(network, cfg);
-        return cfg;
-      } catch {
-        networkConfigCache.set(network, null);
-        return null;
-      }
-    };
+    const getNetworkConfigCached = memoizeNetworkConfigs((err, network) =>
+      request.log.warn({ err, network }, 'network config unavailable in fetch_actions — masking'),
+    );
 
     // The counterparty is whichever side of the action the caller does NOT
     // own; `myId` is the other side. For 'received' this is source; for
     // 'initiated' it's target; for 'all' this still resolves the non-owned
     // side per row regardless of which query param scoped the fetch.
-    const counterpartyId = (row: OwnedRowIds) =>
-      row.target_item_owner === userId ? row.source_item_id : row.target_item_id;
-    const myId = (row: OwnedRowIds) =>
-      row.target_item_owner === userId ? row.target_item_id : row.source_item_id;
+    const counterpartyId = (row: OwnedRowIds) => counterpartyItemId(row, userId);
+    const myId = (row: OwnedRowIds) => ownItemId(row, userId);
 
     const distanceFor = (row: OwnedRowIds): number | null =>
       nearestDistanceMeters(
@@ -275,7 +258,7 @@ const fetch_actions_handler = async (
             cfg,
             cMeta.item_domain,
             cMeta.item_type,
-            facetsList,
+            facetsForDomain(facetsList, cMeta.item_domain),
           );
         }
       } catch (err) {
@@ -299,73 +282,26 @@ const fetch_actions_handler = async (
       const cMeta = itemMeta.get(counterpartyId(row));
       const allowed = await allowedFacetsFor(cMeta);
       const state = cMeta?.item_state ?? {};
-      return allowed.every(({ field, values }) => {
-        const raw = state[field];
-        let asArray: string[];
-        if (Array.isArray(raw)) {
-          asArray = raw.map(String);
-        } else if (raw == null) {
-          asArray = [];
-        } else {
-          asArray = [String(raw as string | number | boolean)];
-        }
-        const wanted = new Set(values.map(String));
-        return asArray.some((v) => wanted.has(v));
-      });
+      return stateMatchesFacets(state, allowed);
     };
 
-    let pageRows = matchingRows;
-    const distanceByActionId = new Map<string, number | null>();
-
-    if (useEnrichedPath) {
-      const withComputed = await Promise.all(
-        matchingRows.map(async (row) => ({
-          row,
-          distance_m: distanceFor(row),
-          pass: await passesFacets(row),
-        })),
-      );
-      let enriched = withComputed.filter((e) => e.pass);
-      if (sort === 'distance') {
-        // Stable sort: distance asc, nulls last, ties keep the SQL-supplied
-        // recency order (Array.prototype.sort is stable in the Node engines
-        // this runs on).
-        enriched = enriched
-          .map((e, i) => ({ e, i }))
-          .sort((a, b) => {
-            if (a.e.distance_m == null && b.e.distance_m == null) return a.i - b.i;
-            if (a.e.distance_m == null) return 1;
-            if (b.e.distance_m == null) return -1;
-            return a.e.distance_m - b.e.distance_m || a.i - b.i;
-          })
-          .map(({ e }) => e);
-      }
-      total = enriched.length;
-      const page = enriched.slice(offset, offset + limit);
-      pageRows = page.map((e) => e.row);
-      for (const e of page) distanceByActionId.set(e.row.action_id, e.distance_m);
-    } else {
-      for (const row of matchingRows) {
-        distanceByActionId.set(row.action_id, distanceFor(row));
-      }
-    }
-
     const revealStatusesByAction = new Map<string, readonly string[]>();
-    for (const row of pageRows) {
-      if (revealStatusesByAction.has(row.action_id)) continue;
+    const resolveRevealStatuses = async (rows: typeof matchingRows) => {
+    const pending = rows.filter((row) => !revealStatusesByAction.has(row.action_id));
+    // Every network's config first (memoised, in parallel), then the rows.
+    const configs = new Map(
+      await Promise.all(
+        [...new Set(pending.map((r) => r.target_item_network))].map(
+          async (network) => [network, await getNetworkConfigCached(network)] as const,
+        ),
+      ),
+    );
+    for (const row of pending) {
       let statuses: readonly string[] = [];
       try {
-        const cfg = await getNetworkConfigCached(row.target_item_network);
+        const cfg = configs.get(row.target_item_network);
         if (cfg) {
-          statuses = getInteractionPiiRevealStatuses(cfg, {
-            actionType: row.action_type,
-            fromNetwork: row.source_item_network,
-            fromDomain: row.source_item_domain,
-            fromItemType: row.source_item_type,
-            toNetwork: row.target_item_network,
-            toDomain: row.target_item_domain,
-            toItemType: row.target_item_type,
-          });
+          statuses = getInteractionPiiRevealStatuses(cfg, interactionInputOf(row));
         }
       } catch (err) {
         request.log.warn(
@@ -375,6 +311,8 @@ const fetch_actions_handler = async (
       }
       revealStatusesByAction.set(row.action_id, statuses);
     }
+    };
+
     // Memoise decrypts per item — the same item can appear on multiple rows
     // (source on one action, target on another) and we only want to pay the
     // crypto cost once per page.
@@ -404,6 +342,19 @@ const fetch_actions_handler = async (
       return value;
     };
 
+    // The name as this caller may see it on this row: a public name, or a
+    // private one revealed by this action's status on a live profile. null for
+    // a name that stays masked — search only ever matches these.
+    const visibleName = (id: string, actionId: string, status: string): string | null => {
+      const entry = resolvedNames.get(id);
+      if (!entry) return null;
+      if (entry.kind === 'public') return entry.value;
+      if (privateNameShown(revealStatusesByAction.get(actionId) ?? [], status, entry.lifecycle_status)) {
+        return unmask(id);
+      }
+      return null;
+    };
+
     const displayName = (
       id: string,
       actionId: string,
@@ -417,12 +368,112 @@ const fetch_actions_handler = async (
       // schema-declared reveals_pii_on_status AND the named profile is live.
       // A paused/draft profile keeps its name masked even on an accepted
       // action — mirrors the contact-details reveal gate (#273).
-      const revealStatuses = revealStatusesByAction.get(actionId) ?? [];
-      if (revealStatuses.includes(status) && entry.lifecycle_status === 'live') {
+      if (privateNameShown(revealStatusesByAction.get(actionId) ?? [], status, entry.lifecycle_status)) {
         return unmask(id) ?? entry.masked;
       }
       return entry.masked;
     };
+
+    const passesSearch = (row: typeof matchingRows[number]): boolean =>
+      matchesActionSearch(q, [
+        visibleName(counterpartyId(row), row.action_id, row.action_status),
+        visibleName(myId(row), row.action_id, row.action_status),
+      ]);
+
+    let pageRows = matchingRows;
+    const distanceByActionId = new Map<string, number | null>();
+
+    if (useEnrichedPath) {
+      if (q) await resolveRevealStatuses(matchingRows);
+      const withComputed = await Promise.all(
+        matchingRows.map(async (row) => ({
+          row,
+          distance_m: distanceFor(row),
+          pass: await passesFacets(row),
+        })),
+      );
+      let enriched = withComputed.filter((e) => e.pass && passesSearch(e.row));
+      if (sort === 'distance') {
+        // Stable sort: distance asc, nulls last, ties keep the SQL-supplied
+        // recency order (Array.prototype.sort is stable in the Node engines
+        // this runs on).
+        enriched = enriched
+          .map((e, i) => ({ e, i }))
+          .sort((a, b) => {
+            if (a.e.distance_m == null && b.e.distance_m == null) return a.i - b.i;
+            if (a.e.distance_m == null) return 1;
+            if (b.e.distance_m == null) return -1;
+            return a.e.distance_m - b.e.distance_m || a.i - b.i;
+          })
+          .map(({ e }) => e);
+      }
+      total = enriched.length;
+      const page = enriched.slice(offset, offset + limit);
+      pageRows = page.map((e) => e.row);
+      for (const e of page) distanceByActionId.set(e.row.action_id, e.distance_m);
+    } else {
+      for (const row of matchingRows) {
+        distanceByActionId.set(row.action_id, distanceFor(row));
+      }
+    }
+
+    await resolveRevealStatuses(pageRows);
+
+    const counterpartyFor = async (row: typeof matchingRows[number]) => {
+      const cMeta = itemMeta.get(counterpartyId(row));
+      if (!cMeta) return null;
+      let values: Record<string, unknown> = {};
+      try {
+        const cfg = await getNetworkConfigCached(row.target_item_network);
+        const counterpartyCfg = await getNetworkConfigCached(cMeta.item_network);
+        if (cfg && counterpartyCfg) {
+          const fields = getInteractionColumnFields(
+            cfg,
+            interactionInputOf(row),
+            counterpartyId(row) === row.source_item_id ? 'from' : 'to',
+          );
+          // Only declared, non-private fields ever leave the server, whatever
+          // the config lists — so the values carry no personal data.
+          const allowed = resolveAllowedFacetFields(
+            getDomainItemSchema(counterpartyCfg, cMeta.item_domain, cMeta.item_type) as Record<
+              string,
+              unknown
+            >,
+          );
+          values = Object.fromEntries(
+            fields
+              .filter((f) => allowed.has(f) && cMeta.item_state[f] != null && cMeta.item_state[f] !== '')
+              .map((f) => [f, cMeta.item_state[f]]),
+          );
+        }
+      } catch (err) {
+        request.log.warn(
+          { err, action_id: row.action_id },
+          'column field resolution failed in fetch_actions — no column values',
+        );
+      }
+      return {
+        network: cMeta.item_network,
+        domain: cMeta.item_domain,
+        item_type: cMeta.item_type,
+        column_fields: values,
+      };
+    };
+    const counterparties = includes.includes('column_fields')
+      ? new Map(
+          await Promise.all(pageRows.map(async (r) => [r.action_id, await counterpartyFor(r)] as const)),
+        )
+      : null;
+
+    const counts = includes.includes('counts')
+      ? await countOwnedActionsForViews(userId, {
+          action_type,
+          item_ids: scopedIds,
+          getNetworkConfig: getNetworkConfigCached,
+          onError: (err) =>
+            request.log.warn({ err }, 'saved-view count resolution failed for a group'),
+        })
+      : undefined;
 
     return reply.code(200).send({
       meta: {
@@ -434,7 +485,9 @@ const fetch_actions_handler = async (
           statuses: action_status ?? [],
           types: action_type ?? [],
           facets: facets ?? [],
+          ...(q ? { q } : {}),
         },
+        ...(counts ? { counts } : {}),
       },
       actions: pageRows.map((row) => ({
         ...row,
@@ -463,6 +516,7 @@ const fetch_actions_handler = async (
         // distance_m is computed at read time (#439 Task 7) from item
         // locations — null when either side has none.
         distance_m: distanceByActionId.get(row.action_id) ?? null,
+        ...(counterparties ? { counterparty: counterparties.get(row.action_id) ?? null } : {}),
       })),
     });
   } catch (err) {
@@ -523,16 +577,6 @@ type ResolvedName =
       lifecycle_status: string;
     };
 
-// Conventional name properties to surface when an item schema declares no
-// public `display_name_field`. The schema-aware mask in
-// packages/schemas/item_state_masking applies to these at item-create time,
-// so item_state already carries the masked value (e.g. "M***").
-const PRIVATE_NAME_FIELDS = [
-  'beneficiary_name',
-  'full_name',
-  'name',
-  'contact_name',
-];
 
 /**
  * Batch-resolves a display name AND a non-PII facet/geo projection for every
@@ -546,7 +590,8 @@ const PRIVATE_NAME_FIELDS = [
  * distance sort/display read, never the masked name.
  */
 async function resolveItemNames(
-  rows: ActionRow[]
+  rows: ActionRow[],
+  log: FastifyBaseLogger,
 ): Promise<{ names: Map<string, ResolvedName>; meta: Map<string, ItemMeta> }> {
   const names = new Map<string, ResolvedName>();
   const meta = new Map<string, ItemMeta>();
@@ -572,21 +617,10 @@ async function resolveItemNames(
     .from(items)
     .where(inArray(items.item_id, [...ids]));
 
-  const configCache = new Map<
-    string,
-    Awaited<ReturnType<typeof getNetworkConfigById>> | null
-  >();
-  const getConfig = async (network: string) => {
-    if (configCache.has(network)) return configCache.get(network) ?? null;
-    try {
-      const cfg = await getNetworkConfigById(network);
-      configCache.set(network, cfg);
-      return cfg;
-    } catch {
-      configCache.set(network, null);
-      return null;
-    }
-  };
+  // A missing config leaves the item unnamed (masked), never an error.
+  const getConfig = memoizeNetworkConfigs((err, network) =>
+    log.warn({ err, network }, 'network config unavailable while resolving action names'),
+  );
 
   for (const item of itemRows) {
     const cfg = await getConfig(item.item_network);

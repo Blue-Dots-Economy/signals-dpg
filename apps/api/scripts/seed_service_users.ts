@@ -9,6 +9,8 @@
  *     organization, plus one apikey. signals-api sends this key to
  *     signals-search; local integrators (e.g. the AI Diffusion agent) also use
  *     it with this org id on the admin API (`x-api-key` + `x-acting-org-id`).
+ *   - raya-voice-bot: service user inside its own 'network_service'
+ *     organization, plus one apikey.
  *
  * Run after `pnpm db:push:api` so the better-auth tables exist.
  *
@@ -20,8 +22,9 @@
  *
  * For production (k8s), the deploy-time migrate-job (in the separate
  * charts repo) applies `provision_service_users.sql` on every
- * install/upgrade, reading the raw key from the AGGREGATOR_DPG_API_KEY
- * Secret. The cluster Secret is the source of truth there.
+ * install/upgrade, reading each raw key from its own Secret
+ * (AGGREGATOR_DPG_API_KEY, RAYA_VOICE_BOT_API_KEY, ...). The cluster
+ * Secrets are the source of truth there.
  */
 import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
@@ -62,6 +65,13 @@ import {
 // Unset → random values, as before. Only applied when the row is created.
 // Either env var may be omitted: no `org_id_env` → no org / member, no
 // `api_key_env` → no apikey.
+//
+// Slugs must match `provision_service_users.sql` in the charts repo, which is
+// what production actually runs — the slug is also the lookup key that
+// `service_account.ts` resolves a Keycloak client id against. Note the voice
+// bot's org is `raya-voice-bot`, NOT `voice-dpg`: `voice-dpg` is the name of
+// its Keycloak client, and the two were named independently. Renaming either
+// to match the other is its own change.
 const SERVICES: ReadonlyArray<{
   slug: string;
   user_email: string;
@@ -72,6 +82,12 @@ const SERVICES: ReadonlyArray<{
     slug: 'aggregator-dpg',
     user_email: 'aggregator-dpg-svc@signals.local',
     org_id_env: 'AGGREGATOR_DPG_ORG_ID',
+  },
+  {
+    slug: 'raya-voice-bot',
+    user_email: 'raya-voice-bot-svc@signals.local',
+    api_key_env: 'RAYA_VOICE_BOT_API_KEY',
+    org_id_env: 'RAYA_VOICE_BOT_ORG_ID',
   },
   {
     slug: 'signals-search',
@@ -151,11 +167,15 @@ const ensure_apikey = async (
     return { minted: false, raw_key: null };
   }
   const raw_key = fixed_key || `sk_signals_${randomBytes(24).toString('hex')}`;
-  // @better-auth/api-key stores SHA-256(key) base64url-encoded (no padding)
-  // and compares the hash at verify time. We must insert the hash, not the
-  // raw key. See node_modules/@better-auth/api-key/dist/index.mjs
-  // `defaultKeyHasher`. Node's `digest('base64url')` is unpadded by default,
-  // matching better-auth's `base64Url.encode(..., { padding: false })`.
+  // The `apikey` table stores SHA-256(key) base64url-encoded (no padding) and
+  // the hash is compared at verify time, so we insert the hash, never the raw
+  // key. Node's `digest('base64url')` is unpadded and uses the `-_` alphabet,
+  // which is exactly the scheme. Three places must agree on it and none of them
+  // share code: this script, `plugins/auth/verify_api_key.ts`, and the
+  // automation's `provision_service_users.sql` (raw Postgres `digest()`).
+  // signals-search is a fourth, in another repo (#516). Originally inherited
+  // from `@better-auth/api-key`'s `defaultKeyHasher`; #517 removed that library
+  // but deliberately kept the scheme so no partner had to rotate a key.
   const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
   // `key` is not unique; one raw key on two users would make the caller ambiguous.
   const [taken] = await db

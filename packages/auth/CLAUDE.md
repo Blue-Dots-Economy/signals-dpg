@@ -1,43 +1,50 @@
 # CLAUDE.md — packages/auth
 
-better-auth configuration + the unified OTP plugin. Root `CLAUDE.md`'s "Auth model" and "Self-signup + login channels" sections cover the *routes and headers* a caller sees; this doc covers how this package wires better-auth itself and the OTP flow underneath.
+**This package no longer has anything to do with authentication.** #517 retired
+better-auth: `src/config.ts` (the `betterAuth(...)` instance), `plugins/`
+(`unified_otp`, `auth_guards`, `otp_delivery`) and `utils/` (session cookie
+helpers) are all gone, along with the `better-auth` / `@better-auth/api-key`
+dependencies. Keycloak is the only identity provider.
 
-## How better-auth is wired (`src/config.ts`)
+The name is kept only because renaming a workspace package touches every
+importer. What actually lives here is **PII crypto**:
 
-`createAuth()` builds one `betterAuth(...)` instance with:
-- a Drizzle Postgres adapter (`drizzleAdapter(config.db, { provider: 'pg' })`),
-- Redis as `secondaryStorage` (session + OTP storage — `get`/`set` proxy straight to the injected `redis` client),
-- five plugins: `openAPI`, `bearer`, `admin`, `organization`, `unifiedOtp` (the custom plugin in `plugins/unified_otp.ts`), plus `apiKey` (from `@better-auth/api-key`).
+- `src/pii_crypto.ts` — envelope encrypt/decrypt for the private item blob.
+- `src/pii_key.ts` — derives the key material from `SIGNALS_PII_KEY`.
 
-## better-auth is pinned to the `1.6.x` line on purpose (`~1.6.29`)
+Both are re-exported from `src/index.ts`, and both are load-bearing well beyond
+auth: `item_service.ts` encrypts the private blob through them, and
+`services/geocoding/jitter.ts` HMACs the same key to place a private location
+deterministically inside its jitter annulus (see `.claude/rules/database-conventions.md`).
+Deleting this package because it "was the auth package" would silently take out
+item encryption and location jitter — neither of which has a compile-time link
+to identity.
 
-`package.json` uses `~1.6.29` for `better-auth` and `@better-auth/api-key`, **not** a caret. Do not widen it back to `^` without doing the migration below — a caret lets the resolver take `1.7.x`, which is where two contracts break (#604):
+## Where the auth material went
 
-- **`SecondaryStorage` gained required members.** `getAndDelete` and `increment` are optional in `@better-auth/core@1.6.x` and **required** in `1.7.x`, so the Redis adapter at `src/config.ts:70` (`get`/`set`/`delete` only) stops compiling — `TS2739`.
-- **`verifyApiKey` left the inferred API surface**, breaking `apps/api/plugins/auth/auth_middleware.ts` — `TS2339`.
+| Was here | Now |
+|---|---|
+| `createAuth()` / `betterAuth(...)` | nothing — Keycloak is the provider |
+| `verifyApiKey` (better-auth plugin) | `apps/api/plugins/auth/verify_api_key.ts`, a native in-process verifier over the same `apikey` table and hash |
+| `unified_otp` (OTP login) | Keycloak's own login flow; the API's BFF cookie exchange is `apps/api/src/routes/v1/auth/session.ts` |
+| `assertSelfSignupAllowed` / `assertChannelAllowed` | `apps/api/src/services/auth/provisioning.ts`, which enforces the same `SELF_SIGNUP_MODE` / `LOGIN_CHANNELS` policy when mirroring a Keycloak subject |
+| session cookie helpers | `apps/api/plugins/auth/resolve_browser_session.ts` |
 
-Both are real upstream intent, not bugs: core `1.6.x` carries `TODO(secondary-storage-atomic-consume)` and `TODO(secondary-storage-increment-required)` comments promising exactly this tightening in the next breaking release.
+The auth model as a whole is documented in `.claude/rules/auth-model.md`.
 
-Two things to know before scheduling that migration. **`getAndDelete` is a security-relevant upgrade, not busywork** — `internal-adapter` uses it to consume single-use verification values atomically, and logs a warning and falls back to read-then-delete without it, so a multi-process deployment can race an OTP consume. It maps to Redis `GETDEL`; `increment` maps to `INCR` + `EXPIRE`-on-create (TTL in **seconds**, applied only on creation — later increments must not extend it). **`increment` backs secondary-storage rate limiting, which this package disables** (see the next section), so it needs a correct implementation rather than a load-bearing one.
+## The `apikey` table outlived the library, on purpose
 
-Note this package is **not** legacy: `AUTH_PROVIDER` defaults to `betterauth` (`packages/config/src/secrets.ts`) and every Keycloak path ships dormant, so this is the live auth provider on a default deployment. Pinning is a deliberate deferral, not abandonment — patches within `1.6.x` still land.
+`verify_api_key.ts` reads the same `apikey` table better-auth used, with the
+same `base64url(sha256(key))` hash. That is not leftover coupling — the table is
+a **cross-repo contract**: signals-search validates against it with its own SQL
+(#516), and the automation's `provision_service_users.sql` seeds it with a raw
+Postgres `digest()` that never loaded better-auth. Dropping the table is #517's
+remaining half and is blocked on #516.
 
-## The instance-level rate limit is **off** — `apiKey` has its own instead
+Two columns there look like library bookkeeping and are not:
 
-`config.ts:65-67` sets `rateLimit: { enabled: false }` on the top-level `betterAuth(...)` call — **OTP request/verify endpoints have no built-in rate limiting.** The only rate limit in this package is scoped to the separate `apiKey` plugin's config (`config.ts:12-15`: `timeWindow: 1h, maxRequests: 10000`), which governs API-key usage, not OTP attempts. This is a known gap, not an oversight to quietly "fix" by re-enabling the global limiter (which would also throttle API-key traffic in ways that config wasn't designed for) — if OTP rate limiting is ever added, it should be scoped narrowly to the OTP endpoints, not flipped on globally.
-
-## OTP flow (`plugins/unified_otp.ts`)
-
-- `generateOtp(isTest)` returns the fixed `'000000'` when `isTest` is true — this is the `CREATE_TEST_OTP` flag guarded by `assertCreateTestOtpSafe` (`packages/config/src/secrets.ts`'s startup guard) — never assume this path is reachable in production.
-- Storage is Redis-keyed: `otp:phone:<phoneNumber>` / `otp:email:<email>`, 5-minute TTL (`expiresInSec = 5 * 60`, `unified_otp.ts:361`), written via `ctx.context.secondaryStorage.set(key, otp, expiresInSec)`.
-- Verification deletes the key on success (one-time use) — a stored OTP is never reusable after a correct verify.
-- **Delivery is fail-loud (#1.14).** `requestOtp` routes the send through `deliverOtp` (`plugins/otp_delivery.ts`), which **awaits** `sendPhoneOtp`/`sendEmailOtp` (email was previously fire-and-forget) and, on any send rejection, drops the just-stored OTP and throws `APIError('BAD_GATEWAY', { code: 'OTP_DELIVERY_FAILED' })`. The send callbacks in `src/config.ts` no longer swallow notification-service errors — they log and rethrow. Net effect: a failed SMS/email send returns `502` instead of `{ ok: true }` for a code that never arrived, and no stale OTP is left stranded in Redis for its full TTL. `deliverOtp` takes its deps injected so it is unit-tested without a better-auth context (`plugins/__tests__/otp_delivery.test.ts`).
-
-## `plugins/auth_guards.ts` — two small, load-bearing guard functions
-
-- **`assertChannelAllowed(identifier, loginChannels)`** — rejects an OTP request/verify whose identifier channel (phone vs email) isn't in the instance's `LOGIN_CHANNELS` config, before any OTP is generated.
-- **`assertSelfSignupAllowed({ allowSelfSignup, email, adminByDomain })`** — the authoritative self-signup gate (see `.claude/rules/auth-model.md` for `SELF_SIGNUP_MODE`). Called at **both** `requestOtp` and `verifyOtp` — the two points new-user creation could occur — as defense-in-depth. Has one bypass: `isAdminDomainEmail(email, adminByDomain)` lets an email on a configured admin domain through even when signup is gated (the admin bootstrap path). **If you ever touch one call site, check the other** — a fix applied to only `requestOtp` or only `verifyOtp` reopens the gate at the other entry point.
-
-> **There is now a third gate, outside this package.** The Keycloak login path doesn't go through these plugins at all: `apps/api/src/services/auth/provisioning.ts` enforces the same self-signup and channel rules when it mirrors a Keycloak subject into the local `user` table. It is inert while `AUTH_PROVIDER=betterauth`, but a change to the *policy* (as opposed to this implementation of it) has to be made in both places for as long as both providers exist.
-
-> **Under `AUTH_PROVIDER=keycloak` nothing in this package runs.** `app.ts` does not register the `/api/auth/*` mount at all, so `checkUser` / `requestOtp` / `verifyOtp` are unreachable — which matters because `verifyOtp` creates users, and one created that way would have no Keycloak identity and so could never log in. The `isAdminDomainEmail` bypass in `assertSelfSignupAllowed` has **no** Keycloak counterpart on purpose: admin creation there is an explicit operator action (`pnpm keycloak:create:admin`) rather than an email-domain rule. See `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md`.
+- **`remaining`** — signals-search filters on `(remaining IS NULL OR remaining > 0)`.
+  Nothing decrements it any more (neither side writes, to avoid racing the
+  owner), so it is static — but it still gates auth in another repo.
+- **`rate_limit_enabled`** — seeded `false` for every service key, which is why
+  better-auth's 10 000/hr ceiling was **already inert** and was not ported.

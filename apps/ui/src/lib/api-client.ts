@@ -65,8 +65,9 @@ export function createApiClient() {
    *
    * `getCsrfToken()` is the non-React signal for "we hold a session" — it is
    * populated only by a successful `fetchBffSession`, and a 401 does not clear
-   * it. `TOKEN_EXPIRED`/`NO_ACTIVE_SESSION` are kept for the betterauth and
-   * service paths, which carry no CSRF token.
+   * it. `TOKEN_EXPIRED` covers the Bearer-token path (resolve_session.ts), which
+   * carries no CSRF token; `NO_ACTIVE_SESSION` is no longer emitted by the API
+   * (#517 retired betterauth) and is matched only as a leftover.
    *
    * Deliberately narrow either way: a 401 from a route the user merely may not
    * call has to stay an ordinary error. A 5xx never qualifies — the API answers

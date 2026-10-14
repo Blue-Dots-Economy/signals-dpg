@@ -11,6 +11,7 @@ import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { useAuth } from '@/contexts/auth-context';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import { cn } from '@/lib/utils';
+import { GuideButton } from '@/guide/guide-button';
 import type { ViewMode } from '@/engine/types';
 
 interface TopBarProps {
@@ -44,6 +45,7 @@ function NotificationBell() {
       className="relative"
       onClick={() => navigate('/my-actions')}
       aria-label={t('nav.pending_actions', { count })}
+      data-tour="notifications"
     >
       <Bell className="h-4 w-4" />
       {count > 0 && (
@@ -115,6 +117,7 @@ export function TopBar({
           >
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
+              data-tour="search"
               type="search"
               aria-label={t('common.search')}
               placeholder={t('common.search')}
@@ -128,16 +131,17 @@ export function TopBar({
       <div className="ml-auto flex items-center gap-2">
         {variant === 'browse' && (
           <ToggleGroup
+            data-tour="view-toggle"
             type="single"
             value={viewMode}
             onValueChange={(value) => {
               if (value) onViewModeChange?.(value as ViewMode);
             }}
           >
-            <ToggleGroupItem value="map" aria-label={t('nav.map_view')}>
+            <ToggleGroupItem data-tour="view-map" value="map" aria-label={t('nav.map_view')}>
               <MapPinned className="h-4 w-4" />
             </ToggleGroupItem>
-            <ToggleGroupItem value="list" aria-label={t('nav.list_view')}>
+            <ToggleGroupItem data-tour="view-list" value="list" aria-label={t('nav.list_view')}>
               <List className="h-4 w-4" />
             </ToggleGroupItem>
           </ToggleGroup>
@@ -146,7 +150,10 @@ export function TopBar({
         {/* On mobile, Language + Theme move into the avatar dropdown once the
             user is signed in (there's no dropdown to move them into for the
             logged-out case, so they stay inline there). */}
-        <div className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}>
+        <div
+          data-tour="preferences"
+          className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}
+        >
           {/* `compact` renders the switcher icon-only below sm and shows the
               language label from sm up. On the logged-out mobile bar (where the
               controls stay inline) this frees the ~90px "English" label so the
@@ -156,16 +163,21 @@ export function TopBar({
           <ThemeModeToggle />
         </div>
 
+        <GuideButton />
+
         {!isLoading && (
           isAuthenticated ? (
             <>
               <span className="hidden md:inline-flex">
                 <NotificationBell />
               </span>
-              <UserMenu />
+              <span data-tour="account" className="inline-flex">
+                <UserMenu />
+              </span>
             </>
           ) : (
             <Button
+              data-tour="account"
               variant="outline"
               size="sm"
               onClick={() => navigate('/auth/login')}

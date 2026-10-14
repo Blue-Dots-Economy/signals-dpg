@@ -63,6 +63,8 @@ vi.mock('@/lib/served-binding', async (orig) => ({
 vi.mock('@/lib/consent-api', () => ({
   fetchConsentConfigs: (...a: unknown[]) => mocks.fetchConsentConfigs(...a),
   getConsentStatusByIdentifier: (...a: unknown[]) => mocks.getConsentStatusByIdentifier(...a),
+  // The signed-in status the pre-login-consent check reads (#626): an adult.
+  getConsentStatus: async () => ({ statuses: { terms: [], privacy: [] }, variant: 'adult' }),
   acceptConsent: (...a: unknown[]) => mocks.acceptConsent(...a),
   submitU18Dob: (...a: unknown[]) => mocks.submitU18Dob(...a),
   getU18Status: (...a: unknown[]) => mocks.getU18Status(...a),

@@ -14,9 +14,10 @@ deploy runner:
    `apps/api/db/postgres/schema/` (`auth.ts`, `metrics.ts`,
    `pii_reveal_audit.ts`, `consent_record.ts`; re-exported from `index.ts`).
    `apps/api/drizzle.config.ts` points `out` at `./drizzle`, `schema` at
-   `./db/postgres/schema`. Tables: the better-auth set (`user`, `account`,
-   `verification`, `apikey`, `organization`, `member`, `invitation`, `team`,
-   `team_member`) plus `item_metrics`, `pii_reveal_audit`, `consent_record`.
+   `./db/postgres/schema`. Tables: `user`, `apikey`, `organization`, `member`
+   (the four that outlived better-auth — `account`, `verification`,
+   `invitation`, `team` and `team_member` were dropped by `0018`, #517) plus
+   `item_metrics`, `pii_reveal_audit`, `consent_record`.
    Migrations are **generated and committed** under `apps/api/drizzle/`
    (`pnpm db:generate:api`) and applied at deploy by `drizzle-orm`'s runtime
    `migrate()` — **not** `drizzle-kit` (a devDependency, absent from the prod
@@ -60,7 +61,7 @@ From a clean checkout:
 
 ```bash
 docker compose up -d db redis      # bring up postgres + redis
-pnpm db:push:api                   # drizzle-kit push → auth tables
+pnpm db:push:api                   # drizzle-kit push → declarative schema tables
 pnpm db:init:api                   # apply create_items.sql + create_actions_events.sql
 ```
 
@@ -79,8 +80,8 @@ Script wiring:
   ```ts
   const FILES = ['create_items.sql', 'create_actions_events.sql'];
   ```
-  `db_init.ts` doesn't include the better-auth tables because local dev uses
-  `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
+  `db_init.ts` doesn't include the declarative (Drizzle-schema) tables because
+  local dev uses `pnpm db:push:api` for them. In deploy, all tables (declarative + raw) are
   applied by the single Drizzle ledger via `migrate.mjs` (see "Deployed" below),
   not by this local script. The script is idempotent and safe to re-run.
 
@@ -358,7 +359,7 @@ manual DDL needed.**
   `POSTGRES_PORT` / `POSTGRES_DB` wiring consumed by both
   `apps/api/scripts/db_init.ts` and the helm migrate-Job.
 - `apps/api/drizzle.config.ts` — Drizzle Kit configuration for the
-  better-auth schema.
+  declarative schema (`apps/api/db/postgres/schema/`).
 - `apps/api/scripts/db_init.ts` — local idempotent SQL applier.
 - `dpg/charts/api/templates/migrate-job.yaml` (charts repo) —
   deploy-time Job.

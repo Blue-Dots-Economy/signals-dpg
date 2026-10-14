@@ -137,6 +137,17 @@ export interface DotNetworkInteraction {
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
   reveals_pii_on_status?: string[];
+  /** Bulk-export eligibility (#769): which side(s) may export the counterparty. */
+  export?: { requester_domains: string[] };
+  /** Status buckets; `create` = still waiting on the receiver. */
+  metric_categories?: {
+    create?: string[];
+    accept?: string[];
+    reject?: string[];
+    cancel?: string[];
+  } | null;
+  /** Fields of each side shown to the other in My Actions (server-filtered to non-private). */
+  column_fields?: { from?: string[]; to?: string[] };
 }
 
 export interface DotNetworkInstance {
@@ -244,6 +255,12 @@ export interface MapProviderProps {
   children?: React.ReactNode;
   /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  /**
+   * Draw the provider's own marker popup (Leaflet bubble / Google InfoWindow or
+   * mobile overlay). Default true. The phone home map turns it off and shows
+   * the marker's details in a bottom sheet instead, driven by `onMarkerClick`.
+   */
+  showPopup?: boolean;
   /**
    * Optional per-marker icon resolver. Defaults to a domain-based lucide icon
    * (see `getIconForDomain`). Callers can override to pick an icon from other

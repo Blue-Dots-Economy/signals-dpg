@@ -26,7 +26,7 @@ This repository contains the current DPG API runtime, schema-driven UI app, exam
 - `packages/config`: env parsing, network config loading, and consent config loading
 - `packages/database`: database helpers and partitioning
 - `packages/schemas`: API request schemas and network schema parsing
-- `packages/auth`: auth integration (better-auth + unified OTP; also carries a **dormant** Keycloak provider gated behind `AUTH_PROVIDER`)
+- `packages/auth`: **no longer auth** — #517 retired better-auth and Keycloak is the only provider, so what remains here is the PII crypto (`pii_crypto`/`pii_key`) backing item encryption and location jitter
 - `packages/notification`: notification service client for OTP and outbound messages
 - `packages/match_score`: match score service client for item comparison
 
@@ -151,11 +151,18 @@ PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 SELF_SIGNUP_MODE="allowed"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
-# DLT-approved provider template id for OTP SMS (login + guardian OTP);
-# defaults to "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
-# CREATE_TEST_OTP is off. (Distinct from the per-event lifecycle SMS templates,
+# DLT-approved provider template id for the guardian/U18 OTP SMS; defaults to
+# "login_otp". Set alongside the NOTIFICATION_SERVICE_* creds when
+# CREATE_TEST_OTP is off. (The login OTP is minted and sent by Keycloak.) (Distinct from the per-event lifecycle SMS templates,
 # which live in apps/api/src/notifications/sms/*.properties.)
 SMS_TEMPLATE_ID=""
+
+# Bulk engagement export (POST /action/export). Optional; defaults shown.
+# Max rows per export (above it: 413), IANA zone for export timestamps, and
+# exports one user may run per hour (above it: 429 EXPORT_RATE_LIMITED).
+# EXPORT_MAX_ROWS=10000
+# EXPORT_TIMEZONE="Asia/Kolkata"
+# EXPORT_RATE_LIMIT_PER_HOUR=20
 
 # Max profiles a single user may hold (default 5). A network.json domain's
 # max_profiles_per_user overrides this per-domain.
@@ -195,11 +202,12 @@ EMAIL_MESSAGES_PATH=""
 # docs/operations/local-split-ui.md.
 UI_HOST_BINDINGS=""
 
-# Auth provider. betterauth (default) uses the in-repo better-auth + OTP flow;
-# keycloak switches the API to validate Keycloak-minted tokens instead. The
-# Keycloak path ships but is DORMANT under the default — flipping to keycloak
-# is migration-gated (see packages/auth/CLAUDE.md).
-AUTH_PROVIDER="betterauth"
+# Auth provider. `keycloak` is the only value — #517 removed better-auth, and a
+# stale `betterauth` here fails at startup with an actionable message rather than
+# being silently coerced. Flipping an existing instance is migration-gated: every
+# user must already exist in the realm (`pnpm keycloak:migrate:users --apply`,
+# then `--reconcile` to 1:1), because nothing creates a missing identity on the fly.
+AUTH_PROVIDER="keycloak"
 ```
 
 For remote network configs, use:
@@ -214,16 +222,34 @@ Or use `SCHEMA_REGISTRY_URL` with either:
 - one base URL
 - comma-separated `network=url` mappings
 
-### 3. Start PostgreSQL and Redis
+### 3. Start PostgreSQL, Redis and Keycloak
 
 ```bash
 docker compose up -d db redis
 ```
 
+Keycloak is **required** — it is the only login provider (#517), and the API
+refuses to start without `KEYCLOAK_BASE_URL`. The root compose file does not
+define it; bring up Keycloak and Mailpit from the `local-setup/` compose
+(`local-setup/.env` must exist — copy it from `local-setup/.env.example`):
+
+```bash
+cd local-setup
+docker compose --profile keycloak up -d keycloak mailpit keycloak-init
+cd ..
+```
+
+Keycloak serves on http://localhost:8080 (realm `bluedots`). The login OTP is
+minted by Keycloak, not the API: email codes land in Mailpit at
+http://localhost:8025, and phone codes are logged by the Keycloak container
+(`docker compose logs keycloak | grep -i otp` from `local-setup/`).
+`CREATE_TEST_OTP` does not affect login; it only fixes the guardian/U18 OTP to
+`000000`.
+
 ### 4. Set up the database (first time only)
 
 ```bash
-pnpm db:push:api           # apply better-auth + Drizzle schema (may prompt to confirm)
+pnpm db:push:api           # apply the Drizzle schema (may prompt to confirm)
 pnpm db:init:api           # create partitioned items / actions / events tables
 pnpm db:seed:services:api  # service users: aggregator-dpg org, signals-search org + apikey (idempotent)
 ```

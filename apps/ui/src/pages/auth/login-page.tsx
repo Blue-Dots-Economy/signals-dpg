@@ -23,7 +23,8 @@ import {
 import { mergeConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import { useNetworkTheme } from '@/theme/theme-provider';
-import type { ConsentAcceptBody, ConsentConfigDocument } from '@dpg/schemas';
+import type { ConsentAcceptBody } from '@dpg/schemas';
+import { buildOutstandingConsent, type OutstandingConsent } from '@/lib/consent-gate';
 import { toast } from 'sonner';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import type { DotNetworkDomain } from '@/engine/types';
@@ -44,10 +45,8 @@ type AuthMode = 'phone' | 'email';
 
 type PendingConsent = ConsentAcceptBody;
 
-interface ConsentGateState {
-  config: ConsentConfigDocument;
-  pendingConsent: PendingConsent;
-}
+/** The gate state is the shared shape — see `lib/consent-gate`. */
+type ConsentGateState = OutstandingConsent;
 
 function domainLabel(domain: DotNetworkDomain): string {
   return formatDomainLabel(domain.id, [domain]);
@@ -305,27 +304,23 @@ function OtpLoginPage() {
           : undefined;
         const mergedConfig = mergeConsentConfig(networkDefault.schema, brandEntry?.schema);
 
-        const needed = (['terms', 'privacy'] as const).filter(
-          (c) => !consentStatus.statuses[c].includes(mergedConfig.documents[c].current_version),
-        );
+        const outstanding = buildOutstandingConsent({
+          config: mergedConfig,
+          network: themeId,
+          brand,
+          source: exists ? 'login' : 'signup',
+          accepted: consentStatus.statuses,
+          // No variant: `status-by-identifier` is unauthenticated and does not
+          // report one, so this gate is always the adult set. A minor gets the
+          // U18 documents post-auth from the guardian flow (#453/#626).
+        });
 
-        if (needed.length > 0) {
+        if (outstanding) {
           setPendingIdentifier(ident);
           setPendingUserExists(exists);
           setPendingName(resolvedName);
           setPendingSignupExtras(resolvedSignupExtras);
-          setConsentGate({
-            config: mergedConfig,
-            pendingConsent: {
-              network: themeId,
-              brand: brand !== 'standard' ? brand : null,
-              source: exists ? 'login' : 'signup',
-              items: needed.map((c) => ({
-                category: c,
-                version: mergedConfig.documents[c].current_version,
-              })),
-            },
-          });
+          setConsentGate(outstanding);
           // Do NOT send OTP yet — wait for accept.
           setIsLoading(false);
           return;
@@ -586,6 +581,7 @@ function OtpLoginPage() {
           mode="gate"
           initialTab="privacy"
           config={consentGate.config}
+          variant={consentGate.variant}
           onAccept={() => { void handleConsentAccept(); }}
         />
       )}

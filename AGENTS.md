@@ -10,7 +10,7 @@ dpg-monorepo/
 │   ├── api/               # Fastify API server
 │   └── ui/                # React + Vite schema-driven UI
 ├── packages/
-│   ├── auth/              # better-auth configuration
+│   ├── auth/              # PII crypto (no longer auth — #517)
 │   ├── config/            # Zod env schemas & allowed lists
 │   ├── database/          # Drizzle ORM setup & utilities
 │   ├── match_score/       # Match-scoring provider client (DPG scoring)
@@ -186,8 +186,8 @@ export default my_route;
 
 ## Auth & Database
 
-- Auth configured in `packages/auth/src/config.ts` using `better-auth`.
-- Use `auth_middleware` plugin for protected routes. OTP flows use `unifiedOtp`.
+- Auth is **Keycloak only** (#517 removed better-auth and `packages/auth/src/config.ts` with it). `AUTH_PROVIDER` accepts just `keycloak`.
+- Use `auth_middleware` plugin for protected routes (`apps/api/plugins/auth/`). It resolves `x-api-key` (in-process, `verify_api_key.ts`), the `sid` BFF cookie, then a Keycloak service bearer. Login/OTP is Keycloak's own flow, not this repo's.
 - **Integrating DPGs**: aggregator-dpg, voice-dpg, etc. authenticate via service apikeys plus an `x-acting-org-id` header. See [`docs/operations/integrating-dpgs.md`](docs/operations/integrating-dpgs.md).
 - Schema files: `apps/api/db/postgres/schema/`. Migrations: `apps/api/drizzle/`.
 - Use `drizzle-kit` for migrations. **Never edit migration files manually.**
