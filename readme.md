@@ -225,7 +225,7 @@ docker compose up -d db redis
 ```bash
 pnpm db:push:api           # apply better-auth + Drizzle schema (may prompt to confirm)
 pnpm db:init:api           # create partitioned items / actions / events tables
-pnpm db:seed:services:api  # service users: aggregator-dpg org + apikey, signals-search apikey (idempotent)
+pnpm db:seed:services:api  # service users: aggregator-dpg org, signals-search org + apikey (idempotent)
 ```
 
 See `SETUP.md` for the full walkthrough and the aggregator integration steps.
@@ -266,7 +266,7 @@ VITE_MAP_PROVIDER="leaflet"
 - `pnpm db:migrate:api`
 - `pnpm db:push:api`
 - `pnpm db:init:api` — create partitioned items / actions / events tables
-- `pnpm db:seed:services:api` — seed the service users (aggregator-dpg org + apikey, signals-search apikey)
+- `pnpm db:seed:services:api` — seed the service users (aggregator-dpg org, signals-search org + apikey)
 - `pnpm db:seed:purple_dot:api` — seed purple_dot sample data
 - `pnpm db:backfill:consent:api` — one-off deploy backfill for the consent-gated discoverability change (#275); re-classifies existing profiles against the consent gate
 - `pnpm db:studio:api`

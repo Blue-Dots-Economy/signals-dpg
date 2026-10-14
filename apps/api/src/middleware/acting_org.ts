@@ -38,9 +38,9 @@ const get_header_value = (raw: string | string[] | undefined): string | undefine
  * that reach is checked; the choice of which org to assert is not.
  *
  * What that means in practice depends entirely on the set of service principals
- * that exist. Today the only org `SERVICES` in `scripts/seed_service_users.ts`
- * seeds is aggregator-dpg's, `type: 'network_service'` — network-wide scope
- * (the signals-search entry has no org, so it can't assert one). Raya /
+ * that exist. Today every org `SERVICES` in `scripts/seed_service_users.ts`
+ * seeds (aggregator-dpg, signals-search) is `type: 'network_service'` —
+ * network-wide scope. Raya /
  * voice is network-wide by the same design. Every principal able to reach this
  * middleware therefore already carries the broadest scope the model defines.
  *
