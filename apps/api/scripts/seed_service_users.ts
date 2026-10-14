@@ -52,8 +52,9 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
-// `org_id_env` / `api_key_env` name env vars that fix the org id / raw key
-// (random when unset); leave one out to skip the org or the apikey.
+// `apikey: false` → org and member only (aggregator-dpg uses a Keycloak token).
+// <SLUG>_ORG_ID / <SLUG>_API_KEY env vars fix the org id / raw key; random when
+// unset (e.g. SIGNALS_SEARCH_API_KEY).
 //
 // Slugs must match `provision_service_users.sql` in the charts repo, which is
 // what production actually runs — the slug is also the lookup key that
@@ -61,30 +62,14 @@ import {
 // bot's org is `raya-voice-bot`, NOT `voice-dpg`: `voice-dpg` is the name of
 // its Keycloak client, and the two were named independently. Renaming either
 // to match the other is its own change.
-const SERVICES: ReadonlyArray<{
-  slug: string;
-  user_email: string;
-  api_key_env?: string;
-  org_id_env?: string;
-}> = [
-  {
-    slug: 'aggregator-dpg',
-    user_email: 'aggregator-dpg-svc@signals.local',
-    org_id_env: 'AGGREGATOR_DPG_ORG_ID',
-  },
-  {
-    slug: 'raya-voice-bot',
-    user_email: 'raya-voice-bot-svc@signals.local',
-    api_key_env: 'RAYA_VOICE_BOT_API_KEY',
-    org_id_env: 'RAYA_VOICE_BOT_ORG_ID',
-  },
-  {
-    slug: 'signals-search',
-    user_email: 'signals-search-svc@signals.local',
-    api_key_env: 'SIGNALS_SEARCH_API_KEY',
-    org_id_env: 'SIGNALS_SEARCH_ORG_ID',
-  },
-];
+const SERVICES = [
+  { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local', apikey: false },
+  { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local', apikey: true },
+  { slug: 'signals-search', user_email: 'signals-search-svc@signals.local', apikey: true },
+] as const;
+
+const env_for = (slug: string, suffix: string): string | undefined =>
+  process.env[`${slug.toUpperCase().replace(/-/g, '_')}_${suffix}`];
 
 const ensure_org = async (slug: string, name: string, fixed_id?: string): Promise<string> => {
   const [existing] = await db
@@ -195,22 +180,24 @@ const ensure_apikey = async (
 
 const main = async () => {
   for (const svc of SERVICES) {
+    const org_id = await ensure_org(
+      svc.slug,
+      `${svc.slug} (network service)`,
+      env_for(svc.slug, 'ORG_ID'),
+    );
     const user_id = await ensure_user(svc.user_email, svc.slug);
-    const org_id = svc.org_id_env
-      ? await ensure_org(svc.slug, `${svc.slug} (network service)`, process.env[svc.org_id_env])
-      : null;
-    const member_id = org_id ? await ensure_member(user_id, org_id) : null;
-    const apikey_result = svc.api_key_env
-      ? await ensure_apikey(user_id, svc.slug, process.env[svc.api_key_env])
+    const member_id = await ensure_member(user_id, org_id);
+    const apikey_result = svc.apikey
+      ? await ensure_apikey(user_id, svc.slug, env_for(svc.slug, 'API_KEY'))
       : null;
 
     // Always print the IDs so operators don't need psql to find them.
     // Raw key is printed ONLY on mint — re-runs show '(existing — capture
     // from first-run logs or rotate via TRUNCATE apikey + reseed)'.
     console.log(`\n${svc.slug}:`);
-    console.log(`  org_id:    ${org_id ?? '(none)'}`);
+    console.log(`  org_id:    ${org_id}`);
     console.log(`  user_id:   ${user_id}`);
-    console.log(`  member_id: ${member_id ?? '(none)'}`);
+    console.log(`  member_id: ${member_id}`);
     if (!apikey_result) {
       console.log(`  apikey:    (none)`);
     } else if (apikey_result.minted) {
