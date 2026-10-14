@@ -121,9 +121,10 @@ pnpm db:seed:services:api  # create the service users (aggregator-dpg org, signa
 ```
 
 - `db:push` may **prompt to confirm** — accept to proceed.
-- The seed is **idempotent**. The signals-search apikey comes from
-  `SIGNALS_SEARCH_API_KEY` if set; otherwise a random one is printed **only on
-  first mint**. If lost, delete the `apikey` row and re-run the seed.
+- The seed is **idempotent**. The signals-search apikey is random and printed
+  **only on first mint** — unless `SIGNALS_SEARCH_API_KEY_HASH` (the key's
+  SHA-256, base64url, no padding) is set, in which case that hash is stored. If
+  lost, delete the `apikey` row and re-run the seed.
 - **aggregator-dpg** gets an org but **no apikey**: it authenticates with a
   Keycloak client-credentials token (`SIGNALSTACK_AUTH_MODE=bearer`), mapped to
   the org whose slug equals its client id.
