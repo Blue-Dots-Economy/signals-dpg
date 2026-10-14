@@ -1,18 +1,10 @@
 /**
- * Local-dev seed for the integrating-DPG service users:
+ * Local-dev seed for the integrating-DPG service users.
  *
- *   - aggregator-dpg: service user inside an organization with
- *     type='network_service'. No apikey: aggregator-dpg authenticates with a
- *     Keycloak client-credentials token, mapped to this org by slug
- *     (see `src/services/auth/service_account.ts`).
- *   - signals-search: service user inside its own 'network_service'
- *     organization, plus one apikey. signals-api sends this key to
- *     signals-search; local integrators (e.g. the AI Diffusion agent) also use
- *     it with this org id on the admin API (`x-api-key` + `x-acting-org-id`).
- *   - raya-voice-bot: service user inside its own 'network_service'
- *     organization, plus one apikey.
- *
- * Run after `pnpm db:push:api` so the better-auth tables exist.
+ * Each service user lives inside an organization with type='network_service'
+ * and owns one apikey, except aggregator-dpg, which authenticates with a
+ * Keycloak token instead. Run after `pnpm db:push:api` so the better-auth
+ * tables exist.
  *
  * Run from repo root:  pnpm db:seed:services:api
  * Run inside apps/api: pnpm db:seed:services
@@ -60,11 +52,8 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
-// `api_key_env` / `org_id_env` let a scripted setup pre-agree the raw key and
-// org id with the integrating DPG instead of copying them from this output.
-// Unset → random values, as before. Only applied when the row is created.
-// Either env var may be omitted: no `org_id_env` → no org / member, no
-// `api_key_env` → no apikey.
+// `org_id_env` / `api_key_env` name env vars that fix the org id / raw key
+// (random when unset); leave one out to skip the org or the apikey.
 //
 // Slugs must match `provision_service_users.sql` in the charts repo, which is
 // what production actually runs — the slug is also the lookup key that
