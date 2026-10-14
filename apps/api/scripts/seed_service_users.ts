@@ -1,10 +1,11 @@
 /**
- * Local-dev seed for the service principals Signals knows about.
+ * Local-dev seed for the integrating-DPG service users:
  *
  *   - aggregator-dpg: service user inside an organization with
- *     type='network_service'. No apikey: aggregator-dpg authenticates with a
- *     Keycloak client-credentials token, mapped to this org by slug
- *     (see `src/services/auth/service_account.ts`).
+ *     type='network_service', plus one apikey. aggregator-dpg itself can call
+ *     with a Keycloak client-credentials token instead (mapped to this org by
+ *     slug, see `src/services/auth/service_account.ts`); the apikey is for
+ *     integrators that call the admin API with `x-api-key` + `x-acting-org-id`.
  *   - signals-search: service user with one apikey and no org. signals-api
  *     sends this key to signals-search, which only checks the `apikey` row;
  *     with no membership the key cannot act on signals-api.
@@ -56,21 +57,21 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
-// `org_id_env` → the service gets an org + `service` member; `api_key_env` →
-// it gets an apikey. Both name env vars that let a scripted setup pre-agree the
-// org id / raw key instead of copying them from this output. Unset → random
-// values. Only applied when the row is created.
+// `api_key_env` / `org_id_env` let a scripted setup pre-agree the raw key and
+// org id with the integrating DPG instead of copying them from this output.
+// Unset → random values, as before. Only applied when the row is created.
 // signals-search has no org on purpose: its key is only for signals-api →
 // signals-search, so it gets no acting-org reach on the admin API.
 const SERVICES: ReadonlyArray<{
   slug: string;
   user_email: string;
-  api_key_env?: string;
+  api_key_env: string;
   org_id_env?: string;
 }> = [
   {
     slug: 'aggregator-dpg',
     user_email: 'aggregator-dpg-svc@signals.local',
+    api_key_env: 'AGGREGATOR_DPG_API_KEY',
     org_id_env: 'AGGREGATOR_DPG_ORG_ID',
   },
   {
@@ -190,9 +191,7 @@ const main = async () => {
       ? await ensure_org(svc.slug, `${svc.slug} (network service)`, process.env[svc.org_id_env])
       : null;
     const member_id = org_id ? await ensure_member(user_id, org_id) : null;
-    const apikey_result = svc.api_key_env
-      ? await ensure_apikey(user_id, svc.slug, process.env[svc.api_key_env])
-      : null;
+    const apikey_result = await ensure_apikey(user_id, svc.slug, process.env[svc.api_key_env]);
 
     // Always print the IDs so operators don't need psql to find them.
     // Raw key is printed ONLY on mint — re-runs show '(existing — capture
@@ -201,9 +200,7 @@ const main = async () => {
     console.log(`  org_id:    ${org_id ?? '(none)'}`);
     console.log(`  user_id:   ${user_id}`);
     console.log(`  member_id: ${member_id ?? '(none)'}`);
-    if (!apikey_result) {
-      console.log(`  apikey:    (none)`);
-    } else if (apikey_result.minted) {
+    if (apikey_result.minted) {
       console.log(`  apikey:    ${apikey_result.raw_key}`);
       console.log(`             ↑ raw key — NOT SHOWN AGAIN. Capture now.`);
     } else {
