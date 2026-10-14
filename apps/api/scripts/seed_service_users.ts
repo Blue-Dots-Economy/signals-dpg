@@ -1,5 +1,6 @@
 /**
- * Local-dev seed for the aggregator-dpg integrating-DPG service user.
+ * Local-dev seed for the integrating-DPG service users: aggregator-dpg, and
+ * the signals-search caller key (signals-api → signals-search).
  *
  * The service user lives inside an organization with type='network_service'
  * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
@@ -53,14 +54,26 @@ import {
 // `api_key_env` / `org_id_env` let a scripted setup pre-agree the raw key and
 // org id with the integrating DPG instead of copying them from this output.
 // Unset → random values, as before. Only applied when the row is created.
-const SERVICES = [
+// signals-search has no org on purpose: its key is only for signals-api →
+// signals-search, so it gets no acting-org reach on the admin API.
+const SERVICES: ReadonlyArray<{
+  slug: string;
+  user_email: string;
+  api_key_env: string;
+  org_id_env?: string;
+}> = [
   {
     slug: 'aggregator-dpg',
     user_email: 'aggregator-dpg-svc@signals.local',
     api_key_env: 'AGGREGATOR_DPG_API_KEY',
     org_id_env: 'AGGREGATOR_DPG_ORG_ID',
   },
-] as const;
+  {
+    slug: 'signals-search',
+    user_email: 'signals-search-svc@signals.local',
+    api_key_env: 'SIGNALS_SEARCH_API_KEY',
+  },
+];
 
 const ensure_org = async (slug: string, name: string, fixed_id?: string): Promise<string> => {
   const [existing] = await db
@@ -138,6 +151,15 @@ const ensure_apikey = async (
   // `defaultKeyHasher`. Node's `digest('base64url')` is unpadded by default,
   // matching better-auth's `base64Url.encode(..., { padding: false })`.
   const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
+  // `key` is not unique; one raw key on two users would make the caller ambiguous.
+  const [taken] = await db
+    .select({ id: apikey.id })
+    .from(apikey)
+    .where(eq(apikey.key, hashed_key))
+    .limit(1);
+  if (taken) {
+    throw new Error(`${name}: this api key is already seeded for another service; give each service its own key`);
+  }
   const now = new Date();
   await db.insert(apikey).values({
     id: `key_${randomUUID()}`,
@@ -158,22 +180,20 @@ const ensure_apikey = async (
 
 const main = async () => {
   for (const svc of SERVICES) {
-    const org_id = await ensure_org(
-      svc.slug,
-      `${svc.slug} (network service)`,
-      process.env[svc.org_id_env],
-    );
     const user_id = await ensure_user(svc.user_email, svc.slug);
-    const member_id = await ensure_member(user_id, org_id);
+    const org_id = svc.org_id_env
+      ? await ensure_org(svc.slug, `${svc.slug} (network service)`, process.env[svc.org_id_env])
+      : null;
+    const member_id = org_id ? await ensure_member(user_id, org_id) : null;
     const apikey_result = await ensure_apikey(user_id, svc.slug, process.env[svc.api_key_env]);
 
     // Always print the IDs so operators don't need psql to find them.
     // Raw key is printed ONLY on mint — re-runs show '(existing — capture
     // from first-run logs or rotate via TRUNCATE apikey + reseed)'.
     console.log(`\n${svc.slug}:`);
-    console.log(`  org_id:    ${org_id}`);
+    console.log(`  org_id:    ${org_id ?? '(none)'}`);
     console.log(`  user_id:   ${user_id}`);
-    console.log(`  member_id: ${member_id}`);
+    console.log(`  member_id: ${member_id ?? '(none)'}`);
     if (apikey_result.minted) {
       console.log(`  apikey:    ${apikey_result.raw_key}`);
       console.log(`             ↑ raw key — NOT SHOWN AGAIN. Capture now.`);
