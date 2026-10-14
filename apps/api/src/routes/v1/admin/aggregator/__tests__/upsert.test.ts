@@ -76,7 +76,7 @@ import { aggregator_upsert } from '../upsert.js';
 const buildApp = async (
   acting: {
     org_id?: string;
-    org_type?: 'aggregator' | 'voice' | 'network_service';
+    org_type?: 'aggregator' | 'network_service';
   } = {},
 ) => {
   const app = Fastify().withTypeProvider<ZodTypeProvider>();
@@ -186,16 +186,6 @@ describe('POST /aggregator/upsert', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('NOT_NETWORK_SERVICE');
-  });
-
-  it('returns 403 NOT_NETWORK_SERVICE when caller acts as voice', async () => {
-    const app = await buildApp({ org_type: 'voice' });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/aggregator/upsert',
-      payload: { external_id: 'x', name: 'X', slug: 'x' },
-    });
-    expect(res.statusCode).toBe(403);
   });
 
   it('returns 409 SLUG_TAKEN on PG unique violation (23505)', async () => {

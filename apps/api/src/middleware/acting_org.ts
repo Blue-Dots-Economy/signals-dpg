@@ -5,7 +5,7 @@ import { organization, member } from '../../db/postgres/schema/auth.js';
 import { authConfig } from '@/config';
 import { ACTING_ORG_WILDCARD } from '@/utils/keycloak_token';
 
-const ALLOWED_ORG_TYPES = ['aggregator', 'voice', 'network_service'] as const;
+const ALLOWED_ORG_TYPES = ['aggregator', 'network_service'] as const;
 type AllowedOrgType = (typeof ALLOWED_ORG_TYPES)[number];
 
 const get_header_value = (raw: string | string[] | undefined): string | undefined => {
@@ -31,17 +31,20 @@ const get_header_value = (raw: string | string[] | undefined): string | undefine
  *      `routes/v1/action/_resolve_acting_actor.ts` (step 5) and the admin read
  *      paths (e.g. `admin/participant_decrypt.ts`, scoping on
  *      `user.onboardedByOrgId`). An `aggregator` acting org reaches only users
- *      it onboarded. `network_service` and `voice` are network-wide by design —
- *      see the rationale comment in `_resolve_acting_actor.ts`.
+ *      it onboarded. `network_service` is network-wide by design — see the
+ *      rationale comment in `_resolve_acting_actor.ts`.
  *
  * So the reach of a request is determined by the TYPE of the org asserted, and
  * that reach is checked; the choice of which org to assert is not.
  *
  * What that means in practice depends entirely on the set of service principals
- * that exist. Today `SERVICES` in `scripts/seed_service_users.ts` holds a single
- * entry, seeded with org `type: 'network_service'` — network-wide scope. Raya /
- * voice is network-wide by the same design. Every principal able to reach this
- * middleware therefore already carries the broadest scope the model defines.
+ * that exist. Every entry in `SERVICES` in `scripts/seed_service_users.ts` is
+ * seeded with org `type: 'network_service'` — network-wide scope — as is every
+ * org the deploy-time `provision_service_users.sql` creates, the Raya voice bot
+ * included. (#518 retired a separate `voice` type that granted exactly this same
+ * reach; the voice channel is now identified by the token's `azp`, not by a
+ * distinct org type.) Every principal able to reach this middleware therefore
+ * already carries the broadest scope the model defines.
  *
  * If a service principal is ever provisioned that should reach only PART of the
  * network — a regional aggregator, a partner integration — layer 1 has to carry
@@ -57,7 +60,7 @@ const get_header_value = (raw: string | string[] | undefined): string | undefine
  *
  * Reads the `x-acting-org-id` header and the apikey-bound user (set upstream
  * by the apikey auth path), validates that the org exists and is one of the
- * types allowed to be asserted as an acting org (`aggregator` | `voice` |
+ * types allowed to be asserted as an acting org (`aggregator` |
  * `network_service`), and that the service user is a registered member of
  * some org in Signals. On success, attaches `request.acting_org` and resolves.
  *

@@ -53,11 +53,14 @@ export function SelectableCard({
       <div className="pointer-events-none">{children}</div>
       {/* Every selectable card shows a checkbox in select mode: an empty outline
           when unselected (signals "click to select"), filled + branded when
-          selected. Non-selectable (dimmed) cards show no checkbox. */}
+          selected. Non-selectable (dimmed) cards show no checkbox. It sits on
+          the card's corner, outside the content box, so it never covers the
+          card's own header (e.g. an action card's timestamp). */}
       {interactive && (
         <span
+          data-testid="selectable-card-check"
           className={cn(
-            'absolute right-3 top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full shadow-md transition-colors',
+            'absolute -right-2 -top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full shadow-md transition-colors',
             selected
               ? 'bg-primary text-primary-foreground'
               : 'border-2 border-muted-foreground/40 bg-background/90 text-muted-foreground/40',

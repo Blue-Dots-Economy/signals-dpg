@@ -39,6 +39,9 @@ export const apiConfig = {
   consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
+  export_max_rows: networkRuntime.EXPORT_MAX_ROWS,
+  export_timezone: networkRuntime.EXPORT_TIMEZONE,
+  export_rate_limit_per_hour: networkRuntime.EXPORT_RATE_LIMIT_PER_HOUR,
   max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
   max_profiles_per_user: networkRuntime.MAX_PROFILES_PER_USER,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
@@ -70,17 +73,12 @@ export const authConfig = {
   // Identity provider. Read this — never re-parse process.env.
   provider: auth.AUTH_PROVIDER,
   /**
-   * Convenience predicates so call sites read as intent, not string compares.
-   *
-   * Exact complements now that `dual` is gone. Both are kept rather than
-   * collapsed to one, because the two names carry opposite intent at their call
-   * sites — `keycloak_enabled` guards Keycloak work, `betterauth_enabled` guards
-   * the legacy surface — and reading `!betterauth_enabled` to mean "Keycloak" was
-   * exactly the kind of double negative that made the three-mode code hard to
-   * follow.
+   * Kept as a constant `true` rather than deleted outright: it reads as intent
+   * at ~20 call sites, and removing it would turn this change into a sprawling
+   * rename across files that have nothing else to do with #517. Its companion
+   * `betterauth_enabled` is gone with the provider it named.
    */
-  keycloak_enabled: auth.AUTH_PROVIDER === 'keycloak',
-  betterauth_enabled: auth.AUTH_PROVIDER === 'betterauth',
+  keycloak_enabled: true,
   /**
    * Acting-org authorisation source (§5.1). The header is sent in every mode;
    * this only decides whether it must fall inside the token's grant.
@@ -100,9 +98,10 @@ export const authConfig = {
  * - `internal_base_url` is what *this process* dials for JWKS / Admin REST; in
  *   containerised setups that is a service name, not the public hostname.
  *
- * Empty strings when AUTH_PROVIDER=betterauth — assertKeycloakConfigured above
- * has already rejected the combination of a Keycloak mode and a missing URL,
- * so any consumer running under `dual`/`keycloak` sees real values.
+ * Never empty in practice: `assertKeycloakConfigured` above has already
+ * rejected a missing URL at boot, and Keycloak is the only provider (#517).
+ * The `?? ''` fallbacks are there to satisfy the optional schema types, not
+ * because a running instance can reach them.
  */
 const keycloakBaseUrl = (keycloak.KEYCLOAK_BASE_URL ?? '').replace(/\/$/, '');
 const keycloakInternalBaseUrl = (

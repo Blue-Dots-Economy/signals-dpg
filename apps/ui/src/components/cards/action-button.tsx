@@ -43,6 +43,7 @@ export function ActionButton({
 
   const button = (
     <Button
+      data-tour="card-action"
       variant={variant}
       size="sm"
       disabled={disabled}

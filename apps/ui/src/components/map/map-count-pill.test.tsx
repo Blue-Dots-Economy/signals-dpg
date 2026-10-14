@@ -46,4 +46,14 @@ describe('MapCountPill', () => {
     expect(screen.queryByText(/^Showing/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^1500 listings/)).not.toBeInTheDocument();
   });
+
+  // #745: at z-[2100] the pill floated over the Connect sheet's Confirm button
+  // on a phone. It must step aside while any Radix/vaul modal is open, which
+  // mark <body> with `data-scroll-locked`. happy-dom applies no CSS, so this
+  // pins the class that does it.
+  it('hides itself while a modal has the page scroll-locked', () => {
+    render(<MapCountPill total={10} shown={10} truncated={false} />);
+    const wrapper = screen.getByText('10 listings').closest('.fixed');
+    expect(wrapper).toHaveClass('in-data-[scroll-locked]:hidden');
+  });
 });

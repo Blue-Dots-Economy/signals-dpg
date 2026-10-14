@@ -157,13 +157,20 @@ export interface FetchMyActionsQuery {
   action_type?: string | string[];
   action_status?: string | string[];
   item_id?: string;
+  /** Several of the caller's profiles; omitted = all of them. */
+  item_ids?: string[];
   ownership_role?: 'all' | 'initiated' | 'received';
+  /** Search on unmasked names only (see the server's `q`). */
+  q?: string;
+  /** Opt-in response parts. */
+  include?: Array<'counts' | 'column_fields'>;
   // #439: server-side sort key. Defaults to 'recent' server-side when omitted.
   sort?: 'recent' | 'oldest' | 'match_score' | 'distance';
   // #439: non-PII item_state facet selections (OR within a field, AND across
   // fields), applied against the counterparty item on each action — same
   // shape as the map/discover facet filter (`DiscoverFacetFilter`).
-  facets?: Array<{ field: string; values: string[] }>;
+  // `domain` limits a selection to counterparties in that domain.
+  facets?: Array<{ domain?: string; field: string; values: string[] }>;
   limit?: number;
   offset?: number;
 }
@@ -205,6 +212,21 @@ export interface Action {
   // distance, or the score service wasn't consulted for this row).
   match_score?: number | null;
   distance_m?: number | null;
+  /** `include=column_fields` only — non-private fields, no personal data. */
+  counterparty?: {
+    network: string;
+    domain: string;
+    item_type: string;
+    column_fields: Record<string, unknown>;
+  } | null;
+}
+
+/** `include=counts`: totals for the My Actions saved views. */
+export interface OwnedActionCounts {
+  all: number;
+  needs_response: number;
+  ready_to_export: number;
+  sent: number;
 }
 
 /**
@@ -215,6 +237,7 @@ export interface FetchMyActionsResponse {
     total: number;
     limit: number;
     offset: number;
+    counts?: OwnedActionCounts;
   };
   actions: Action[];
 }
@@ -459,6 +482,7 @@ function appendRepeated(params: URLSearchParams, key: string, value: string | st
 function appendFacets(params: URLSearchParams, facets: FetchMyActionsQuery['facets']) {
   if (!facets?.length) return;
   facets.forEach((facet, i) => {
+    if (facet.domain) params.append(`facets[${i}][domain]`, facet.domain);
     params.append(`facets[${i}][field]`, facet.field);
     facet.values.forEach((v, j) => {
       params.append(`facets[${i}][values][${j}]`, v);
@@ -483,6 +507,9 @@ export async function fetchMyActions(
   appendRepeated(params, 'action_type', query.action_type);
   appendRepeated(params, 'action_status', query.action_status);
   if (query.item_id) params.set('item_id', query.item_id);
+  appendRepeated(params, 'item_ids', query.item_ids);
+  if (query.q?.trim()) params.set('q', query.q.trim());
+  appendRepeated(params, 'include', query.include);
   if (query.sort) params.set('sort', query.sort);
   appendFacets(params, query.facets);
   if (query.limit !== undefined) params.set('limit', String(query.limit));

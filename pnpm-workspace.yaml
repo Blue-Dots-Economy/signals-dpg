@@ -23,6 +23,13 @@ allowBuilds:
 #   qs 6.15.3 → CVE-2026-82417 (MED) and CVE-2026-82562 (LOW), both DoS in
 #     stringify / array-limit parsing. Fixed in 6.16.0.
 overrides:
-  'fast-uri@>=3.0.0 <3.1.6': 3.1.7
-  'fast-uri@>=4.0.0 <4.1.3': 4.1.4
+#   fast-uri 3.1.7 and 4.1.4 -> CVE-2026-86472 (host-case normalization bypass)
+#     and CVE-2026-86818 (mailto header injection via percent-encoded
+#     field-name desynchronization). Fixed in 2.4.7 / 3.1.8 / 4.1.5. Both
+#     selectors are widened to catch the versions the previous floors produced.
+#   source-map-js 1.2.1 -> CVE-2026-93749 (HIGH), DoS via malformed indexed
+#     source maps. Fixed in 1.2.2. Arrives via @tailwindcss/node and css-tree.
+  'fast-uri@>=3.0.0 <3.1.8': 3.1.8
+  'fast-uri@>=4.0.0 <4.1.5': 4.1.5
+  'source-map-js@<1.2.2': 1.2.2
   'qs@<6.16.0': 6.16.0

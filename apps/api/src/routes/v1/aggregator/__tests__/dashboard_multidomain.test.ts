@@ -151,7 +151,7 @@ import { aggregator_dashboard } from '../dashboard.js';
 
 const buildApp = async (acting?: {
   org_id?: string;
-  org_type?: 'aggregator' | 'voice' | 'network_service';
+  org_type?: 'aggregator' | 'network_service';
 }) => {
   const app = Fastify();
   app.setValidatorCompiler(validatorCompiler);

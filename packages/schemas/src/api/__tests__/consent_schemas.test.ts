@@ -4,6 +4,7 @@ import {
   ConsentAcceptItemSchema,
   ConsentAcceptResponseSchema,
   ConsentStatusByIdentifierQuerySchema,
+  ConsentStatusByIdentifierResponseSchema,
   ConsentStatusQuerySchema,
   ConsentStatusResponseSchema,
   ProfileConsentAcceptBodySchema,
@@ -320,5 +321,28 @@ describe('ProfileConsentAcceptBodySchema', () => {
     if (result.success) {
       expect(result.data).not.toHaveProperty('user_id');
     }
+  });
+});
+
+describe('ConsentStatusByIdentifierResponseSchema (#626)', () => {
+  // The UNAUTHENTICATED pre-login status. It must never carry `variant`:
+  // that would tell anyone holding a phone number or email that it belongs to
+  // a minor. Kept apart from ConsentStatusResponseSchema on purpose — this
+  // pins it, so re-adding the field is a failing test, not a review catch.
+  it('has no variant field', () => {
+    expect(Object.keys(ConsentStatusByIdentifierResponseSchema.shape)).toEqual(['statuses']);
+  });
+
+  it('drops a variant the handler might add, so it cannot reach the response', () => {
+    const out = ConsentStatusByIdentifierResponseSchema.parse({
+      statuses: { terms: [2], privacy: [2] },
+      variant: 'u18',
+    });
+    expect(out).toEqual({ statuses: { terms: [2], privacy: [2] } });
+    expect(out).not.toHaveProperty('variant');
+  });
+
+  it('the authenticated status does carry it', () => {
+    expect(Object.keys(ConsentStatusResponseSchema.shape)).toContain('variant');
   });
 });

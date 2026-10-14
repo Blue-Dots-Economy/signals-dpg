@@ -24,7 +24,8 @@ export interface CardSelection {
   /** The group key the batch is locked to, or null when nothing is selected. */
   lockKey: string | null;
   /** Replace the selection with the given ids (used to keep failed ids selected). */
-  setSelected: (ids: string[]) => void;
+  /** Replace the selection; `groupKey` locks it to that group (e.g. select-all). */
+  setSelected: (ids: string[], groupKey?: string) => void;
 }
 
 export function useCardSelection(): CardSelection {
@@ -71,9 +72,10 @@ export function useCardSelection(): CardSelection {
     [lockKey],
   );
 
-  const setSelected = React.useCallback((ids: string[]) => {
+  const setSelected = React.useCallback((ids: string[], groupKey?: string) => {
     setSelectedState(new Set(ids));
     if (ids.length === 0) setLockKey(null);
+    else if (groupKey !== undefined) setLockKey(groupKey);
   }, []);
 
   const isSelected = React.useCallback((id: string) => selected.has(id), [selected]);

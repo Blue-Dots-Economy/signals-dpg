@@ -14,8 +14,8 @@ import {
 const mockAuthConfig = {
   allow_self_signup: false,
   login_channels: ['email', 'phone'] as Array<'email' | 'phone'>,
-  provider: 'betterauth' as 'betterauth' | 'keycloak',
-  keycloak_enabled: false,
+  provider: 'keycloak' as const,
+  keycloak_enabled: true,
 };
 
 const mockKeycloakConfig = {
@@ -44,8 +44,8 @@ async function get() {
 beforeEach(() => {
   mockAuthConfig.allow_self_signup = false;
   mockAuthConfig.login_channels = ['email', 'phone'];
-  mockAuthConfig.provider = 'betterauth';
-  mockAuthConfig.keycloak_enabled = false;
+  mockAuthConfig.provider = 'keycloak';
+  mockAuthConfig.keycloak_enabled = true;
   mockKeycloakConfig.base_url = '';
   mockKeycloakConfig.realm = 'bluedots';
   mockKeycloakConfig.ui_client_id = 'signals-ui';
@@ -61,14 +61,18 @@ describe('GET /api/v1/auth/config', () => {
     });
   });
 
-  it('reports the provider and no Keycloak details on a better-auth instance', async () => {
+  it('publishes a single-valued authProvider — the UI has one branch to serve', async () => {
+    // #517 narrowed the response schema to z.enum(['keycloak']). This is the
+    // PUBLISHED CONTRACT, not just current behaviour: while the schema still
+    // permitted 'betterauth', the UI's betterauth branch could not be proven
+    // unreachable and so could not be deleted (#759). Widening this enum again
+    // would silently resurrect that branch's reason to exist.
     const res = await get();
-    expect(res.json()).toMatchObject({ authProvider: 'betterauth', keycloak: null });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().authProvider).toBe('keycloak');
   });
 
   it('advertises Keycloak details once the instance is configured for it', async () => {
-    mockAuthConfig.provider = 'keycloak';
-    mockAuthConfig.keycloak_enabled = true;
     mockKeycloakConfig.base_url = 'http://localhost:8080';
 
     const res = await get();
@@ -82,8 +86,6 @@ describe('GET /api/v1/auth/config', () => {
 
   it('withholds Keycloak details when the mode is on but no URL is configured', async () => {
     // A half-configured instance must not send the UI somewhere broken.
-    mockAuthConfig.provider = 'keycloak';
-    mockAuthConfig.keycloak_enabled = true;
     mockKeycloakConfig.base_url = '';
 
     const res = await get();
@@ -92,8 +94,6 @@ describe('GET /api/v1/auth/config', () => {
   });
 
   it('never exposes the API client secret', async () => {
-    mockAuthConfig.provider = 'keycloak';
-    mockAuthConfig.keycloak_enabled = true;
     mockKeycloakConfig.base_url = 'http://localhost:8080';
 
     const res = await get();

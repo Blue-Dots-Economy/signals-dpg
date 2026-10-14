@@ -139,7 +139,7 @@ const sample = (overrides: Record<string, unknown> = {}) => ({
 
 const buildApp = async (acting?: {
   org_id?: string;
-  org_type?: 'aggregator' | 'voice' | 'network_service';
+  org_type?: 'aggregator' | 'network_service';
 }) => {
   const app = Fastify();
   app.setValidatorCompiler(validatorCompiler);
@@ -181,13 +181,6 @@ describe('GET /aggregator/dashboard/export', () => {
     expect(res.statusCode).toBe(403);
     expect(res.json().error).toBe('NOT_AGGREGATOR');
     expect(state.staleness_calls).toHaveLength(0);
-  });
-
-  it('403 NOT_AGGREGATOR for voice caller', async () => {
-    const app = await buildApp({ org_type: 'voice' });
-    const res = await app.inject({ method: 'GET', url: '/dashboard/export' });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe('NOT_AGGREGATOR');
   });
 
   it('400 NO_DOMAINS_CONFIGURED when org.metadata is null', async () => {

@@ -252,7 +252,7 @@
     {
       "clientId": "voice-dpg",
       "name": "voice-dpg (service auth into signals)",
-      "description": "Client-credentials client replacing voice-dpg's x-api-key on the signals service path (§5).",
+      "description": "Client-credentials client replacing voice-dpg's x-api-key on the signals service path (§5). Resolves to a type='network_service' org in signals (#518 retired the separate 'voice' org type); this client id is also what distinguishes the voice channel in signals' audit logs. NOTE: signals maps a client id to an organization.slug, and the voice bot's org slug is 'raya-voice-bot', not 'voice-dpg' — see docs/operations/integrating-dpgs.md.",
       "enabled": true,
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",

@@ -4,7 +4,6 @@ import {
   runMigration,
   runReconcile,
   runProbe,
-  runPasswordAudit,
   type Logger,
   type MigrationClient,
   type MigrationData,
@@ -63,7 +62,6 @@ function fakeData(over: Partial<MigrationData> = {}): MigrationData {
   return {
     fetchHumanUsers: over.fetchHumanUsers ?? vi.fn(async () => []),
     countServiceUsers: over.countServiceUsers ?? vi.fn(async () => 0),
-    fetchPasswordAccountRows: over.fetchPasswordAccountRows ?? vi.fn(async () => []),
   };
 }
 
@@ -290,28 +288,5 @@ describe('runProbe', () => {
     expect(code).toBe(1);
     expect(verdict).toBe('ignored');
     expect(assignedId).toBe('kc-generated');
-  });
-});
-
-// ── runPasswordAudit ─────────────────────────────────────────────────────────
-
-describe('runPasswordAudit', () => {
-  it('is clear (exit 0) when no password rows exist', async () => {
-    const data = fakeData({ fetchPasswordAccountRows: vi.fn(async () => []) });
-    const { code, total } = await runPasswordAudit(data, silent);
-    expect(code).toBe(0);
-    expect(total).toBe(0);
-  });
-
-  it('flags password accounts (exit 1) with the summed total', async () => {
-    const data = fakeData({
-      fetchPasswordAccountRows: vi.fn(async () => [
-        { providerId: 'credential', n: 2 },
-        { providerId: 'email', n: 1 },
-      ]),
-    });
-    const { code, total } = await runPasswordAudit(data, silent);
-    expect(code).toBe(1);
-    expect(total).toBe(3);
   });
 });

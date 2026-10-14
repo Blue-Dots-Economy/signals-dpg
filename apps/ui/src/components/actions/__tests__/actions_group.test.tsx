@@ -838,8 +838,8 @@ describe('ActionList', () => {
 
     await user.click(screen.getByRole('button', { name: /clear/i }));
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
-    // Still in select mode → the toggle reads "Done".
-    expect(screen.getByRole('button', { name: /done/i })).toBeInTheDocument();
+    // Still in select mode → the toolbar offers "Cancel selection".
+    expect(screen.getByRole('button', { name: /cancel selection/i })).toBeInTheDocument();
   });
 
   it('changing the status filter drops out of select mode so a hidden selection cannot go stale', async () => {
@@ -857,7 +857,7 @@ describe('ActionList', () => {
     // only has to make sure the now-possibly-hidden selection is dropped.
     await user.click(screen.getByTestId('status-remove'));
     expect(screen.queryByText('1 selected')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /done/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /cancel selection/i })).not.toBeInTheDocument();
   });
 });
 

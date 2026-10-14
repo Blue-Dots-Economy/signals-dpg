@@ -204,6 +204,7 @@ const state = {
   locationSource: 'none' as 'profile' | 'browser' | 'none',
   browserSupported: false,
   browserStatus: 'idle' as 'idle' | 'loading' | 'error' | 'success',
+  isMobile: false,
 };
 
 const browseCalls: BrowseCall[] = [];
@@ -273,6 +274,12 @@ vi.mock('@/hooks/use-match-score', () => ({
     recalculate: async () => {},
     clearCache: () => {},
   }),
+}));
+
+// Off by default, so every suite renders the desktop page; the phone map
+// sheet suite (#745) flips it.
+vi.mock('@/hooks/use-mobile', () => ({
+  useIsMobile: () => state.isMobile,
 }));
 
 vi.mock('@/hooks/use-geolocation-permission', () => ({
@@ -380,6 +387,8 @@ interface MapViewStubProps {
   filtersSlot?: React.ReactNode;
   onViewportChange?: (viewport: MapViewport) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
+  showPopup?: boolean;
+  onMarkerSelect?: (marker: MapMarker) => void;
 }
 
 function MapViewStub({
@@ -388,9 +397,21 @@ function MapViewStub({
   filtersSlot,
   onViewportChange,
   renderPopup,
+  showPopup = true,
+  onMarkerSelect,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
   const open = items.find((item) => item.id === openId);
+  // The same marker the real MapView would build for an item's first location.
+  const toMarker = (item: MapViewStubProps['items'][number]): MapMarker => ({
+    id: `${item.id}#0`,
+    lat: 12.9,
+    lng: 77.6,
+    label: 'Item',
+    data: {},
+    precision: 'exact',
+    domain: item.domain,
+  });
   return (
     <div data-testid="map-view">
       {filtersSlot}
@@ -413,20 +434,18 @@ function MapViewStub({
       </button>
       {items.length === 0 && <p>{emptyMessage}</p>}
       {items.map((item) => (
-        <button key={item.id} type="button" onClick={() => setOpenId(item.id)}>
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => {
+            onMarkerSelect?.(toMarker(item));
+            if (showPopup) setOpenId(item.id);
+          }}
+        >
           {`marker ${item.id}`}
         </button>
       ))}
-      {open &&
-        renderPopup?.({
-          id: `${open.id}#0`,
-          lat: 12.9,
-          lng: 77.6,
-          label: 'Item',
-          data: {},
-          precision: 'exact',
-          domain: open.domain,
-        })}
+      {open && renderPopup?.(toMarker(open))}
     </div>
   );
 }
@@ -562,6 +581,7 @@ beforeEach(() => {
   state.locationSource = 'none';
   state.browserSupported = false;
   state.browserStatus = 'idle';
+  state.isMobile = false;
 });
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -931,6 +951,72 @@ describe('HomePage — map view', () => {
 
     const map = screen.getByTestId('map-view');
     expect(within(map).getAllByText('Acme Welding').length).toBeGreaterThan(0);
+  });
+});
+
+describe('HomePage — phone map: marker details in a bottom sheet (#745)', () => {
+  function withOneProviderMarker() {
+    signedInSeeker();
+    state.isMobile = true;
+    state.markers = [
+      { item_id: 'p1', item_domain: 'provider', item_instance_url: null, item_locations: [{ lat: 12.91, lng: 77.61 }] },
+    ];
+    state.markersTotal = 1;
+  }
+
+  it('opens the tapped marker in a titled bottom sheet, not the map popup', async () => {
+    withOneProviderMarker();
+    state.detail = { item: providerItem1, isLoading: false };
+    renderHome('/?view=map');
+
+    await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'marker p1' }));
+
+    const sheet = await screen.findByRole('dialog', { name: 'Acme Welding' });
+    expect(within(sheet).getByText(/Public profile\. Contact details are shared/)).toBeInTheDocument();
+    // The full-size list card, not the compact popup one.
+    expect(sheet.querySelector('[data-item-card]')).not.toBeNull();
+    // Nothing is drawn over the map itself.
+    expect(within(screen.getByTestId('map-view')).queryByText('Acme Welding')).not.toBeInTheDocument();
+  });
+
+  it('shows the loading line while the item is still being fetched', async () => {
+    withOneProviderMarker();
+    state.detail = { item: null, isLoading: true };
+    renderHome('/?view=map');
+
+    await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'marker p1' }));
+
+    const sheet = await screen.findByRole('dialog');
+    expect(within(sheet).getByText('Loading details...')).toBeInTheDocument();
+  });
+
+  it('closes the sheet from its close control', async () => {
+    withOneProviderMarker();
+    state.detail = { item: providerItem1, isLoading: false };
+    renderHome('/?view=map');
+
+    await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'marker p1' }));
+    await screen.findByRole('dialog', { name: 'Acme Welding' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Acme Welding' })).not.toBeInTheDocument());
+  });
+
+  it('keeps the popup on desktop', async () => {
+    withOneProviderMarker();
+    state.isMobile = false;
+    state.detail = { item: providerItem1, isLoading: false };
+    renderHome('/?view=map');
+
+    await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'marker p1' }));
+
+    expect(within(screen.getByTestId('map-view')).getAllByText('Acme Welding').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('dialog', { name: 'Acme Welding' })).not.toBeInTheDocument();
   });
 });
 
