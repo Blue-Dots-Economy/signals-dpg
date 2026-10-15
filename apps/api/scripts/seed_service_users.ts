@@ -2,7 +2,8 @@
  * Local-dev seed for the integrating-DPG service users.
  *
  * Each service user lives inside an organization with type='network_service'
- * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
+ * and owns one apikey, except aggregator-dpg, which authenticates with a
+ * Keycloak token instead. Run after `pnpm db:push:api` so the better-auth
  * tables exist.
  *
  * Run from repo root:  pnpm db:seed:services:api
@@ -51,6 +52,9 @@ import {
 // the network cannot be expressed that way: it needs the `signals_acting_orgs`
 // claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
 // that adds it here.
+// `apikey: false` → org and member only (aggregator-dpg uses a Keycloak token).
+// <SLUG>_ORG_ID / <SLUG>_API_KEY_HASH env vars fix the org id / the stored key
+// hash (e.g. SIGNALS_SEARCH_API_KEY_HASH); random key when unset.
 //
 // Slugs must match `provision_service_users.sql` in the charts repo, which is
 // what production actually runs — the slug is also the lookup key that
@@ -59,18 +63,22 @@ import {
 // its Keycloak client, and the two were named independently. Renaming either
 // to match the other is its own change.
 const SERVICES = [
-  { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
-  { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local' },
+  { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local', apikey: false },
+  { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local', apikey: true },
+  { slug: 'signals-search', user_email: 'signals-search-svc@signals.local', apikey: true },
 ] as const;
 
-const ensure_org = async (slug: string, name: string): Promise<string> => {
+const env_for = (slug: string, suffix: string): string | undefined =>
+  process.env[`${slug.toUpperCase().replace(/-/g, '_')}_${suffix}`];
+
+const ensure_org = async (slug: string, name: string, fixed_id?: string): Promise<string> => {
   const [existing] = await db
     .select({ id: organization.id })
     .from(organization)
     .where(eq(organization.slug, slug))
     .limit(1);
   if (existing) return existing.id;
-  const id = `org_${randomUUID()}`;
+  const id = fixed_id || `org_${randomUUID()}`;
   await db.insert(organization).values({
     id,
     slug,
@@ -119,9 +127,14 @@ const ensure_member = async (user_id: string, org_id: string): Promise<string> =
   return id;
 };
 
+const KEY_PREFIX = 'sk_signals_';
+// SHA-256 digest, base64url without padding — the stored `apikey.key` format.
+const KEY_HASH_RE = /^[A-Za-z0-9_-]{43}$/;
+
 const ensure_apikey = async (
   user_id: string,
   name: string,
+  fixed_hash?: string,
 ): Promise<{ minted: boolean; raw_key: string | null }> => {
   const [existing] = await db
     .select({ id: apikey.id })
@@ -131,7 +144,12 @@ const ensure_apikey = async (
   if (existing) {
     return { minted: false, raw_key: null };
   }
-  const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
+  if (fixed_hash && !KEY_HASH_RE.test(fixed_hash)) {
+    throw new Error(`${name}: the key hash must be SHA-256, base64url without padding`);
+  }
+  // A pre-agreed key arrives already hashed, so its raw value never reaches
+  // this script.
+  const raw_key = fixed_hash ? null : `${KEY_PREFIX}${randomBytes(24).toString('hex')}`;
   // The `apikey` table stores SHA-256(key) base64url-encoded (no padding) and
   // the hash is compared at verify time, so we insert the hash, never the raw
   // key. Node's `digest('base64url')` is unpadded and uses the `-_` alphabet,
@@ -141,7 +159,18 @@ const ensure_apikey = async (
   // signals-search is a fourth, in another repo (#516). Originally inherited
   // from `@better-auth/api-key`'s `defaultKeyHasher`; #517 removed that library
   // but deliberately kept the scheme so no partner had to rotate a key.
-  const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
+  const hashed_key = raw_key
+    ? createHash('sha256').update(raw_key).digest('base64url')
+    : (fixed_hash as string);
+  // `key` is not unique; one raw key on two users would make the caller ambiguous.
+  const [taken] = await db
+    .select({ id: apikey.id })
+    .from(apikey)
+    .where(eq(apikey.key, hashed_key))
+    .limit(1);
+  if (taken) {
+    throw new Error(`${name}: this api key is already seeded for another service; give each service its own key`);
+  }
   const now = new Date();
   await db.insert(apikey).values({
     id: `key_${randomUUID()}`,
@@ -150,8 +179,8 @@ const ensure_apikey = async (
     userId: user_id,
     referenceId: user_id,
     configId: 'default',
-    start: raw_key.slice(0, 6),
-    prefix: 'sk_signals_',
+    start: (raw_key ?? KEY_PREFIX).slice(0, 6),
+    prefix: KEY_PREFIX,
     enabled: true,
     rateLimitEnabled: false,
     createdAt: now,
@@ -165,10 +194,13 @@ const main = async () => {
     const org_id = await ensure_org(
       svc.slug,
       `${svc.slug} (network service)`,
+      env_for(svc.slug, 'ORG_ID'),
     );
     const user_id = await ensure_user(svc.user_email, svc.slug);
     const member_id = await ensure_member(user_id, org_id);
-    const apikey_result = await ensure_apikey(user_id, svc.slug);
+    const apikey_result = svc.apikey
+      ? await ensure_apikey(user_id, svc.slug, env_for(svc.slug, 'API_KEY_HASH'))
+      : null;
 
     // Always print the IDs so operators don't need psql to find them.
     // Raw key is printed ONLY on mint — re-runs show '(existing — capture
@@ -177,7 +209,11 @@ const main = async () => {
     console.log(`  org_id:    ${org_id}`);
     console.log(`  user_id:   ${user_id}`);
     console.log(`  member_id: ${member_id}`);
-    if (apikey_result.minted) {
+    if (!apikey_result) {
+      console.log(`  apikey:    (none)`);
+    } else if (apikey_result.minted && !apikey_result.raw_key) {
+      console.log(`  apikey:    (seeded from the provided key hash)`);
+    } else if (apikey_result.minted) {
       console.log(`  apikey:    ${apikey_result.raw_key}`);
       console.log(`             ↑ raw key — NOT SHOWN AGAIN. Capture now.`);
     } else {

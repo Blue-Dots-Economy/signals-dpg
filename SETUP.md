@@ -117,17 +117,24 @@ Run from the repo root, in order:
 ```bash
 pnpm db:push:api           # apply the Drizzle schema
 pnpm db:init:api           # apply partitioned items / actions / events tables
-pnpm db:seed:services:api  # create the service user + apikey
+pnpm db:seed:services:api  # create the service users (aggregator-dpg org, signals-search org + apikey)
 ```
 
 - `db:push` may **prompt to confirm** — accept to proceed.
-- The seed is **idempotent**. The raw apikey is printed **only on first mint** —
-  capture it if you'll run the aggregator (see below). If lost, delete the
-  `apikey` row and re-run the seed.
+- The seed is **idempotent**. The signals-search apikey is random and printed
+  **only on first mint** — unless `SIGNALS_SEARCH_API_KEY_HASH` (the key's
+  SHA-256, base64url, no padding) is set, in which case that hash is stored. If
+  lost, delete the `apikey` row and re-run the seed.
+- **aggregator-dpg** gets an org but **no apikey**: it authenticates with a
+  Keycloak client-credentials token (`SIGNALSTACK_AUTH_MODE=bearer`), mapped to
+  the org whose slug equals its client id.
+- **signals-search** gets an org and an apikey. signals-api calls search with
+  the key; local integrators (e.g. the AI Diffusion agent) use the key and that
+  org id on the admin API.
 
-> **Only if integrating the aggregator:** the seed prints an `org_id` and an
-> `apikey` (`sk_signals_…`). Keep both — you'll paste them into the aggregator's
-> env in the [aggregator section](#optional--run-with-the-aggregator-dpg).
+> **Only if integrating the aggregator:** the seed prints the aggregator-dpg
+> `org_id`. Keep it — it's the aggregator's `SIGNALSTACK_ACTING_ORG_ID` in the
+> [aggregator section](#optional--run-with-the-aggregator-dpg).
 
 ## Step 5 — Run it
 
@@ -161,9 +168,11 @@ Open **http://localhost:5173** in your browser.
 
 ### Self-signup & login channels
 
-- `SELF_SIGNUP_MODE` (default `gated`) — the public OTP login flow will NOT create
-  new accounts. Onboard participants via `POST /api/v1/admin/participant`
-  (aggregator/voice). Set `SELF_SIGNUP_MODE=allowed` to permit self-registration.
+- `SELF_SIGNUP_MODE` — `.env.example` sets `allowed` so local setups can
+  self-register. Unset, the code default is `gated`: the public OTP login flow
+  will NOT create new accounts, and participants are onboarded via
+  `POST /api/v1/admin/participant` (aggregator/voice). Use `gated` for shared or
+  prod environments.
 - `LOGIN_CHANNELS` (default `email,phone`) — restrict login identifiers. e.g.
   `LOGIN_CHANNELS=phone` shows only the phone input and rejects email OTP.
 - Admin-domain emails (`ADMIN_DOMAINS`) are exempt from the self-signup gate.
@@ -217,14 +226,14 @@ HTTP-referrer restricted for local use.
 
 ## Optional — run with the aggregator-dpg
 
-Bring-up is one-directional: **Signals comes up first** and mints a service
-apikey + org id (Step 4); the **aggregator** is then pointed at Signals with
-those two secrets.
+Bring-up is one-directional: **Signals comes up first** and seeds the
+aggregator-dpg service org (Step 4); the **aggregator** is then pointed at
+Signals with that org id and a Keycloak client-credentials token.
 
 ```
-┌────────────────────┐   x-api-key + x-acting-org-id   ┌────────────────────┐
+┌────────────────────┐  Bearer token + x-acting-org-id  ┌────────────────────┐
 │  aggregator-dpg     │ ───────────────────────────────▶│   Signals-DPG       │
-│  (docker compose)   │  ADMIN_KEY / ACTING_ORG_ID       │   api on :2742       │
+│  (docker compose)   │  CLIENT_ID/SECRET, ACTING_ORG_ID │   api on :2742       │
 └────────────────────┘                                   └────────────────────┘
 ```
 
@@ -260,15 +269,22 @@ aggregator runs in Docker, Signals runs on the host, so reach the host via
 ```dotenv
 # aggregator-dpg/.env
 SIGNALSTACK_BASE_URL=http://host.docker.internal:2742
-SIGNALSTACK_ADMIN_KEY=sk_signals_…      # apikey from the Signals seed
-SIGNALSTACK_ACTING_ORG_ID=org_…         # org_id from the Signals seed
+SIGNALSTACK_AUTH_MODE=bearer
+SIGNALSTACK_CLIENT_ID=aggregator-dpg    # Keycloak client; slug of the seeded org
+SIGNALSTACK_CLIENT_SECRET=…             # that client's secret in the shared realm
+SIGNALSTACK_ACTING_ORG_ID=org_…         # aggregator-dpg org_id from the Signals seed
 SIGNALSTACK_TIMEOUT_MS=10000
 ```
+
+Signals must accept that client: set `KEYCLOAK_SERVICE_CLIENT_IDS=aggregator-dpg`
+in the Signals `.env`, with `KEYCLOAK_BASE_URL` pointing at the same Keycloak
+the aggregator mints its token from.
 
 Also fill any `change-me-*` placeholders (`openssl rand -hex 32`).
 
 > Leaving `SIGNALSTACK_BASE_URL` blank **disables** the push to Signals. When
-> set, `SIGNALSTACK_ADMIN_KEY` + `SIGNALSTACK_ACTING_ORG_ID` are both required.
+> set, `SIGNALSTACK_CLIENT_ID`, `SIGNALSTACK_CLIENT_SECRET` and
+> `SIGNALSTACK_ACTING_ORG_ID` are all required.
 
 **4. Bring up the full stack:**
 
@@ -285,11 +301,14 @@ Step 3, so stop those first (or remap `KEYCLOAK_PORT` / `MAILPIT_UI_PORT` in
 `local-setup/.env` and point `KEYCLOAK_BASE_URL` in the root `.env` at the new port).
 
 **5. Verify the integration** — exercise the aggregator → Signals auth path
-directly with the seed secrets:
+directly with a client-credentials token (use your realm name):
 
 ```bash
+TOKEN=$(curl -s http://keycloak:8080/realms/<realm>/protocol/openid-connect/token \
+  -d grant_type=client_credentials -d client_id=aggregator-dpg \
+  -d client_secret="$SIGNALSTACK_CLIENT_SECRET" | sed 's/.*"access_token":"\([^"]*\)".*/\1/')
 curl -X POST http://localhost:2742/api/v1/admin/aggregator/upsert \
-  -H "x-api-key: $SIGNALSTACK_ADMIN_KEY" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "x-acting-org-id: $SIGNALSTACK_ACTING_ORG_ID" \
   -H 'Content-Type: application/json' \
   -d '{ "external_id": "agg_bbmp_001", "name": "BBMP", "slug": "bbmp" }'

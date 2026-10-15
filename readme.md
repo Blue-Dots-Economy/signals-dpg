@@ -145,10 +145,10 @@ chars) and is **not** yet in `.env.example` — set it before starting the API:
 INSTANCE_SHARED_SECRET="<shared 32+ char secret>"
 PEER_AUTH_MODE="permissive"      # permissive (default) | enforced
 
-# Self-signup + login. gated (default): no self-service signup via the public
-# OTP flow — onboard participants via POST /api/v1/admin/participant.
-# allowed: opens public self-registration.
-SELF_SIGNUP_MODE="gated"
+# Self-signup + login. allowed: public self-registration (local default).
+# gated (code default when unset): no self-service signup via the public OTP
+# flow — onboard participants via POST /api/v1/admin/participant.
+SELF_SIGNUP_MODE="allowed"
 LOGIN_CHANNELS="phone,email"     # ordered subset of phone,email
 
 # DLT-approved provider template id for the guardian/U18 OTP SMS; defaults to
@@ -251,7 +251,7 @@ http://localhost:8025, and phone codes are logged by the Keycloak container
 ```bash
 pnpm db:push:api           # apply the Drizzle schema (may prompt to confirm)
 pnpm db:init:api           # create partitioned items / actions / events tables
-pnpm db:seed:services:api  # mint the service user + apikey (idempotent)
+pnpm db:seed:services:api  # service users: aggregator-dpg org, signals-search org + apikey (idempotent)
 ```
 
 See `SETUP.md` for the full walkthrough and the aggregator integration steps.
@@ -292,7 +292,7 @@ VITE_MAP_PROVIDER="leaflet"
 - `pnpm db:migrate:api`
 - `pnpm db:push:api`
 - `pnpm db:init:api` — create partitioned items / actions / events tables
-- `pnpm db:seed:services:api` — mint the service user + apikey
+- `pnpm db:seed:services:api` — seed the service users (aggregator-dpg org, signals-search org + apikey)
 - `pnpm db:seed:purple_dot:api` — seed purple_dot sample data
 - `pnpm db:backfill:consent:api` — one-off deploy backfill for the consent-gated discoverability change (#275); re-classifies existing profiles against the consent gate
 - `pnpm db:studio:api`
