@@ -26,6 +26,13 @@ name: signals-dpg
 #     cp .env.example .env            # set SIGNALS_PII_KEY (see LOCAL_SETUP.md §2)
 #     docker compose up -d --build
 #
+# ── Build from source vs. pull prebuilt (signals-api / signals-ui) ──────────
+# Both declare `build:` and `image:`. The `--build` flag is the toggle:
+#     docker compose up -d --build   builds from your checked-out source
+#     docker compose up -d           skips the build and pulls the tag below from
+#                                     GHCR instead — faster, but not your local source
+# Override via SIGNALS_API_IMAGE / SIGNALS_UI_IMAGE in .env to pin a different tag.
+#
 # ── Host ports ──────────────────────────────────────────────────────────────
 #   Signals UI    http://localhost:5173   (must be 5173 — API CORS allow-list)
 #   Signals API   http://localhost:2742   (Swagger at /api/reference)
@@ -345,7 +352,7 @@ services:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
-    image: signals-dpg/api:local
+    image: ${SIGNALS_API_IMAGE:-ghcr.io/blue-dots-economy/signals-dpg/api:main}
     container_name: signals-api
     restart: unless-stopped
     # Inherits the exact same env as the bootstrap step.
@@ -381,7 +388,7 @@ services:
         # (GET /api/v1/auth/config), so switching providers needs no UI rebuild
         # and the UI cannot disagree with the API. Set AUTH_PROVIDER on the API
         # side instead.
-    image: signals-dpg/ui:local
+    image: ${SIGNALS_UI_IMAGE:-ghcr.io/blue-dots-economy/signals-dpg/ui:main}
     container_name: signals-ui
     restart: unless-stopped
     environment:
