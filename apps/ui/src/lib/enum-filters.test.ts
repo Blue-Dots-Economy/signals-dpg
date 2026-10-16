@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain } from '@/engine/types';
-import { getEnumFilterFields, getEnumFilterFieldsForDomains } from './enum-filters';
+import {
+  getEnumFilterFields,
+  getEnumFilterFieldsForDomains,
+  resolveProfileMatchFilters,
+  hasMatchableFields,
+} from './enum-filters';
 
 // #203 map-serverside-search Task 7: the filters panel must never offer a
 // `private: true` field as a filter option, even though the server's facet
@@ -104,5 +109,117 @@ describe('getEnumFilterFieldsForDomains — all declared enum fields, no filtera
     });
 
     expect(getEnumFilterFieldsForDomains([seeker, provider]).map((f) => f.key).sort()).toEqual(['city', 'gender']);
+  });
+});
+
+describe('resolveProfileMatchFilters', () => {
+  const targetFields = getEnumFilterFields([
+    {
+      type: 'object',
+      properties: {
+        typeOfJob: { type: 'string', title: 'Type of Job', enum: ['WFH', 'Desk', 'On-Field', 'Standing'] },
+        natureOfJob: {
+          type: 'string',
+          title: 'Nature of Job',
+          enum: ['Internship', 'Apprenticeship', 'Full-time', 'Flexible', 'Gig Work', 'Not Available'],
+        },
+        benefitsOffered: { type: 'array', title: 'Benefits', items: { enum: ['Meals', 'Transport'] } },
+      },
+    } as RJSFSchema,
+  ]);
+
+  const seekerSchema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      typeOfJobPreferred: { type: 'string', enum: ['WFH', 'Desk', 'On-Field', 'Standing'] },
+      natureOfJobsInterestedIn: {
+        type: 'array',
+        items: { enum: ['Internship', 'Apprenticeship', 'Full-time', 'Flexible', 'Gig Work'] },
+      },
+      city: { type: 'string', enum: ['blr', 'del'] },
+    },
+  } as RJSFSchema;
+
+  it('maps a single-value viewer field to the target field with matching options, despite the different name', () => {
+    const result = resolveProfileMatchFilters(seekerSchema, { typeOfJobPreferred: 'Desk' }, targetFields);
+    expect(result).toEqual({ typeOfJob: ['Desk'] });
+  });
+
+  it('maps an array-value viewer field to the target field with matching options', () => {
+    const result = resolveProfileMatchFilters(
+      seekerSchema,
+      { natureOfJobsInterestedIn: ['Full-time', 'Internship'] },
+      targetFields,
+    );
+    expect(result).toEqual({ natureOfJob: ['Full-time', 'Internship'] });
+  });
+
+  it('is a no-op when the viewer profile has no value for any correspondable field', () => {
+    expect(resolveProfileMatchFilters(seekerSchema, {}, targetFields)).toEqual({});
+    expect(resolveProfileMatchFilters(seekerSchema, { city: 'blr' }, targetFields)).toEqual({});
+  });
+
+  it('is a no-op when no target field is offered at all', () => {
+    const result = resolveProfileMatchFilters(seekerSchema, { typeOfJobPreferred: 'Desk' }, []);
+    expect(result).toEqual({});
+  });
+
+  it('is a no-op when the viewer has no schema or no data', () => {
+    expect(resolveProfileMatchFilters(undefined, { typeOfJobPreferred: 'Desk' }, targetFields)).toEqual({});
+    expect(resolveProfileMatchFilters(seekerSchema, undefined, targetFields)).toEqual({});
+  });
+
+  it('unions values when two viewer fields both correspond to the same target field', () => {
+    const fields = getEnumFilterFields([
+      { type: 'object', properties: { role: { type: 'string', enum: ['x', 'y'] } } } as RJSFSchema,
+    ]);
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: {
+        a: { type: 'string', enum: ['x', 'y'] },
+        b: { type: 'string', enum: ['x', 'y'] },
+      },
+    } as RJSFSchema;
+    expect(resolveProfileMatchFilters(schema, { a: 'x', b: 'y' }, fields)).toEqual({ role: ['x', 'y'] });
+  });
+
+  it('never carries over a value that is not actually one of the target field’s own options', () => {
+    const fields = getEnumFilterFields([
+      { type: 'object', properties: { typeOfJob: { type: 'string', enum: ['WFH', 'Desk', 'On-Field', 'Standing'] } } } as RJSFSchema,
+    ]);
+    const schema: RJSFSchema = {
+      type: 'object',
+      properties: { status: { type: 'string', enum: ['WFH', 'Desk', 'On-Field', 'Weekend'] } },
+    } as RJSFSchema;
+    expect(resolveProfileMatchFilters(schema, { status: 'Weekend' }, fields)).toEqual({});
+    expect(resolveProfileMatchFilters(schema, { status: 'Desk' }, fields)).toEqual({ typeOfJob: ['Desk'] });
+  });
+});
+
+describe('hasMatchableFields', () => {
+  const targetFields = getEnumFilterFields([
+    { type: 'object', properties: { typeOfJob: { type: 'string', enum: ['WFH', 'Desk', 'On-Field', 'Standing'] } } } as RJSFSchema,
+  ]);
+
+  const seekerSchema: RJSFSchema = {
+    type: 'object',
+    properties: {
+      typeOfJobPreferred: { type: 'string', enum: ['WFH', 'Desk', 'On-Field', 'Standing'] },
+      city: { type: 'string', enum: ['blr', 'del'] },
+    },
+  } as RJSFSchema;
+
+  it('is true when a viewer field corresponds by VALUE to a target field, regardless of profile data', () => {
+    expect(hasMatchableFields(seekerSchema, targetFields)).toBe(true);
+  });
+
+  it('is false when no viewer field corresponds to any target field', () => {
+    const onlyCity: RJSFSchema = { type: 'object', properties: { city: { type: 'string', enum: ['blr', 'del'] } } };
+    expect(hasMatchableFields(onlyCity, targetFields)).toBe(false);
+  });
+
+  it('is false for an undefined schema or when there are no target fields at all', () => {
+    expect(hasMatchableFields(undefined, targetFields)).toBe(false);
+    expect(hasMatchableFields(seekerSchema, [])).toBe(false);
   });
 });

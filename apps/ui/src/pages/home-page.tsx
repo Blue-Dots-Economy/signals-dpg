@@ -33,6 +33,7 @@ import { MapView } from '@/components/map/map-container';
 import { MapErrorBoundary } from '@/components/map/map-error-boundary';
 import { SEARCH_AREA_MIN_ZOOM } from '@/lib/map-caps';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
+import { RelevantToMeButton } from '@/components/filters/relevant-to-me-button';
 import { MarkerPopupCard } from '@/components/map/marker-popup-card';
 import { MapCountPill } from '@/components/map/map-count-pill';
 import { MarkerDetailSheet } from '@/components/map/marker-detail-sheet';
@@ -59,7 +60,11 @@ import {
   computeOpenActionItemIds,
 } from '@/lib/profile-actions';
 import type { TFunction } from 'i18next';
-import { getEnumFilterFieldsForDomains } from '@/lib/enum-filters';
+import {
+  getEnumFilterFieldsForDomains,
+  resolveProfileMatchFilters,
+  hasMatchableFields,
+} from '@/lib/enum-filters';
 import {
   deriveBrowseParams,
   anchorItemIdForTarget,
@@ -646,6 +651,8 @@ export function HomePage() {
   const [mapSelectedFields, setMapSelectedFields] = React.useState<Record<string, string[]>>(() =>
     parseFacetParams(searchParams),
   );
+  // Map-only auto-filter toggle, on by default.
+  const [relevantToMeEnabled, setRelevantToMeEnabled] = React.useState(true);
   // Map viewport (Task 6, #203 §5.2): null until the map reports its first
   // `onViewportChange` (debounced pan/zoom settle). The map's own initial
   // center/zoom comes from the existing `focusPoint`/`userLocation`/default
@@ -1132,6 +1139,64 @@ export function HomePage() {
     () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
     [mapSelectedFields],
   );
+
+  // The viewer's own schema, not the target domain's.
+  const viewerSchemaForMatch = React.useMemo(() => {
+    if (!network || !myItem) return undefined;
+    const domain = network.domains.find((d) => d.id === myItem.item_domain);
+    return domain?.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
+  }, [network, myItem]);
+
+  // Same fields the Filters dropdown already offers for the domains on the map — matched generically, no per-network config.
+  const mapFilterFields = React.useMemo(
+    () => getEnumFilterFieldsForDomains(mapDomains),
+    [mapDomains],
+  );
+
+  // What the toggle WOULD apply right now, independent of whether it's actually on — {} is the required no-op.
+  const profileMatchFilters = React.useMemo(
+    () => resolveProfileMatchFilters(viewerSchemaForMatch, myItem?.item_state, mapFilterFields),
+    [viewerSchemaForMatch, myItem, mapFilterFields],
+  );
+
+  // Whether the toggle is worth showing at all, independent of the viewer's current profile data.
+  const relevantToMeAvailable = React.useMemo(
+    () => hasMatchableFields(viewerSchemaForMatch, mapFilterFields),
+    [viewerSchemaForMatch, mapFilterFields],
+  );
+
+  // useMapMarkers drops a domain entirely if it can't satisfy every active filter field, so auto-matching across >1 domain at once (different field names per domain) silently zeroes out whichever domain didn't "win" — restrict to exactly one selected domain.
+  const relevantToMeSingleDomainOk = mapDomains.length === 1;
+
+  // Writes profileMatchFilters into the same mapSelectedFields the manual chips use, so a match is visibly selected; relevantToMeAppliedFieldsRef tracks exactly what this effect added so it retracts only that. setMapSelectedFields (not handleMapFieldsChange) keeps it out of the shareable ?f_* URL.
+  const relevantToMeAppliedFieldsRef = React.useRef<Set<string>>(new Set());
+  React.useEffect(() => {
+    const shouldApply = relevantToMeEnabled && viewMode === 'map' && relevantToMeSingleDomainOk;
+    // Captured outside the updater below: React Strict Mode double-invokes a setState updater, and mutating the ref inside it would make the second call see an already-cleared ref and undo the first.
+    const previouslyApplied = relevantToMeAppliedFieldsRef.current;
+    const nextApplied = new Set<string>(shouldApply ? Object.keys(profileMatchFilters) : []);
+    relevantToMeAppliedFieldsRef.current = nextApplied;
+
+    setMapSelectedFields((current) => {
+      const next = { ...current };
+      let changed = false;
+
+      for (const field of previouslyApplied) {
+        if (field in next) {
+          delete next[field];
+          changed = true;
+        }
+      }
+
+      if (shouldApply) {
+        for (const [field, values] of Object.entries(profileMatchFilters)) {
+          next[field] = values;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [relevantToMeEnabled, viewMode, relevantToMeSingleDomainOk, profileMatchFilters]);
 
   // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
   // markers rather than a full per-domain browse feed (that full fetch was
@@ -2208,17 +2273,29 @@ export function HomePage() {
     );
   };
 
-  const filtersPanel = (
-    <BrowseFiltersPanel
-      // The map's own copy, shown only while maximized (the toolbar is behind
-      // the overlay), where it floats over tiles rather than sitting in a row.
-      trigger="overlay"
-      domains={visibleDomains}
-      filterFieldDomains={filterFieldDomains}
-      selectedFields={mapSelectedFields}
-      onFieldsChange={handleMapFieldsChange}
-      viewMode={viewMode}
+  // Standalone toggle beside the Filters trigger, map-only.
+  const relevantToMeButton = viewMode === 'map' && relevantToMeAvailable && (
+    <RelevantToMeButton
+      enabled={relevantToMeEnabled}
+      onChange={setRelevantToMeEnabled}
+      singleDomainOk={relevantToMeSingleDomainOk}
     />
+  );
+
+  const filtersPanel = (
+    <div className="flex items-center gap-2">
+      {relevantToMeButton}
+      <BrowseFiltersPanel
+        // The map's own copy, shown only while maximized (the toolbar is behind
+        // the overlay), where it floats over tiles rather than sitting in a row.
+        trigger="overlay"
+        domains={visibleDomains}
+        filterFieldDomains={filterFieldDomains}
+        selectedFields={mapSelectedFields}
+        onFieldsChange={handleMapFieldsChange}
+        viewMode={viewMode}
+      />
+    </div>
   );
 
   // Task 6 (#203 §6): the page-header mount of the filters panel (passed to
@@ -2230,13 +2307,16 @@ export function HomePage() {
   // fallback now applies facet filters natively, that pausing no longer
   // applies and this is identical to `filtersPanel` above.
   const listFiltersPanel = (
-    <BrowseFiltersPanel
-      domains={visibleDomains}
-      filterFieldDomains={filterFieldDomains}
-      selectedFields={mapSelectedFields}
-      onFieldsChange={handleMapFieldsChange}
-      viewMode={viewMode}
-    />
+    <div className="flex items-center gap-2">
+      {relevantToMeButton}
+      <BrowseFiltersPanel
+        domains={visibleDomains}
+        filterFieldDomains={filterFieldDomains}
+        selectedFields={mapSelectedFields}
+        onFieldsChange={handleMapFieldsChange}
+        viewMode={viewMode}
+      />
+    </div>
   );
 
   // One marker-details renderer for both shapes: the desktop popup bubble and
