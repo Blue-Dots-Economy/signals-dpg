@@ -134,7 +134,7 @@ Five workflows, and the split between them is load-bearing: **`ci.yaml` checks, 
 
 - **`ci.yaml`** — `pull_request` into `develop`/`main`/`feature`, and `push` to `develop`/`main`. Jobs: `typecheck-api`, `typecheck-ui`, `test`, `sonar`, `dep-cruise`, `schema-parity`, `spec-drift`. Note there is **no `feature` push trigger** (#756) and **no tag trigger** — both existed only to drive a publish job that no longer lives here. `main` is in the list because the org's SonarCloud plan analyses the main branch only, so without it the dashboard reports `"main" branch has not been analyzed yet` however many PRs land.
 - **`build-images.yaml`** — publishes the `api` and `ui` images to GHCR on a **release tag** (`v*.*.*`, `20*-s*-rc*`) or a manual run. No branch push publishes (#756): the `:main` / `:develop` tags it used to produce were mutable and nothing consumed them, since deployments pin a release tag or an immutable `sha-` tag in `bluedots-automation`'s `global-images.yaml`.
-- **`create-release.yaml`** — the front door for cutting a release. Dispatch it with a tag name and a base branch; it checks CI, creates the tag and the GitHub release with generated notes in one API call, then dispatches the image build. `dry_run` previews the notes without creating anything.
+- **`create-release.yaml`** — the front door for cutting a release. Dispatch it with a tag name and a base branch (`base` defaults to `main`. The `docs_only` input re-publishes an existing tag's notes to the docs PR.); it checks CI, creates the tag and the GitHub release with generated notes in one API call, then dispatches the image build. `dry_run` previews the notes without creating anything.
 - **`openapi-sync.yml`** (pushes `openapi.json` to `bluedots-docs`) and **`security.yml`** (thin caller into `bluedots-automation`'s reusable scan) are unrelated to the release path.
 - **gitleaks git-history secret scan is on** in `security.yml` (#777) and fails closed; it complements native GitHub secret scanning, which misses custom high-entropy secrets such as Keycloak client secrets.
 - **`.github/dependabot.yml` has a 7-day cooldown** (`cooldown.default-days: 7`) on all three ecosystems — npm, github-actions, docker (#796). It delays version updates only; security updates still arrive immediately.
@@ -145,7 +145,7 @@ Five workflows, and the split between them is load-bearing: **`ci.yaml` checks, 
 - It **fails closed when there are zero runs**. That is the realistic accident (a tag on a commit CI never saw), not a tag on a commit CI rejected; a "did it fail?" test would wave it through.
 - Both carry a `skip_ci_check` input for an emergency publish, which logs a warning naming the commit so the bypass is visible.
 
-**Create releases from `develop` or `main`, never `feature`.** Merges into `feature` run no CI — `pull_request` runs record the PR head, not the resulting merge commit — so the gate will refuse a tag cut there. This matches existing practice (`202609-s1-rc3` was cut from `develop`).
+**Sprint tags (`YYYYMM-sN-rcN`) are created from `main` only; `v*.*.*` and per-app tags may come from `develop` or `main`. Never `feature`.** Merges into `feature` run no CI — `pull_request` runs record the PR head, not the resulting merge commit — so the gate will refuse a tag cut there.
 
 **Two GitHub behaviours the release path depends on**, both of which look like bugs when you hit them:
 
