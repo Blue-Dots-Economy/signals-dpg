@@ -1,3 +1,5 @@
+<!-- Release and promotion PRs: write this with the `release-pr-notes` skill (`/plugin install bluedots-release-tools@bluedots`). -->
+
 ## Summary
 
 <!-- What changed and why. -->
@@ -11,6 +13,14 @@ User-facing changes in this release — delete this comment and list them, e.g.:
 
 If this PR has NO user-facing changes, add the `no-release-notes` label instead.
 -->
+
+## Breaking changes / config
+
+<!-- Write `None.` if nothing applies. -->
+
+## What users will notice
+
+<!-- Write `None.` if nothing applies. -->
 
 ## Checklist
 
