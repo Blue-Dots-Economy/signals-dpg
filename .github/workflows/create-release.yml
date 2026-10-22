@@ -44,7 +44,7 @@ permissions: {}
 jobs:
   release:
     permissions: { contents: write, actions: write }
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/create-release.yml@6ba052ba8947a94915b0e7aeab0aa574a8c3a939 # feat/create-release 2026-10-22 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/create-release.yml@03ca0cdd3222c277adfc7d193e830e58ede99fe9 # feat/create-release 2026-10-22 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
     with:
       tag: ${{ inputs.tag }}
       base: ${{ inputs.base }}
@@ -53,6 +53,6 @@ jobs:
       docs_only: ${{ inputs.docs_only }}
       ci-workflow: ci.yaml
       build-workflow: build-images.yaml
-      automation-ref: 6ba052ba8947a94915b0e7aeab0aa574a8c3a939
+      automation-ref: 03ca0cdd3222c277adfc7d193e830e58ede99fe9
     secrets:
       docs-token: ${{ secrets.DOCS_SYNC_TOKEN }}

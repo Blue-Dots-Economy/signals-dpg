@@ -1,4 +1,4 @@
-<!-- Release and promotion PRs: write this with the `release-pr-notes` skill (`/plugin install bluedots-release-tools@bluedots`). -->
+<!-- Release and promotion PRs: write this with the `release-pr-notes` skill (`/plugin marketplace add Blue-Dots-Economy/bluedots-claude-plugins`, then `/plugin install bluedots-release-tools@bluedots`). -->
 
 ## Summary
 
