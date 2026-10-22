@@ -492,3 +492,85 @@ describe('mount-closed-then-open parity (regression guard for aggregator Critica
     expect(acceptBtn).toHaveAttribute('aria-disabled', 'false');
   });
 });
+
+describe('gate mode expand to full screen', () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+  afterEach(() => {
+    isMobile.value = false;
+  });
+
+  const dialogContent = (base: HTMLElement) =>
+    base.querySelector('[data-slot="dialog-content"]') as HTMLElement;
+
+  it('toggles the dialog between its normal size and full screen', async () => {
+    const user = userEvent.setup();
+    const { baseElement } = render(
+      <ConsentModal open mode="gate" initialTab="privacy" config={config} />,
+    );
+
+    const expand = screen.getByRole('button', { name: /expand to full screen/i });
+    expect(expand).toHaveAttribute('aria-pressed', 'false');
+    expect(dialogContent(baseElement)).toHaveClass('max-w-2xl');
+    expect(dialogContent(baseElement)).not.toHaveClass('w-screen');
+
+    await user.click(expand);
+    const collapse = screen.getByRole('button', { name: /exit full screen/i });
+    expect(collapse).toHaveAttribute('aria-pressed', 'true');
+    expect(dialogContent(baseElement)).toHaveClass('w-screen', 'h-dvh', 'max-w-none');
+
+    await user.click(collapse);
+    expect(screen.getByRole('button', { name: /expand to full screen/i })).toBeInTheDocument();
+    expect(dialogContent(baseElement)).not.toHaveClass('w-screen');
+  });
+
+  it('Escape leaves full screen but never dismisses the gate', async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    const { baseElement } = render(
+      <ConsentModal open mode="gate" initialTab="privacy" config={config} onOpenChange={onOpenChange} />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /expand to full screen/i }));
+    fireEvent.keyDown(dialogContent(baseElement), { key: 'Escape' });
+
+    expect(dialogContent(baseElement)).not.toHaveClass('w-screen');
+    expect(screen.getByRole('button', { name: /expand to full screen/i })).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps read progress and the ticked agreement across expand and collapse', async () => {
+    const user = userEvent.setup();
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} onAccept={vi.fn()} />);
+
+    stubReaderAsFullyRead();
+    await user.click(screen.getByRole('checkbox'));
+
+    await user.click(screen.getByRole('button', { name: /expand to full screen/i }));
+    expect(screen.getByRole('checkbox')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByRole('button', { name: /accept/i })).toHaveAttribute('aria-disabled', 'false');
+
+    await user.click(screen.getByRole('button', { name: /exit full screen/i }));
+    expect(screen.getByRole('checkbox')).toHaveAttribute('data-state', 'checked');
+    expect(screen.getByRole('button', { name: /accept/i })).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('offers no expand control in view mode or on mobile', () => {
+    const { unmount } = render(
+      <ConsentModal open mode="view" initialTab="privacy" config={config} onOpenChange={vi.fn()} />,
+    );
+    expect(screen.queryByRole('button', { name: /expand to full screen/i })).not.toBeInTheDocument();
+    unmount();
+
+    isMobile.value = true;
+    render(<ConsentModal open mode="gate" initialTab="privacy" config={config} />);
+    expect(screen.queryByRole('button', { name: /expand to full screen/i })).not.toBeInTheDocument();
+  });
+});
