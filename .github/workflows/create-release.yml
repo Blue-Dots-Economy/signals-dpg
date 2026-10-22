@@ -1,0 +1,58 @@
+# Create release
+#
+# Thin caller. All release logic (tag validation, CI gate, release creation,
+# build dispatch, release-notes fragment) lives once in bluedots-automation's
+# .github/workflows/create-release.yml so the four service repos can't drift
+# apart. This workflow replaced this repo's `cut-release.yaml`.
+#
+# Sprint tags (`YYYYMM-sN-rcN`) come from main only; the reusable workflow
+# rejects them from any other base. Run with dry_run first to preview the notes.
+#
+# The pin below is the bluedots-automation feature-branch head. Repin to the
+# feature squash SHA once bluedots-automation merges, then to @main once
+# promoted. The same SHA is passed as automation-ref so the scripts match.
+
+name: Create release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. 202610-s1-rc1 or v1.2.0"
+        required: true
+        type: string
+      base:
+        description: "Branch to cut the tag from. Sprint tags must come from main."
+        type: choice
+        options: [main, develop]
+        default: main
+      dry_run:
+        description: "Check everything and preview the notes, but create nothing"
+        type: boolean
+        default: false
+      skip_ci_check:
+        description: "Tag even if CI has not passed (emergency use only)"
+        type: boolean
+        default: false
+      docs_only:
+        description: "The tag and release already exist: only re-publish the docs fragment"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  release:
+    permissions: { contents: write, actions: write }
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/create-release.yml@6ba052ba8947a94915b0e7aeab0aa574a8c3a939 # feat/create-release 2026-10-22 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
+    with:
+      tag: ${{ inputs.tag }}
+      base: ${{ inputs.base }}
+      dry_run: ${{ inputs.dry_run }}
+      skip_ci_check: ${{ inputs.skip_ci_check }}
+      docs_only: ${{ inputs.docs_only }}
+      ci-workflow: ci.yaml
+      build-workflow: build-images.yaml
+      automation-ref: 6ba052ba8947a94915b0e7aeab0aa574a8c3a939
+    secrets:
+      docs-token: ${{ secrets.DOCS_SYNC_TOKEN }}
