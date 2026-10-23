@@ -7,9 +7,8 @@ import {
   type PartialConsentConfig,
 } from '@dpg/schemas';
 
-// A brand override is a partial document set (each top-level document optional);
-// the UI merges it over the network default. PartialConsentConfigSchema is defined
-// in @dpg/schemas (Zod 4 has no `.deepPartial()`).
+// A brand override is a partial document set (each top-level document
+// optional); the UI merges it over the network default.
 
 export type LoadedConsentConfig = {
   network: string;
@@ -22,11 +21,8 @@ export type LoadConsentConfigOptions = {
   networkLocalFile: string;
   networks: string[];
   /**
-   * Address rendered in place of the `__SUPPORT_EMAIL__` placeholder that
-   * canonical consent files ship (so the email is configurable without editing
-   * consent content). Deployed instances have it substituted upstream at
-   * ConfigMap render; this fallback keeps local/direct reads showing a real
-   * address. Defaults to `hello@bluedotseconomy.org`.
+   * Replaces the `__SUPPORT_EMAIL__` placeholder in consent copy. Deployments
+   * may also substitute it upstream at ConfigMap render.
    */
   supportEmail?: string;
 };
@@ -45,8 +41,6 @@ async function readConsentJson(
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
     throw err;
   }
-  // Render the support-email placeholder before parsing so every content field
-  // that references it picks up the configured address.
   return JSON.parse(text.split(SUPPORT_EMAIL_PLACEHOLDER).join(supportEmail));
 }
 
@@ -64,19 +58,15 @@ async function listSubdirectories(dir: string): Promise<string[]> {
 /**
  * Local mode: the network default consent.json sits beside network.json; brand
  * overrides live in immediate sub-folders named for the brand id.
- * Local mode is single-network (mirrors network_config_loader).
- *
- * Remote mode: remote consent delivery is a follow-up; returns [] for now.
+ * Local mode is single-network. Remote mode returns [] (not implemented).
  */
 export async function loadConsentConfigs(
   opts: LoadConsentConfigOptions
 ): Promise<LoadedConsentConfig[]> {
   if (opts.source !== 'local') {
-    // Remote consent delivery is a follow-up; returns [] for now.
     return [];
   }
 
-  // Local mode represents exactly one network — use only the first entry.
   if (opts.networks.length === 0) return [];
   const network = opts.networks[0];
   const supportEmail = opts.supportEmail ?? DEFAULT_SUPPORT_EMAIL;
