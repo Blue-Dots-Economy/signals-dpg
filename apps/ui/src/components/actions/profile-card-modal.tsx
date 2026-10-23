@@ -30,9 +30,7 @@ interface ProfileCardModalProps {
   counterparty: ProfileCardCounterparty;
 }
 
-// Server error codes → i18n keys, resolved via t() so the user sees translated
-// copy rather than raw English server text. Shared with the (now-folded-in)
-// contact-reveal path.
+// Server error codes to i18n keys, so the user never sees raw server text.
 const errorMessageKeys: Record<string, string> = {
   PII_NOT_REVEALED: 'contact.error_pii_not_revealed',
   CROSS_INSTANCE_REVEAL_NOT_SUPPORTED: 'contact.error_cross_instance',
@@ -44,29 +42,18 @@ const errorMessageKeys: Record<string, string> = {
 };
 
 /**
- * Whether to ATTEMPT the unmasked reveal for this status. The server is the
- * real gate (it reveals only when the action's own `reveals_pii_on_status`
- * includes the current status, else returns PII_NOT_REVEALED); this is a
- * client-side hint to avoid a doomed reveal call for obviously-not-revealed
- * statuses. Hardcoded to the default gate (accepted → stays revealed through
- * completion) rather than threading the per-interaction `reveals_pii_on_status`
- * array in here. A wrong guess degrades gracefully, not incorrectly:
- * - guess too NARROW (a network reveals on some other status): we show masked,
- *   never leaking PII;
- * - guess too WIDE (we try reveal on a status the server won't reveal): the
- *   server returns PII_NOT_REVEALED, which falls back to the masked profile
- *   with a "not available" note (see REVEAL_UNAVAILABLE_CODES below).
- * If a network ever customises `reveals_pii_on_status`, thread it in here.
+ * Guesses whether this status reveals PII, only to pick the description shown
+ * before the fetch settles. Hardcodes the default gate (accepted, completed)
+ * rather than the interaction's `reveals_pii_on_status`; the server decides
+ * the actual reveal.
  */
 function statusRevealsPii(status: string): boolean {
   return status === 'accepted' || status === 'completed';
 }
 
-// Reveal-endpoint error codes that mean "the contact reveal is legitimately
-// unavailable here" (not a failure). For these we show the public profile with
-// a distinct note; every OTHER code (UNAUTHORIZED, NOT_ACTION_PARTICIPANT,
-// ACTION_NOT_FOUND, INTERNAL_SERVER_ERROR, …) surfaces as an error rather than
-// silently showing masked copy that contradicts an accepted request.
+// Reveal-endpoint codes that mean the reveal is legitimately unavailable, not
+// a failure: the public profile is shown instead. Any other code surfaces as
+// an error rather than masked copy that contradicts an accepted request.
 const REVEAL_UNAVAILABLE_CODES = new Set([
   'CROSS_INSTANCE_REVEAL_NOT_SUPPORTED',
   'PII_NOT_REVEALED',
@@ -80,10 +67,10 @@ interface ResolvedItem {
   item_state: Record<string, unknown>;
 }
 
-// masked → public profile, request not (yet) revealing; full → reveal succeeded;
-// reveal_unavailable → public profile because the OTHER party isn't live;
-// reveal_blocked_self → public profile because the VIEWER's own profile isn't live.
-// reveal_retired → the counterparty permanently removed their profile (#347).
+// masked: public profile, request not revealing; full: reveal succeeded;
+// reveal_unavailable: public profile, the other party is not live;
+// reveal_blocked_self: public profile, the viewer's own profile is not live;
+// reveal_retired: the counterparty permanently removed their profile.
 type ViewMode = 'masked' | 'full' | 'reveal_unavailable' | 'reveal_blocked_self' | 'reveal_retired';
 
 type ModalState =
@@ -93,10 +80,8 @@ type ModalState =
   | { status: 'error'; message: string };
 
 /**
- * Shows the profile of an action's counterparty as a `DomainCard`. Unmasked
- * (incl. contact details) once the request reveals PII (accepted/completed),
- * masked (public fields only) otherwise. Works for both initiated and received
- * actions — the caller passes the resolved counterparty.
+ * Shows an action's counterparty as a `DomainCard`: unmasked (with contact
+ * details) when the server reveals PII, public fields otherwise.
  */
 export function ProfileCardModal({
   open,
@@ -143,10 +128,10 @@ export function ProfileCardModal({
     };
 
     const resolve = async (): Promise<{ item: ResolvedItem; mode: ViewMode }> => {
-      // Always ask the action's contact-details endpoint first — it's the only
-      // source that can resolve a NON-live counterparty (paused #273, or retired
-      // #347), which the network item fetch (live-only) can't see. It reveals
-      // PII when allowed, else returns the masked view + a reveal_blocked_reason.
+      // Contact-details first: it is the only source that can resolve a
+      // paused or retired counterparty (the item fetch is live-only). It
+      // reveals PII when allowed, else returns the masked view and a
+      // reveal_blocked_reason.
       try {
         const data = await getActionContactDetails(actionId);
         const it = data.other_actor.item;
@@ -167,16 +152,13 @@ export function ProfileCardModal({
         };
       } catch (err) {
         const code = (err as { code?: string }).code ?? 'INTERNAL_SERVER_ERROR';
-        // PII_NOT_REVEALED: the action simply isn't at a revealing status and the
-        // counterparty is live — show the ordinary masked public profile.
+        // Not at a revealing status and the counterparty is live.
         if (code === 'PII_NOT_REVEALED') {
           return { item: await fetchMasked(), mode: 'masked' };
         }
-        // Other "reveal legitimately unavailable" codes → masked public + note.
         if (REVEAL_UNAVAILABLE_CODES.has(code)) {
           return { item: await fetchMasked(), mode: 'reveal_unavailable' };
         }
-        // A real failure — surface it.
         throw err;
       }
     };
@@ -210,17 +192,15 @@ export function ProfileCardModal({
     return (domain?.item_schemas?.[item.item_type] as RJSFSchema | undefined) ?? null;
   }, [item, networkConfig]);
 
-  // Per-domain card config (title_field / avatar_from / default_fields). Without
-  // it the card falls back to a best-guess title ("Untitled") and generic
-  // fields instead of the network's configured heading + fields.
+  // Per-domain card config, so the card uses the network's title and fields.
   const cardConfig = React.useMemo<DotCardConfig | null>(() => {
     if (!item || !networkConfig) return null;
     const domain = networkConfig.domains.find((d) => d.id === item.item_domain);
     return (domain?.card as DotCardConfig | undefined) ?? null;
   }, [item, networkConfig]);
 
-  // Description keyed off the resolved mode. Before the fetch settles, guess
-  // from the expected mode so the copy doesn't flash the wrong line.
+  // Before the fetch settles, guess from the status so the copy does not
+  // flash the wrong line.
   const descKey =
     state.status === 'success'
       ? state.mode === 'full'
@@ -238,21 +218,10 @@ export function ProfileCardModal({
 
   return (
     <ResponsiveDialog open={open} onOpenChange={onOpenChange} title={name} contentClassName="max-w-xl">
-      {/* Scroll region for the whole modal body. Deliberately a BLOCK, not a
-          flex column (#507): as a flex column, `DomainCard`'s root — which sets
-          `overflow-hidden` for its rounded header — became a flex item whose
-          automatic minimum size is 0 (that's what a non-visible overflow does),
-          so the card SHRANK below its content and clipped it itself. This
-          container then never overflowed, so it never got a scrollbar and the
-          card's "Hide details" toggle was unreachable. As block children, the
-          card keeps its full height and the overflow lands here, where it
-          scrolls. Height is bounded by `ResponsiveDialog` on both shapes, so no
-          cap is needed (or wanted) here — but the two bounds differ: 90dvh on
-          the desktop Dialog, and 80dvh on the mobile Drawer, where
-          `DrawerContent`'s own `data-[vaul-drawer-direction=bottom]:max-h-[80dvh]`
-          outranks the `max-h-[90dvh]` passed in (class+attribute, 0,2,0, beats a
-          plain class, 0,1,0) and vaul defaults to `direction="bottom"`. Tighter,
-          not looser, so the scroll fix holds on both. */}
+      {/* A block, not a flex column: `DomainCard`'s root has
+          `overflow-hidden`, so as a flex item its minimum size is 0 and it
+          would shrink and clip itself instead of this region scrolling.
+          `ResponsiveDialog` bounds the height (90dvh dialog, 80dvh drawer). */}
       <div className="space-y-4 overflow-y-auto p-6">
         <DialogHeader>
           <DialogTitle>{name}</DialogTitle>
@@ -272,8 +241,8 @@ export function ProfileCardModal({
           </div>
         )}
 
-        {/* A retired profile shows only the notice (in the description) — its
-            leftover non-PII fields must not be rendered as a card (#347). */}
+        {/* A retired profile shows only the notice; its leftover fields must
+            not render as a card. */}
         {state.status === 'success' && state.mode !== 'reveal_retired' && item && schema && (
           <DomainCard schema={schema} cardConfig={cardConfig} schemaName={item.item_domain} data={item.item_state} />
         )}
