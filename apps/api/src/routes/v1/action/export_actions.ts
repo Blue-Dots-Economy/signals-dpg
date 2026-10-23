@@ -31,8 +31,8 @@ import { humanizeKey } from '@/services/action_export/columns';
 import { buildExportWorkbook, XLSX_CONTENT_TYPE } from '@/services/action_export/xlsx';
 
 /**
- * `POST /api/v1/action/export` (#770) — Excel file of the caller's engagement
- * COUNTERPARTIES, one counterparty type per file. Thin I/O shell around
+ * `POST /api/v1/action/export`: Excel file of the caller's engagement
+ * counterparties, one counterparty type per file. Thin I/O shell around
  * `buildExport`, which owns the per-row export rules; this handler enforces
  * everything that needs I/O, so no rule depends on the UI:
  *
@@ -369,8 +369,8 @@ async function runExport(
     });
   }
 
-  // The download-level audit record (#639 Q5: metadata only) is a structured
-  // log line, not a table. X-Export-Id / the filename carry export_id, so a
+  // The download-level audit record (metadata only) is a structured log line,
+  // not a table. X-Export-Id / the filename carry export_id, so a
   // file found later traces back to this line.
   request.log.info(
     {
