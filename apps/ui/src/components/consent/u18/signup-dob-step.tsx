@@ -11,9 +11,9 @@ export interface SignupDobStepProps {
 }
 
 /**
- * Birth-year step for the legacy OTP login page (`OtpLoginPage`), whose OTP
- * API endpoints no longer exist; the Keycloak panel does not use it. Collects
- * the age only; the caller routes minors to the guardian flow.
+ * Birth-year step used only by the legacy OTP login page (`OtpLoginPage`),
+ * whose OTP endpoints the API does not serve; the Keycloak panel does not use
+ * it. Collects the age only; the caller routes minors to the guardian flow.
  */
 export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();
