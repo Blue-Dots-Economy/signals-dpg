@@ -202,6 +202,29 @@ export default my_route;
 - No `// TODO` comments — open an issue instead.
 - No hardcoded secrets or credentials in code.
 
+## Code Comments
+
+Comments say what the code cannot. Git, PRs, issues and `docs/` hold the rest.
+
+**Keep:**
+
+- The reason for a non-obvious choice, in one sentence.
+- Constraints and invariants: transactions, ordering, locking, idempotency, fail-closed behaviour.
+- Security, PII and authorisation rules (for example "Never log this value.").
+- Behaviour of external systems the code depends on: Keycloak, notification-service, signals-search, Postgres, network.json.
+- Public API docs that tell a caller something the signature does not: failure results, side effects, units.
+- Tool directives (`eslint-disable`, `@ts-expect-error`, `NOSONAR` with its rule key and reason, `@deprecated`, coverage ignores).
+
+**Do not write:**
+
+- History: issue or PR numbers, phases, plan or spec section IDs, "previously", "used to", "was renamed".
+- Design essays. Put them in `docs/architecture/` and leave a one-line pointer.
+- Comments that restate the code, or `@param` / `@returns` lines that only repeat the name and type.
+- Banners, dividers, ALL-CAPS emphasis, "NOTE:", "deliberately".
+- Commented-out code, or `// TODO` (open an issue instead).
+
+**Style:** short, present-tense statements about the current code. A wrong comment is worse than none: when code changes, fix or delete the comments that describe it.
+
 ## UI Data Caching (React Query)
 
 One QueryClient (`apps/ui/src/lib/query-client.ts`), one key factory

@@ -127,6 +127,7 @@ map pins (P-follow-5) are still pending. See code comments at
 - **ESM only**, strict TS, no `any`. Use `import type` for type-only imports.
 - **No `console.log` in library packages** — go through `request.log` in app code.
 - **No `// TODO` comments** — open an issue instead.
+- **Comments say what the code cannot** — keep reasons, constraints and security notes; no history, essays or restating. Full rules: `AGENTS.md` → Code Comments.
 
 ## CI and releases
 
