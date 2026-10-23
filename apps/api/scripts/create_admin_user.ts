@@ -1,37 +1,20 @@
 /**
  * Create (or promote) a signals admin, in both signals and Keycloak.
  *
- * ── Why this exists ───────────────────────────────────────────────────────
- * Under better-auth, the first admin bootstrapped itself: `unified_otp`'s verify
- * minted `role: 'admin'` for any email on an `ADMIN_DOMAINS` domain, and
- * `assertSelfSignupAllowed` let that email through even on a **gated** instance
- * (`packages/auth/plugins/auth_guards.ts`). Neither has a Keycloak equivalent —
- * `provisioning.ts` and `self_signup.ts` both hardcode `role: 'user'`, and
- * `refreshMirror` deliberately never syncs role. So on a gated instance (the
- * default) there was no code path at all that could create the first admin.
+ * Admin creation is an explicit operator action: Keycloak provisioning
+ * (`provisioning.ts`, `self_signup.ts`) always creates `role: 'user'` and
+ * `refreshMirror` never syncs role, so no login path can create an admin.
  *
- * That is gap G2 of
- * `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md`.
- * The decision recorded there is to make admin creation an explicit **operator
- * action** rather than re-implement "this email domain implies admin", which was
- * weak authorisation dressed up as configuration.
- *
- * ── What it does ──────────────────────────────────────────────────────────
  * 1. Creates or reuses the local `user` row, with `role='admin'`.
- * 2. Creates the Keycloak identity with **the same id**, carrying the
+ * 2. Creates the Keycloak identity with the same id, carrying the
  *    `signals_admin` realm role (`user_to_keycloak.ts` derives it from the row's
- *    role, so this follows automatically).
+ *    role).
  *
- * The invariant that matters, as everywhere else in this migration:
+ * The id must be a bare UUID because keycloak user.id == sub == signals
+ * user.id. `seed_service_users.ts` prefixes ids (`usr_…`) only because service
+ * accounts never log in through Keycloak.
  *
- *     keycloak user.id == sub == signals user.id
- *
- * so the id must be a **bare UUID**. Note this differs from
- * `seed_service_users.ts`, which prefixes ids (`usr_…`) — those are service
- * accounts that never log in through Keycloak, so the invariant does not bind
- * them. An admin does log in, so a prefixed id would break their session.
- *
- * ── Run ───────────────────────────────────────────────────────────────────
+ * Run:
  *   cd apps/api
  *   pnpm tsx scripts/create_admin_user.ts --email=ops@example.org --name="Ops"
  *   pnpm tsx scripts/create_admin_user.ts --email=ops@example.org --name="Ops" --apply
@@ -39,11 +22,11 @@
  *
  * Dry run by default — it reports what it would do and writes nothing.
  *
- * Idempotent: an existing local user is **promoted** in place (never duplicated,
- * never re-keyed — their id is load-bearing for `items.created_by`), and an
+ * Idempotent: an existing local user is promoted in place (never duplicated or
+ * re-keyed, since `items.created_by` references the id), and an
  * existing Keycloak identity under the same id is left alone.
  *
- * ── Options ───────────────────────────────────────────────────────────────
+ * Options:
  *   --email=<addr>       Admin's email. Either this or --phone is required.
  *   --phone=<e164>       Admin's phone in E.164. Drives the phone OTP channel.
  *   --name=<name>        Display name. Required when creating.
@@ -60,11 +43,10 @@ import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
 /**
- * Env resolution, priority order: the real process environment always wins,
- * then `--env-path`, then the repo's known .env locations. Paths resolve from
- * this SCRIPT's location, not `process.cwd()`, so the behaviour does not depend
- * on where it is invoked from — the same reasoning as
- * `migrate_users_to_keycloak.ts`, which fixed exactly that bug.
+ * Env resolution, priority order: the real process environment, then
+ * `--env-path`, then the repo's known .env locations. Paths resolve from this
+ * script's location, not `process.cwd()`, so the invocation directory does not
+ * matter.
  */
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
@@ -95,9 +77,8 @@ function loadEnvFile(): void {
 
 loadEnvFile();
 
-// Own pool + drizzle rather than importing the API's `drizzle_config`, which
-// transitively runs the full Zod env validation. A standalone script should not
-// require app-context env vars — same reasoning as `seed_service_users.ts`.
+// Own pool + drizzle rather than the API's `drizzle_config`, which runs the
+// full Zod env validation a standalone script should not need.
 const pgUrl =
   process.env.POSTGRES_URL ??
   `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
@@ -115,7 +96,6 @@ import {
   SIGNALS_ADMIN_ROLE,
 } from '../src/services/auth/user_to_keycloak.js';
 
-// ── args ───────────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 const has = (flag: string) => argv.includes(flag);
@@ -132,7 +112,6 @@ if (!email && !phoneNumber) {
   process.exit(2);
 }
 
-// ── keycloak config ────────────────────────────────────────────────────────
 
 function loadKeycloakConfig(): KeycloakAdminConfig {
   const baseUrl = (
@@ -158,7 +137,6 @@ function loadKeycloakConfig(): KeycloakAdminConfig {
   return { baseUrl, realm, clientId, clientSecret };
 }
 
-// ── main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const kcConfig = loadKeycloakConfig();
@@ -171,10 +149,8 @@ async function main(): Promise<void> {
    * Preflight: prove Keycloak is reachable and the credentials work BEFORE
    * touching the database.
    *
-   * Without this, an unreachable Keycloak leaves a committed local row with
-   * `role='admin'` and no realm identity — a privileged user who can never sign
-   * in. Found the hard way: the first run of this script did exactly that when
-   * pointed at the wrong port.
+   * Otherwise an unreachable Keycloak leaves a committed `role='admin'` row with
+   * no realm identity: a privileged user who can never sign in.
    */
   if (APPLY) {
     try {
@@ -265,8 +241,7 @@ async function main(): Promise<void> {
         banned: false,
         banReason: '',
         banExpires: null,
-        // Matches the row `unified_otp`'s admin path produced, which this
-        // replaces. An operator-created admin sees no consent screens.
+        // An operator-created admin sees no consent screens.
         termsAccepted: true,
         privacyAccepted: true,
         createdAt: now,
@@ -280,7 +255,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // ── the Keycloak identity ────────────────────────────────────────────────
   const mapped = mapUserToKeycloak({
     id: userId,
     name: userName,

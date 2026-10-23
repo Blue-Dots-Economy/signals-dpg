@@ -183,7 +183,7 @@ function auditFilters<F extends { q?: string; action_ids?: string[] }>(filters: 
 /**
  * An integrating DPG's machine identity rather than a signed-in person: an
  * `x-api-key` caller, or a Keycloak client-credentials token (the only path
- * that sets `service_client_id`). Deliberately NOT `user.role` — the service
+ * that sets `service_client_id`). Not `user.role`: the service
  * marker is `member.role = 'service'`, which `request.user` does not carry.
  */
 function isServiceCaller(request: FastifyRequest): boolean {
