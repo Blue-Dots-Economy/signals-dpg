@@ -1,24 +1,14 @@
 /**
- * Session resolution, shared by `auth_middleware.ts` and `validate_session.ts`
- * so the two cannot drift.
+ * Keycloak session resolution, shared by `auth_middleware.ts` and
+ * `resolve_browser_session.ts`. Keycloak is the only identity provider.
  *
- * Which provider runs is decided entirely by `AUTH_PROVIDER`:
- *
- *   betterauth  the Keycloak branch is not reached at all; the caller falls
- *               through to better-auth's own session handling.
- *   keycloak    Keycloak only. There is no better-auth fallback — a request that
- *               carries no usable Keycloak token is simply unauthenticated.
- *
- * Bearer tokens are a SERVICE channel only (AUTH-VULN-03/04). A human token
+ * Bearer tokens are a service channel only (AUTH-VULN-03/04). A human token
  * presented in an `Authorization` header is refused however valid it is: a
  * browser session is the `sid` cookie, resolved by `resolve_browser_session.ts`,
- * which calls this module's `resolveHumanSession` itself.
+ * which calls `resolveHumanSession` itself.
  *
- * A token that *looks* Keycloak-issued but fails validation is rejected outright
- * rather than passed on. That mattered when a fallback existed (it would have
- * turned a precise failure — "expired", "wrong client" — into a generic 401, and
- * let a rejected token get a second evaluation by another code path), and it is
- * retained now because the precise failure is still the more useful answer.
+ * A token that looks Keycloak-issued but fails validation is rejected with its
+ * specific code ("expired", "wrong client") rather than a generic 401.
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -170,19 +160,10 @@ const WRONG_PATH_FOR_CLIENT: AuthFailure = {
 /**
  * A human token presented as `Authorization: Bearer` (AUTH-VULN-03/04).
  *
- * Human sessions authenticate with the `sid` cookie now. Keeping this channel
- * open would leave the hole the cookie was introduced to close: a token that
- * any script on the origin can attach to a request is exactly what the pentest
- * replayed, and an httpOnly cookie is worth nothing while a second, script-
- * readable credential is still accepted for the same identity.
- *
- * Every human client signals serves today is the browser SPA, which is now
- * driven end to end by the BFF (`routes/v1/auth/session.ts`). Adding a human
- * client that CANNOT hold a cookie — a native app, say — means giving it a
- * channel of its own, not re-opening this one for everybody.
- *
- * Service callers are untouched: they present client-credentials tokens and
- * resolve on the service path, which never went through a browser.
+ * Human sessions authenticate with the httpOnly `sid` cookie, which is worth
+ * nothing while a script-readable credential is still accepted for the same
+ * identity. A human client that cannot hold a cookie (e.g. a native app) needs
+ * a channel of its own, not this one reopened.
  */
 const BEARER_NOT_A_SESSION: AuthFailure = {
   status: 401,
@@ -208,18 +189,14 @@ const MISSING_REALM_ROLE: AuthFailure = {
 };
 
 /**
- * A realm-valid token that belongs to the AGGREGATOR portal, not to signals.
+ * A realm-valid token that belongs to the aggregator portal, not to signals.
  *
- * Same rejection as `MISSING_REALM_ROLE` — the gate is unchanged — but it says
- * which account the caller is actually signed in as. Both apps share one realm,
- * so signing into the aggregator leaves an SSO session that Keycloak silently
- * reuses here: the user never chose this identity and is not told that is what
- * happened. "Not a participant" is true of an aggregator coordinator and reads
- * as "your account is broken", which sends them nowhere.
+ * Same rejection as `MISSING_REALM_ROLE`, but it names the account the caller is
+ * signed in as: both apps share one realm, so an aggregator login leaves an SSO
+ * session that Keycloak silently reuses here.
  *
- * Recognised positively from `aggregator_id` / the `org_owner` realm role
- * rather than inferred from the absence of signals roles, so the claim is only
- * made when it is certain.
+ * Recognised positively from `aggregator_id` / the `org_owner` realm role, not
+ * inferred from the absence of signals roles.
  */
 const AGGREGATOR_ACCOUNT: AuthFailure = {
   status: 403,
@@ -240,21 +217,16 @@ export type SessionResolution =
   | { ok: true }
   /** Handled by the Keycloak path and failed — reply and stop. */
   | { ok: false; failure: AuthFailure }
-  /** Not a Keycloak token; the caller should try better-auth. */
+  /** Not resolved here; the caller tries its next channel or answers 401. */
   | { ok: false; fallthrough: true };
 
 /**
- * Try to resolve the request against Keycloak, populating `request.user` from
- * the local mirror on success. This either resolves the request or fails it:
- * there is no second provider to defer to, so a request with no usable Keycloak
- * token is unauthenticated rather than passed on.
+ * Resolve a service bearer token, populating `request.user` from the service
+ * account on success. A request with no usable Keycloak token is
+ * unauthenticated.
  *
- * **The `fallthrough` guard below is dead** — it meant "AUTH_PROVIDER=betterauth,
- * hand this to better-auth", and #517 made `keycloak_enabled` a constant `true`.
- * It is kept because removing the third `SessionResolution` variant would ripple
- * through every caller for no behavioural gain, and it is dead in the safe
- * direction. Do NOT read it as live behaviour — collapsing it (and the variant)
- * is tracked in #759.
+ * The `keycloak_enabled` guard below is unreachable: `keycloak_enabled` is a
+ * constant `true`.
  */
 export async function resolveKeycloakSession(
   request: FastifyRequest
@@ -274,16 +246,11 @@ export async function resolveKeycloakSession(
   }
 
   /**
-   * Only one kind of caller may authenticate with a bearer token: an
-   * integrating DPG holding a client-credentials token. A human token gets a
-   * 401 here regardless of how valid it is — see `BEARER_NOT_A_SESSION`. The
-   * human path still exists and is still reached, but only through the cookie
-   * (`resolve_browser_session.ts`), which calls `resolveHumanSession` directly.
+   * Only an integrating DPG's client-credentials token may authenticate with a
+   * bearer token; a human token gets `BEARER_NOT_A_SESSION`.
    *
-   * The fork is still on `isServiceAccountToken` rather than on the client
-   * allowlist, because conflating the two was the original risk: a service
-   * token must never be run through human provisioning (it has no email or
-   * phone, and would otherwise try to mint a user mirror).
+   * The fork is on `isServiceAccountToken`, not the client allowlist, so a
+   * service token is never run through human provisioning.
    */
   if (!isServiceAccountToken(verified.claims)) {
     const azp = typeof verified.claims.azp === 'string' ? verified.claims.azp : null;
@@ -324,33 +291,24 @@ async function resolveServiceSession(
     name: service.user.name,
     role: service.user.role,
   };
-  // Which integrating DPG this is (#518). Every service org is
-  // `type='network_service'` now, so the acting org tells you the caller is a
-  // service and nothing more — the client id is what separates the voice bot
-  // from aggregator-dpg. Bound onto the request logger rather than logged once,
-  // so every subsequent line for this request carries it without each call site
-  // having to remember.
+  // Which integrating DPG this is: every service org is `network_service`, so
+  // only the client id separates e.g. the voice bot from aggregator-dpg. Audit
+  // only, never authorization. Bound onto the request logger so every later
+  // line for this request carries it.
   request.service_client_id = service.client_id;
   request.log = request.log.child({ service_client_id: service.client_id });
-  // Acting-org grant (§5.1). Carried to acting_org.ts, which decides whether
-  // to enforce it based on ACTING_ORG_SOURCE.
+  // Acting-org grant, enforced (or not) by acting_org.ts per ACTING_ORG_SOURCE.
   request.acting_org_grant = actingOrgGrant(claims);
   return { ok: true };
 }
 
 /**
  * Human path: named-client and realm-role gates, then the local user mirror.
+ * Reached only from the cookie path (`resolve_browser_session.ts`).
  *
- * Reached only from the cookie path now (`resolve_browser_session.ts`) — the
- * bearer fork above refuses human tokens outright. The gates below still apply
- * in full, because the token behind a session cookie is the same realm token
- * with the same claims; only how it reached the API changed.
- *
- * A missing `azp` is a rejection, not a pass: the audience gate in
- * `verifyKeycloakToken` accepts on an `aud` match alone, so a token with no
- * `azp` but an `aud` naming an accepted client would otherwise skip the client
- * check entirely and reach provisioning unattributed. Keycloak always emits
- * `azp`, so nothing legitimate lands there.
+ * A missing `azp` is a rejection, not a pass: `verifyKeycloakToken` accepts on
+ * an `aud` match alone, so a token with no `azp` would otherwise skip the client
+ * check and reach provisioning unattributed. Keycloak always emits `azp`.
  */
 export async function resolveHumanSession(
   claims: KeycloakClaims,

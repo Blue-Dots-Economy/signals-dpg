@@ -24,37 +24,25 @@ const REFRESH_BEFORE_EXPIRY_MS = 30_000;
 /**
  * Methods that cannot change state, so they need no CSRF token.
  *
- * A cookie is attached by the browser automatically, which is what makes
- * cookie auth vulnerable to cross-site requests in a way `Authorization` never
- * was. `SameSite=Lax` already blocks the cross-site POST case in current
- * browsers; the double-submit token below is the second layer, because
- * `SameSite` is a browser-side control and this is the server's own check.
+ * The browser attaches the cookie automatically, so cookie auth is open to
+ * cross-site requests. `SameSite=Lax` is the browser-side layer; the
+ * double-submit token below is the server's own check.
  */
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
  * Resolves a browser session from the `sid` cookie (AUTH-VULN-03/04).
  *
- * This is the replacement for the SPA holding a token: the cookie carries only
- * an opaque id, the tokens live in Redis, and the access token is refreshed
- * here rather than by client-side JavaScript. Returns `fallthrough` when there
- * is no cookie so the caller can try the other auth paths — a request with no
- * session is not an error, it is an anonymous or service request.
+ * The cookie carries only an opaque id; the tokens live in Redis and the access
+ * token is refreshed here, never by client-side JavaScript. Returns
+ * `fallthrough` when there is no usable session so the caller can try the other
+ * channels.
  */
 export async function resolveBrowserSession(
   request: FastifyRequest,
   reply: FastifyReply
 ): Promise<SessionResolution> {
-  /**
-   * Dormant unless Keycloak is the provider, mirroring
-   * `resolveKeycloakSession`. It guarded against a `sid` row surviving a flip to
-   * `AUTH_PROVIDER=betterauth` and resolving through Keycloak provisioning on an
-   * instance meant to have every Keycloak path switched off.
-   *
-   * **Dead since #517** — there is no `betterauth` to flip back to and
-   * `keycloak_enabled` is a constant `true`, so this can never return here. Kept
-   * for the same reason as its twin in `resolve_session.ts`; tracked in #759.
-   */
+  // Unreachable: `keycloak_enabled` is a constant `true`.
   if (!authConfig.keycloak_enabled) return { ok: false, fallthrough: true };
 
   const sessionId = request.cookies?.[SESSION_COOKIE];
@@ -63,16 +51,13 @@ export async function resolveBrowserSession(
   const session = await readSession(sessionId);
   if (!session) {
     /**
-     * Cookie present but the session is gone (expired, revoked, or a stale
-     * cookie from a previous deployment). Clear it so the browser stops
-     * re-sending a credential that can never work again.
+     * Cookie present but the session is gone (expired, revoked, stale). Clear
+     * it so the browser stops re-sending it.
      *
-     * `fallthrough`, NOT a 401: `sid` is a generic name and `clearCookie` here
-     * sets no `Domain`, so a host-only clear cannot remove a `sid` set by
-     * something else on a parent domain. Answering 401 would re-reject that
-     * cookie on every request and lock the user out permanently, with nothing
-     * they could do about it. Falling through lets the other channels answer,
-     * and an unauthenticated request still ends in the usual 401 from there.
+     * `fallthrough`, not a 401: `sid` is a generic name and this host-only
+     * clear cannot remove a `sid` set on a parent domain, so a 401 would lock
+     * the user out permanently. An unauthenticated request still ends in 401
+     * from the later channels.
      */
     clearSessionCookie(reply);
     return { ok: false, fallthrough: true };
@@ -101,15 +86,12 @@ export async function resolveBrowserSession(
   const verified = await verifyKeycloakToken(accessToken);
   if (!verified.ok) {
     /**
-     * Only a verdict ABOUT THE TOKEN ends the session.
+     * Only a verdict about the token ends the session.
      *
-     * `KEYCLOAK_UNAVAILABLE` (JWKS unreachable) and `KEYCLOAK_NOT_CONFIGURED`
-     * mean we do not know whether the token is good. Destroying the session on
-     * those turns a 30-second Keycloak restart into a permanent, fleet-wide
-     * logout: every active browser's Redis row is deleted and its cookie
-     * cleared, so nobody is signed back in when Keycloak recovers. The bearer
-     * path already maps them to 503 for exactly this reason
-     * (`TOKEN_FAILURES` in resolve_session.ts) — this path must not disagree.
+     * `KEYCLOAK_UNAVAILABLE` / `KEYCLOAK_NOT_CONFIGURED` mean the token's
+     * validity is unknown. Destroying sessions there would turn a brief
+     * Keycloak restart into a fleet-wide logout, so they map to the same
+     * failures as the bearer path (`TOKEN_FAILURES`).
      */
     if (verified.code === 'TOKEN_INVALID' || verified.code === 'TOKEN_EXPIRED') {
       await destroySession(sessionId);
@@ -144,15 +126,13 @@ function csrfOk(request: FastifyRequest, session: BrowserSession): boolean {
 /**
  * In-flight refreshes, keyed by session.
  *
- * A page load fires several requests at once and they all see the same
- * near-expiry token. Without this each one calls the token endpoint with the
- * SAME refresh token, and with Keycloak's "Revoke Refresh Token" enabled only
- * the first is honoured — the rest get `invalid_grant` and would end a session
- * that is in perfectly good health. Sharing one promise per session makes the
- * common case a single call.
+ * A page load fires several requests that all see the same near-expiry token.
+ * With Keycloak's "Revoke Refresh Token" enabled only the first refresh is
+ * honoured and the rest get `invalid_grant`, so concurrent requests share one
+ * refresh promise.
  *
- * Per-process only. Two pods can still race, which is what the `invalid_grant`
- * re-read in `refreshAccessToken` recovers from.
+ * Per-process only. A race between pods is recovered by the `invalid_grant`
+ * re-read in `refreshAccessToken`.
  */
 const refreshesInFlight = new Map<string, Promise<RefreshOutcome>>();
 
@@ -166,11 +146,8 @@ type RefreshOutcome =
 /**
  * The session's access token, refreshed if it is at or near expiry.
  *
- * The distinction that matters is WHY a refresh failed. A rejected grant means
- * the session is over. A 5xx or a timeout means Keycloak is unwell — ending the
- * session there would turn a brief outage into a forced re-login for everyone
- * mid-session, which is the same mistake as destroying on `KEYCLOAK_UNAVAILABLE`
- * above.
+ * A rejected grant ends the session. A 5xx or timeout means Keycloak is unwell,
+ * so the session survives and only this request fails.
  */
 async function currentAccessToken(
   request: FastifyRequest,
@@ -207,14 +184,9 @@ async function refreshAccessToken(
     // `updateSession` returns null only when the row vanished mid-refresh —
     // a concurrent logout. The freshly minted tokens have nowhere to live.
     if (!updated) {
-      /**
-       * Logged because this branch is otherwise invisible: Keycloak said yes,
-       * the user is signed out anyway, and nothing else here records why. If
-       * sessions are dying at their first refresh while Keycloak's SSO session
-       * stays healthy, this line and the `rejected` one below are what tell
-       * "the grant was refused" apart from "the grant was fine and the store
-       * lost it" — two faults that look identical from the browser.
-       */
+      // Logged because it is otherwise invisible: it separates "the store lost
+      // the session" from "the grant was refused", which look identical from
+      // the browser.
       request.log.warn(
         'Browser session refresh succeeded but its session row was gone; ending session'
       );
