@@ -13,14 +13,9 @@ const NotReadyResponse = z.object({
 });
 
 /**
- * Runs a dependency check with a hard timeout, collapsing any failure
- * (rejection or timeout) to `'error'`. Keeps the readiness probe from hanging on
- * a wedged Postgres/Redis connection — satisfies the repo's external-call
- * timeout rule.
- *
- * @param fn - The dependency call to run (e.g. a `select 1` or a Redis `ping`).
- * @param ms - Timeout in milliseconds (default 2000).
- * @returns `'ok'` if it resolved in time, `'error'` otherwise.
+ * Runs a dependency check with a hard timeout (ms, default 2000), collapsing
+ * any rejection or timeout to `'error'`, so the readiness probe cannot hang on
+ * a wedged Postgres/Redis connection.
  */
 async function probe(fn: () => Promise<unknown>, ms = 2000): Promise<'ok' | 'error'> {
   let timer: NodeJS.Timeout | undefined;

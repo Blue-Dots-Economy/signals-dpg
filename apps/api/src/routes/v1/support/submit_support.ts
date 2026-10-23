@@ -27,8 +27,7 @@ const SubmitSupportBody = z.object({
   consent: z.literal(true),
   // Count/size/type limits are enforced in the handler by
   // validateSupportAttachments so each rejection gets its own error code and a
-  // message naming the offending file — a zod bound could only produce a
-  // generic 400 (#551).
+  // message naming the offending file; a zod bound could only give a generic 400.
   attachments: z
     .array(
       z.object({
@@ -86,17 +85,13 @@ export const submit_support_handler = async (
   // Per-user cap: the endpoint accepts multi-MB uploads that sit in the
   // notification-service queue until delivered.
   //
-  // Counted BEFORE the body is validated, deliberately. Fastify has already
-  // buffered and parsed the payload by the time any of this runs, so a rejected
-  // submission has cost the same as an accepted one — if only accepted ones
-  // counted, a caller could post oversized rubbish (a fourth file, a disallowed
-  // content type) without limit and never spend a slot. The client validates the
-  // same rules before submitting, so a legitimate user does not reach here with
-  // an invalid body and rarely spends a slot on a mistake.
+  // Counted before the body is validated: the payload is already buffered and
+  // parsed, so a rejected submission costs as much as an accepted one. The
+  // client validates the same rules first, so legitimate users rarely spend a
+  // slot on a mistake.
   //
-  // Still after the 503: an instance with no support address should not burn
-  // anyone's quota. Fails OPEN on a Redis error — a rate-limit backend outage
-  // must not silence someone's complaint.
+  // After the 503, so an unconfigured instance burns no quota. Fails open on a
+  // Redis error so a limiter outage cannot silence a complaint.
   try {
     const submissions = await incrWithinWindow(`support:rl:${userId}`, SUPPORT_WINDOW_SEC);
     if (submissions > SUPPORT_MAX_PER_WINDOW) {

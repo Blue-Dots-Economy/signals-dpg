@@ -62,13 +62,11 @@ function guardianOtpErrorStatus(code: GuardianOtpError['code']): number {
 }
 
 /**
- * PRE-AUTH, signup-scoped guardian consent (U18 spec, pre-signup phase).
+ * Pre-auth, signup-scoped guardian consent.
  *
- * Both routes are PUBLIC and unauthenticated — deliberately no
- * `auth_middleware_if_enabled` preHandler, mirroring `routes/v1/auth/
- * auth_config.ts`. The account this guardian is being captured for does not
- * exist yet, so there is no session/apikey to authenticate against; the flow
- * is keyed on the signup identifier itself (see `services/signup_guardian.ts`).
+ * Both routes are public and unauthenticated (no `auth_middleware_if_enabled`):
+ * the account does not exist yet, so the flow is keyed on the signup
+ * identifier itself (see `services/signup_guardian.ts`).
  */
 export const u18_signup_guardian: FastifyPluginAsyncZod = async (fastify) => {
   fastify.route({
