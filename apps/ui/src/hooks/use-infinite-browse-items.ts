@@ -161,8 +161,8 @@ export function useInfiniteBrowseItems(
     q,
     filters,
     // Only coordinates that reach the request belong in the key. On the
-    // discover path the user's location affects nothing, so keying on it would
-    // refetch when geolocation resolves; the native path orders by proximity.
+    // discover path the user's location affects only `nearest`, and then through
+    // `ordering`, so keying on it would refetch when geolocation resolves; the native path orders by proximity.
     ...(useDiscover
       ? {
           area,

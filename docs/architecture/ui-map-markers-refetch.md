@@ -21,8 +21,7 @@ A domain that cannot honour every active facet is not queried at all
 Both live map providers report `map.getBounds()` corners, so the map uses the
 bbox path. The bbox is clamped first (`clampBbox`): a zoomed-out provider reports
 bounds beyond +/-180 / +/-90, which the markers endpoint rejects with a 400.
-Viewports built by hand with only center + radius (tests, the list distance
-path) use the radius path and a coarse radius-bucket cache key instead; the
+Viewports built by hand with only center + radius (tests only) use the radius path and a coarse radius-bucket cache key instead; the
 request still sends the unrounded radius.
 
 ## Hold or refetch

@@ -42,8 +42,8 @@ const errorMessageKeys: Record<string, string> = {
 };
 
 /**
- * Guesses whether this status reveals PII, only to pick the description shown
- * before the fetch settles. Hardcodes the default gate (accepted, completed)
+ * Guesses whether this status reveals PII, to pick the description shown before
+ * the fetch settles and to re-resolve when the status changes. Hardcodes the default gate (accepted, completed)
  * rather than the interaction's `reveals_pii_on_status`; the server decides
  * the actual reveal.
  */

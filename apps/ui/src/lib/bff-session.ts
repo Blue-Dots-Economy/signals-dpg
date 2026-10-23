@@ -57,7 +57,7 @@ export async function fetchBffSession(): Promise<BffSession> {
     csrfToken = session.csrfToken ?? null;
     return session;
   } catch {
-      // Could not reach the API (offline, DNS, dropped connection): unknown.
+    // Could not reach the API (offline, DNS, dropped connection): unknown.
     return { authenticated: false, unknown: true };
   }
 }

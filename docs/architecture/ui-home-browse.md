@@ -30,8 +30,8 @@ the list's domain is already one of them.
 
 ## Low zoom and anonymous visitors
 
-The map always fetches slim markers (coordinates only, capped at
-`MAP_FETCH_LIMIT`) and clusters them, even at low zoom or for a visitor with no
+The map always fetches slim markers (coordinates only, capped per zoom
+band by `capForZoom`) and clusters them, even at low zoom or for a visitor with no
 location. Clustering bounds on-screen density, and a visitor needs to see where
 items are to know where to zoom. `meta.total` reports the true match count
 regardless of the cap; `MapCountPill` shows it.

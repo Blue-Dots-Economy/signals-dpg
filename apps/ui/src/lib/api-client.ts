@@ -44,7 +44,7 @@ export function createApiClient() {
    * clear it). The gate sits here, not in the handler, because the emit is
    * latched once per page and an anonymous 401 would spend the latch.
    * `TOKEN_EXPIRED` covers the Bearer-token path (resolve_session.ts), which has
-   * no CSRF token. The API no longer emits `NO_ACTIVE_SESSION`.
+   * no CSRF token. `NO_ACTIVE_SESSION` is still matched, though the API no longer emits it.
    *
    * A 401 from a route the user may not call stays an ordinary error, and a 5xx
    * never qualifies: the API answers a dependency outage with 503 so it does not
