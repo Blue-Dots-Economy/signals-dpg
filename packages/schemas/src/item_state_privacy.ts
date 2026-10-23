@@ -20,9 +20,8 @@ export function mergeItemStateWithPrivate(
 }
 
 /**
- * Same merge semantics as mergeItemStateWithPrivate. Named alias for the
- * "merge mask values into the public mirror at create/update time" call site,
- * so reader intent is clear.
+ * Same merge as mergeItemStateWithPrivate, named for the call site that merges
+ * mask values into the public mirror at create/update time.
  */
 export function mergeMasksIntoPublic(
   publicState: JsonRecord,

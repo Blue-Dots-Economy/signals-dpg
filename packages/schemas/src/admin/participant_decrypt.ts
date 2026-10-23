@@ -4,39 +4,30 @@ import { ItemLocationsArray } from '../api/item_schemas';
 /**
  * Body for POST /api/v1/admin/participant/decrypt.
  *
- * Returns DECRYPTED profile item_state for participants the calling org is
- * entitled to (an aggregator sees only items it onboarded; network_service
- * sees all). Exactly one selector is required:
- *  - `item_ids` — 1..N item uuids (used by the aggregator profile export).
+ * Returns decrypted profile item_state for participants the calling org is
+ * entitled to (an aggregator sees only items whose creator it onboarded;
+ * network_service sees all items in served networks). Exactly one selector is
+ * required:
+ *  - `item_ids` — 1..N item uuids.
  *  - `user_id` — a single signals user id (all of that user's items).
  *
- * Both modes are implemented now; the aggregator UI uses item_ids first.
- *
- * #521 reshape: `fields`, `contact`, and `include_locations` are three
- * independent, optional controls (see
- * docs/superpowers/specs/2026-08-07-participant-decrypt-field-resolution-design.md
- * §4) — deliberately decoupled so canonical contacts and locations are
- * available regardless of the `item_state` projection.
+ * `fields`, `contact` and `include_locations` are independent, so contacts
+ * and locations are available regardless of the `item_state` projection.
  */
 export const DecryptParticipantRequest = z
   .object({
     item_ids: z.array(z.uuid()).min(1).optional(),
     user_id: z.string().min(1).optional(),
-    // Pure item_state projection. Omitted => full item_state (today's
-    // behavior). Present => only these raw keys, read as-is from item_state.
-    // An EMPTY array (`[]`) => empty item_state (`{}`), so `{ fields: [],
-    // contact: true }` returns contact details only. No canonical
-    // special-casing, no `user` (account) fallback — see `contact` below.
+    // item_state projection. Omitted => full item_state; present => only these
+    // raw keys. `[]` => `{}`, so `{ fields: [], contact: true }` returns
+    // contact details only. No account fallback here; see `contact`.
     fields: z.array(z.string().min(1)).max(50).optional(),
-    // Canonical contact block (independent of `fields`). `true` = all three;
-    // an array = that subset; omit for no contact block. (`false` is not a
-    // distinct value — omitting the key is the way to say "no contact".)
-    // Resolved via the domain contact_fields map with account (user-table)
-    // fallback + provenance — see DecryptedProfileSnapshot.contact.
+    // Canonical contact block: `true` = all three, an array = that subset,
+    // omitted = none. Resolved via the domain contact_fields map with the
+    // account (user table) as fallback; each value reports its source.
     contact: z
       .union([z.literal(true), z.array(z.enum(['name', 'email', 'phone'])).min(1)])
       .optional(),
-    // Include the item's geocoded item_locations in the response.
     include_locations: z.boolean().optional(),
   })
   .refine(

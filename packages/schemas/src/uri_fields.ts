@@ -6,9 +6,8 @@
  *                     and the API validate the value against URL_PATTERN.
  *
  * Valid on a string property, or on an array-of-strings property (the pattern
- * is then injected into `items`, so a domain can offer "add as many links as
- * you like"). Shared by the UI (card render + form validation) and the API
- * (item_state / action-payload validation) so both enforce identical rules.
+ * is then injected into `items`). Shared by the UI and the API so both enforce
+ * identical rules.
  *
  * This module must stay dependency-free: the UI imports it through the deep
  * alias `@dpg/schemas/uri_fields`, because the `@dpg/schemas` barrel re-exports
@@ -25,8 +24,8 @@ export const URI_FIELD_MARKER = 'x-uri' as const;
  *
  *  - The scheme is optional: `example.com` is accepted and stored as typed;
  *    the card prefixes `https://` when it builds the href. When present it is
- *    matched case-insensitively, so `HTTPS://example.com` is accepted — the
- *    render-side href builder is case-insensitive too, and the two must agree.
+ *    matched case-insensitively, as the render-side href builder is; the two
+ *    must agree.
  *  - A query string or fragment may follow the host with no path in between:
  *    `example.com?q=1` and `example.com#top` are accepted.
  *  - Surrounding whitespace is tolerated (users paste with a trailing space);
@@ -37,9 +36,9 @@ export const URI_FIELD_MARKER = 'x-uri' as const;
  *    `http://localhost:3000` and bare IPs are rejected, as are non-http(s)
  *    schemes such as `javascript:` and `data:`.
  *
- * `pattern` is deliberately used rather than `format: "uri"`: `format` is
- * ignored by the API's ajv instance (no `ajv-formats` registered), and ajv's
- * `uri` format would reject the scheme-less input users actually type.
+ * `pattern` is used rather than `format: "uri"`: `format` is ignored by the
+ * API's ajv (no `ajv-formats` registered), and ajv's `uri` format would
+ * reject the scheme-less input users type.
  */
 export const URL_PATTERN = String.raw`^\s*$|^\s*([hH][tT][tT][pP][sS]?:\/\/)?([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}(:\d{1,5})?([\/?#][^\s]*)?\s*$`;
 
@@ -57,9 +56,8 @@ export function isUriField(propSchema: unknown): boolean {
  * marked field that does not already define its own `pattern`. For a marked
  * array property the pattern goes on `items` (patterns apply to strings, not
  * arrays). Recurses through `properties` and `items` so nested objects are
- * covered. The marker itself is left in place — the UI's
- * `normalizeSchemaForRjsf` strips it, and the API's ajv runs with
- * `strict: false` and ignores unknown keywords.
+ * covered. The marker is left in place: the UI's `normalizeSchemaForRjsf`
+ * strips it, and the API's ajv runs with `strict: false`.
  */
 export function applyUriPatterns<T>(schema: T): T {
   if (!isPlainObject(schema)) return schema;
@@ -98,9 +96,8 @@ function withPattern(prop: JsonRecord): JsonRecord {
 }
 
 /**
- * The top-level property names carrying the marker. Used by the form to map an
- * ajv `pattern` error back to "this is a link field" so the message can be
- * rewritten into something a user understands.
+ * The top-level property names carrying the marker, so the form can reword an
+ * ajv `pattern` error on a link field.
  */
 export function collectUriFieldKeys(schema: unknown): string[] {
   if (!isPlainObject(schema) || !isPlainObject(schema.properties)) return [];
