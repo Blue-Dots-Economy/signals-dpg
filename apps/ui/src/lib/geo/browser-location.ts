@@ -1,10 +1,8 @@
 /**
- * Browser geolocation helper: a typed, promise-based wrapper around the
- * `navigator.geolocation` API with explicit error codes. Framework-agnostic so
- * it can back a hook, a map "locate me" control, or a nearby-search flow.
+ * Promise-based wrapper around `navigator.geolocation` with explicit error codes.
  *
- * NOTE: `getCurrentPosition` triggers the browser's permission prompt and should
- * be invoked from a user gesture (e.g. a button click) — never on mount.
+ * `getCurrentPosition` triggers the browser's permission prompt, so call it from
+ * a user gesture, never on mount.
  */
 
 export interface BrowserLocation {

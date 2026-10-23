@@ -1,11 +1,9 @@
 import { isAxiosError } from 'axios';
 
 /**
- * T must not declare its own `status` field — the bulk envelope reserves
- * `status` for the per-item discriminant ('success' | 'error'), and
- * envelopeToResult strips it before returning the caller's response shape.
- * If a future response type ever added a bare `status` field that field would
- * be silently lost; this constraint turns that into a compile-time error.
+ * The bulk envelope reserves `status` for the per-item discriminant and
+ * `envelopeToResult` strips it, so a response type with its own `status` field
+ * would lose it silently; this makes that a compile-time error.
  */
 type NoStatusField<T> = T extends { status: unknown } ? never : T;
 
@@ -23,16 +21,14 @@ export interface BulkEnvelope<T> {
 }
 
 /**
- * Error thrown when a single-item bulk call's one element failed. Carries the
- * per-item machine code. A synthetic `response` mirrors the old AxiosError shape
- * (`response.data.error` / `.message`) so existing call-site error handling that
- * reads those fields keeps working.
+ * Thrown when a single-item bulk call's one element failed. `code` is the
+ * per-item machine code; `response` mirrors the AxiosError shape
+ * (`response.data.error` / `.message`) for call-site error handling.
  */
 export class BulkSingleError extends Error {
   code: string;
-  // `response.status` is the HTTP response status (e.g. 422 for an all-fail
-  // single-item bulk call), which is why callers' `status === 401` checks
-  // correctly never match a per-item bulk failure.
+  // The HTTP status (e.g. 422 for an all-fail call), so callers' `status === 401`
+  // checks never match a per-item failure.
   response: { status?: number; data: { error: string; message: string } };
   constructor(code: string, message: string, status?: number) {
     super(message);
@@ -51,17 +47,16 @@ function envelopeToResult<T extends object>(env: BulkEnvelope<NoStatusField<T>>,
       status,
     );
   }
-  // strip envelope-only fields (`index`, `status`), return the caller's response shape
+  // Strip envelope-only fields (`index`, `status`).
   const { index: _index, status: _status, ...data } = first;
   return data as T;
 }
 
 /**
- * Await a bulk POST that wraps a single payload, and unwrap results[0].
- * On success (200/201) axios resolves → unwrap. On all-fail (422) axios rejects
- * with the envelope in response.data → unwrap that to throw a BulkSingleError.
- * Genuine request-level errors (401, network failure, 400 {error,message} with
- * no `results`) are rethrown unchanged.
+ * Awaits a bulk POST wrapping one payload and unwraps results[0]. A 422
+ * all-fail rejects with the envelope, which becomes a `BulkSingleError`.
+ * Request-level errors (401, network failure, 400 without `results`) are
+ * rethrown unchanged.
  */
 export async function unwrapBulkSingle<T extends object>(
   request: Promise<{ status: number; data: BulkEnvelope<NoStatusField<T>> }>,
@@ -82,10 +77,8 @@ export async function unwrapBulkSingle<T extends object>(
 }
 
 /**
- * Await a bulk POST that wraps an array of payloads, returning the full
- * envelope. On 200/201/207 axios resolves → return data. On 422 (all items
- * failed) axios rejects with the envelope in response.data → return that.
- * Genuine request-level errors (401, network failure, 400 {error,message}
+ * Awaits a bulk POST of several payloads and returns the full envelope,
+ * including on a 422 all-fail. Request-level errors (401, network failure, 400
  * without `results`) are rethrown unchanged.
  */
 export async function postBulkEnvelope<T extends object>(

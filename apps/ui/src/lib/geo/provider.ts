@@ -8,8 +8,8 @@ import { withGeoCache } from './geo-cache';
 let cached: GeoProvider | null = null;
 
 /**
- * `VITE_GEO_COUNTRY` → upper-case ISO 3166-1 alpha-2, or undefined (no
- * restriction) when unset, blank, or not a two-letter code (#785).
+ * `VITE_GEO_COUNTRY` as upper-case ISO 3166-1 alpha-2, or undefined (no
+ * restriction) when unset, blank or not a two-letter code.
  */
 export function normalizeCountry(raw: string | undefined): string | undefined {
   const v = raw?.trim().toUpperCase();
@@ -17,11 +17,9 @@ export function normalizeCountry(raw: string | undefined): string | undefined {
 }
 
 /**
- * Active geo provider: Google Places when a maps key is configured, otherwise
- * the key-less Photon fallback.
- *
- * A PII-mask guard is applied centrally here so that form autocomplete skips
- * queries that are API-masked values (e.g. "***", "+91-XX-XXXX-X123").
+ * Active geo provider: Google Places when a maps key is configured, else the
+ * key-less Photon fallback. Queries that look like API-masked PII ("***",
+ * "+91-XX-XXXX-X123") are skipped here for every caller.
  */
 export function getGeoProvider(): GeoProvider {
   if (cached) return cached;

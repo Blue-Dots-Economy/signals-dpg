@@ -1,8 +1,7 @@
 /**
- * Persistence for the user's currently-selected own-profile ("active profile")
- * per network. Stored in localStorage so the choice survives reloads. Shared by
- * the home page (reads it to anchor the discover list + sidebar highlight) and
- * the profile form (writes it so a freshly-created profile becomes active).
+ * The user's selected own profile ("active profile") per network, kept in
+ * localStorage so it survives reloads. For example, the home page reads it to
+ * anchor the discover list, and the profile form sets a new profile active.
  */
 function key(networkId: string): string {
   return `activeProfileId:${networkId}`;
