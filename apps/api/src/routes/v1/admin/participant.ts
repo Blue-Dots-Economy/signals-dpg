@@ -485,10 +485,10 @@ async function checkAgeGates(
 
 /**
  * Failure mapping shared by the `update_item` and `insert_item` branches. A typed
- * service error (statusCode + errorCode) is a client error, logged at warn and
- * surfaced with its curated message; anything else is logged at error and answered
- * generically, because a raw DB error's text carries the failed SQL + bound params
- * — i.e. the participant's `item_state` (name/phone/email). Never return it.
+ * service error (errorCode) is surfaced with its curated message, logged at warn
+ * when it is a 4xx; an untyped error is logged at error and answered generically,
+ * because a raw DB error's text carries the failed SQL + bound params, i.e. the
+ * participant's `item_state` (name/phone/email). Never return it.
  */
 function replyItemWriteFailure(
   ctx: ParticipantCtx,
