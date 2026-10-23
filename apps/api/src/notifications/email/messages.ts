@@ -9,14 +9,12 @@ import { parseProperties } from './parse_properties';
 import { TOKEN_RE } from './substitute';
 
 /**
- * Boot-time loader for the email messages layered index (#529). Bundled
- * defaults ship next to this module; per-key precedence, lowest to highest:
- * bundled defaults < instance override (EMAIL_MESSAGES_PATH) < network file
- * < brand file. Every layer is partial — a typo'd or missing key at any
- * layer just falls back to the layer below it with a warning; only the
- * bundled defaults must be complete (a hole there is a build defect and
- * boot-fails). Loaded once per process (singleton promise, the
- * network_configs pattern); copy changes apply on restart/deploy.
+ * Layered email copy. Per-key precedence, lowest to highest: bundled defaults
+ * < instance override (EMAIL_MESSAGES_PATH) < network file < brand file.
+ * Override layers are partial and a bad key falls back with a warning; only the
+ * bundled defaults must be complete (a missing key throws). Loaded once per
+ * process, so copy changes apply on restart.
+ * Operations: docs/operations/email-copy-overrides.md.
  */
 export interface EmailMessages {
   get(key: string): string;
@@ -43,9 +41,7 @@ function lintPlaceholders(
       const value = entries.get(key);
       if (!value) continue;
       for (const m of value.matchAll(TOKEN_RE)) {
-        // Object.hasOwn, not `in`: `in` walks the prototype chain, so a
-        // placeholder literally named {{toString}}/{{constructor}} would
-        // read as "declared" via Object.prototype and evade this warning.
+        // Object.hasOwn, not `in`, so {{toString}} is not "declared" via the prototype.
         if (!Object.hasOwn(def.tokens, m[1])) {
           warn(
             `${prefix}: "${key}" references unknown placeholder {{${m[1]}}} — it will appear in the email as literal text`,
@@ -57,11 +53,8 @@ function lintPlaceholders(
 }
 
 /**
- * Merge a partial override text over `base`, per key: unknown keys warn and
- * are ignored (typo catcher), malformed lines warn with their 1-based line
- * number and are ignored, every warning carries `label` so ops can tell
- * which layer/file produced it. Known keys always win over `base`; anything
- * the override text doesn't mention falls back to `base` untouched.
+ * Merges a partial override over `base` per key. Unknown keys, malformed
+ * lines and empty values warn (tagged with `label`) and are ignored.
  */
 function mergeLayer(
   base: ReadonlyMap<string, string>,
@@ -83,9 +76,7 @@ function mergeLayer(
       warn(`email messages ${label}: unknown key "${key}" — ignored (typo?)`);
       continue;
     }
-    // An empty value (e.g. an accidental line-wrap leaving `key=`) would send
-    // an email with a blank subject/body — fall back instead, per the
-    // "a bad override can never silently break email" contract.
+    // An empty value would send a blank subject/body, so fall back instead.
     if (value === '') {
       warn(
         `email messages ${label}: empty value for "${key}" — ignored (falls back to the previous layer)`,
@@ -191,8 +182,7 @@ export function loadEmailMessagesIndex(opts: {
   };
 }
 
-// Resolves next to this module: apps/api/src in dev (tsx/vitest), dist/ in the
-// tsup bundle — tsup's onSuccess copies the file there (see tsup.config.ts).
+// Resolves next to this module: src/ in dev, dist/ in the bundle (copied by tsup.config.ts).
 const DEFAULTS_URL = new URL('./messages.default.properties', import.meta.url);
 
 let messagesPromise: Promise<EmailMessagesIndex> | null = null;
@@ -218,10 +208,8 @@ export function getEmailMessages(): Promise<EmailMessagesIndex> {
     ];
     let layers: LoadedEmailMessagesFile[] = [];
     if (apiConfig.network_config_source !== 'local') {
-      // Make the skip loud: in remote network-config mode the per-network/
-      // brand messages.properties files are NOT discovered (remote layering
-      // is a follow-up, mirroring the consent loader) — without this line an
-      // operator's network copy would just silently disappear.
+      // Remote network-config mode loads no network/brand copy files; warn so
+      // an operator's network copy does not vanish silently.
       console.warn(
         'email messages: network/brand copy files are not loaded when NETWORK_CONFIG_SOURCE is not "local" — EMAIL_MESSAGES_PATH is the only override surface on this instance',
       );
@@ -233,11 +221,8 @@ export function getEmailMessages(): Promise<EmailMessagesIndex> {
         networks,
       });
     } catch (err) {
-      // Task 13's loader only swallows ENOENT/ENOTDIR — anything else (a
-      // permissions error, say) rethrows. A bad network/brand messages file
-      // must never take email down any more than a bad EMAIL_MESSAGES_PATH
-      // does (see the try/catch above): warn and fall back to instance/base
-      // copy only.
+      // The loader rethrows anything but a missing file. A bad network/brand
+      // file must not take email down: fall back to instance/base copy.
       console.warn(
         `email messages: cannot read network/brand messages files (${String(err)}) — using instance/base copy only`,
       );
@@ -245,9 +230,7 @@ export function getEmailMessages(): Promise<EmailMessagesIndex> {
 
     return loadEmailMessagesIndex({ defaultsText, instanceOverrideText, layers });
   })().catch((err: unknown) => {
-    // Don't let a transient fs error (or a bundled-file defect) cache a
-    // rejected promise forever — the next call gets a fresh attempt instead
-    // of email being permanently down until restart.
+    // Do not cache a rejected promise; the next call retries.
     messagesPromise = null;
     throw err;
   });

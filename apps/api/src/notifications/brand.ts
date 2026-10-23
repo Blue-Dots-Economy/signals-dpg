@@ -1,24 +1,14 @@
-/**
- * Brand / URL resolution for action emails. Pure helpers — the dispatcher
- * supplies the values from network config + env (the same sources OTP reads).
- */
+/** Brand and URL helpers for notification emails. */
 
-/** Generic Phase-1 CTA: the frontend base URL + the UI login route. */
+/** The UI login route under `baseUrl`. */
 export function buildCtaUrl(baseUrl: string): string {
-  // Trailing slashes are trimmed by a loop rather than /\/+$/: that pattern
-  // backtracks quadratically on a long run of slashes that does not end in a
-  // match. `baseUrl` is operator-set config today, so this is not a reachable
-  // DoS — but the linear form costs nothing and does not rely on that staying
-  // true if the helper is ever handed a caller-supplied value.
+  // A loop, not /\/+$/, which backtracks quadratically on long slash runs.
   let base = baseUrl;
   while (base.endsWith('/')) base = base.slice(0, -1);
   return `${base}/auth/login`;
 }
 
-/**
- * Brand display name for the sign-off: the network display name when set,
- * otherwise the instance name (matches the OTP path).
- */
+/** Sign-off brand name: the network display name when set, else the instance name. */
 export function resolveBrandName(opts: {
   networkDisplayName?: string;
   instanceName: string;
@@ -27,12 +17,7 @@ export function resolveBrandName(opts: {
   return display ? display : opts.instanceName;
 }
 
-/**
- * Per-network CTA button colour for action emails. Emails can't use CSS
- * variables, so the colour is inlined per-send. Keyed by network id; unknown
- * networks fall back to the neutral blue. (Phase-2 NS-owned templates can move
- * this into per-network config.)
- */
+/** Per-network CTA button colour, inlined because emails cannot use CSS variables. */
 const BRAND_COLOR: Record<string, string> = {
   blue_dot: '#2563eb',
   purple_dot: '#7c3aed',
@@ -51,22 +36,13 @@ export function resolveBrandColor(networkId: string | null | undefined): string 
 }
 
 /**
- * Builds the per-recipient CTA resolver.
+ * Builds a resolver from the recipient's domain to its portal's login URL, or
+ * undefined when nothing is configured. `byDomain` is `{}` on a single-host
+ * install.
  *
- * Which portal a mail should link to depends on the RECIPIENT's own domain —
- * the seeker's "your application was sent" mail belongs on the seeker portal
- * and the provider's "a seeker applied" mail on the provider portal — so this
- * cannot be resolved once per process the way it used to be (#569).
- *
- * Falls back to the single `FRONTEND_BASE_URL` front-door on a miss. On a split
- * deployment that host is blocked, so the fallback is a link that does not
- * work; it is kept anyway because the alternative for a CTA-shell mail is
- * sending no email at all or changing the template. The boot-time
- * unknown-domain warning is what tells an operator a mapping is missing.
- *
- * @param byDomain - Inverted host bindings; `{}` on a single-host install.
- * @param fallbackBaseUrl - `FRONTEND_BASE_URL`, when set.
- * @returns A resolver returning the login URL, or undefined when nothing is configured.
+ * A domain missing from `byDomain` falls back to `FRONTEND_BASE_URL`, which on
+ * a split deployment is a blocked host; that is preferred over sending no
+ * email. The boot-time unknown-domain warning flags the missing mapping.
  */
 export function createCtaUrlResolver(opts: {
   byDomain: Record<string, string>;
