@@ -20,8 +20,7 @@ export function UserMenu() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [supportOpen, setSupportOpen] = useState(false);
-  // Config-tier query (5 min), shared with the dialog by key — one request per
-  // session, not one per menu open.
+  // Shared with the support dialog by query key, so menu opens do not refetch.
   const { config: supportConfig } = useSupportConfig();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const { data: pendingCount = 0 } = usePendingActionsCount();
@@ -99,9 +98,7 @@ export function UserMenu() {
               )}
             </div>
           </div>
-          {/* Mobile-only: Notifications, Language and Theme normally live
-              inline in the top bar, but are hidden there below `md` to keep
-              the bar from overflowing — they're reachable here instead. */}
+          {/* Below `md` these are hidden in the top bar, so they live here. */}
           <div className="border-t p-1 md:hidden">
             <button
               type="button"
@@ -125,11 +122,9 @@ export function UserMenu() {
               <ThemeModeToggle />
             </div>
           </div>
-          {/* Hidden when the instance has no SUPPORT_EMAIL: without this the
-              form is reachable but every submit 503s, which the user only
-              discovers after typing out their complaint (#551). The fallback
-              config is `enabled: true`, so a slow/failed config fetch shows the
-              entry rather than hiding a working one. */}
+          {/* Hidden when the instance has no SUPPORT_EMAIL, since every submit
+              would 503. The fallback config is `enabled: true`, so a failed
+              config fetch does not hide a working form. */}
           {supportConfig.enabled && (
             <div className="border-t p-1">
               <button
