@@ -12,7 +12,7 @@
 # aggregator-dpg/infra/keycloak/render-realm.sh, so the two realm exports stay
 # interchangeable while the shared `bluedots` realm has two producers.
 #
-# NOTE: this only takes effect on FIRST import. Once the realm exists in
+# This only takes effect on first import. Once the realm exists in
 # Keycloak's database, changes here are ignored — that is what
 # init/apply-user-profile.sh is for.
 set -eu
