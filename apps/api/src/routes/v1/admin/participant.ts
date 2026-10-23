@@ -35,8 +35,8 @@ import { insertLocalUser } from '@/services/auth/user_writer';
 /**
  * POST /api/v1/admin/participant
  *
- * Tier-aware upsert. Dispatches on `resolve_upsert_action`'s verdict
- * (6 kinds) + a runtime ownership check for the update_item branch.
+ * Tier-aware upsert. Dispatches on `resolve_upsert_action`'s verdict, plus a
+ * runtime ownership check for the update_item branch.
  *
  * When `item_state` is absent the route enters account_only mode:
  * - new user  → create user (no item), return user_existed:false
@@ -63,23 +63,13 @@ export const participant: FastifyPluginCallback = (app, _opts, done) => {
   done();
 };
 
-// ---------------------------------------------------------------------------
-// Shared onboarding-field payload builder (same columns in both branches).
-// ---------------------------------------------------------------------------
-
 type OnboardingFields = {
   phone_norm: string | null;
   age: number | undefined;
   /**
    * The aggregator that owns this participant, or null when nobody does yet.
-   *
-   * SS-3 (#640): this is NO LONGER simply the acting org. A `network_service`
-   * caller is not an aggregator — the voice agent is hosted by the network, so
-   * a cold inbound caller genuinely has no aggregator of its own — and
-   * tagging them to the network's own org satisfies "every entrant has an
-   * owner" on paper while leaving a verification queue nobody would open.
-   * Those callers resolve the instance's DEFAULT aggregator instead, and get
-   * null when none is configured. See `resolveOnboardingOwnerOrg`.
+   * Not always the acting org: a `network_service` caller resolves the
+   * instance's default aggregator instead (see `resolveOnboardingOwnerOrg`).
    */
   owner_org_id: string | null;
   /** True when `owner_org_id` came from the default rather than a real onboarding act. */
@@ -88,14 +78,12 @@ type OnboardingFields = {
   source_id: string | undefined;
   /**
    * The domain this participant is being onboarded into, when the caller named
-   * one. Recorded on the user row so the single-domain lock has something to
-   * lock against — this API never wrote `user.domains`, which left every
-   * aggregator-onboarded participant permanently unlocked (and made
-   * `GET /api/v1/user/domains` return `[]` for them in the UI).
+   * one. Recorded on `user.domains` so the single-domain lock has something to
+   * lock against.
    *
    * Undefined for an aggregator caller that omits `domain` on the account-only
    * path; the column then stays empty and the participant's first item create
-   * records it (`assertSingleDomain`).
+   * records it (`claimDomain`).
    */
   domain: string | undefined;
   now: Date;
@@ -111,21 +99,17 @@ export const DOMAIN_REQUIRED_FOR_DEFAULT = {
 /**
  * Who owns a participant created through this route.
  *
- * An aggregator caller owns the participants it onboards, unchanged. A
- * `network_service` caller is not an aggregator — the voice agent is hosted by
- * the network, so a cold inbound caller genuinely has no aggregator of its own —
- * and falls back to the default nominated for the binding it is joining.
+ * An aggregator caller owns the participants it onboards. A `network_service`
+ * caller (e.g. the network-hosted voice agent) is not an aggregator, so the
+ * participant falls back to the default aggregator nominated for the
+ * (network, domain) binding, or stays untagged when none is nominated.
  *
- * `domain` is REQUIRED on that branch. The request schema marks it optional
- * with a documented default of `'seeker'`, which is fine for the item it
- * creates but not for this: defaults are per (network, domain), so a silent
- * `'seeker'` fallback would hand a provider participant — and the right to
- * decrypt their PII — to the seeker aggregator, with a 200 and no trace. The
- * voice registration bot always sends it.
+ * `domain` is required on that branch even though the request schema defaults
+ * it to `'seeker'`: defaults are per (network, domain), so a silent `'seeker'`
+ * fallback would hand a provider participant, and the right to decrypt their
+ * PII, to the seeker aggregator.
  *
- * Works in `account_only` mode too: `domain` is a top-level body field,
- * independent of `item_state`, so a participant with no profile yet is still
- * tagged at account creation.
+ * Works in `account_only` mode too, since `domain` is a top-level body field.
  *
  * @returns the resolved owner, or `null` when the caller omitted `domain`
  *   (the caller turns that into a 400).
@@ -157,9 +141,9 @@ async function resolveOnboardingOwnerOrg(
 const buildOnboardingSet = (f: OnboardingFields) => ({
   phoneNumber: f.phone_norm,
   phoneNumberVerified: false,
-  // Age snapshot (#331) — integrating DPGs derive it from the birth year and
-  // send the number; no birth date is accepted. (Deprecated terms/privacy
-  // booleans are intentionally NOT written — consent lives in the ledger, #309.)
+  // Age snapshot: integrating DPGs derive it from the birth year; no birth date
+  // is accepted. Consent booleans are not written here; consent lives in the
+  // ledger.
   age: f.age ?? null,
   onboardedByOrgId: f.owner_org_id,
   onboardedByDefault: f.onboarded_by_default,
@@ -171,28 +155,6 @@ const buildOnboardingSet = (f: OnboardingFields) => ({
   // would read as "locked to nothing" rather than "not yet decided".
   ...(f.domain ? { domains: [f.domain] } : {}),
 });
-
-// ---------------------------------------------------------------------------
-// signUpAndOnboardUser
-//
-// Creates the participant's local `user` row, applies the onboarding columns,
-// runs whatever else the caller needs in the same transaction, and finally mints
-// the Keycloak identity.
-//
-// `insertLocalUser` writes the row directly, INSIDE the transaction that also
-// carries the onboarding columns and the caller's work. So a failure anywhere
-// rolls the whole thing back and there is no orphan to clean up.
-//
-// (Until #517 there was a second path here: under `AUTH_PROVIDER=betterauth`,
-// `signUpEmail` wrote the row first and outside any transaction, which could
-// orphan it. That path went with the library.)
-//
-// Used by two branches: `account_only` (no item) and `create_new_user` (which
-// also creates the profile item). Both supply `withinTx`; neither owns a
-// transaction any more, because the user write has to be able to join it.
-//
-// Returns { ok: true, user_id } or a typed failure the caller turns into a reply.
-// ---------------------------------------------------------------------------
 
 type SignUpResult =
   | { ok: true; user_id: string }
@@ -209,7 +171,7 @@ type SignUpResult =
       details?: Record<string, unknown>;
     };
 
-/** Shape both branches share for classifying a write failure. */
+/** Postgres unique violation (23505), by code or message. */
 function isUniqueViolation(err: unknown): boolean {
   const e = err as { code?: string; cause?: { code?: string }; message?: string } | null;
   const pg_code = e?.code ?? e?.cause?.code;
@@ -221,15 +183,15 @@ function isUniqueViolation(err: unknown): boolean {
   );
 }
 
+/**
+ * Creates the participant's local `user` row with its onboarding columns, runs
+ * the caller's `withinTx` work in the same transaction, then mints the Keycloak
+ * identity. A failure inside the transaction rolls everything back, so there is
+ * no orphan row to clean up. Used by `account_only` (new user) and
+ * `create_new_user`.
+ */
 async function signUpAndOnboardUser(params: {
-  /**
-   * The participant's real email, or null for a phone-only participant.
-   *
-   * Deliberately not a synthesised address. `signUpEmail` requires one, so the
-   * `<uuid>@no-email.local` placeholder is derived below and confined to that
-   * branch — it used to be computed by the callers and then leaked into both the
-   * `user` row and the Keycloak identity.
-   */
+  /** The participant's real email, or null for a phone-only participant. Never a synthesised address. */
   email_norm: string | null;
   name: string;
   fields: OnboardingFields;
@@ -249,10 +211,8 @@ async function signUpAndOnboardUser(params: {
 
   try {
     await db.transaction(async (tx) => {
-      // The row and its onboarding columns in one insert — there is no separate
-      // update to sequence, and nothing to orphan if the rest of the transaction
-      // fails. Consent booleans are deliberately not written here; consent lives
-      // in the ledger (#309), which `withinTx` records.
+      // The row and its onboarding columns in one insert. Consent is recorded
+      // in the ledger by `withinTx`, not as user columns.
       const written = await insertLocalUser(
         {
           id: user_id,
@@ -282,26 +242,19 @@ async function signUpAndOnboardUser(params: {
     });
   } catch (updateErr: unknown) {
     // No orphan cleanup here: the row was written inside the transaction that
-    // just rolled back, so deleting would at best be a no-op and at worst remove
-    // a *different* row that happened to reuse the id. (The better-auth path,
-    // which committed its row outside the transaction and so could orphan one,
-    // is gone with the library — #517.)
+    // just rolled back, so a delete could only be a no-op or remove a different
+    // row that reused the id.
     return classifyOnboardFailure(updateErr, log);
   }
 
-  // The realm identity comes last, once the local row is complete: under
-  // Keycloak the `user` row is only a mirror, and without a realm user the OTP
-  // login fails with `user_not_found` — the participant would be onboarded and
-  // permanently unable to sign in. Deliberately fails the whole request rather
-  // than logging and continuing; the orphan is cleaned up the same way an
-  // update failure is, so the caller can safely retry.
+  // The realm identity comes last, once the local row is committed. Without a
+  // realm user the participant could never sign in, so a failure here fails the
+  // whole request: the committed local row is deleted so the caller can retry.
   const identity = await createParticipantKeycloakIdentity({
     userId: user_id,
     name,
-    // The real email, or null. Passing the `@no-email.local` placeholder here is
-    // what made the realm identity's username an address nobody can receive mail
-    // at — their phone is then the only usable channel, and the fake address
-    // matches no lookup on either side.
+    // The real email or null, never a placeholder: a fake address would become
+    // the realm username and match no lookup on either side.
     email: email_norm,
     phoneNumber: fields.phone_norm,
     log,
@@ -400,11 +353,7 @@ type ExistingUser = {
   age: number | null;
 };
 
-/**
- * Everything the verdict branches below share. The handler resolves this once,
- * then dispatches; each branch is a self-contained function so the endpoint reads
- * as "validate → resolve → dispatch" instead of one 500-line body.
- */
+/** Everything the verdict branches below share; resolved once by the handler. */
 type ParticipantCtx = {
   request: UpsertRequest;
   reply: FastifyReply;
@@ -427,7 +376,7 @@ function userLevelPair(body: UpsertBody) {
   return { terms, privacy };
 }
 
-/** Identifier presence + consent-payload validation (#309). Null = acceptable. */
+/** Identifier presence + consent-payload validation. Null = acceptable. */
 function validateParticipantPayload(
   body: UpsertBody,
   email_norm: string | null,
@@ -488,14 +437,10 @@ async function findExistingUser(
 }
 
 /**
- * The two age gates, which run ONLY after the ownership verdict and only on
- * branches that actually act on the user (owned aggregator / network_service /
- * new-user onboarding). Evaluating them earlier — on the globally-matched user,
- * before the `aggregator_owned_elsewhere` gate — would let a non-owning
- * aggregator probe another tenant's user: `U18_NOT_ALLOWED` leaks minor-status and
- * `AGE_REQUIRED` leaks "no age on file". Called here they still precede every DB
- * write (all writes live in the branches), so a minor is still a true no-op for
- * legitimate onboarding.
+ * The two age gates. They run only after the ownership verdict, on branches that
+ * act on the user: evaluated earlier, a non-owning aggregator could probe another
+ * tenant's user (`U18_NOT_ALLOWED` leaks minor status, `AGE_REQUIRED` leaks "no
+ * age on file"). They still precede every DB write, so a minor is a true no-op.
  */
 async function checkAgeGates(
   ctx: ParticipantCtx,
@@ -503,9 +448,8 @@ async function checkAgeGates(
 ): Promise<ParticipantFailure | null> {
   const { body, request } = ctx;
 
-  // U18 (#309/#331): a minor is NEVER onboarded via this server-to-server API.
-  // Reject with an error and perform NO operation — no create/update, no consent.
-  // Minors complete onboarding through the portal (guardian OTP flow).
+  // A minor is never onboarded via this server-to-server API; no create, update
+  // or consent happens. Minors onboard through the portal (guardian OTP flow).
   if (effectiveAge != null && isMinor(effectiveAge)) {
     return {
       status: 400,
@@ -514,11 +458,9 @@ async function checkAgeGates(
     };
   }
 
-  // On guardian-gated domains, recording user consent requires a known age so we
-  // can confirm the user is an adult before recording consent / promoting. An age
-  // already on the user's record satisfies it; only a brand-new / age-less user
-  // must supply one. Runs after the lookup so a returning adult re-sending the
-  // consent pair isn't wrongly rejected.
+  // On guardian-gated domains, recording user consent requires a known age to
+  // confirm the user is an adult. An age already on file satisfies it, so a
+  // returning adult re-sending the consent pair is not rejected.
   const { terms, privacy } = userLevelPair(body);
   if (terms && privacy && effectiveAge == null) {
     const gate_network = body.network ?? 'blue_dot';
@@ -617,18 +559,14 @@ async function existingUserOk(
 }
 
 /**
- * Aggregator-onboarding initiation email (#531/#534), NEW users only. Both
- * onboarding channels (bulk + link) land on this route, so this is the single
- * place the "you've been onboarded — activate your account" email is sent, in
- * place of the self create/welcome emails. Welcome is not a concern here: an
- * onboarded user's local row already exists (insertLocalUser), so
- * provisioning.createMirror is skipped on first login and never sends Welcome.
- * `actingOrgType: 'aggregator'` is hard-coded deliberately: every service-org
- * onboarder (aggregator, network_service) lands here, and all get the
- * initiation email — the self create/Welcome path is suppressed for all of
- * them, so collapsing them to the aggregator copy prevents a missed onboarding
- * email. (A network_service onboard is thus described as an aggregator in the
- * copy — accepted.)
+ * Aggregator-onboarding initiation email, new users only. Both onboarding
+ * channels (bulk + link) land on this route, so this is the single place the
+ * "activate your account" email is sent. Welcome is never sent for these users:
+ * their local row already exists, so provisioning.createMirror is skipped on
+ * first login.
+ * `actingOrgType: 'aggregator'` is hard-coded so a network_service onboard also
+ * gets the initiation email (its copy then names an aggregator, which is
+ * accepted).
  * Fire-and-forget, lazy-imported to keep the notification chain off this
  * route's static graph.
  */
@@ -730,8 +668,8 @@ async function handleAccountOnlyNewUser(ctx: ParticipantCtx) {
 async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: ExistingUser) {
   const { request, reply, body } = ctx;
   let consent_recorded = 0;
-  // Drafts promoted as a side effect of the age write — an age is user-level, so it
-  // can unblock several of the user's profiles at once (#557).
+  // Drafts promoted as a side effect of the age write. Age is user-level, so it
+  // can unblock several of the user's profiles at once.
   let promotedDrafts: ItemEventKey[] = [];
 
   const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
@@ -774,10 +712,8 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
     }
   }
 
-  // This branch touches no item of its own, so the promoted drafts are the only
-  // events it has to publish. After the transaction, never inside it: an event
-  // published pre-commit lets the worker index the row before the promotion is
-  // visible (#557).
+  // Published after the transaction, never inside it: an event published
+  // pre-commit lets the worker index the row before the promotion is visible.
   await publishItemEvents(promotedDrafts, 'upsert', request.log);
 
   return existingUserOk(reply, existing.id, consent_recorded);
@@ -793,12 +729,10 @@ async function handleUpdateItem(
   let consent_recorded = 0;
   let promotedDrafts: ItemEventKey[] = [];
 
-  // Runtime ownership check — pre-flight ahead of updateItemInternal so
-  // mismatches produce 403 ITEM_NOT_OWNED_BY_USER rather than 404. Reads the item's
-  // key columns in the same query: this branch can publish an event for the named
-  // item even when no item_state was sent, and the key must come from the row —
-  // body.network / body.domain / body.item_type are optional and need not describe
-  // this item.
+  // Runtime ownership check, ahead of updateItemInternal so a mismatch is
+  // 403 ITEM_NOT_OWNED_BY_USER rather than 404. The event key comes from the row,
+  // not the body: body.network / domain / item_type are optional and need not
+  // describe this item.
   const [ownerRow] = await db
     .select({
       created_by: items.created_by,
@@ -829,7 +763,6 @@ async function handleUpdateItem(
   // match `resolveLocationUpdate`, which only lets a NON-empty array win over
   // re-geocoding the address text.
   const hasItemLocations = Boolean(body.item_locations?.length);
-  // Either of these means the named item changed and search must hear about it.
   let itemWritten = false;
   let itemPromoted = false;
   try {
@@ -866,13 +799,10 @@ async function handleUpdateItem(
         acceptedAt: new Date(),
       });
       consent_recorded = consent.recorded;
-      // `item_id` resolves to update_item with OR without item_state (#309): a
-      // consent-only activation sends no fields, and recordParticipantConsent
-      // promotes the named item draft → live itself. Its `promoted` flag is the only
-      // signal for that — there is no updateItemInternal row, and the item is no
-      // longer `draft`, so promoteEligibleDraftsForUser below cannot return it
-      // either. Dropping it here would leave the profile `draft` in item_search:
-      // #557 through another door.
+      // A consent-only activation sends no fields, and recordParticipantConsent
+      // promotes the named item draft → live itself. Its `promoted` flag is the
+      // only signal for that (promoteEligibleDraftsForUser no longer sees a
+      // draft), and without it item_search would keep the profile as `draft`.
       itemPromoted = consent.promoted;
       if (body.age != null) {
         promotedDrafts = await promoteEligibleDraftsForUser(tx, existing.id);
@@ -887,8 +817,8 @@ async function handleUpdateItem(
     });
   }
 
-  // The named item when it was written or promoted, plus any OTHER draft the age
-  // write promoted (#557). De-duplicated, since the two sets can overlap.
+  // The named item when it was written or promoted, plus any other draft the age
+  // write promoted. publishItemEvents de-duplicates the overlap.
   await publishItemEvents(
     itemWritten || itemPromoted ? [namedItem, ...promotedDrafts] : promotedDrafts,
     'upsert',
@@ -912,17 +842,13 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
 
   let insertedItemId: string | undefined;
   try {
-    // Must run inside a transaction: createItemInternal's profile-cap guard
-    // takes a transaction-scoped advisory lock (pg_advisory_xact_lock) and
-    // then counts+inserts — on the plain pooled `db` (autocommit) that lock
-    // would release immediately, leaving the check→insert non-atomic and the
-    // cap racy. The same transaction also makes the consent write + promotion
-    // atomic with the item insert. Mirrors create_new_user + /item/create.
+    // Must run inside a transaction: the profile-cap guard takes a
+    // transaction-scoped advisory lock, which would release immediately under
+    // autocommit and make the cap racy. It also makes the consent write and
+    // promotion atomic with the insert.
     await db.transaction(async (tx) => {
-      // Persist age (#331) BEFORE recording consent so promoteItemOnProfileConsent
-      // sees the adult age and can flip the new profile live. Adding a profile to
-      // an existing user is this branch; without this write, an age supplied here
-      // is dropped and the profile is stuck draft under the guardian gate (#309).
+      // Persist age before recording consent so promoteItemOnProfileConsent sees
+      // the adult age and can flip the new profile live under the guardian gate.
       if (body.age != null) {
         await tx
           .update(user)
@@ -963,7 +889,7 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
     });
   }
 
-  // The inserted item, plus any other draft the age write promoted (#557).
+  // The inserted item, plus any other draft the age write promoted.
   await publishItemEvents(
     [
       { item_network: network, item_domain: domain, item_type, item_id: insertedItemId! },
@@ -1072,10 +998,9 @@ async function handleCreateNewUser(ctx: ParticipantCtx) {
 }
 
 /**
- * Validate → resolve the participant → dispatch on the ownership verdict. Each
- * verdict's work lives in its own function above; keep this body a dispatcher so
- * the ordering that matters (payload validation, then ownership, then the age
- * gates, then any DB write) stays readable in one screen.
+ * Validate → resolve the participant → dispatch on the ownership verdict. The
+ * order matters: payload validation, then ownership, then the age gates, then
+ * any DB write.
  */
 export const participant_handler = async (
   request: UpsertRequest,
@@ -1085,25 +1010,21 @@ export const participant_handler = async (
   const email_norm = body.email?.trim().toLowerCase() ?? null;
   const phone_norm = body.phone_number?.trim() ?? null;
 
-  // --- Consent-payload validation (#309) ---
   const payloadFailure = validateParticipantPayload(body, email_norm, phone_norm);
   if (payloadFailure) return failureReply(reply, payloadFailure);
 
   const ctx: ParticipantCtx = { request, reply, body, email_norm, phone_norm };
 
-  // 1. Look up existing user.
   const existing = await findExistingUser(email_norm, phone_norm);
 
-  // 2. Compute aggregator ownership and dispatch on the helper's verdict.
   const aggregator_owns_user = Boolean(
     request.acting_org?.org_type === 'aggregator' &&
     existing?.onboardedByOrgId === request.acting_org?.org_id,
   );
 
-  // 3. Dispatch. A create is always an insert (#349): item_state with no
-  //    item_id creates a NEW profile every call; item_id updates that specific
-  //    item. The per-user profile cap is enforced downstream in
-  //    createItemInternal (createProfileItem), so all creation paths share it.
+  // A create is always an insert: item_state with no item_id creates a new
+  // profile every call; item_id updates that item. The per-user profile cap is
+  // enforced downstream in createItemInternal.
   const verdict = resolve_upsert_action({
     acting_org: request.acting_org,
     user_exists: Boolean(existing),
@@ -1134,7 +1055,7 @@ export const participant_handler = async (
     });
   }
 
-  // Effective age (#331): what this call supplies, else what's already on file.
+  // Effective age: what this call supplies, else what's already on file.
   const ageFailure = await checkAgeGates(ctx, body.age ?? existing?.age ?? null);
   if (ageFailure) return failureReply(reply, ageFailure);
 
