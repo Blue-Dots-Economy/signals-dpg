@@ -1,24 +1,16 @@
 /**
- * backfill_lifecycle — recompute items.lifecycle_status for existing rows.
+ * backfill_lifecycle: recompute items.lifecycle_status for existing rows after
+ * a network.json `required[]` change. Re-runs each item's stored state through
+ * `classify_item` and updates only rows whose status changed.
  *
- * #180: when a network.json `required[]` changes, an item that was written
- * `live` may no longer be required-complete (or vice-versa). A blanket DEFAULT
- * is wrong either way. This command re-runs each item through the SAME pure
- * classifier used on writes (`classify_item`: `paused` sticky; otherwise
- * `live` iff required-complete AND profile-creation consent accepted) over its
- * stored state, and updates `lifecycle_status` only where it actually changed.
+ * No `gates` are passed, so only the default `schema_required` gate applies:
+ * `consent_accepted` is computed but has no effect, and the consent and
+ * owner gates a domain may declare are not evaluated.
  *
- * `consent_accepted` per item = has a `profile_creation` row in the consent
- * ledger (same signal as backfill_demote_consentless). So this is the general
- * recompute across BOTH gate dimensions (completeness + consent), covering the
- * required[]-changed case the consent-only backfill doesn't.
+ * No decryption is needed: the public `item_state` carries masks for provided
+ * private fields, which count as populated, so completeness matches write time.
  *
- * No decryption needed: the stored public `item_state` carries masks for
- * provided private fields, and `is_populated(mask)` is true — so completeness
- * matches write-time exactly.
- *
- * On-demand + idempotent — run it when a served network's item schema changes.
- * Ships compiled in the api image; run:
+ * On-demand and idempotent. Ships compiled in the api image:
  *   node dist/scripts/backfill_lifecycle.js [--network N] [--domain D] [--item-type T] [--dry-run]
  *   (local: pnpm --filter api db:backfill:lifecycle -- --dry-run)
  */
@@ -45,15 +37,15 @@ function parseArgs(argv: string[]): Args {
       case '--domain': a.domain = argv[++i]; break;
       case '--item-type': a.itemType = argv[++i]; break;
       case '--dry-run': a.dryRun = true; break;
-      case '--': break; // arg separator forwarded by pnpm/npm — ignore
+      case '--': break; // arg separator forwarded by pnpm/npm
       default: throw new Error(`unknown arg: ${argv[i]}`);
     }
   }
   return a;
 }
 
-// Cache resolved schemas per (network/domain/item_type). A null value means the
-// schema couldn't be resolved (unserved / removed) — those items are skipped.
+// Per network/domain/item_type. Null means unresolvable (unserved or removed);
+// those items are skipped.
 const schemaCache = new Map<string, JSONSchemaLike | null>();
 async function schemaFor(network: string, domain: string, itemType: string): Promise<JSONSchemaLike | null> {
   const key = `${network}/${domain}/${itemType}`;
@@ -86,9 +78,7 @@ async function main() {
   let skipped = 0;
   const transitions: Record<string, number> = {};
 
-  // The classifier gates `live` on required-completeness AND profile-creation
-  // consent. An item is consent-accepted iff it has a `profile_creation` row in
-  // the consent ledger. Load that id set once (matches backfill_demote_consentless).
+  // Items with a `profile_creation` row in the consent ledger.
   const consentedResult = await db.execute(
     sql`SELECT DISTINCT item_id FROM consent_record
         WHERE level = 'item' AND consent_category = 'profile_creation' AND item_id IS NOT NULL`
@@ -99,9 +89,8 @@ async function main() {
     )
   );
 
-  // Offset pagination is stable here: the only column we UPDATE is
-  // lifecycle_status, never the ORDER BY keys (the composite PK), so the row
-  // set and its ordering don't shift between batches.
+  // Offset pagination is stable: only lifecycle_status is updated, never the
+  // ORDER BY keys (the composite PK).
   const whereScope = and(...scope);
   for (let offset = 0; ; offset += BATCH_SIZE) {
     const rows = await db
@@ -129,9 +118,8 @@ async function main() {
         continue;
       }
       const current = row.lifecycle_status as LifecycleStatus;
-      // No `gates` passed, so `owner_required` (#640) is not evaluated here —
-      // a lifecycle backfill must not demote a population for want of an
-      // owning aggregator. See `GO_LIVE_GATE_CHECKS.owner_required`.
+      // No `gates`: a backfill must not demote a population for want of an
+      // owning aggregator (`owner_required`).
       const next = classify_item({
         schema,
         merged_state: (row.item_state ?? {}) as Record<string, unknown>,

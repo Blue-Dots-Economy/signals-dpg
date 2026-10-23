@@ -230,11 +230,10 @@ async function cacheReferencedItemSchemas() {
 }
 
 /**
- * Wipe the on-disk schema cache. `getConfiguredNetworkSchemas` short-circuits
- * on any cached entry and never re-reads the source config, so the cache
- * outlives a process restart and keeps serving the previously configured
- * network. Local dev clears it on boot (see server.ts) so a network switch in
- * `.env` actually takes effect.
+ * Wipe the on-disk schema cache. `getConfiguredNetworkSchemas` serves any
+ * cached entry without re-reading the source config, and the cache survives
+ * restarts, so local mode clears it on boot (see app.ts) for a network switch
+ * in `.env` to take effect.
  */
 export async function clearNetworkSchemaCache() {
   await rm(CACHE_ROOT, { recursive: true, force: true });

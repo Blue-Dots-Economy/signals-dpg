@@ -1,19 +1,17 @@
 import type { NetworkConfigDocument } from '@dpg/schemas';
 
 /**
- * Under-18 check from the stored age (#331). Age is a snapshot captured at
- * registration (derived from the birth year: `currentYear - birthYear`, no
- * month). A minor is `age <= 18`: with no month we can't confirm someone in
- * their 18th year has had their birthday, so the whole boundary year is treated
- * as u18 — fail-closed. Adult only at 19+ by this rule.
+ * Under-18 check from the stored age, a registration-time snapshot of
+ * `currentYear - birthYear` with no month. Without the month a stored 18 may
+ * not have turned 18 yet, so `age <= 18` counts as a minor (fail-closed).
  */
 export function isMinor(age: number): boolean {
   return age <= 18;
 }
 
 /**
- * Whether a served domain routes minors through the guardian flow (U18 D8).
- * Read server-side at the gate; never trust a client-supplied value.
+ * Whether a served domain routes minors through the guardian flow. Read from
+ * network config at the gate; never trust a client-supplied value.
  */
 export function guardianConsentRequired(
   networkConfig: NetworkConfigDocument,

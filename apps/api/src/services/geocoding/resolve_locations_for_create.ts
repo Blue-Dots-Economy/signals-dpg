@@ -20,9 +20,8 @@ interface ResolveLocationsForCreateArgs {
 }
 
 /**
- * Geocode an item's primary location field from its (full) item_state.
- * Always resolves to the EXACT point for both private and public fields.
- * Best-effort: any failure → []. Caller decides how to treat an empty result.
+ * Geocodes an item's primary location field from its full item_state, to the
+ * exact point for both private and public fields. Any failure returns [].
  */
 export async function geocodeLocationsFromState(
   itemSchema: Record<string, unknown>,
@@ -31,8 +30,7 @@ export async function geocodeLocationsFromState(
 ): Promise<ItemLocation[]> {
   try {
     const { primary } = parseLocationFields(itemSchema);
-    // Always resolve to the EXACT point. Privacy for a PRIVATE field is applied
-    // downstream as a jitter at the storage choke point (item_service), so the
+    // A private field is jittered at storage time in item_service, so the
     // exact coordinate is never persisted.
     const queries = buildLocationQueries(item_state, primary);
     const out: ItemLocation[] = [];
@@ -48,16 +46,13 @@ export async function geocodeLocationsFromState(
 }
 
 /**
- * Resolves the coordinates to store for a NEW item from its address/location
- * field, when the caller supplied none. Shared by the public `/item/create`
- * route and the admin-participant onboarding path (`create_profile_item`) so
- * both store `item_locations` identically.
+ * Resolves the coordinates to store for a new item from its location field.
+ * Shared by `/item/create` and `create_profile_item` so both store
+ * `item_locations` identically.
  *
- * Rules (mirrors the original inline logic in create_item):
- *  - `provided` non-empty → used as-is (never geocoded over).
- *  - Private and public primary fields both geocode to their exact point; a
- *    private field is jittered at storage time.
- *  - Best-effort: any failure returns `provided ?? []` (item created without coords).
+ *  - A non-empty `provided` is used as-is, never geocoded over.
+ *  - Best-effort: any failure returns [] and the item is created without
+ *    coordinates.
  */
 export async function resolveLocationsForCreate(
   args: ResolveLocationsForCreateArgs,

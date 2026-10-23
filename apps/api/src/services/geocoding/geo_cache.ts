@@ -10,20 +10,15 @@ export function normalizeGeoKey(query: string): string {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
-// PII note: a cache entry is an UNLINKED address→coordinate map — the same fact
-// any geocoder returns — with no user/item association and never served
-// publicly (internal Redis only). Caching the exact coordinate here is therefore
-// not user-PII; the PII-jitter control still applies downstream to the
-// coordinate STORED ON and SERVED FROM an item. Caching a post-jitter value is
-// infeasible: this sits at the shared exact-resolve / paid-API layer used by
-// both public (exact) and private fields.
-// See docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
+// PII: entries are exact address→coordinate pairs with no user or item link,
+// kept in internal Redis only. Jitter for private fields is applied later, to
+// the coordinate stored on the item. Design:
+// docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
 /**
  * Redis key for a resolved place: `geo:place:<normalized query>`, or
  * `geo:place:<COUNTRY>:<normalized query>` when geocoding is restricted to a
- * country (#785). The country is part of the key so turning the restriction on
- * does not keep serving a foreign point cached before it existed. Unrestricted
- * keys are unchanged, so deployments without a country keep their cache.
+ * country, so enabling the restriction does not serve foreign points cached
+ * before it.
  */
 export function buildGeoCacheKey(query: string, country?: string): string {
   const scope = country ? `${country}:` : '';
@@ -54,15 +49,15 @@ export async function getCachedCoordinates(
     if (cached === GEO_NEGATIVE_SENTINEL) return null;
     if (cached !== null) return JSON.parse(cached) as Coordinates;
   } catch {
-    // Redis unavailable → fall through to a live resolve (handled below).
+    // Redis unavailable: fall through to a live resolve.
   }
 
   let result: Coordinates | null;
   try {
     result = await loader();
   } catch {
-    // Transient provider error (HTTP/network/rate-limit): best-effort null,
-    // do NOT cache — the next lookup should retry live.
+    // Transient provider error: return null without caching so the next
+    // lookup retries live.
     return null;
   }
 

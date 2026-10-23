@@ -23,7 +23,7 @@ export type GateInput = {
   sourceItemId: string;
   targetItemId: string;
   stage?: 'initiate' | 'accept'; // perform → initiate (default), accept-status → accept
-  channel: 'self' | 'external'; // Boolean(request.acting_org): UI self-session vs on-behalf (#395)
+  channel: 'self' | 'external'; // Boolean(request.acting_org): UI self-session vs on-behalf
   otp?: string; // body.guardian_otp
 };
 
@@ -35,13 +35,13 @@ export type GateResult =
   | { status: 'throttled' }
   | { status: 'rate_limited' }
   | { status: 'no_provider' }
-  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' }; // U18 on external channel (#395)
+  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' }; // U18 on external channel
 
 /**
- * U18 guardian-consent gate for actions (Phase 5b). Detects whether the ward
- * is a minor on a guardian-gated domain, issues/verifies an OTP scoped to the
- * specific action, and reports the outcome. It never writes a consent row or
- * resolves a consent version — the caller does that once it sees `verified`.
+ * U18 guardian-consent gate for actions. Detects whether the ward is a minor on
+ * a guardian-gated domain, issues or verifies an OTP scoped to the specific
+ * action, and reports the outcome. It never writes a consent row; the caller
+ * does that on `verified`.
  */
 export async function guardianActionGate(input: GateInput): Promise<GateResult> {
   const cfg = await getNetworkConfigById(input.network);
@@ -51,12 +51,9 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
 
   const age = await getWardAge(input.wardUserId);
 
-  // External / on-behalf channel (#395): there is no guardian-OTP path over
-  // voice/aggregator for now, so a minor — or, fail-closed, an age-unknown
-  // ward — is blocked outright and must complete the action in the app (the
-  // `self` path below). A confirmed adult proceeds unchanged. The `reason`
-  // (`minor` | `age_unknown`) rides on the result for support triage; the
-  // caller's client-facing message never leaks it (see guardianGateFailure).
+  // On-behalf channels (voice/aggregator) have no guardian-OTP path, so a
+  // minor or an age-unknown ward is blocked and must act in the app. `reason`
+  // is for support triage; guardianGateFailure does not expose it.
   if (input.channel === 'external') {
     if (age !== null && !isMinor(age)) {
       return { status: 'not_required' };
@@ -64,7 +61,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
     return { status: 'external_minor_blocked', reason: age === null ? 'age_unknown' : 'minor' };
   }
 
-  // channel === 'self' (UI): existing behavior verbatim.
+  // Self channel: an age-unknown ward is not gated here.
   if (age === null || !isMinor(age)) {
     return { status: 'not_required' };
   }
@@ -79,8 +76,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
       if (!contact) {
         throw new GuardianOtpError('NO_OTP_PROVIDER');
       }
-      // Parent-facing template vars (#294) — best-effort; the OTP is dispatched
-      // regardless if either lookup returns null (template renders without them).
+      // Best-effort template vars; the OTP is sent even if either is null.
       const [parentName, providerOrgName] = await Promise.all([
         getGuardianNamePlaintext(input.wardUserId),
         resolveProviderServiceName(input.targetItemId, input.network),
@@ -89,8 +85,6 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
-        // action_type comes straight from network.json (the interaction) — the
-        // template id derives from it, no hardcoded connect/apply.
         scenario: { kind: 'action', actionType: input.actionType, stage: input.stage ?? 'initiate' },
         variables: {
           ...(parentName ? { parentName } : {}),
@@ -132,16 +126,13 @@ export type BulkGateItem = {
   targetItemId: string;
 };
 
-// Deterministic scope for a ward's gated batch (#393). Hashing the SORTED set of
-// (actionType, sourceItem, targetItem) tuples means the guardian's single OTP
-// re-matches only when the ward resubmits the SAME batch — change the set and
-// it's a new challenge. No server-side batch id to store.
+// Hashing the sorted (actionType, sourceItem, targetItem) set means the OTP
+// matches only when the ward resubmits the same batch, with no stored batch id.
 function bulkScope(wardUserId: string, network: string, items: BulkGateItem[]): string {
   const tuples = items
     .map((i) => `${i.actionType}|${i.sourceItemId}|${i.targetItemId}`)
-    // Code-point ordering, NOT localeCompare: this ordering is hashed into a
-    // Redis scope key that must match byte-for-byte across processes, locales
-    // and ICU versions.
+    // Code-point ordering, not localeCompare: the hashed key must match
+    // byte-for-byte across processes, locales and ICU versions.
     .sort((a, b) => {
       if (a < b) return -1;
       return a > b ? 1 : 0;
@@ -152,18 +143,14 @@ function bulkScope(wardUserId: string, network: string, items: BulkGateItem[]): 
 }
 
 /**
- * Bulk counterpart of {@link guardianActionGate} (#393). Instead of one OTP per
- * action, it issues ONE OTP + ONE email listing every provider org for each
- * ward's gated subset of a bulk submit, and verifies that one OTP for the whole
- * group. Returns a `GateResult` PER ITEM INDEX using the exact same result shape
- * as the single gate, so the bulk handler consumes batch and per-item outcomes
- * identically (same failure mapping, same `verified` → guardian-consent-row).
+ * Bulk counterpart of {@link guardianActionGate}: one OTP (and one email
+ * listing every provider org) per ward and network for the gated items of a
+ * bulk submit, verified once for the whole group. Returns a `GateResult` per
+ * item index, in the single gate's shape.
  *
- * Ungated / adult items are simply absent from the returned map — the caller
- * falls back to the per-item gate for those (a cheap `not_required`). Fail-closed
- * throughout: a null age on a gated domain, or a missing guardian contact, never
- * proceeds. `guardianConsentRequired` / age check remain the single source of
- * truth — this only changes how the OTP is scoped, not who is gated.
+ * Only items of a known minor on a gated domain appear in the map; the caller
+ * runs the per-item gate for the rest (including age-unknown wards). A missing
+ * guardian contact yields `no_provider`.
  */
 export async function guardianBulkActionGate(args: {
   items: BulkGateItem[];
@@ -172,7 +159,6 @@ export async function guardianBulkActionGate(args: {
 }): Promise<Map<number, GateResult>> {
   const results = new Map<number, GateResult>();
 
-  // Resolve gated-ness once per (network) config + once per ward age.
   const configCache = new Map<string, Awaited<ReturnType<typeof getNetworkConfigById>>>();
   const ageCache = new Map<string, number | null>();
   const getCfg = async (network: string) => {
@@ -189,8 +175,8 @@ export async function guardianBulkActionGate(args: {
     return age;
   };
 
-  // Bucket the gated items by ward+network (the scope + provider-name lookups
-  // are network-scoped, so a ward acting across networks gets one OTP each).
+  // Grouped by ward and network: the scope and provider-name lookups are
+  // network-scoped.
   const groups = new Map<string, BulkGateItem[]>();
   for (const item of args.items) {
     const cfg = await getCfg(item.network);
@@ -234,8 +220,7 @@ export async function guardianBulkActionGate(args: {
             actionType: bucket[0].actionType,
             stage: args.stage ?? 'initiate',
             providerOrgNames: names,
-            // Bluedots networks use "jobs" copy; everything else "opportunities"
-            // (#393). No network.json flag exists for this yet.
+            // blue_dot uses "jobs" copy; there is no network.json flag for it.
             jobs: network === 'blue_dot',
           },
           variables: parentName ? { parentName } : {},
@@ -261,8 +246,7 @@ export async function guardianBulkActionGate(args: {
       throw err;
     }
 
-    // Verify + CONSUME once for the whole group — a single correct OTP unlocks
-    // every gated item in the batch.
+    // One correct OTP unlocks every gated item in the group.
     const ok = await verifyGuardianOtp({ scope, otp: args.otp });
     assign(ok ? { status: 'verified' } : { status: 'invalid_otp' });
   }
@@ -271,10 +255,8 @@ export async function guardianBulkActionGate(args: {
 }
 
 /**
- * Map a non-proceeding gate result to the per-item BulkItemFailure the action
- * handlers throw. Returns null for `not_required` / `verified` (the caller
- * proceeds). Shared by perform_action + update_action_status so the error
- * codes/messages can't drift between the two.
+ * Maps a non-proceeding gate result to the per-item BulkItemFailure the action
+ * handlers throw, or null for `not_required` / `verified`.
  */
 export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
   switch (gate.status) {
@@ -295,8 +277,7 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
         'No verified contact channel is available to send the guardian OTP.',
       );
     case 'external_minor_blocked':
-      // reason (`minor` | `age_unknown`) is carried on the gate result for
-      // support triage; the client message deliberately does not leak it.
+      // The message does not reveal `reason`.
       return new BulkItemFailure(
         'MINOR_ACTION_CHANNEL_BLOCKED',
         "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
