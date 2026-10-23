@@ -1,33 +1,19 @@
 /**
- * Keycloak → local `user` mirror provisioning.
+ * Keycloak → local `user` mirror provisioning. Keycloak owns credentials; this
+ * module runs when a human's token reaches signals: the channel gate
+ * (LOGIN_CHANNELS), the self-signup gate (SELF_SIGNUP_MODE), the local `user`
+ * row, the `member` row, and guardian materialization for a U18 self-signup.
  *
- * This is the app-side home of the business logic that `unified_otp` married to
- * authentication (§4 of docs/superpowers/plans/2026-07-23-keycloak-migration-design.md).
- * Keycloak's OTP flow owns the *credential* half; everything below is the half
- * that has to keep happening when a human's token first reaches signals:
+ * The mirror is keyed on `sub`, and `sub` == `user.id`, so `items.created_by`
+ * and every `*_owner` column keep pointing at the same UUIDs. Never mint a
+ * fresh id for a user that already exists.
  *
- *   - the channel gate (LOGIN_CHANNELS)
- *   - the self-signup gate (SELF_SIGNUP_MODE) — see the R2 note below
- *   - the local `user` row (the mirror, keyed on the Keycloak `sub`)
- *   - the `member` / org-join row
- *   - guardian materialization for a U18 self-signup
+ * Under SELF_SIGNUP_MODE=gated, participants are created by an admin
+ * (POST /api/v1/admin/participant), so a token whose `sub` has no local row
+ * must not get a mirror. This is the only place a user row is created from a
+ * login.
  *
- * **The mirror is keyed on `sub`, and `sub` == `user.id` by design** (§6.1).
- * That equality is the whole reason domain data never moves: `items.created_by`
- * and every `*_owner` text column keep pointing at the same UUIDs. Nothing here
- * may ever mint a fresh id for a user that already exists.
- *
- * **R2 — the gated-signup gate must not reopen here.** Under
- * SELF_SIGNUP_MODE=gated, participants are created by an admin
- * (POST /api/v1/admin/participant), so a valid Keycloak token whose `sub` has
- * no local row means someone got an account another way. Provisioning refuses
- * to create the mirror for them. `unified_otp` enforced this at two call sites
- * as defence-in-depth; here there is exactly one place a user row can be born
- * from a login, and this is it.
- *
- * Nothing in this module throws for an expected failure — callers get a
- * discriminated result and map it to a status code, per the repo's
- * "routes never throw" convention.
+ * Expected failures return a discriminated result; nothing here throws for them.
  */
 
 import { and, eq, or } from 'drizzle-orm';
@@ -48,7 +34,7 @@ import { actingOrgGrant, grantIsWildcard } from '@/utils/keycloak_token';
 import type { KeycloakClaims } from '@/utils/keycloak_token';
 import { randomUUID } from 'node:crypto';
 
-/** The shape the auth middleware puts on `request.user`. Unchanged contract. */
+/** The shape the auth middleware puts on `request.user`. */
 export interface ProvisionedUser {
   id: string;
   email: string;
@@ -59,9 +45,9 @@ export interface ProvisionedUser {
 export type ProvisioningErrorCode =
   /** The identifier channel in the token is not enabled on this instance. */
   | 'LOGIN_CHANNEL_DISABLED'
-  /** Gated instance, and this subject has no local row to log into (R2). */
+  /** Gated instance, and this subject has no local row to log into. */
   | 'SELF_SIGNUP_DISABLED'
-  /** The local mirror says this user is banned (R8). */
+  /** The local mirror says this user is banned. */
   | 'USER_BANNED'
   /** A different local user already owns this token's email/phone. */
   | 'IDENTITY_CONFLICT'
@@ -77,23 +63,15 @@ export type ProvisioningResult =
 /**
  * Resolve the organization a human token says its subject belongs to.
  *
- * **This reads the `signals_acting_orgs` grant, not a `signalstack_org_id`
- * claim.** It used to read the latter, which no client ever emits: the
- * `signals-ui` mapper takes the `signalstack_org_id` *user attribute* and emits
- * it under the claim name `signals_acting_orgs` (verified against the
- * `bluedots` realm). So `orgId` was always null and `ensureOrgMembership` was
- * dead code that looked live — gap G5 of
- * `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md`.
+ * Reads the `signals_acting_orgs` grant: the `signals-ui` mapper emits the
+ * `signalstack_org_id` user attribute under that claim name, and no client
+ * emits a `signalstack_org_id` claim. For a human the grant is their single
+ * org; service tokens never reach here (`resolve_session.ts` routes them to
+ * `resolveServiceAccount` first).
  *
- * Reusing the grant is correct rather than a conflation, for the human path
- * specifically: per design §5.1 a human's grant *is* "the single org from their
- * user attribute". Service tokens never reach here — `resolve_session.ts` forks
- * them to `resolveServiceAccount` first.
- *
- * Adopted only when the grant names exactly **one concrete** org. A wildcard
- * (`['*']`, the platform service grant) or a multi-org grant says what a caller
- * may *act for*, which is not the same as what they are a *member of*, and
- * guessing one from the other would silently join people to orgs.
+ * Adopted only when the grant names exactly one concrete org. A wildcard or
+ * multi-org grant says what a caller may act for, not what they are a member
+ * of, and guessing would silently join people to orgs.
  */
 function orgIdFromGrant(claims: KeycloakClaims): string | null {
   const grant = actingOrgGrant(claims);
@@ -135,9 +113,8 @@ function readIdentity(claims: KeycloakClaims): TokenIdentity {
   const email = normalizeEmail(claims.email);
   const phoneNumber = normalizePhone(claims.phone_number);
 
-  // Keycloak splits the name; signals stores one column. `name` is populated
-  // when a full-name mapper is configured, so prefer it and fall back to the
-  // parts. 'user' matches what unified_otp defaulted to on create.
+  // Keycloak splits the name; signals stores one column. Prefer `name` (set
+  // when a full-name mapper is configured), then the parts, then 'user'.
   const joined = [claims.given_name, claims.family_name]
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '')
     .join(' ')
@@ -158,17 +135,10 @@ function readIdentity(claims: KeycloakClaims): TokenIdentity {
 }
 
 /**
- * Channel gate, relocated from `assertChannelAllowed`.
- *
- * Semantics differ slightly from the OTP version by necessity: there, the
- * caller named the channel it wanted to use, so a disabled channel could be
- * rejected outright. A token just carries whichever identifiers Keycloak knows
- * about, so the rule is "at least one identifier on an enabled channel" — a
- * user with both an email and a phone on an email-only instance is fine.
- *
- * This is what keeps open question 9(b) from biting silently: on an instance
- * with no SMS provider and LOGIN_CHANNELS=email, a phone-only user is refused
- * here with a clear code rather than half-provisioned.
+ * Channel gate: at least one token identifier must be on an enabled channel.
+ * A user with both email and phone on an email-only instance passes; a
+ * phone-only user on LOGIN_CHANNELS=email is refused rather than
+ * half-provisioned.
  */
 function channelAllowed(identity: TokenIdentity): boolean {
   const channels = authConfig.login_channels;
@@ -247,15 +217,13 @@ export async function provisionUserFromClaims(
 /**
  * Bring an existing mirror row in line with the token.
  *
- * Keycloak is authoritative for email / phone / verified flags / name (§6.1),
- * so a change there propagates down. Signals-local columns (`domains`,
- * `date_of_birth`, onboarding attribution, `tags`) are never touched here —
- * that is the whole point of the ownership split.
+ * Keycloak is authoritative for email, phone, verified flags and name.
+ * Signals-local columns (`domains`, `age`, onboarding attribution, `tags`) are
+ * never touched here.
  *
- * `role` is deliberately NOT synced from realm roles yet: today's `user.role`
- * still comes from the better-auth admin plugin, and overwriting it from a
- * token before the realm roles are actually assigned would silently demote
- * every existing admin.
+ * `role` is not synced from realm roles: `user.role` is a signals-local column,
+ * and overwriting it from a token without matching realm roles would demote
+ * existing admins.
  */
 async function refreshMirror(
   existing: typeof userTable.$inferSelect,
@@ -299,8 +267,7 @@ async function refreshMirror(
   } catch (err) {
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
       // Keycloak moved this subject onto an email/phone another local user
-      // already holds. Refusing is the only safe move — merging two users
-      // would repoint domain data, which this design exists to avoid (§2.3).
+      // already holds. Refuse: merging two users would repoint domain data.
       log.error(
         { err, sub: identity.sub },
         'provisioning: token identifiers collide with another local user',
@@ -326,14 +293,14 @@ async function refreshMirror(
 /**
  * First login for this subject: create the local mirror.
  *
- * Two gates run before anything is written — the self-signup gate (R2) and a
- * check that no *other* local row already owns these identifiers.
+ * Two gates run before anything is written: the self-signup gate and a check
+ * that no other local row already owns these identifiers.
  */
 async function createMirror(
   identity: TokenIdentity,
   log: FastifyBaseLogger
 ): Promise<ProvisioningResult> {
-  // R2. A gated instance creates participants through the admin path, which
+  // A gated instance creates participants through the admin path, which
   // writes the local row itself; reaching here with no row means this subject
   // was not onboarded by signals.
   if (!authConfig.allow_self_signup) {
@@ -349,10 +316,9 @@ async function createMirror(
     };
   }
 
-  // A local row holding these identifiers under a *different* id means the
-  // Keycloak subject and the signals user have diverged — the §6.3 spike-2
-  // collision case. Never create a second row; never rewrite the first one's
-  // id (domain data points at it).
+  // A local row holding these identifiers under a different id means the
+  // Keycloak subject and the signals user have diverged. Never create a second
+  // row; never rewrite the first one's id (domain data points at it).
   const identifierFilters = [
     identity.email ? eq(userTable.email, identity.email) : undefined,
     identity.phoneNumber ? eq(userTable.phoneNumber, identity.phoneNumber) : undefined,
@@ -386,9 +352,8 @@ async function createMirror(
     };
   }
 
-  // The insert itself lives in `user_writer.ts`, shared with admin onboarding so
-  // the two cannot drift. The linchpin — this row's primary key IS the Keycloak
-  // subject — is enforced there (it rejects anything that is not a bare UUID).
+  // `insertLocalUser` is shared with admin onboarding and rejects any id that
+  // is not a bare UUID, since the primary key must be the Keycloak subject.
   const written = await insertLocalUser(
     {
       id: identity.sub,
@@ -398,9 +363,9 @@ async function createMirror(
       phoneNumber: identity.phoneNumber,
       phoneNumberVerified: identity.phoneNumberVerified,
       extra: {
-        // Parity with unified_otp's create: reaching a completed login means the
-        // consent screens were passed. Age stays null here — it is captured
-        // post-login, or written by guardian materialization below.
+        // Reaching a completed login means the consent screens were passed.
+        // Age stays null here; it is captured post-login, or written by
+        // signup extras / guardian materialization below.
         termsAccepted: true,
         privacyAccepted: true,
       },
@@ -417,8 +382,8 @@ async function createMirror(
   }
 
   if (!written.created) {
-    // Two concurrent first logins; the other one won. Still ensure the org join,
-    // because that is checked on every login rather than only on create.
+    // Two concurrent first logins; the other one won. The org join is still
+    // checked, as on every login.
     const row = written.existing;
     await ensureOrgMembership(row.id, identity, log);
     return {
@@ -435,23 +400,17 @@ async function createMirror(
     role: 'user',
   };
 
-  // Apply anything the self-signup form parked for this identifier (§ the
-  // Keycloak signup path creates the identity before the local row exists, so
-  // `domains` and DOB have nowhere to go until now — see signup_extras.ts).
-  //
-  // Runs BEFORE guardian materialization on purpose: for a gated minor the
-  // guardian capture is the OTP-verified record and must win on DOB.
-  //
-  // Captures the domain this account signed up into so the welcome mail can
-  // link to that portal (#569); previously this value was applied and dropped.
+  // Apply what the self-signup form parked for this identifier: the Keycloak
+  // identity exists before the local row, so `domains` and age have nowhere to
+  // go until now (see signup_extras.ts). Runs before guardian materialization
+  // so that, for a gated minor, the OTP-verified guardian capture wins on DOB.
+  // The returned domain tells the welcome mail which portal to link.
   const signupDomain = await applySignupExtras(user.id, identity, log);
 
   await ensureOrgMembership(user.id, identity, log);
 
-  // Guardian materialization, relocated from the better-auth `afterUserCreate`
-  // hook (create_auth.ts:38-44). Same contract as there: genuinely-new users
-  // only, and a failure is logged but never blocks the login — a half-captured
-  // guardian record must not lock a ward out of their own account.
+  // New users only. A failure is logged but never blocks the login: a
+  // half-captured guardian record must not lock a ward out of their account.
   try {
     await materializeSignupGuardian({
       id: user.id,
@@ -462,11 +421,8 @@ async function createMirror(
     log.error({ err, user_id: user.id }, 'materializeSignupGuardian failed');
   }
 
-  // The other half of that same hook. Without this a Keycloak-provisioned user
-  // silently received no welcome message, where every better-auth signup did.
-  // It swallows each channel's failure internally; the try/catch is defence in
-  // depth, matching the guardian call above — a welcome message must never be
-  // the reason a login fails.
+  // Swallows each channel's failure internally; the try/catch is defence in
+  // depth, since a welcome message must never be the reason a login fails.
   try {
     await sendWelcomeNotifications(
       {
@@ -485,14 +441,9 @@ async function createMirror(
 }
 
 /**
- * Write the `member` row for a token that names an organization, relocated
- * from `verifyOtp`'s `joinOrg` branch.
- *
- * Best-effort by design, exactly as it was there: an org that doesn't exist or
- * a failed insert is logged and skipped, never surfaced as a login failure.
- * Where `unified_otp` took an org *slug* from the request body, the token
- * carries an org *id* claim — there is no request body at token-validation
- * time.
+ * Write the `member` row for a token that names an organization. Best-effort:
+ * an unknown org or a failed insert is logged and skipped, never surfaced as a
+ * login failure.
  */
 async function ensureOrgMembership(
   userId: string,
@@ -516,8 +467,8 @@ async function ensureOrgMembership(
       return;
     }
 
-    // Scoped to (org, user) exactly as unified_otp did — a user may belong to
-    // more than one org, so checking by user alone would skip the second join.
+    // Scoped to (org, user): a user may belong to more than one org, so
+    // checking by user alone would skip the second join.
     const [already] = await db
       .select({ id: memberTable.id })
       .from(memberTable)
@@ -547,12 +498,10 @@ async function ensureOrgMembership(
  *
  * Best-effort: these are recoverable through the normal UI (`setUserDomains`,
  * the DOB step), so a Redis outage must not fail a login that has already
- * succeeded. A user with no stash — migrated, or admin-onboarded — is the
- * common case and costs one Redis read.
+ * succeeded.
  *
- * Returns the applied domain (or `null` when there is none / nothing was
- * applied / the lookup failed) so the caller can hand it to the welcome mail,
- * which needs to know which portal to link (#569).
+ * Returns the applied domain, or `null` when none was applied or the lookup
+ * failed; the welcome mail uses it to pick the portal link.
  */
 async function applySignupExtras(
   userId: string,
@@ -574,11 +523,9 @@ async function applySignupExtras(
     updates.updatedAt = new Date();
     await db.update(userTable).set(updates).where(eq(userTable.id, userId));
 
-    // SS-3 (#640): the domain the user picked at signup has just landed on
-    // their row, so this is the first moment a per-(network, domain) default
-    // aggregator can own them. No-op when they already have an owner or no
-    // default is nominated. Inside the same best-effort try/catch as the rest
-    // of this function — a login that already succeeded must not fail here.
+    // The signup domain has just landed on the row, so a per-(network, domain)
+    // default aggregator can now own them. No-op when they already have an
+    // owner or no default is nominated.
     if (extras.domain) {
       await tagUserForDomain(db, userId, extras.domain);
     }

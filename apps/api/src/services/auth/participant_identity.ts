@@ -1,31 +1,16 @@
 /**
  * Keycloak identity creation for admin-onboarded participants.
  *
- * The missing half of `POST /api/v1/admin/participant`. That route creates the
- * local `user` row (today via better-auth's `signUpEmail`), but under Keycloak
- * a local row is not an account: login goes through the realm's OTP flow, whose
- * `IdentifierFormAuthenticator` is **login-only** and fails with
- * `user_not_found` when no realm user owns the identifier. So a participant
- * onboarded by an aggregator got a signals row and no way to ever sign in.
+ * `POST /api/v1/admin/participant` writes the local `user` row
+ * (`insertLocalUser`), but login goes through the realm's OTP flow, which
+ * fails with `user_not_found` when no realm user owns the identifier, and
+ * `selfSignup` would answer `alreadyRegistered` for the local row. So the
+ * realm identity is created here with the id signals chose, via
+ * `partialImport`, keeping `keycloak user.id == sub == signals user.id`
+ * (`items.created_by` and every `*_owner` column key on it).
  *
- * Worse, they could not self-rescue either — `selfSignup` sees the existing
- * local row and returns `alreadyRegistered: true` without creating anything in
- * Keycloak, so "sign in" said *user not found* and "sign up" said *already
- * registered*.
- *
- * This module closes that gap by mirroring what `self_signup.ts` already does
- * for the public path: create the realm identity with the id signals chose, via
- * `partialImport`. The invariant that matters is
- *
- *     keycloak user.id == sub == signals user.id
- *
- * because `items.created_by` and every `*_owner` text column key on that id
- * (see the migration design §2.3/§6.1). `POST /users` is unusable here: on
- * Keycloak 26.5.5 it ignores a client-supplied id and mints its own.
- *
- * **Fails closed.** A participant with no realm identity cannot log in, so a
- * failure here is reported to the caller rather than logged and swallowed —
- * silently creating an unusable account is the bug being fixed.
+ * Fails closed: a participant with no realm identity cannot log in, so a
+ * failure is returned to the caller, not logged and swallowed.
  */
 
 import type { FastifyBaseLogger } from 'fastify';
@@ -35,7 +20,7 @@ import { mapUserToKeycloak } from '@/services/auth/user_to_keycloak';
 
 /** Why a participant's realm identity could not be created. */
 export type ParticipantIdentityErrorCode =
-  /** A Keycloak mode is active but the admin client is not configured. */
+  /** The Keycloak admin client is not configured. */
   | 'IDENTITY_PROVIDER_NOT_CONFIGURED'
   /** The row carries neither an email nor a phone, so it has no username. */
   | 'NO_IDENTIFIER'
@@ -47,11 +32,7 @@ export type ParticipantIdentityErrorCode =
 export type ParticipantIdentityResult =
   | {
       ok: true;
-      /**
-       * False when this instance runs `AUTH_PROVIDER=betterauth`, where there
-       * is no realm to create anything in and the better-auth row IS the
-       * account. Callers use this only for logging.
-       */
+      /** False when the realm identity already existed. Callers use this only for logging. */
       created: boolean;
     }
   | { ok: false; code: ParticipantIdentityErrorCode; message: string };
@@ -91,21 +72,13 @@ function getAdminClient(): KeycloakAdminClient | null {
 /**
  * Creates the Keycloak identity for an already-written signals `user` row.
  *
- * Idempotent: an identity already carrying `userId` is reported as success, so
- * a retried onboard does not fail on its own previous work.
- *
- * @param input - The signals user id plus the identifiers to key the realm user on.
- * @returns `ok` with `created` false under `AUTH_PROVIDER=betterauth` (nothing
- *   to do), `ok` with `created` true once the realm user exists, or a typed
- *   failure the caller must surface — never a silent partial success.
+ * Idempotent: an identity already carrying `userId` is reported as success
+ * (`created: false`), so a retried onboard does not fail on its own previous
+ * work. Any other failure is a typed result the caller must surface.
  */
 export async function createParticipantKeycloakIdentity(
   input: ParticipantIdentityInput,
 ): Promise<ParticipantIdentityResult> {
-  // Under `betterauth` there is no realm to write into and the better-auth row
-  // is the account. Both `dual` and `keycloak` need the identity: `dual`'s
-  // straggler backfill only fires on a better-auth *login*, which an
-  // aggregator-onboarded participant never performs.
   if (!authConfig.keycloak_enabled) return { ok: true, created: false };
 
   const client = getAdminClient();
@@ -127,7 +100,7 @@ export async function createParticipantKeycloakIdentity(
     name: input.name,
     email: input.email,
     // Onboarding by an aggregator proves nothing about the identifier; the OTP
-    // login is what verifies it. Same stance as `self_signup.ts`.
+    // login verifies it.
     emailVerified: false,
     phoneNumber: input.phoneNumber,
     phoneNumberVerified: false,
@@ -160,8 +133,7 @@ export async function createParticipantKeycloakIdentity(
         return { ok: true, created: true };
 
       case 'already_exists':
-        // A retry, or the migration script got here first. The id matches, so
-        // the invariant holds and there is nothing to do.
+        // A retry, or the migration script got here first. The id matches.
         input.log.info({
           operation: 'createParticipantKeycloakIdentity',
           status: 'skipped',
@@ -171,8 +143,8 @@ export async function createParticipantKeycloakIdentity(
         return { ok: true, created: false };
 
       case 'created_with_different_id':
-        // Must not happen on the partialImport path, but if the transport ever
-        // regresses to POST /users this is the invariant break — report it.
+        // Not expected on the partialImport path; reported because it breaks
+        // `sub == user.id`.
         input.log.error({
           operation: 'createParticipantKeycloakIdentity',
           status: 'failure',

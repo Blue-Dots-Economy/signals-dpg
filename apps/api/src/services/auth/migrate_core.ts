@@ -1,17 +1,10 @@
 /**
- * Pure orchestration core for the Keycloak user migration (rollout step R4 of
- * `docs/superpowers/plans/2026-07-23-keycloak-migration-design.md`).
+ * Decision core for the local-user → Keycloak migration. The CLI wrapper
+ * (`apps/api/scripts/migrate_users_to_keycloak.ts`) owns env, the pg pool, args
+ * and `process.exit`, and injects the Keycloak admin client, data access,
+ * options and logger, so every decision here is testable with fakes.
  *
- * The CLI wrapper (`scripts/migrate_users_to_keycloak.ts`) owns all the
- * side-effects — env loading, the pg pool, arg parsing, `process.exit` — and
- * injects everything this module needs: a Keycloak admin client, a data-access
- * object, options, and a logger. That keeps every migration *decision* (the
- * FATAL abort when a UUID is not honoured, the service-user exclusion wiring,
- * the reconcile false-green, dry-run conflict detection, idempotent re-runs)
- * unit-testable with fakes — no Keycloak and no Postgres.
- *
- * Each entry point returns a structured result **and** an exit code, and prints
- * through the injected logger, so the CLI's console output is unchanged.
+ * Each entry point returns a structured result and an exit code.
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -24,8 +17,7 @@ import {
   type SignalsUserRow,
 } from './user_to_keycloak.js';
 
-/** The Keycloak operations the migration needs — a narrow slice of the admin
- * client, so a fake in a test only has to implement these. */
+/** The slice of the Keycloak admin client the migration uses. */
 export type MigrationClient = Pick<
   KeycloakAdminClient,
   | 'createUser'
@@ -37,8 +29,7 @@ export type MigrationClient = Pick<
   | 'attributesWillPersist'
 >;
 
-/** Data access the migration needs. The SQL lives in the CLI shell; the
- * decisions live here, so tests inject rows directly. */
+/** Data access the migration needs; the SQL lives in the CLI wrapper. */
 export interface MigrationData {
   fetchHumanUsers(limit?: number): Promise<SignalsUserRow[]>;
   countServiceUsers(): Promise<number>;
@@ -112,8 +103,8 @@ export interface ProbeResult {
 }
 
 /**
- * §6.3 spike 1, executed rather than assumed: does POST /users honour a
- * client-supplied id on THIS Keycloak? Creates and deletes a throwaway user.
+ * Check whether this Keycloak's POST /users honours a client-supplied id.
+ * Creates and deletes a throwaway disabled user.
  */
 export async function runProbe(
   client: MigrationClient,
@@ -177,8 +168,9 @@ export async function runProbe(
 
 
 /**
- * Refuse to run if `phoneNumber` writes would be silently discarded (Keycloak 26
- * drops undeclared attributes without error → a FALSE GREEN reconcile).
+ * Refuse to run if `phoneNumber` writes would be silently discarded: Keycloak 26
+ * drops undeclared attributes without error, which would make reconcile pass
+ * falsely.
  */
 export async function assertAttributesPersist(
   client: MigrationClient,
@@ -266,7 +258,7 @@ async function findIdentifierClashes(client: MigrationClient, row: SignalsUserRo
   return clash.filter((c) => c.id !== row.id);
 }
 
-/** Dry run: report the collision case (§6.3 spike 2) without writing. */
+/** Dry run: report identifier collisions without writing. */
 async function dryRunPass(
   client: MigrationClient,
   ready: ReadyUser[],
@@ -341,9 +333,8 @@ async function createPass(
           logger.log(`  CONFLICT ${user.id}  ${outcome.detail}`);
           break;
         case 'created_with_different_id':
-          // Stop immediately: continuing would produce a population whose subs
-          // do not match the local ids — the one thing this migration must
-          // never do.
+          // Stop immediately: continuing would produce Keycloak subs that do
+          // not match the local ids.
           tally.idNotHonoured += 1;
           logger.error('');
           logger.error(
@@ -370,9 +361,9 @@ export interface ReconcileResult {
   errored: number;
 }
 
-/** The R4 go/no-go gate: every local human user must have a Keycloak user under
- * the same id, with its phone attribute intact (id-presence alone is a false
- * green — see the FALSE GREEN note in the design). */
+/** Go/no-go check: every local human user must have a Keycloak user under the
+ * same id, with its phone attribute intact (id presence alone can pass while
+ * phone attributes were dropped). */
 export async function runReconcile(
   client: MigrationClient,
   data: MigrationData,
