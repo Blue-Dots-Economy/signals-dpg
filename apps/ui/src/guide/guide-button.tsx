@@ -69,13 +69,11 @@ export function GuideButton() {
     if (tour && !isTourRunning()) start(tour);
   }, [requested, pathname, searchParams, setSearchParams, start]);
 
-  // Auto-play, once per tour. Signed in, only in the person's FIRST session
-  // in the app (`/auth/me` first_login — decided per account on the server,
-  // so a new phone does not replay them, and someone a voice call or an
-  // aggregator signed up still gets them on their first real visit); each
-  // page's tour then plays as they reach it. Signed out, a page's auto-start
-  // tour plays once per browser. Skipped under test runners and browser
-  // automation, where an overlay would block the run.
+  // Auto-play, once per tour. Signed in: only in the person's first session
+  // (`/auth/me` first_login, decided per account server-side, so a new phone
+  // does not replay them); each page's tour plays as they reach it. Signed out:
+  // a page's auto-start tour plays once per browser. Skipped under test
+  // runners and browser automation, where an overlay would block the run.
   const firstLogin = isAuthenticated && user?.firstLogin === true;
   React.useEffect(() => {
     if (requested || import.meta.env.MODE === 'test' || navigator.webdriver) return;

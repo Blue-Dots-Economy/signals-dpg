@@ -14,12 +14,10 @@ import { getRuntimeEnv } from '@/lib/runtime-env';
 import { applyNetworkBrand } from '@/theme/theme-provider';
 import { TOURIST_NETWORK_ID, TOURIST_BRAND } from './resolve-tourist-config';
 
-// Apply network + brand to <html> (data-network/data-brand) and install the
-// brand-aware favicon from the MODULE-resolved values. The inline HTML script
-// only sets first-paint fallbacks because Vite `define` does not replace tokens
-// inside classic inline <script> blocks. The tourist app has no
-// NetworkThemeProvider, so without this the active brand's CSS + favicon never
-// activate (data-brand stays 'standard').
+// Apply network + brand to <html> and install the brand-aware favicon from the
+// module-resolved values. The inline HTML script only sets first-paint
+// fallbacks (Vite `define` does not replace tokens in classic inline scripts),
+// and the tourist app has no NetworkThemeProvider to do it.
 const meta = applyNetworkBrand(TOURIST_NETWORK_ID, TOURIST_BRAND);
 
 // Browser tab title — sources in order:
@@ -28,9 +26,8 @@ const meta = applyNetworkBrand(TOURIST_NETWORK_ID, TOURIST_BRAND);
 //   3. neutral default 'Signals'
 document.title = meta.copy.title || getRuntimeEnv('VITE_TOURIST_APP_TITLE')?.trim() || 'Signals';
 
-// AUTH-VULN-03/04: clear the access/refresh tokens the old build left in
-// this browser. Nothing reads them any more, so they would otherwise sit
-// there readable by any script on the origin.
+// Clear access/refresh tokens an older build left in browser storage. Nothing
+// reads them, and they would otherwise sit readable by any script on the origin.
 purgeLegacyAuthStorage();
 
 const queryClient = createQueryClient();
@@ -39,11 +36,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ThemeModeProvider>
       {/*
-       * Same <Toaster> configuration as app.tsx. The tourist app opens straight
-       * onto the map and has no theme toggle, so a visitor on a dark-mode phone
-       * gets the light basemap with no way to switch — this is where the
-       * one-per-session basemap notice matters most, and without a mounted
-       * Toaster sonner would drop it silently.
+       * Same <Toaster> as app.tsx. The tourist app opens on the map with no theme
+       * toggle, so the one-per-session basemap notice matters most here, and
+       * sonner drops it without a mounted Toaster.
        */}
       <Toaster
         position="top-center"
