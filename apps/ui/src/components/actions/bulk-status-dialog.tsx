@@ -220,7 +220,7 @@ export function BulkStatusDialog({
     <ResponsiveDialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && isPending) return;
+        if (!next && isPending) return; // don't allow dismiss mid-submit
         onOpenChange(next);
       }}
       title={t(titleKey, { count: actions.length })}

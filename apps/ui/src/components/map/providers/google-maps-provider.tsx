@@ -123,7 +123,7 @@ function resolveThemeColor(varName: string, fallback: string): string {
   const ctx = document.createElement('canvas').getContext('2d');
   if (!ctx) return computed;
   ctx.fillStyle = fallback;
-  ctx.fillStyle = computed;
+  ctx.fillStyle = computed; // canvas normalizes oklch → rgb if supported
   return ctx.fillStyle;
 }
 
@@ -331,8 +331,9 @@ function ClusteredMarker({
       </AdvancedMarker>
       {isActive &&
         (isMobile
-          ? // Mobile: a centred overlay instead of the InfoWindow, which pushed
-            // tall cards off-screen and gave them no bounded height to scroll.
+          ? // Mobile: render the card as a centered overlay (portal to <body>)
+            // instead of the InfoWindow, which pushed tall cards off-screen and
+            // gave them no bounded height to scroll.
             createPortal(
               <div
                 className="fixed inset-0 z-[2000] flex items-center justify-center p-3"
@@ -534,7 +535,7 @@ function ClustererManager({
   // set by default, which is O(n^2) as markers register one by one, so they
   // run with noDraw=true and this batches a single render().
   const scheduleRender = React.useCallback(() => {
-    if (renderRafRef.current != null) return;
+    if (renderRafRef.current != null) return; // already scheduled this frame
     renderRafRef.current = requestAnimationFrame(() => {
       renderRafRef.current = null;
       clustererRef.current?.render();
@@ -557,7 +558,7 @@ function ClustererManager({
         return;
       }
 
-      if (prev === el) return;
+      if (prev === el) return; // No change.
 
       if (prev) {
         clusterer.removeMarker(prev, true);

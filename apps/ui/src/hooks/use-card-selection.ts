@@ -56,7 +56,7 @@ export function useCardSelection(): CardSelection {
           return next;
         }
         if (lockKey !== null && groupKey !== undefined && groupKey !== lockKey) {
-          return prev;
+          return prev; // ignore off-lock additions
         }
         next.add(id);
         if (prev.size === 0 && groupKey !== undefined) setLockKey(groupKey);
