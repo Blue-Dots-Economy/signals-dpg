@@ -23,10 +23,9 @@ interface TopBarProps {
   subtitle?: string;
   /** Invoked by the Back button when `variant === 'form'`. */
   onBack?: () => void;
-  /** Label for the Back control (defaults to "Back"). Form pages pass "Browse"
-   * since the control returns to the browse view, not the prior route. */
+  /** Label for the Back control (default "Back"). */
   backLabel?: string;
-  // browse-only — unused (and unneeded) when variant === 'form'
+  // browse only
   search?: string;
   onSearchChange?: (value: string) => void;
   viewMode?: ViewMode;
@@ -96,22 +95,14 @@ export function TopBar({
         </div>
       ) : (
         <>
-          {/* On mobile this used to ALWAYS drop to its own full-width line,
-              which left row one holding nothing but icons and a gap — two rows
-              of chrome before any content. It now shares row one whenever
-              there is room; the class comment below says when that is. From
-              `sm` up it is inline and wide, unchanged. */}
-          {/* `max-w-2xl`, up from `max-w-md`: the Filters trigger moved to the
-              browse toolbar, so the search box can take the width it left
-              rather than sitting beside a gap. */}
+          {/* Search shares row one on mobile when there is room. */}
+          {/* Wide (`max-w-2xl`): the Filters trigger is in the toolbar. */}
           <div
             className={cn(
               'relative min-w-0 sm:order-none sm:w-auto sm:flex-1 sm:max-w-2xl',
-              // Signed in, the language + theme pair below is hidden under
-              // `md`, so the row has room for the search inline and row one is
-              // actually used. Signed out those two are present and it does
-              // not fit — then it keeps its own full-width line rather than
-              // shrinking to an unusable stub.
+              // Signed in, language and theme are hidden under `md`, so search
+              // fits inline. Signed out it takes its own full-width line rather
+              // than shrinking to a stub.
               isAuthenticated ? 'flex-1' : 'order-last w-full',
             )}
           >
@@ -147,18 +138,13 @@ export function TopBar({
           </ToggleGroup>
         )}
 
-        {/* On mobile, Language + Theme move into the avatar dropdown once the
-            user is signed in (there's no dropdown to move them into for the
-            logged-out case, so they stay inline there). */}
+        {/* On mobile, signed-in users get these in the avatar menu instead. */}
         <div
           data-tour="preferences"
           className={cn('flex items-center gap-2', isAuthenticated && 'hidden md:flex')}
         >
-          {/* `compact` renders the switcher icon-only below sm and shows the
-              language label from sm up. On the logged-out mobile bar (where the
-              controls stay inline) this frees the ~90px "English" label so the
-              row no longer overflows and wraps to a third line. Desktop (sm+)
-              is unchanged — the full label still shows. */}
+          {/* `compact`: icon-only below sm, so the signed-out mobile bar does
+              not overflow. */}
           <LanguageSwitcher compact />
           <ThemeModeToggle />
         </div>
