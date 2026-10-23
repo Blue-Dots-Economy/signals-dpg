@@ -4,7 +4,7 @@
 // partitioned item/action/event tables. Tables defined in
 // apps/api/db/postgres/schema/*.ts are owned by Drizzle and not bundled.
 //
-// The bundle is a generated reference copy checked by CI (schema-parity job).
+// The bundle is a generated reference copy applied by CI's test and schema-parity jobs.
 // Nothing at runtime applies it: `pnpm db:init:api` reads the source scripts
 // directly, and deploys run the Drizzle ledger (apps/api/scripts/migrate.mjs).
 //

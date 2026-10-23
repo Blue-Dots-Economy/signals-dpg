@@ -136,8 +136,8 @@ export const DiscoverResponseItemSchema = ItemResponseSchema.extend({
 
 // When signals-search throws, times out or is unconfigured, the BFF falls back
 // to the native item fetch (`native_fallback`, `degraded: true`) so an outage
-// never surfaces as a 5xx. `q` and `filters` still apply there; only
-// relevance ranking is lost.
+// never surfaces as a 5xx. `q` and `filters` still apply there (`q` to local
+// rows only); only relevance ranking is lost.
 export const DiscoverSourceSchema = z.enum(['signals_search', 'native_fallback']);
 
 export const DiscoverResponseSchema = z.object({

@@ -200,7 +200,8 @@ ensure_acting_org_mapper signals-ui '{
 }'
 
 # Service clients get a wildcard grant: the integrating DPGs' platform-wide
-# reach, made explicit and auditable.
+# reach, made explicit and auditable. Known limitation: the wildcard is broader
+# than any one DPG needs; it should become a per-DPG list of orgs.
 for svc in aggregator-dpg voice-dpg; do
   ensure_acting_org_mapper "$svc" '{
     "name": "signals_acting_orgs",
