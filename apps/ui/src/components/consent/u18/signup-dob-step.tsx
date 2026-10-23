@@ -4,24 +4,16 @@ import { ArrowRight, Info } from 'lucide-react';
 import { BirthYearSelect } from '@/components/consent/u18/birth-year-select';
 
 export interface SignupDobStepProps {
-  /**
-   * Called with the derived age once the ward taps Continue. Pure UI — no API
-   * call. The caller derives minor status and routes accordingly.
-   */
+  /** Called with the derived age on Continue. No API call. */
   onSubmit: (age: number) => void;
-  /**
-   * True when an EXISTING user is backfilling a missing DOB before their login
-   * OTP (vs a brand-new signup) — switches the heading copy accordingly.
-   */
+  /** True when an existing user is backfilling a missing DOB; switches the heading copy. */
   existing?: boolean;
 }
 
 /**
- * DOB capture step shown DURING signup, AFTER the name/domain form, and ONLY
- * when the chosen domain is guardian-gated (u18-enabled). Rendered inline as
- * the auth page's content (inside AuthShell) — it REPLACES the signup form
- * rather than stacking as a modal over it. Purely collects the date; the
- * caller decides minor -> guardian flow vs adult -> account creation.
+ * Birth-year step for the legacy OTP login page (`OtpLoginPage`), whose OTP
+ * API endpoints no longer exist; the Keycloak panel does not use it. Collects
+ * the age only; the caller routes minors to the guardian flow.
  */
 export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();

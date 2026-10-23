@@ -22,23 +22,18 @@ export interface U18GuardianFlowProps {
   /** DOB step resolved the ward as an adult — caller should fall back to the normal consent flow. */
   onNotMinor: () => void;
   /**
-   * Step to start on. Defaults to `'dob'` (the original first-login/bulk-user
-   * gate on the home page, which doesn't yet know the ward's DOB). A caller
-   * that already resolved `isMinor === true` itself via `submitU18Dob` (e.g.
-   * the Signals self-signup flow, which collects DOB in its own form before
-   * OTP verification) can pass `'guardian'` to skip the redundant DOB step.
+   * Step to start on. `'dob'` when the ward's age is unknown; a caller that
+   * already knows the ward is a minor passes `'guardian'`.
    */
   initialStep?: U18Step;
   /**
-   * Optional escape hatch. The flow blocks the whole page (a minor must not
-   * proceed without a guardian), so the external menu can't be reached — this
-   * lets a ward who can't get through (wrong account, backend outage) sign out.
+   * Escape hatch: the flow blocks the whole page, so this lets a ward who
+   * cannot get through (wrong account, outage) sign out.
    */
   onLogout?: () => void;
   /**
-   * Render the steps INLINE (plain content, no blocking Dialog) instead of the
-   * default modal. Used inside the auth flow's right panel post-login (#453),
-   * matching SignupGuardianFlow; the home page keeps the modal presentation.
+   * Render the steps inline instead of in a blocking dialog, for the auth
+   * pages' panel (like SignupGuardianFlow).
    */
   inline?: boolean;
   /** What this OTP authorises — passed to the guardian OTP step's purpose panel. */
@@ -46,9 +41,8 @@ export interface U18GuardianFlowProps {
 }
 
 /**
- * First-login guardian consent flow for under-18 wards (U18 Phase 6, D1/D4):
- * DOB → guardian details (with same-contact warn-and-ack) → guardian OTP.
- * Blocking, like ProfileConsentModal — cannot be dismissed mid-flow.
+ * Guardian consent flow for a signed-in under-18 ward: DOB, guardian details,
+ * guardian OTP. Blocking; cannot be dismissed mid-flow.
  */
 export function U18GuardianFlow({
   network,
@@ -95,9 +89,7 @@ export function U18GuardianFlow({
             setGuardianBody(body);
             setStep('otp');
           }}
-          // Back to the year-of-birth step only when this flow owns one (existing
-          // user, post-login #453). When it started at 'guardian' (DOB known)
-          // there's nowhere to go back to.
+          // Back only when this flow started at the DOB step.
           onBack={initialStep === 'dob' ? () => setStep('dob') : undefined}
         />
       )}
@@ -129,8 +121,6 @@ export function U18GuardianFlow({
     </>
   );
 
-  // Inline (#453): render the steps directly in the auth flow's right panel,
-  // matching the login/OTP form + SignupGuardianFlow — no blocking Dialog.
   if (inline) {
     return (
       <div className="flex flex-col gap-4">
@@ -147,9 +137,7 @@ export function U18GuardianFlow({
     <ResponsiveDialog
       open
       onOpenChange={(next) => {
-        // Blocking: never dismiss via the Dialog's own open-change. The whole
-        // page stays inert so a minor cannot create a profile or act before the
-        // guardian confirms.
+        // Blocking, so a minor cannot act before the guardian confirms.
         if (!next) return;
       }}
       dismissible={false}

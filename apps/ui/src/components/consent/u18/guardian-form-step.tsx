@@ -20,23 +20,19 @@ import {
 export interface GuardianFormStepProps {
   network: string;
   brand?: string | null;
-  /** Called after a successful submit (OTP sent), with the body used — kept by
-   * the orchestrator so the OTP step can resend without re-collecting the form. */
+  /** Called after a successful submit (OTP sent) with the body, so the OTP step can resend. */
   onSubmitted: (body: SubmitGuardianBody) => void;
   /**
-   * Submit handler. Defaults to the authenticated `submitGuardian`
-   * (POST /u18/guardian). The pre-auth signup flow injects a handler that
-   * maps the same body onto POST /u18/signup/guardian (no session yet).
+   * Defaults to the authenticated `submitGuardian` (POST /u18/guardian). The
+   * pre-auth signup flow passes one for POST /u18/signup/guardian.
    */
   submit?: (body: SubmitGuardianBody) => Promise<SubmitGuardianResponse>;
   /**
-   * Contact to compare against for the same-contact warning. Defaults to the
-   * authenticated user's own email/phone; the pre-auth signup flow (no session)
-   * passes the ward's signup identifier instead.
+   * Contact for the same-contact check. Defaults to the signed-in user's;
+   * the pre-auth signup flow passes the ward's signup identifier.
    */
   ownContact?: { email?: string | null; phoneNumber?: string | null };
-  /** Optional back handler — renders a "Back" control returning to the previous
-   * step (the birth-year step). Omitted when there's nowhere to go back to. */
+  /** Renders a "Back" control to the birth-year step when set. */
   onBack?: () => void;
 }
 
@@ -60,8 +56,7 @@ export function GuardianFormStep({
   const [guardianName, setGuardianName] = React.useState('');
   const [guardianEmail, setGuardianEmail] = React.useState('');
   const [guardianPhone, setGuardianPhone] = React.useState('');
-  // Consent is captured via the same blocking popup the login flow uses (below):
-  // Send OTP opens it, "Accept & continue" records the acceptance and proceeds.
+  // Send OTP opens the blocking consent gate; accepting records it and sends.
   const [consentAccepted, setConsentAccepted] = React.useState(false);
   const [showConsentGate, setShowConsentGate] = React.useState(false);
   const [serverFlaggedSameContact, setServerFlaggedSameContact] = React.useState(false);
@@ -72,9 +67,8 @@ export function GuardianFormStep({
   const guardianPhoneE164 = toE164(guardianPhone);
   const hasContact = Boolean(guardianEmail.trim()) || guardianPhone.length === 10;
 
-  // Hard block: a guardian contact equal to the ward's own is NOT allowed (a
-  // ward can't be their own guardian). Detected client-side and re-enforced by
-  // the server (409 SAME_CONTACT_NOT_ALLOWED).
+  // A ward cannot be their own guardian. Also enforced server-side
+  // (409 SAME_CONTACT_NOT_ALLOWED).
   const ownEmail = compareContact.email?.trim().toLowerCase();
   const ownPhone = compareContact.phoneNumber?.trim();
   const clientDetectedSameContact =
@@ -112,10 +106,8 @@ export function GuardianFormStep({
       return;
     }
 
-    // Consent via the same blocking popup login uses: open it here; its
-    // "Accept & continue" (onAccept below) records acceptance and calls doSubmit.
-    // If no consent doc is configured there's nothing to show — proceed (the
-    // server still records the ward's terms/privacy rows).
+    // With no consent config there is nothing to show, so proceed; the server
+    // still records the ward's terms/privacy rows.
     if (!consentAccepted && consentConfig) {
       setValidationError(null);
       setShowConsentGate(true);
@@ -175,9 +167,7 @@ export function GuardianFormStep({
   return (
     <>
     {consentConfig && showConsentGate && (
-      // Same blocking consent popup as login — the ward's guardian reads T&C +
-      // Privacy and taps "Accept & continue", which records acceptance and
-      // resumes sending the OTP.
+      // The U18 consent gate; accepting resumes sending the OTP.
       <ConsentModal
         open
         mode="gate"
