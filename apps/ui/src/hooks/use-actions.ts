@@ -20,22 +20,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { queryKeys } from '@/lib/query-keys';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 
-// ─── Query Keys ───────────────────────────────────────────────────
-
 export const actionKeys = queryKeys.actions;
 
-// ─── Constants ───────────────────────────────────────────────────
-
-// How often to re-fetch action lists + the pending-action badge count.
-// 5s was historically the default for a "real-time feel" but produces ~12
-// requests per minute per logged-in user even when nothing changes — the
-// dominant cost in the captured HAR. 30s is a better default for a
-// notification badge (the receiver also gets an instant local refresh via
-// useUpdateActionStatus.onSuccess invalidation, so polling only covers
-// the cross-user case of someone else sending a new action).
-//
-// Override via `VITE_ACTION_POLL_INTERVAL_MS` (e.g. `"15000"` to poll every
-// 15 seconds, or `"0"` to disable polling entirely and rely on mutations).
+// How often action lists and the pending badge refetch (default 60s). Polling
+// only covers someone else sending a new action; a user's own status change
+// refreshes at once through mutation invalidation. Override with
+// `VITE_ACTION_POLL_INTERVAL_MS` ("0" disables polling).
 const DEFAULT_POLLING_INTERVAL = 60000;
 
 export function resolvePollingInterval(): number | false {
@@ -49,17 +39,11 @@ export function resolvePollingInterval(): number | false {
 
 const POLLING_INTERVAL = resolvePollingInterval();
 
-// Page size for BOTH the plain `useActions` query (when the caller doesn't
-// override it) and the paged `useReceivedActions`/`useInitiatedActions`
-// infinite queries below (#439). Replaces the old hardcoded `limit: 100,
-// offset: 0` — a small page + `useInfiniteQuery`'s `getNextPageParam` is what
-// makes "My Actions" pageable instead of fetching everything up front.
+// Page size for `useActions` (unless overridden) and the infinite action hooks.
 export const ACTIONS_PAGE_SIZE = 20;
 
-// The query-shaping fields #439 adds on top of plain react-query options.
-// Kept as ONE merged options object (rather than a separate `params` arg) so
-// every existing `useActions('all', { enabled: !!user })` call site keeps
-// working unchanged.
+// Query-shaping fields merged into the react-query options object, so
+// `useActions('all', { enabled })` call sites need no separate params argument.
 interface ActionQueryFields {
   /** Scope to a single item's actions (either side) — the active profile. */
   itemId?: string | null;
@@ -77,12 +61,9 @@ type UseActionsOptions = ActionQueryFields &
   >;
 
 /**
- * Builds the FetchMyActionsQuery filter shape shared by `useActions` and the
- * infinite `useReceivedActions`/`useInitiatedActions` below, WITHOUT `offset`
- * — offset is either fixed (plain `useActions`) or driven by
- * `useInfiniteQuery`'s pageParam (the infinite hooks), so it's applied by the
- * caller, not baked into this shared shape (mirrors
- * `useInfiniteBrowseItems`'s `filterKey` convention).
+ * The FetchMyActionsQuery filter shape shared by the action hooks, without
+ * `offset`: that is fixed for `useActions` and the page param for the infinite
+ * hooks.
  */
 function buildActionsFilterKey(
   ownershipRole: 'initiated' | 'received' | 'all',
@@ -99,17 +80,9 @@ function buildActionsFilterKey(
   };
 }
 
-// ─── Hooks ────────────────────────────────────────────────────────
-
 /**
- * Hook to fetch actions with auto-polling every 5 seconds
- * Use ownershipRole to filter: 'initiated' | 'received' | 'all'
- *
- * #439: now also accepts the same query-shaping fields as the infinite
- * hooks below (`itemId`/`status`/`type`/`sort`/`facets`/`limit`) merged into
- * the options object, so a caller that only wants "give me my recent
- * actions" (e.g. the home-page/public-profile-page open-pair-check) keeps
- * working unchanged while a caller that wants to scope/sort can opt in.
+ * Fetches the caller's actions with polling. `ownershipRole` selects
+ * 'initiated' | 'received' | 'all'; the optional query fields scope and sort.
  */
 export function useActions(
   ownershipRole: 'initiated' | 'received' | 'all' = 'all',
@@ -134,16 +107,12 @@ export function useActions(
     refetchIntervalInBackground: false, // Stop polling when tab is hidden
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
     ...restOptions,
-    // Don't fetch/poll actions for anonymous users — the endpoint requires a
-    // session and would 401 on every poll (e.g. sidebar open while logged out).
+    // The endpoint requires a session; anonymous callers would 401 on every poll.
     enabled: isAuthenticated && (callerEnabled ?? true),
   });
 }
 
-/**
- * Hook to get count of pending received actions for badge
- * Auto-polls every 5 seconds
- */
+/** Count of pending received actions, for the badge. Polls. */
 export function usePendingActionsCount() {
   const { isAuthenticated } = useAuth();
   return useQuery({
@@ -163,16 +132,11 @@ export function usePendingActionsCount() {
     refetchInterval: POLLING_INTERVAL,
     refetchIntervalInBackground: false,
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
-    // Anonymous users have no actions — skip the polling entirely (avoids
-    // repeated 401s when the sidebar is open while logged out).
     enabled: isAuthenticated,
   });
 }
 
-/**
- * Hook to update action status
- * Automatically invalidates action queries on success
- */
+/** Updates one action's status and invalidates all action queries. */
 export function useUpdateActionStatus() {
   const queryClient = useQueryClient();
 
@@ -182,7 +146,6 @@ export function useUpdateActionStatus() {
       return response;
     },
     onSuccess: () => {
-      // Invalidate all action-related queries to refresh data
       queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },
   });
@@ -198,8 +161,8 @@ export function useUpdateActionStatusBulk() {
   return useMutation<
     BulkEnvelope<UpdateActionStatusResponse>,
     Error,
-    // `guardianOtp` (when a minor resubmits the batch after GUARDIAN_OTP_REQUIRED)
-    // rides on every payload so one code clears the whole accept batch (#393).
+    // `guardianOtp` (a minor resubmitting after GUARDIAN_OTP_REQUIRED) rides on
+    // every payload so one code clears the whole batch.
     { payloads: UpdateActionStatusPayload[]; guardianOtp?: string }
   >({
     mutationFn: ({ payloads, guardianOtp }) => updateActionStatusBulk(payloads, guardianOtp),
@@ -209,10 +172,7 @@ export function useUpdateActionStatusBulk() {
   });
 }
 
-/**
- * Hook to get actions by specific status
- * Useful for filtering received actions
- */
+/** Received actions, optionally filtered by status. Polls. */
 export function useReceivedActionsByStatus(
   status?: string,
   options: Omit<
@@ -246,11 +206,7 @@ export function useReceivedActionsByStatus(
   });
 }
 
-/**
- * Query-shaping params `useReceivedActions`/`useInitiatedActions` accept on
- * top of the required scoping `itemId` (#439: My Actions per-profile
- * filter/sort — the page owns this state and passes it straight through).
- */
+/** Query-shaping params for `useReceivedActions`/`useInitiatedActions`. */
 export interface UseOwnedActionsParams {
   status?: NonNullable<FetchMyActionsQuery['action_status']>;
   type?: NonNullable<FetchMyActionsQuery['action_type']>;
@@ -264,19 +220,10 @@ interface ActionsPage {
 }
 
 /**
- * Shared `useInfiniteQuery` builder for the received/initiated tabs (#439).
- * `itemId` is REQUIRED to be a real id for the query to run — My Actions is
- * now scoped to exactly one (live) profile, so with no resolvable profile
- * there is nothing to scope to and the fetch stays disabled (an empty list
- * is the correct end state, not "fetch everything unscoped" like the old
- * behavior).
- *
- * The query key is built from `buildActionsFilterKey` (limit fixed at
- * `ACTIONS_PAGE_SIZE`, NO offset) so paging within the same filter set
- * appends pages via `fetchNextPage` instead of minting a new cache entry per
- * page; changing any filter (status/sort/facets/itemId) changes the key and
- * `useInfiniteQuery` restarts paging at offset 0, matching
- * `useInfiniteBrowseItems`'s convention.
+ * Shared infinite query for the received/initiated lists, scoped to one live
+ * profile. With no `itemId` the query stays disabled (an empty list, never an
+ * unscoped fetch). The key has no offset, so paging appends pages and a filter
+ * change restarts at offset 0.
  */
 function useOwnedActionsInfinite(
   ownershipRole: 'initiated' | 'received',
@@ -297,10 +244,7 @@ function useOwnedActionsInfinite(
       const nextOffset = lastPage.meta.offset + lastPage.meta.limit;
       return nextOffset < lastPage.meta.total ? nextOffset : undefined;
     },
-    // Same freshness behavior as before (60s default) — a refetch just
-    // re-requests the FIRST page's worth (react-query refetches every loaded
-    // page on an interval/invalidate, same as it always has for infinite
-    // queries), keeping the badge/list in sync without a full page reload.
+    // Polling refetches every loaded page.
     refetchInterval: POLLING_INTERVAL,
     refetchIntervalInBackground: false,
     staleTime: POLLING_INTERVAL === false ? Infinity : POLLING_INTERVAL,
@@ -308,11 +252,7 @@ function useOwnedActionsInfinite(
   });
 }
 
-/**
- * Hook to get initiated actions, scoped to `itemId` (the active live
- * profile) and paged via `useInfiniteQuery` (#439). See
- * `useOwnedActionsInfinite` for the shared paging/scoping behavior.
- */
+/** Initiated actions for `itemId` (the active live profile), paged. */
 export function useInitiatedActions(
   itemId: string | null | undefined,
   params: UseOwnedActionsParams = {},
@@ -320,11 +260,7 @@ export function useInitiatedActions(
   return useOwnedActionsInfinite('initiated', itemId, params);
 }
 
-/**
- * Hook to get received actions, scoped to `itemId` (the active live
- * profile) and paged via `useInfiniteQuery` (#439). See
- * `useOwnedActionsInfinite` for the shared paging/scoping behavior.
- */
+/** Received actions for `itemId` (the active live profile), paged. */
 export function useReceivedActions(
   itemId: string | null | undefined,
   params: UseOwnedActionsParams = {},
@@ -333,10 +269,9 @@ export function useReceivedActions(
 }
 
 /**
- * One page of the caller's sent + received actions (My Actions revamp):
- * offset/limit paging, filters and `include` parts exactly as the query says.
- * Keeps the previous page on screen while the next loads, so paging and
- * filtering don't flash an empty table.
+ * One page of the caller's sent and received actions, with filters and
+ * `include` parts as the query says. Keeps the previous page on screen while
+ * the next loads, so paging and filtering don't flash an empty table.
  */
 export function useOwnedActionsPage(query: FetchMyActionsQuery, enabled = true) {
   const { isAuthenticated } = useAuth();

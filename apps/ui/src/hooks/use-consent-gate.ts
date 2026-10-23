@@ -21,9 +21,8 @@ interface UseConsentGateResult {
   config: ConsentConfigDocument | null;
   currentVersions: CurrentVersions | null;
   /**
-   * Which document set applies (#626). Comes from the status endpoint, which
-   * derives it server-side from the user's recorded age — the client has no
-   * access to the age and must not decide this for itself.
+   * Which document set applies. The status endpoint derives it from the user's
+   * recorded age; the client has no access to the age and must not decide it.
    */
   variant: ConsentVariant;
   isLoading: boolean;

@@ -17,10 +17,9 @@ export function mergeConsentConfig(
       profile_creation:
         brandOverride.documents.profile_creation ?? networkDefault.documents.profile_creation,
     },
-    // Per-document, like `documents` above: a brand that overrides only the U18
-    // terms keeps the network's U18 privacy rather than losing the whole set.
-    // Dropping `u18_documents` here (as this did) silently downgraded every
-    // branded deployment's minors to the adult copy (#626).
+    // Merged per document, like `documents`: a brand overriding only the U18
+    // terms keeps the network's U18 privacy, and minors never fall back to the
+    // adult copy.
     u18_documents: mergeU18Documents(networkDefault.u18_documents, brandOverride.u18_documents),
     actions: brandOverride.actions ?? networkDefault.actions,
   };

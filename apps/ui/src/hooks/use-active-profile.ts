@@ -10,19 +10,14 @@ interface UseActiveProfileResult {
 }
 
 /**
- * Shared "which of my own profiles am I acting/viewing as" state, lifted out
- * of home-page.tsx (home-page keeps its own copy — not refactored here) so
- * other pages (e.g. the shell around the public profile page) can reuse the
- * same restore-on-load + persist behavior without depending on browse-only
- * concerns like the profile-consent gate.
+ * Which of the user's own profiles they are acting as, restored on load and
+ * persisted per network. Used by pages outside home (home-page keeps its own
+ * copy).
  *
- * Restore runs once per network: prefer the stored id (if it still names one
- * of `myItems`), else default to `myItems[0]`. Unlike home-page's version this
- * has no `isFetched` signal to key off of, so the restore is deferred until
- * `myItems` is non-empty — if a network genuinely has zero owned profiles the
- * id simply stays `null` (the correct end state either way), and the stored
- * localStorage value from a previous session is left untouched rather than
- * cleared out from under a fetch that just hasn't resolved yet.
+ * Restore runs once per network: the stored id if it still names one of
+ * `myItems`, else `myItems[0]`. It waits until `myItems` is non-empty, so a
+ * fetch still in flight does not clear the stored id; with no owned profiles
+ * the id stays null.
  */
 export function useActiveProfile(
   network: DotNetworkSchema | null,
