@@ -1,12 +1,8 @@
 import { redis } from '@api/db/secondary/redis';
 
 /**
- * Fixed-window counter: increment `key`, set the window TTL on the first hit,
- * return the running count. The caller decides the max and what to do when it
- * is exceeded.
- *
- * Extracted from `services/guardian_otp.ts` when the support route needed the
- * same primitive (#551) — it is the only rate-limit shape this API uses.
+ * Fixed-window counter: increments `key`, sets the window TTL on the first
+ * hit, and returns the running count. The caller decides the limit.
  */
 export async function incrWithinWindow(key: string, windowSec: number): Promise<number> {
   const count = await redis.incr(key);

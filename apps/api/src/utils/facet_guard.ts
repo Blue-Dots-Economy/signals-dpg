@@ -18,12 +18,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Declared, non-private facet fields for an item schema, keyed by field name.
- * Reuses the same `properties[field].private === true` convention as
- * `item_state_privacy.ts` / `location_fields.ts` (item_state masking) — a
- * field is a valid facet target only if it is declared in the schema's
- * `properties` AND not marked private. `arrayValued` (JSON Schema
- * `type: 'array'`) tells the signals-search client which filter op to use.
+ * Declared, non-private fields of an item schema (the same
+ * `properties[field].private === true` convention as item_state masking).
+ * `arrayValued` (`type: 'array'`) tells the signals-search client which
+ * filter op to use.
  */
 export function resolveAllowedFacetFields(
   itemSchema: Record<string, unknown>
@@ -45,12 +43,10 @@ export function resolveAllowedFacetFields(
 }
 
 /**
- * Server-resolved private/undeclared-facet guard for the discover BFF (#203).
- * Drops any client-supplied filter whose field is not a declared, non-private
- * facet on the network config's item schema — the client's field list is
- * never trusted. Defense-in-depth: `item_state` is already the masked public
- * projection, but undeclared fields (typos, fields dropped from a newer
- * schema, etc.) must not reach signals-search either.
+ * Drops any client filter whose field is not a declared, non-private field of
+ * the item schema; the client's field list is never trusted. `item_state` is
+ * already the masked projection, but undeclared fields must not reach
+ * signals-search either.
  */
 export function resolveAllowedFacetFilters(
   networkConfig: NetworkConfigDocument,
@@ -75,23 +71,11 @@ export function resolveAllowedFacetFilters(
 }
 
 /**
- * #394 map native text search (moved here unchanged from `markers.ts` for
- * #203 List PR Task 3 reuse by the discover BFF's native fallback): resolves
- * the SERVER-known allowlist of non-private `item_state` field keys a
- * free-text `q` may match against, for a given network/domain (+ optional
- * item_type). Reuses `resolveAllowedFacetFields` above — the same
- * `private: true` convention every other item_state guard in this codebase
- * already trusts — never the client's own field list, so a client can't
- * expand its match surface by naming more fields.
- *
- * `item_type` is optional for callers whose request can span every item_type
- * in a domain (e.g. a map viewport), so when it's omitted this unions the
- * non-private fields across every item_type declared for the domain — the
- * same "no single item_type" treatment item_fetch_runtime.ts's own
- * (differently-scoped, array-facet) `resolveAllowedFacetFields` already
- * gives. A network/domain/item_type this instance doesn't actually define
- * contributes no fields — fails closed via `buildWhereClause`'s
- * `fields.length === 0` branch (unsatisfiable match), never a throw or a 500.
+ * Server-side allowlist of non-private `item_state` keys a free-text `q` may
+ * match, never the client's own list. With no `item_type` (e.g. a map
+ * viewport) it unions every item type of the domain. An undefined
+ * network/domain/item_type yields no fields, which makes the match
+ * unsatisfiable rather than an error.
  */
 export function resolveTextSearchFields(
   networkConfig: NetworkConfigDocument,
