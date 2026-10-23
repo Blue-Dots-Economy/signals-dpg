@@ -48,29 +48,24 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 /**
- * Write any consent accepted on the login screen. The accept endpoint is
- * authenticated, so this is the first moment it can be persisted — the
- * acceptance was parked across the Keycloak redirect.
- *
- * Deliberately non-fatal: the user is signed in either way, and a failed write
- * means the gate re-prompts next login rather than stranding them here.
+ * Writes any consent accepted on the login screen. The accept endpoint is
+ * authenticated, so the acceptance was parked across the Keycloak redirect.
+ * Non-fatal: a failed write means the gate re-prompts next login.
  */
 async function flushPendingConsent(
   persistErrorMessage: string,
   consentAttempt: string | undefined,
 ): Promise<void> {
-  // `consentAttempt` comes back from the OIDC `state` of the login that just
-  // landed. A parked acceptance is honoured only if it was parked by that same
-  // login — otherwise it belongs to someone else's abandoned round trip on this
-  // device and must not be written against this session. See pending-consent.ts.
+  // Honour a parked acceptance only if this same login parked it (the
+  // `consentAttempt` from the OIDC state); otherwise it belongs to another
+  // abandoned round trip on this device. See pending-consent.ts.
   const pending = takePendingConsent(consentAttempt);
   if (!pending) return;
-  // Shown the adult copy before sign-in; a known minor is asked again with the
-  // U18 documents by the gates below instead (#626).
+  // The login screen showed the adult copy; a known minor on a network with
+  // U18 documents is asked again by the gates below.
   if (!(await preLoginConsentApplies(pending.network, pending.brand ?? null))) return;
   try {
-    // Bounded: a slow or hanging consent write must not hold the user on
-    // the spinner after they are already signed in.
+    // Bounded so a hanging write cannot hold a signed-in user on the spinner.
     await withTimeout(acceptConsent(pending), CONSENT_WRITE_TIMEOUT_MS);
   } catch (consentErr) {
     // eslint-disable-next-line no-console
@@ -80,11 +75,11 @@ async function flushPendingConsent(
 }
 
 /**
- * Durable write of the signup form's domain/age (G3). The server parked
- * these in Redis with a 30-minute TTL and swallows failures, so this
- * authenticated write is the backstop that stops a user landing with
- * `domains = null` / `age = null` — the latter being fail-closed
- * server-side for a guardian-gated domain. Idempotent with the stash.
+ * Durable write of the signup form's domain/age. The server parks these in
+ * Redis for 30 minutes and swallows failures, so this authenticated write is
+ * the backstop against landing with `domains = null` / `age = null` (a null
+ * age is fail-closed server-side in a guardian-gated domain). Idempotent with
+ * the server-side stash.
  */
 async function flushPendingSignupExtras(
   network: string,
@@ -92,13 +87,12 @@ async function flushPendingSignupExtras(
 ): Promise<void> {
   const signupExtras = takePendingSignupExtras();
   if (!signupExtras) return;
-  // Hand the domain to profile-form-page (one-shot) as well as
-  // persisting it, exactly as the OTP flow does.
+  // Also hand the domain to profile-form-page (one-shot).
   setStoredSignupDomain(network, signupExtras.domain);
   try {
     await setUserDomains([signupExtras.domain]);
   } catch {
-    // Best-effort — profile-form falls back to held items if unset.
+    // Best-effort: profile-form falls back to held items if unset.
   }
   if (signupExtras.age !== undefined) {
     try {
@@ -110,20 +104,15 @@ async function flushPendingSignupExtras(
 }
 
 /**
- * Authenticated U18 guardian gate (G4), ported from `otp-page.tsx`.
+ * Authenticated U18 guardian gate. Returns the step the blocking guardian flow
+ * should open on, or null when the user is not gated. The Keycloak chooser
+ * collects no identifier before login, so DOB capture (`'dob'`) happens here
+ * when no birth data is stored.
  *
- * The Keycloak chooser never collects an identifier, so the OTP flow's
- * pre-login `u18Precheck` has no equivalent here — the DOB capture has to
- * happen now instead, which is what the `'dob'` step is for when no birth data
- * is stored yet. Returns the step the blocking guardian flow should open on,
- * or null when the user is not gated.
+ * Best-effort: a failed lookup returns null and the user lands. The home-page
+ * gate is a backstop and the server-side go-live gate is the real control.
  *
- * Best-effort: a failed status lookup resolves to null and the user lands. The
- * home-page gate is a backstop and the server-side go-live gate is the real
- * fail-closed control.
- *
- * `heldDomains` is the already-resolved held-domain list when the caller has
- * one (a bound deployment resolves it once per login rather than twice).
+ * `heldDomains` is the caller's already-resolved held-domain list, if any.
  */
 async function resolveGuardianGateStep(
   network: string,
@@ -131,37 +120,18 @@ async function resolveGuardianGateStep(
 ): Promise<'dob' | 'guardian' | null> {
   try {
     const u18 = await getU18Status(network);
-    /**
-     * `isMinor` is `age !== null && isMinor(age)` server-side, so it is
-     * FALSE for a user whose age is unknown — which is every existing user
-     * onboarded by an aggregator (bulk upload / form link never captures
-     * one). Gating on `isMinor` alone therefore skipped exactly the
-     * population the `'dob'` step was written for, leaving it unreachable:
-     * those users fell through to the landing page and were then caught by
-     * home-page's `u18BirthUnresolved` backstop, which renders the DOB step
-     * on top of the map view.
-     *
-     * `!hasBirthData` is the missing condition. With it, DOB is captured
-     * here — before any navigation — which is what the OTP flow achieved
-     * via its pre-login `u18Precheck`.
-     */
+    // `isMinor` is false when age is unknown, which covers every user an
+    // aggregator onboarded (bulk upload / form link never capture age).
+    // `!hasBirthData` gates them too, so DOB is captured before navigation.
     const needsBirthData = !u18.hasBirthData;
     const needsGuardian = u18.isMinor && !u18.guardianVerified;
     if (!needsBirthData && !needsGuardian) return null;
 
-    /**
-     * Only gate inside a guardian-gated domain. A provider has no U18
-     * flow at all (`guardian_consent_required: false`), so asking them
-     * for a date of birth is pure friction.
-     *
-     * Keyed on the domains the user ALREADY holds a profile in, matching
-     * how home-page derives `wardDomain` from `myItem.item_domain` — a
-     * user with no profile yet has no domain to judge, and is gated later
-     * at profile creation once they pick one.
-     */
+    // Gate only inside a guardian-gated domain (a provider domain has no U18
+    // flow). Judged on domains the user already holds a profile in, as
+    // home-page does; a user with no profile is gated at profile creation.
     const held = heldDomains ?? (await resolveHeldDomains(network));
 
-    // No profile yet → no domain to judge, so nothing to fetch either.
     if (held.length === 0) return null;
 
     const networkCfg = await fetchNetworkConfig(network);
@@ -172,7 +142,6 @@ async function resolveGuardianGateStep(
 
     return u18.hasBirthData ? 'guardian' : 'dob';
   } catch {
-    // fall through and land the user
     return null;
   }
 }
@@ -180,70 +149,51 @@ async function resolveGuardianGateStep(
 /**
  * Landing page after the Keycloak round trip (`/auth/callback`).
  *
- * The API has already exchanged the code and set the session cookie by the time
- * the browser gets here (AUTH-VULN-03/04); this page asks who that session
- * belongs to — which is also what provisions the local `user` mirror on a first
- * login — and then runs everything that happens after a session exists: consent
- * resume, the wrong-portal check, the U18 gate and the landing decision. On
- * success the user never really sees it; on failure it is the only place that
- * can explain what went wrong, so the API's own message is surfaced rather than
- * a generic error.
+ * The API has already exchanged the code and set the session cookie. This page
+ * asks who the session belongs to (which provisions the local `user` mirror on
+ * a first login), then runs consent resume, the wrong-portal check, the U18
+ * gate and the landing decision. On failure it surfaces the API's own message.
  */
 export function OidcCallbackPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { completeKeycloakLogin, signOut } = useAuth();
-  // The OIDC client is built from the server's advertised Keycloak details.
   const { config: authCfg, isLoading: isConfigLoading } = useAuthConfig();
   const { themeId, brand } = useNetworkTheme();
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
   /**
-   * Terms/privacy still outstanding for this user — the login-time gate.
-   *
-   * better-auth gates these on EVERY login (pre-OTP, by identifier). The
-   * Keycloak chooser has no identifier to pre-check, so the equivalent has to
-   * run here, once the session exists and the authenticated status endpoint can
-   * be used. Without it a migrated user, or anyone who signed up before a
-   * version bump, is never re-prompted.
+   * Terms/privacy still outstanding: the login-time consent gate. The Keycloak
+   * chooser has no identifier to pre-check, so it runs here once the session
+   * exists. Without it a migrated user, or one who signed up before a version
+   * bump, is never re-prompted.
    */
   const [consentGate, setConsentGate] = useState<
     (OutstandingConsent & { returnTo: string }) | null
   >(null);
   /**
-   * A gated minor held on a blocking guardian flow AFTER login (ownership
-   * proven by Keycloak) and BEFORE landing — never home-first. The OTP flow
-   * does the same in `otp-page.tsx`; `initialStep` is `'dob'` when no birth
-   * data is stored, because the Keycloak chooser had no pre-login step to
-   * collect it.
+   * A gated minor held on a blocking guardian flow after login and before
+   * landing. `initialStep` is `'dob'` when no birth data is stored.
    */
   const [guardianGate, setGuardianGate] = useState<{
     initialStep: 'dob' | 'guardian';
     returnTo: string;
   } | null>(null);
 
-  // Runs once. StrictMode double-invokes effects in development, and the chain
-  // below writes (parked consent, signup domain/age) — none of which should
-  // happen twice. The code exchange itself is the API's problem now.
+  // Runs once: StrictMode double-invokes effects in development, and the chain
+  // below writes parked consent and signup domain/age.
   const exchangeStarted = useRef(false);
 
   useEffect(() => {
-    /**
-     * Wait for the auth config before doing anything.
-     *
-     * The work below runs ONCE, behind the ref guard, and part of it is
-     * deciding whether this instance is on Keycloak at all. Running before
-     * `/api/v1/auth/config` resolves means deciding from `undefined` — the page
-     * reports "not configured", the guard is already set so it never retries,
-     * and the user bounces: error → sign in → Keycloak's still-valid SSO
-     * cookie → straight back here.
-     */
+    // Wait for the auth config. The work below runs once behind the ref guard;
+    // deciding before `/api/v1/auth/config` resolves would report "not
+    // configured" permanently, and Keycloak's still-valid SSO cookie would
+    // bounce the user straight back here.
     if (isConfigLoading) return;
     if (exchangeStarted.current) return;
 
-    // Config has loaded but names no Keycloak — either the API isn't in a
-    // Keycloak mode, or the request failed and React Query gave up. Say so
-    // rather than reporting it as a broken sign-in.
+    // Config loaded but names no Keycloak (unconfigured, or the request
+    // failed). Say so rather than reporting a broken sign-in.
     if (!authCfg?.keycloak) {
       exchangeStarted.current = true;
       setError(t('auth.oidc_error_unconfigured'));
@@ -253,26 +203,19 @@ export function OidcCallbackPage() {
     exchangeStarted.current = true;
     let cancelled = false;
 
-    // Not awaited: an effect cannot be async. The body catches its own
-    // failures and reports them on the page.
+    // Not awaited: an effect cannot be async. The body reports its own failures.
     void (async () => {
       try {
-        // The code exchange now happens on the API (AUTH-VULN-03/04) — by the
-        // time we land here the session cookie is already set and the tokens
-        // are in Redis. The BFF hands the flow's parameters back on the
-        // redirect, so everything below this line is unchanged: this page still
-        // owns wrong-portal detection, consent resume and the landing decision.
+        // The API already exchanged the code and set the session cookie; it
+        // hands the flow's parameters back on the redirect.
         const params = new URLSearchParams(window.location.search);
         const returnTo = params.get('returnTo') ?? undefined;
         const consentAttempt = params.get('consentAttempt') ?? undefined;
         await completeKeycloakLogin();
 
-        // Per-domain UI gate (G7), ported from `otp-page.tsx`: block a user who
-        // already holds a profile in a domain this deployment does not serve —
-        // they must use that domain's portal. Runs first, before any write, so a
-        // wrong-portal user is turned away rather than partially onboarded.
-        // Reused by the U18 gate below, so a bound deployment resolves the
-        // user's held domains once per login rather than twice.
+        // Per-domain gate: turn away a user who already holds a profile in a
+        // domain this deployment does not serve, before any write. The held
+        // domains are reused by the U18 gate below.
         let heldDomains: string[] | null = null;
 
         const scope = getServedScope();
@@ -281,20 +224,15 @@ export function OidcCallbackPage() {
           heldDomains = held;
           const gate = evaluateDomainGate(held, scope.domains);
           if (!gate.allow) {
-            // Park the reason BEFORE signing out. Under Keycloak `signOut()`
-            // hands off to `signoutRedirect()`, a full-page navigation to the
-            // end-session endpoint — this await never resolves, so the
-            // `navigate` below (and the router state it carries) never runs,
-            // and Keycloak returns the browser to the site root with a fresh
-            // document. Without this the user was correctly bounced but landed
-            // on the logged-out home page with no explanation. `WrongPortalToast`
-            // reads it back once the new document boots.
+            // Park the reason before signing out: signOut() hands the browser
+            // to Keycloak's end-session endpoint, which returns a fresh
+            // document, so router state is lost. `WrongPortalToast` reads it
+            // back.
             setPendingWrongPortal(gate.heldDomain);
             await signOut();
-            // Still reached when `signoutRedirect()` could not navigate (e.g.
-            // Keycloak unreachable, so sign-out falls back to a local
-            // `removeUser`). Both paths share the `wrong-portal-block` toast
-            // id, so the user sees one message, not two.
+            // Still reached when no end-session redirect happens. Both paths
+            // share the `wrong-portal-block` toast id, so the user sees one
+            // message.
             navigate('/auth/login', {
               replace: true,
               state: { wrongPortalDomain: gate.heldDomain },
@@ -303,49 +241,38 @@ export function OidcCallbackPage() {
           }
         }
 
-        // Write any consent accepted on the login screen — deliberately after
-        // the session is established, since the accept endpoint is
-        // authenticated. The acceptance was parked across the Keycloak redirect.
+        // After the session exists, since the accept endpoint is authenticated.
         await flushPendingConsent(t('auth.toast_consent_persist_error'), consentAttempt);
 
-        // Durable write of the signup form's domain/age (G3).
+        // Durable write of the signup form's domain/age.
         await flushPendingSignupExtras(themeId, t('auth.toast_consent_persist_error'));
 
-        // First-time-login profile redirect (#376), previously wired only into
-        // the OTP page and therefore dead under Keycloak (#558). Resolved ONCE
-        // here so all three exits below — guardian gate, consent gate and the
-        // direct navigate — inherit the same landing. Placed after the session
-        // is established (an authenticated read) and after the parked consent /
-        // signup writes are flushed, but BEFORE the gates, so a gated user
-        // still clears their gate first and only then lands on the form.
+        // First-login profile redirect. Resolved once so all three exits below
+        // share the landing; after the parked writes but before the gates, so
+        // a gated user clears the gate first and then lands on the form.
         const landing = await resolvePostLoginLanding(themeId, returnTo ?? '/');
 
-        // Authenticated U18 guardian gate (G4). Runs BEFORE the adult
-        // terms/privacy gate below on purpose: a gated minor must not be shown
-        // the adult consent screens, because the guardian flow records their
-        // consent guardian-sourced instead (#453).
+        // U18 guardian gate runs before the adult terms/privacy gate: a gated
+        // minor must not see the adult consent screens, because the guardian
+        // flow records their consent as guardian-sourced.
         const guardianStep = await resolveGuardianGateStep(themeId, heldDomains);
         if (guardianStep) {
           setGuardianGate({ initialStep: guardianStep, returnTo: landing });
           return;
         }
 
-        // Login-time terms/privacy gate. Runs AFTER the parked signup consent is
-        // flushed, so a fresh signup that just accepted has nothing outstanding.
+        // Login-time terms/privacy gate. Runs after the parked signup consent
+        // is flushed, so a fresh signup has nothing outstanding.
         const outstanding = await resolveOutstandingConsent(themeId, brand);
         if (outstanding) {
           setConsentGate({ ...outstanding, returnTo: landing });
           return;
         }
 
-        // Navigate unconditionally — NOT gated on `cancelled`.
-        //
-        // `completeKeycloakLogin` updates the session, which re-renders this page;
-        // if a dep identity changes in that render React runs this effect's
-        // cleanup. Gating the navigation on that flag stranded a fully
-        // authenticated user on the spinner. The flag's only legitimate job is
-        // avoiding a setState after unmount, which is why the catch below still
-        // honours it.
+        // Navigate regardless of `cancelled`: `completeKeycloakLogin` re-renders
+        // this page and may run the effect cleanup, and gating on the flag
+        // stranded authenticated users on the spinner. The flag only prevents
+        // setState after unmount (see the catch).
         navigate(landing, { replace: true });
       } catch (err) {
         if (cancelled) return;
@@ -360,10 +287,8 @@ export function OidcCallbackPage() {
   }, [authCfg, brand, completeKeycloakLogin, isConfigLoading, navigate, signOut, t, themeId]);
 
   /**
-   * Accepted the login-time gate. The session already exists here, so unlike the
-   * signup path this writes straight through rather than parking anything.
-   * Non-fatal: the user is signed in regardless, and a failed write just means
-   * the gate re-prompts next login.
+   * Accepted the login-time gate. The session exists, so this writes directly.
+   * Non-fatal: a failed write means the gate re-prompts next login.
    */
   const handleConsentAccept = async () => {
     if (!consentGate) return;
@@ -379,10 +304,9 @@ export function OidcCallbackPage() {
     navigate(returnTo, { replace: true });
   };
 
-  // Blocking guardian gate for a minor — replaces the spinner inside the same
-  // AuthShell, mirroring `otp-page.tsx`, so the ward never sees home until the
-  // guardian is verified. Both `onNotMinor` (DOB resolved adult) and
-  // `onComplete` (guardian verified) land the user.
+  // Blocking guardian gate for a minor, so the ward never sees home until the
+  // guardian is verified. `onNotMinor` (DOB says adult) and `onComplete`
+  // (guardian verified) both land the user.
   if (guardianGate) {
     return (
       <AuthShell>
@@ -437,40 +361,26 @@ export function OidcCallbackPage() {
   }
 
   /**
-   * End the session so the user can sign in as someone else (#688 / #753).
-   *
-   * A forced re-prompt (`prompt=login`) is NOT enough: it re-authenticates the
-   * CURRENT user, so naming a different one makes Keycloak throw USER_CONFLICT
-   * (AuthenticationProcessor.setAutheticatedUser) and report
-   * `invalid_user_credentials` — which the login theme renders as "Invalid
-   * username or password" on a flow that never asked for a password. Only
-   * ending the session clears the authenticated user.
-   *
-   * `endBffSession` replaces #688's `oidcLogout`, which lived in the OIDC
-   * client this change removes. It is the stronger of the two: it destroys the
-   * server-side session as well as handing off to Keycloak's end-session
-   * endpoint, so the escape hatch cannot leave a live `sid` behind while the
-   * realm session goes. Returns `false` when the server did not end it, which
-   * is the same dead-button case the fallback below is for.
-   *
-   * Falls back to the login page if the redirect cannot start, which at least
-   * leaves them somewhere rather than on a dead button.
+   * Ends the session so the user can sign in as someone else. A forced
+   * re-prompt (`prompt=login`) re-authenticates the current user, so naming a
+   * different one makes Keycloak report `invalid_user_credentials` ("Invalid
+   * username or password"). Only ending the session clears the authenticated
+   * user. `endBffSession` destroys the server-side session and hands off to
+   * Keycloak's end-session endpoint.
    */
   const switchAccount = async (): Promise<void> => {
     try {
       const ended = await endBffSession();
-      // `endBffSession` navigates to Keycloak itself when it has an end-session
-      // URL. Reaching here with `false` means it had none, so nothing is in
-      // flight and this is the only thing that will move the user.
+      // `endBffSession` navigates to Keycloak itself on success. `false` means
+      // the server did not end the session and nothing is navigating.
       if (!ended) navigate('/auth/login', { replace: true });
     } catch {
       navigate('/auth/login', { replace: true });
     }
   };
 
-  // The API's message is English by construction (it doubles as log and
-  // API-client copy), so prefer a localised equivalent wherever one exists —
-  // otherwise a Hindi user reads an English sentence above a Hindi button.
+  // The API's message is English, so prefer a localised equivalent when one
+  // exists.
   const body = LOCALISED_REJECTION_KEYS[errorCode ?? ''] ?? '';
 
   return (
@@ -482,11 +392,8 @@ export function OidcCallbackPage() {
           <AlertDescription>{body ? t(body) : error}</AlertDescription>
         </Alert>
         {isRecoverableIdentity(errorCode) ? (
-          // "Back to sign in" is a loop for EVERY one of these: Keycloak's SSO
-          // cookie is still valid, so the login page hands back the same
-          // identity and the same error. The loop is caused by the live realm
-          // session, not by which identity it holds — so the escape cannot be
-          // gated on one diagnosis.
+          // "Back to sign in" would loop: Keycloak's still-valid SSO cookie
+          // hands back the same identity and the same error.
           <Button onClick={() => void switchAccount()}>{t('auth.switch_account')}</Button>
         ) : (
           <Button onClick={() => navigate('/auth/login', { replace: true })}>
@@ -499,10 +406,8 @@ export function OidcCallbackPage() {
 }
 
 /**
- * Rejections whose copy we localise, keyed by the API's error code.
- *
- * Anything absent falls back to the API's own English message, which is the
- * right default for the long tail (SELF_SIGNUP_DISABLED, USER_BANNED, …).
+ * Rejections whose copy is localised, keyed by the API's error code. Others
+ * fall back to the API's English message.
  */
 const LOCALISED_REJECTION_KEYS: Readonly<Record<string, string>> = {
   TOKEN_AGGREGATOR_ACCOUNT: 'auth.aggregator_account_no_signals',
@@ -510,45 +415,30 @@ const LOCALISED_REJECTION_KEYS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Whether signing out and back in could plausibly succeed.
- *
- * True only for "the realm handed us the wrong identity" — the caller may well
- * hold a participant account. Deliberately NOT true for the long tail:
- * offering "sign in with a different account" for KEYCLOAK_NOT_CONFIGURED or
- * USER_BANNED would send the user round a loop that cannot resolve.
- *
- * @param errorCode - Machine-readable code from the API, when present.
- * @returns True when the sign-out escape should be offered.
+ * Whether signing out and back in could succeed: only when the realm handed
+ * over the wrong identity. Offering it for KEYCLOAK_NOT_CONFIGURED or
+ * USER_BANNED would loop.
  */
 function isRecoverableIdentity(errorCode: string | null | undefined): boolean {
   return errorCode === 'TOKEN_AGGREGATOR_ACCOUNT' || errorCode === 'TOKEN_ROLE_REJECTED';
 }
 
 /**
- * Pull a human-readable reason out of whatever failed.
- *
- * Almost always an axios failure from `/api/v1/auth/me`, which carries the
- * API's `{ code, error, message }` — this is how SELF_SIGNUP_DISABLED,
- * USER_BANNED and friends become visible to the user. The code exchange itself
- * no longer fails here: it happens on the API, which reports a failed exchange
- * by redirecting to `/?auth_error=1` rather than sending the browser to this
- * page at all.
- */
-/**
  * Reads the API's machine-readable error code, when present.
- *
- * `TOKEN_AGGREGATOR_ACCOUNT` means the caller is signed in as an aggregator
- * account via the shared realm's SSO session — recoverable by switching
- * account, unlike the other failures here (#753).
- *
- * @param err - The thrown request error.
- * @returns The `error.code` string, or null.
+ * `TOKEN_AGGREGATOR_ACCOUNT` means the shared realm's SSO session belongs to an
+ * aggregator account.
  */
 function extractCode(err: unknown): string | null {
   const code = (err as { response?: { data?: { code?: unknown } } } | null)?.response?.data?.code;
   return typeof code === 'string' && code !== '' ? code : null;
 }
 
+/**
+ * Pulls a human-readable reason out of a failure, usually an axios error from
+ * `/api/v1/auth/me` carrying the API's `{ code, error, message }`. A failed
+ * code exchange never reaches this page: the API redirects to
+ * `/auth/login?auth_error=1` instead.
+ */
 function extractMessage(err: unknown): string | null {
   const apiMessage = (
     err as { response?: { data?: { message?: unknown } } } | null
@@ -560,14 +450,9 @@ function extractMessage(err: unknown): string | null {
 }
 
 /**
- * Which account consents this signed-in user still owes, if any.
- *
- * Uses the AUTHENTICATED status endpoint — the identifier-based variant the OTP
- * login uses isn't available here, because the chooser never collects an
- * identifier. Returns null when nothing is outstanding.
- *
- * Fails OPEN, matching the OTP flow's pre-check: a consent-service blip must not
- * block a login that has already succeeded. The user is re-prompted next time.
+ * Which account consents this signed-in user still owes, or null. Uses the
+ * authenticated status endpoint. Fails open: a consent-service blip must not
+ * block a login that already succeeded; the user is re-prompted next time.
  */
 async function resolveOutstandingConsent(
   network: string,
@@ -590,7 +475,7 @@ async function resolveOutstandingConsent(
       config,
       network,
       brand,
-      // 'login', not 'signup' — this is a returning user, or a version bump.
+      // A returning user or a version bump, not a signup.
       source: 'login',
       accepted: status.statuses,
       variant: status.variant,

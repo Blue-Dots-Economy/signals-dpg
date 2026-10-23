@@ -49,13 +49,9 @@ const HERO_GRADIENT =
 
 
 /**
- * Lean top bar shared by every state on this page — no search / view-toggle /
- * filters / notifications, none of which are relevant on a single-profile
- * page. Branding lives in the sidebar header (PortalHeader), so this is just
- * the mobile sidebar trigger plus the share + explore + auth affordances.
- * The share affordance is the shared `ShareProfileButton` (link + QR), styled
- * as this page's labelled pill; it renders nothing until a live item has
- * loaded, since there is nothing shareable before then.
+ * Lean top bar shared by every state on this page: the mobile sidebar trigger
+ * (or the logo, anonymously), share, explore and auth controls. The share
+ * button renders nothing until a live item has loaded.
  */
 function ProfileTopBar({
   networkId,
@@ -70,28 +66,24 @@ function ProfileTopBar({
   /** Navigate back to where the viewer came from (falls back to the map view). */
   onBack: () => void;
   /**
-   * Anonymous mode has no sidebar, so the brand logo lives in the app bar (left);
-   * the authenticated mode keeps the sidebar and shows the mobile sidebar trigger
-   * instead. The header title renders in both modes.
+   * Anonymous mode has no sidebar, so the logo goes in the app bar; signed in,
+   * the bar shows the mobile sidebar trigger instead.
    */
   showLogo: boolean;
 }>) {
   const { t } = useTranslation();
 
-  // The caller already applied this page's live gate (it passes null for a
-  // non-live/absent item). `ShareProfileButton` gates on `lifecycle_status`,
-  // which the masked public projection does NOT return — so state it here
-  // rather than let a live profile silently lose its share button.
+  // The caller passes null for a non-live item. `ShareProfileButton` gates on
+  // `lifecycle_status`, which the masked public projection omits, so state it
+  // here or a live profile loses its share button.
   const shareItem = item ? { ...item, lifecycle_status: 'live' as const } : null;
 
   return (
     <header className="sticky top-0 z-10 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur sm:px-6">
       {showLogo && <PortalHeader />}
       {!showLogo && <SidebarTrigger className="md:hidden" />}
-      {/* Anonymous mode has the logo in the app bar (no sidebar edge), so add a
-          full-height divider after it — mirroring the sidebar's right border in
-          the authenticated layout. The back button + title then sit in the
-          "content" region, same slot as the logged-in view. */}
+      {/* Anonymous: a full-height divider after the logo, mirroring the
+          sidebar's right border in the signed-in layout. */}
       {showLogo && <span className="w-px shrink-0 self-stretch bg-border" aria-hidden="true" />}
       <button
         type="button"
@@ -161,19 +153,12 @@ function UnavailableState({ networkId }: Readonly<{ networkId?: string }>) {
 }
 
 /**
- * Apply/Connect + See-Match-Score row shown to a logged-in viewer of SOMEONE
- * ELSE's live profile, using their active profile as the source (full parity
- * with the map/list card). Reuses the shared action flow (`ActionHandler` →
- * `performAction`) and match-score wiring — all already themed with the app's
- * Button variants, so colors match automatically.
- *
- * Renders one of three states, resolved from the active profile:
- *  - no active profile / no compatible interaction → a muted "switch profile" hint,
- *  - a draft active profile → a muted "complete profile" hint,
- *  - otherwise → the Match Score control + one ActionButton per available action.
- * Hooks run unconditionally above these branches. The route stays public and
- * all data stays masked; the action itself goes through the authenticated
- * server flow (interaction matrix + ownership + consent + guardian OTP).
+ * Apply/Connect and See-Match-Score row for a signed-in viewer of someone
+ * else's live profile, sourced from their active profile. Shows a "switch
+ * profile" hint when no interaction applies, a "complete profile" hint for a
+ * draft, else the match score control and one button per action. Data stays
+ * masked; the action goes through the authenticated server flow (interaction
+ * matrix, ownership, consent, guardian OTP).
  */
 function ProfileActionRow({
   net,
@@ -194,10 +179,8 @@ function ProfileActionRow({
   const queryClient = useQueryClient();
   const [matchOpen, setMatchOpen] = React.useState(false);
 
-  // U18 minor status for the viewer (source profile owner), mirroring
-  // home-page.tsx: only an authenticated user on a network has stored birth
-  // data. On failure the status stays null (adult path) — never leave a minor
-  // ungated, which the server also enforces regardless of this UI signal.
+  // The viewer's U18 status, as on home-page. On failure it stays null (no
+  // confirm-before-OTP dialog); the server enforces the guardian gate anyway.
   const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
   React.useEffect(() => {
     if (!user || !net) {
@@ -224,10 +207,8 @@ function ProfileActionRow({
     [net, activeItem?.item_domain, viewedDomain],
   );
 
-  // Disable Apply/Connect when the active profile already has an OPEN action
-  // (either direction) with the viewed item — parity with the list/map. Actions
-  // only fetch for a signed-in user (the endpoint 401s anonymously; the hook
-  // also self-gates on auth).
+  // Disable Apply/Connect when an action is already open with the viewed item
+  // (either direction). Actions are fetched only for a signed-in user.
   const { data: myActionsData } = useActions('all', { enabled: !!user, limit: 100 });
   const hasOpenActionWithViewed = React.useMemo(() => {
     if (!activeItem) return false;
@@ -245,8 +226,8 @@ function ProfileActionRow({
       guardianOtp?: string,
     ) => {
       if (!activeItem) throw new ActionAbortedError('no active profile');
-      // Draft source profile can't act — surface the "complete your profile"
-      // hint and abort (ActionAbortedError suppresses the generic error toast).
+      // Draft source profile: show the "complete your profile" hint and abort
+      // (ActionAbortedError suppresses the generic error toast).
       if (activeItem.lifecycle_status === 'draft') {
         toast.warning(
           t('public_profile.complete_profile_hint', 'Complete your active profile to apply or connect.'),
@@ -258,8 +239,7 @@ function ProfileActionRow({
         throw new Error('No user');
       }
 
-      // Extract the consent sentinel ConsentCheckbox smuggled through the form
-      // data; it must not appear in requirements_snapshot sent to the server.
+      // The consent sentinel must not reach requirements_snapshot.
       const { [ACTION_CONSENT_SENTINEL]: consentRaw, ...requirementsSnapshot } = formData;
       const consent =
         consentRaw &&
@@ -300,11 +280,11 @@ function ProfileActionRow({
           requirements_snapshot: requirementsSnapshot,
           ...(consent ? { consent } : {}),
         },
-        sourceInstanceUrl, // call the SOURCE instance (where the active profile lives)
+        sourceInstanceUrl, // the source instance, where the active profile lives
         guardianOtp,
       );
 
-      // Surface the new action without waiting for the 60s poll.
+      // Surface the new action without waiting for the poll.
       queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
       toast.success(
         t('public_profile.action_sent', '{{action}} request sent', {
@@ -315,8 +295,7 @@ function ProfileActionRow({
     [activeItem, item, net, user, queryClient, t],
   );
 
-  // A draft active profile can't act at all — completing it is the blocker, so
-  // that hint takes precedence over the compatibility hint below.
+  // A draft active profile cannot act at all, so that hint takes precedence.
   if (activeItem?.lifecycle_status === 'draft') {
     return (
       <p className="mt-4 text-sm text-muted-foreground">
@@ -337,9 +316,8 @@ function ProfileActionRow({
     <>
       <ActionHandler
         onActionSubmit={onActionSubmit}
-        // Parity with home-page: only confirm-before-OTP when the viewer is
-        // actually a minor AND their active-profile domain requires guardian
-        // consent — an adult on such a domain gets no extra dialog.
+        // Confirm before the guardian OTP only for a minor whose active
+        // profile's domain requires guardian consent.
         guardianConfirmRequired={
           u18Status?.isMinor === true &&
           !!net &&
@@ -393,23 +371,16 @@ function ProfileActionRow({
 }
 
 /**
- * Public, auth-aware single-profile view for a shared link
- * (`/public/:network/:domain/:itemType/:itemId`). Fetches the one profile via the
- * public, masked, jittered, live-only item endpoint (through `useItemDetail`)
- * and renders a schema-driven hero + details grid built entirely from the
- * resolved network's card config and item schema — no field name, section
- * title, or location is hardcoded here. Never exposes PII or a raw error:
+ * Public single-profile view for a shared link
+ * (`/public/:network/:domain/:itemType/:itemId`). Fetches the profile from the
+ * public masked, jittered, live-only endpoint and renders it entirely from the
+ * network's card config and item schema. Never shows PII or a raw error:
  * empty/invalid/non-live → "unavailable"; transient failure → "try again".
  *
- * Rendered inside the Signals app shell (lean app bar + optional sidebar) in 3
- * auth-aware modes: anonymous (app-bar-only, no sidebar), signed in viewing
- * someone else's profile (full AppSidebar + an Apply/Connect + match-score
- * action row sourced from the viewer's active profile), and signed in viewing
- * one's own shared link (full AppSidebar + an own-preview banner, no actions).
- * Data is the masked public projection in every mode — no PII, and the route
- * itself stays unauthenticated (no RequireAuth). The action row runs only for
- * an authenticated non-owner and goes through the normal server-guarded action
- * flow; a share link is never a credential.
+ * Modes: anonymous (app bar only), signed in viewing someone else's profile
+ * (sidebar + action row from the viewer's active profile), and signed in
+ * viewing one's own (sidebar + preview banner). The route has no RequireAuth;
+ * a share link is never a credential.
  */
 export function PublicProfilePage() {
   const { t } = useTranslation();
@@ -419,22 +390,18 @@ export function PublicProfilePage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuth();
-  // Network display name for copy that references the brand (e.g. the contact
-  // note) — resolves per the link's ?network= (Blue Dots / Purple Dot / …), so
-  // it's never hardcoded to one network.
+  // Network display name for copy, from the link's ?network=.
   const { theme } = useNetworkTheme();
 
-  // Back button: return to the previous in-app page when the viewer navigated
-  // here within the app (history exists); for a freshly-opened share link
-  // (no in-app history — `location.key === 'default'`) land on the map view.
+  // Back: the previous in-app page when there is history; a freshly opened
+  // share link (`location.key === 'default'`) lands on the map view.
   const handleBack = React.useCallback(() => {
     if (location.key !== 'default') navigate(-1);
     else navigate(`/?network=${encodeURIComponent(network ?? '')}&view=map`);
   }, [location.key, navigate, network]);
 
-  // Keep the theme aligned to the link's network (the theme provider reads the
-  // `?network=` query param; our own links include it, but sync it defensively
-  // for links that lost the query string).
+  // Keep the theme on the link's network (the provider reads `?network=`);
+  // synced here for links that lost the query string.
   React.useEffect(() => {
     if (network && searchParams.get('network') !== network) {
       const next = new URLSearchParams(searchParams);
@@ -455,8 +422,7 @@ export function PublicProfilePage() {
   const { activeProfileId, setActiveProfile, activeItem } = useActiveProfile(net ?? null, myItems ?? []);
   const isOwnProfile = isAuthenticated && !!itemId && (myItems ?? []).some((i) => i.item_id === itemId);
 
-  // Build domain → schema map for the sidebar's own-profile title resolution
-  // (first item_schema per domain), mirroring home-page's userSchemas.
+  // Domain → schema map (first item_schema per domain) for sidebar titles.
   const userSchemas = React.useMemo(() => {
     if (!net) return {};
     const map: Record<string, RJSFSchema> = {};
@@ -467,10 +433,9 @@ export function PublicProfilePage() {
     return map;
   }, [net]);
 
-  // Live-only endpoint: any returned item is already live. The masked public
-  // projection does NOT include `lifecycle_status`, so `=== 'live'` alone would
-  // wrongly reject every profile — treat a missing status as live (and still
-  // reject an explicit non-live status defensively).
+  // The endpoint is live-only, and the masked projection omits
+  // `lifecycle_status`, so a missing status counts as live; an explicit
+  // non-live status is still rejected.
   const isLive = Boolean(item && (!item.lifecycle_status || item.lifecycle_status === 'live'));
 
   let content: React.ReactNode;
@@ -487,9 +452,8 @@ export function PublicProfilePage() {
       </StateWell>
     );
   } else if (netError || !net) {
-    // Unknown / unresolvable network in the URL — we can't theme or build the
-    // schema-driven view, so treat it as unavailable rather than rendering an
-    // empty card. (No PII either way; this is just a cleaner dead-end.)
+    // Unknown network in the URL: nothing to theme or render, so show
+    // unavailable.
     content = <UnavailableState networkId={network} />;
   } else if (isError) {
     content = (
@@ -522,16 +486,15 @@ export function PublicProfilePage() {
       | RJSFSchema
       | undefined;
     const resolved = resolveCardFields(schema, liveItem.item_state, domainCfg?.card ?? null);
-    // Every non-empty resolved row. Masked-stub values (e.g. "H***", "1***")
-    // the API returns for coarsened fields are shown as-is — they're the
-    // masked public projection, safe to display.
+    // Every non-empty resolved row. Masked stubs (e.g. "H***") come from the
+    // public projection and are safe to show.
     const rows = [...resolved.defaultRows, ...resolved.extraRows].filter(
       (row) => !row.isEmpty
     );
 
     content = (
       <div className="mx-auto max-w-2xl px-5 py-10 sm:py-14">
-        {/* Hero — left-aligned avatar + title, with domain/meta below the title. */}
+        {/* Hero: avatar and title, domain/meta below. */}
         <div className="flex items-start gap-4">
           <div
             className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-xl font-bold text-white shadow-sm"
@@ -551,8 +514,7 @@ export function PublicProfilePage() {
           </div>
         </div>
 
-        {/* Own-profile preview banner — only shown to the signed-in owner of
-            this exact profile, so they know this is the masked view others see. */}
+        {/* Own-profile preview banner: shows the owner the masked view others see. */}
         {isOwnProfile && (
           <div className="mt-6 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-foreground">
             {t(
@@ -562,7 +524,7 @@ export function PublicProfilePage() {
           </div>
         )}
 
-        {/* Details — every non-empty, non-masked resolved row, schema-driven end to end. */}
+        {/* Details: every non-empty resolved row, schema-driven. */}
         <p className="mt-8 mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           {t('public_profile.details', 'Details')}
         </p>
@@ -587,8 +549,8 @@ export function PublicProfilePage() {
                 </div>
               </div>
             ))}
-            {/* Odd field count → fill the empty trailing cell (sm+ two-col grid)
-                so the table's borders close cleanly instead of cutting off. */}
+            {/* Odd field count: fill the trailing cell so the grid's borders
+                close cleanly. */}
             {rows.length % 2 === 1 && (
               <div
                 aria-hidden="true"
@@ -604,9 +566,7 @@ export function PublicProfilePage() {
           </div>
         </div>
 
-        {/* Apply/Connect + See Match Score — only for a logged-in viewer of
-            someone ELSE's profile, sourced from their active profile. Own
-            profile keeps the preview banner above; anonymous gets nothing. */}
+        {/* Only for a signed-in viewer of someone else's profile. */}
         {isAuthenticated && !isOwnProfile && (
           <ProfileActionRow
             net={net ?? null}
@@ -629,13 +589,10 @@ export function PublicProfilePage() {
     );
   }
 
-  // Anonymous view: no sidebar at all — an app-bar-only, full-width column with
-  // the brand logo moved into the app bar. Authenticated view keeps the full
-  // sidebar shell (AppSidebar + sidebar trigger) exactly as before.
+  // Anonymous: no sidebar, logo in the app bar. Signed in: the sidebar shell.
   if (!isAuthenticated) {
-    // No SidebarProvider here (anonymous has no sidebar), so its built-in
-    // TooltipProvider is gone too — the app-bar's ThemeModeToggle renders a
-    // Radix Tooltip that throws without a provider ancestor. Supply one.
+    // No SidebarProvider here, so supply the TooltipProvider it would give:
+    // ThemeModeToggle's Radix Tooltip throws without one.
     return (
       <TooltipProvider>
         <div className="flex h-svh min-w-0 flex-1 flex-col">
