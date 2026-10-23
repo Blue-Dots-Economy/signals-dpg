@@ -123,10 +123,8 @@ export const acting_org_preHandler = async (
     return;
   }
 
-  // Org-agnostic: this separates privilege tiers, not tenants. `member` rows
-  // come from the service-user seed and from Keycloak provisioning of a token
-  // whose grant names one org, so a participant without an org grant is
-  // refused here. Tenant reach is decided downstream by the org's type.
+  // A participant without a `member` row is refused here. Which users the org
+  // may reach is checked downstream, per route.
   const member_rows = await db
     .select({ id: member.id })
     .from(member)

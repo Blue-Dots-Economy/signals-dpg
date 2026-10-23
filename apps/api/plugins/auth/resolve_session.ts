@@ -292,8 +292,9 @@ async function resolveServiceSession(
     role: service.user.role,
   };
   // Which integrating DPG this is: every service org is `network_service`, so
-  // only the client id separates e.g. the voice bot from aggregator-dpg. Audit
-  // only, never authorization. Bound onto the request logger so every later
+  // only the client id separates e.g. the voice bot from aggregator-dpg. Its
+  // presence marks a service caller (export_actions, auth/me); its value is for
+  // audit only. Bound onto the request logger so every later
   // line for this request carries it.
   request.service_client_id = service.client_id;
   request.log = request.log.child({ service_client_id: service.client_id });

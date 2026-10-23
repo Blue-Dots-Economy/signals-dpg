@@ -579,8 +579,8 @@ async function fetchInstanceMarkers(input: {
 
 async function fetchRemoteMarkers(instanceUrl: string, filters: ItemFetchFilters) {
   const target = new URL('/api/v1/network/item/markers_local', instanceUrl);
-  // Forward only `q`: the peer's markers schema validates a top-level `q` and
-  // resolves its own non-private field allowlist. Without it the peer returns
+  // Adds a top-level `q`: the peer ignores `text_search` and resolves its own
+  // non-private field allowlist. Without it the peer returns
   // every marker in the viewport.
   const requestBody = JSON.stringify({
     ...filters,
