@@ -26,31 +26,21 @@ import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
 
 /**
- * Module-level WeakMap: AdvancedMarkerElement → domain string.
- * Populated by each ClusteredMarker when its underlying element becomes
- * available; read by the cluster renderer to tally per-domain counts.
- * WeakMap ensures entries are GC-eligible alongside the element object.
+ * AdvancedMarkerElement to domain, filled by each ClusteredMarker and read by
+ * the cluster renderer for the per-domain badge row.
  */
 const markerDomainMap = new WeakMap<object, string>();
 
-// Marker stacking. The "You" self-marker is non-interactive decoration, so it
-// must sit BELOW item pins: otherwise, when an item shares the exact same point
-// as "You" (spreadCoLocatedMarkers fans it ~10m off, which is sub-pixel at low
-// zoom), the self-marker (previously z 1000) rendered on top and swallowed the
-// click — the item's card wouldn't open until fully zoomed in. Ordering:
-// self (0) < item pins (500) < clusters (1000 + count). A co-located item pin
-// now renders on top and is directly clickable.
+// Stacking: self (0) < item pins (500) < clusters (1000 + count). The
+// non-interactive "You" marker sits below item pins so an item on the same
+// point (fanned only ~10 m, sub-pixel at low zoom) stays clickable.
 const SELF_MARKER_Z_INDEX = 0;
 const ITEM_MARKER_Z_INDEX = 500;
 
-// Cluster-click zoom (see onClusterClick). One click smoothly zooms to the
-// level that reveals the cluster's contents — the SAME target Google's default
-// fitBounds would pick, but animated instead of snapping. For a cluster with no
-// inner sub-clusters (near-identical/co-located points) that target is the max
-// cap, so a single click drills straight to the item level — just smoothly.
+// Zoom cap for a cluster click; co-located points zoom straight to it.
 const CLUSTER_CLICK_MAX_ZOOM = 20;
-// Cluster-click zoom animation duration (ms). Runtime-env so the feel can be
-// tuned per deploy (config.js) without a rebuild; default 2000, 0 = instant.
+// Cluster-click zoom animation duration (ms), tunable per deploy via runtime
+// config; default 2000, 0 = instant.
 function resolveClusterZoomAnimMs(): number {
   const raw = getRuntimeEnv('VITE_MAP_CLUSTER_ZOOM_ANIM_MS');
   if (raw == null || String(raw).trim() === '') return 2000;
@@ -58,14 +48,11 @@ function resolveClusterZoomAnimMs(): number {
   return Number.isFinite(n) && n >= 0 ? n : 2000;
 }
 const CLUSTER_ZOOM_ANIM_MS = resolveClusterZoomAnimMs();
-// World tile size (px) used by the standard "zoom to fit bounds" math.
 const WORLD_PX = 256;
 
 /**
- * The (fractional) zoom at which `bounds` fills the given map pixel size — the
- * same result google.maps fitBounds targets. Degenerate/near-zero bounds (a
- * cluster of co-located points) yield the max cap, so clicking such a cluster
- * zooms all the way to the individual items.
+ * The fractional zoom at which `bounds` fills `dim`, the same target as
+ * `fitBounds`. Zero-size bounds (co-located points) yield the max cap.
  */
 function getBoundsZoomLevel(
   bounds: google.maps.LatLngBounds,
@@ -87,12 +74,10 @@ function getBoundsZoomLevel(
 }
 
 /**
- * Smoothly animate the map camera (center + fractional zoom) to a target over
- * CLUSTER_ZOOM_ANIM_MS via requestAnimationFrame + moveCamera. We set a mapId
- * (vector map), so moveCamera renders fractional zoom crisply — this turns the
- * otherwise-instant large fitBounds jump into a smooth fly-in. `animRef` holds
- * the in-flight rAF handle so a new click (or unmount) cancels the previous
- * animation instead of fighting it.
+ * Animates the camera to `target` over CLUSTER_ZOOM_ANIM_MS with
+ * `moveCamera`. The map has a `mapId` (vector map), so fractional zoom renders
+ * crisply. `animRef` holds the in-flight frame so a new click or unmount
+ * cancels it.
  */
 function animateMapCamera(
   map: google.maps.Map,
@@ -122,10 +107,9 @@ function animateMapCamera(
 }
 
 /**
- * Resolves a CSS custom property (e.g. --primary) to a concrete rgb/hex string.
- * The theme stores --primary as an `oklch(...)` value; an SVG data-URI `fill`
- * needs a rasterizable colour, so we round-trip it through a canvas which
- * normalizes any CSS colour to rgb/hex.
+ * Resolves a CSS custom property to an rgb/hex string for the generated
+ * cluster HTML. The theme stores `--primary` as `oklch(...)`; a canvas
+ * `fillStyle` round-trip normalizes it.
  */
 function resolveThemeColor(varName: string, fallback: string): string {
   if (typeof document === 'undefined') return fallback;
@@ -139,19 +123,14 @@ function resolveThemeColor(varName: string, fallback: string): string {
   const ctx = document.createElement('canvas').getContext('2d');
   if (!ctx) return computed;
   ctx.fillStyle = fallback;
-  ctx.fillStyle = computed; // canvas normalizes oklch → rgb if supported
+  ctx.fillStyle = computed;
   return ctx.fillStyle;
 }
 
 /**
- * Builds the cluster bubble as an HTML element (for AdvancedMarkerElement
- * content). Rendering as real HTML — rather than an SVG data-URI — lets the
- * lucide icons keep their stroke styling and lets the mini badges tuck neatly
- * under the main circle via flexbox, matching the intended design.
- *
- * A main circle shows the total (themed --primary background, white text). When
- * the cluster spans more than one domain, a row of small white chips below it
- * shows each domain's icon + count (sorted by count desc).
+ * Builds the cluster bubble as HTML for AdvancedMarkerElement content: the
+ * total in a `--primary` circle and, when several domains are present, a row
+ * of per-domain icon+count chips below it.
  */
 function buildClusterContent(
   total: number,
@@ -166,9 +145,7 @@ function buildClusterContent(
 
   const size = total < 10 ? 38 : total < 100 ? 44 : 50;
   const circle = document.createElement('div');
-  // Stable class hook for the mobile-only legibility rule in index.css — no
-  // style is defined by this class name itself, so desktop rendering (which
-  // has no matching media query) is byte-identical.
+  // Hook for the mobile-only legibility rule in index.css.
   circle.className = 'dpg-cluster-count';
   circle.style.cssText =
     `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
@@ -199,23 +176,15 @@ function buildClusterContent(
   return wrap;
 }
 
-/**
- * Custom cluster renderer so the cluster bubble uses the active network theme
- * colour (instead of the library's default blue) and shows a per-domain
- * breakdown. Returns an AdvancedMarkerElement with HTML content.
- */
+/** Cluster renderer using the network theme colour and a per-domain breakdown. */
 const clusterRenderer: Renderer = {
   render(cluster: Cluster) {
     const { count, position, markers } = cluster;
-    // Neutral gray fallback used only if --primary can't be resolved — must not
-    // be a specific network's brand colour.
+    // Neutral gray fallback, not any network's brand colour.
     const primary = resolveThemeColor('--primary', '#6b7280');
 
-    // Tally domains from the clustered marker elements via the WeakMap. Only
-    // markers with a known domain are counted in the breakdown; an unregistered
-    // marker would otherwise fall back to '' and fabricate a phantom
-    // empty-domain group, making a single-domain cluster look multi-domain.
-    // The total bubble count is independent (cluster.count).
+    // Only markers with a known domain are tallied; an unregistered one would
+    // add a phantom '' group. The total (`cluster.count`) is unaffected.
     const domains = (markers ?? [])
       .map((m) => markerDomainMap.get(m as object))
       .filter((d): d is string => Boolean(d));
@@ -229,11 +198,8 @@ const clusterRenderer: Renderer = {
   },
 };
 
-// ─── Per-marker component ────────────────────────────────────────────────────
-// Each ClusteredMarker calls useAdvancedMarkerRef() (legal — one hook per
-// component instance) to obtain the underlying AdvancedMarkerElement, then
-// reports it to the parent via onMarkerReady so the parent can register it
-// with the MarkerClusterer instance.
+// Each ClusteredMarker reports its AdvancedMarkerElement via `onMarkerReady`
+// so the parent can register it with the MarkerClusterer.
 
 interface ClusteredMarkerProps {
   marker: MapMarker;
@@ -263,11 +229,9 @@ function ClusteredMarker({
   const map = useMap();
   const isMobile = useIsMobile();
 
-  // Google auto-pans an InfoWindow into view when it OPENS, but not when its
-  // content later resizes (e.g. the user taps "View more details" and the card
-  // grows). Without this, a card anchored near a map edge gets its top/bottom
-  // clipped after expanding. We observe the popup content's size and, whenever
-  // it changes, nudge the map so the whole card stays visible.
+  // Google auto-pans an InfoWindow into view when it opens, not when its
+  // content later grows, so a resize observer pans the map to keep the card
+  // visible.
   const popupObserverRef = React.useRef<ResizeObserver | null>(null);
   const popupPrevHeightRef = React.useRef<number | null>(null);
 
@@ -288,7 +252,6 @@ function ClusteredMarker({
     [map]
   );
 
-  // Callback ref: (re)wire the observer when the popup content mounts/unmounts.
   const popupContentRef = React.useCallback(
     (node: HTMLDivElement | null) => {
       popupObserverRef.current?.disconnect();
@@ -296,8 +259,8 @@ function ClusteredMarker({
       if (!node) return;
       const ro = new ResizeObserver(() => {
         const h = node.getBoundingClientRect().height;
-        // Skip the first measurement (baseline); only react to real changes so
-        // we don't fight Google's own open-time auto-pan.
+        // Skip the first measurement so this does not fight Google's
+        // open-time auto-pan.
         if (
           popupPrevHeightRef.current !== null &&
           Math.abs(h - popupPrevHeightRef.current) > 1
@@ -314,23 +277,14 @@ function ClusteredMarker({
 
   React.useEffect(() => () => popupObserverRef.current?.disconnect(), []);
 
-  // Resolve the marker icon once per render (cheap — just a lookup). Defaults
-  // to a domain-based icon; callers may override (e.g. tourist app by category).
   const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
-  // When a marker image is provided (e.g. the RubiX favicon), the pin renders
-  // that image in a white circle instead of the coloured icon pin.
   const markerImage = resolveMarkerImage?.(marker) ?? null;
 
-  // Report the underlying element to the parent each time it changes.
-  // Also register this element→domain mapping so the cluster renderer can
-  // look up each marker's domain when building the badge row.
   React.useEffect(() => {
     if (markerEl) {
       markerDomainMap.set(markerEl, marker.domain ?? '');
     }
     onMarkerReady(id, markerEl);
-    // Cleanup: remove from clusterer when this marker unmounts.
-    // WeakMap cleanup is automatic (GC) when markerEl is released.
     return () => {
       onMarkerReady(id, null);
     };
@@ -343,11 +297,9 @@ function ClusteredMarker({
         ref={markerRef}
         position={{ lat: marker.lat, lng: marker.lng }}
         title={marker.label}
-        // Above the non-interactive "You" self-marker so a co-located item is
-        // always clickable (see SELF_MARKER_Z_INDEX / ITEM_MARKER_Z_INDEX).
+        // Above the "You" self-marker; see ITEM_MARKER_Z_INDEX.
         zIndex={ITEM_MARKER_Z_INDEX}
         onClick={() => {
-          // Toggle: clicking the already-open marker closes its popup.
           if (isActive) {
             onClose();
           } else {
@@ -357,16 +309,9 @@ function ClusteredMarker({
         }}
       >
         {/*
-         * Render a custom circular marker as AdvancedMarker children rather
-         * than using <Pin glyph={...}>. The vis.gl <Pin> glyph prop expects a
-         * string/DOM element, so a React icon node silently fails to render
-         * (showing a plain colored pin with no icon). A styled div child is
-         * rendered reliably by vis.gl.
-         *
-         * Colour is network-derived: `bg-primary` / `text-primary-foreground`
-         * resolve to the active network theme's --primary (blue_dot → blue,
-         * purple_dot → purple, …) the same way the rest of the UI is themed.
-         * The lucide icon inherits the foreground colour via currentColor.
+         * A styled div child rather than <Pin glyph>: vis.gl's glyph prop takes
+         * a string or DOM element, and a React icon node silently renders
+         * nothing.
          */}
         {markerImage ? (
           <div
@@ -386,12 +331,8 @@ function ClusteredMarker({
       </AdvancedMarker>
       {isActive &&
         (isMobile
-          ? // Mobile: render the card as a centered overlay (portal to <body>)
-            // with a tap-to-close backdrop instead of the Google InfoWindow.
-            // Anchoring to the marker pushed tall cards partly off-screen and
-            // the InfoWindow never gave the card a bounded height, so its scroll
-            // didn't engage on touch. A fixed overlay is always fully on-screen
-            // and the card's own scroll works normally. Card size is unchanged.
+          ? // Mobile: a centred overlay instead of the InfoWindow, which pushed
+            // tall cards off-screen and gave them no bounded height to scroll.
             createPortal(
               <div
                 className="fixed inset-0 z-[2000] flex items-center justify-center p-3"
@@ -429,12 +370,8 @@ function ClusteredMarker({
   );
 }
 
-// ─── MapView controller component ────────────────────────────────────────────
-// Lives inside <Map> so it can call useMap() from @vis.gl/react-google-maps.
-// Imperatively pans/zooms the Google map when the caller provides an explicit
-// viewport (e.g. when the user picks a different own profile from the selector).
-// Only fires when `initialViewSet` is true; when false the map is in "fit all"
-// mode and we leave it alone so it doesn't fight FitBounds or user panning.
+// Pans/zooms the map to `center`/`zoom` when `initialViewSet` is true; when
+// false it leaves the map alone so it does not fight user panning.
 
 interface MapViewControllerProps {
   center: [number, number];
@@ -450,7 +387,6 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
   const prevNonce = React.useRef<number | undefined>(focusNonce);
 
   React.useEffect(() => {
-    // Only drive the viewport when a specific profile is selected.
     if (!map || !initialViewSet) return;
 
     const sameCenter =
@@ -475,24 +411,10 @@ function MapViewController({ center, zoom, initialViewSet, focusNonce }: MapView
   return null;
 }
 
-// ─── Viewport reporter component ─────────────────────────────────────────────
-// Lives inside <Map> so it can call useMap(). Reports the map's viewport
-// (center + half-diagonal radius, plus the raw `map.getBounds()` corners —
-// #203 map-serverside-search Task 4) to the caller on debounced `idle`
-// (Google's settle event, fired after pan/zoom/resize finish). Only ever mounted when
-// `onViewportChange` is provided (see `GoogleMapProvider` below), so the
-// tourist app — which never passes it — attaches no `idle` listener at all.
-//
-// Also emits the CURRENT viewport once on mount (bypassing the debounce), for
-// parity with the Leaflet provider's mount emit. Google's own `idle` normally
-// fires shortly after load regardless of a location fix, so this is a
-// fast-path here rather than a fix for a stuck-forever case — but it is
-// skipped if center/bounds aren't ready yet, since the first `idle` will
-// cover it in that case.
-//
-// Every emit also carries `map.getZoom()` (#203 §7, optional on Google's own
-// types) so the home-page can gate anonymous count-first browsing on the
-// zoom level without a separate event.
+// Reports the viewport (centre, bounds corners, zoom) on debounced `idle`.
+// Mounted only when `onViewportChange` is provided. Also emits once on mount
+// for parity with the Leaflet provider; skipped when bounds are not ready,
+// since the first `idle` covers it.
 
 function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
   const map = useMap();
@@ -531,10 +453,8 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   return null;
 }
 
-// ─── Clusterer manager component ─────────────────────────────────────────────
-// Lives inside <Map> so it can call useMap() from @vis.gl/react-google-maps.
-// Maintains a MarkerClusterer instance and keeps it in sync with the set of
-// AdvancedMarkerElements reported by ClusteredMarker children.
+// Keeps a MarkerClusterer in sync with the elements ClusteredMarker children
+// report.
 
 interface ClustererManagerProps {
   markers: MapMarker[];
@@ -559,37 +479,27 @@ function ClustererManager({
 }: ClustererManagerProps) {
   const map = useMap();
 
-  // Map from marker id → AdvancedMarkerElement
   const markerElsRef = React.useRef<globalThis.Map<string, NonNullable<AdvancedMarkerRef>>>(new globalThis.Map());
 
-  // Stable ref to the MarkerClusterer instance
   const clustererRef = React.useRef<MarkerClusterer | null>(null);
 
-  // Pending handle for the rAF-batched clusterer render (see scheduleRender).
   const renderRafRef = React.useRef<number | null>(null);
-  // Pending handle for the smooth cluster-click zoom animation (onClusterClick).
   const cameraAnimRef = React.useRef<number | null>(null);
 
-  // Create the clusterer once the map is ready.
   React.useEffect(() => {
     if (!map) return;
 
     const clusterer = new MarkerClusterer({
       map,
       renderer: clusterRenderer,
-      // One click smoothly zooms to reveal the cluster's contents. We compute
-      // the SAME target zoom Google's default `fitBounds(cluster.bounds)` would
-      // pick (via getBoundsZoomLevel) — for a cluster with no inner sub-clusters
-      // (co-located points) that's the max cap, i.e. straight to the item level
-      // — then ANIMATE the camera there (animateMapCamera) instead of the
-      // default's instant snap. This restores the original one-click-reveal
-      // behaviour, just smooth.
+      // Animates to the zoom the default `fitBounds(cluster.bounds)` would
+      // snap to, so one click reveals the cluster's contents.
       onClusterClick: (_event, cluster, clusterMap) => {
         const div = clusterMap.getDiv();
         const dim = { width: div?.offsetWidth || 800, height: div?.offsetHeight || 600 };
         const current = clusterMap.getZoom() ?? 12;
         const fit = cluster.bounds ? getBoundsZoomLevel(cluster.bounds, dim) : current + 3;
-        // Always zoom IN at least one level; never past the cap.
+        // Zoom in at least one level, never past the cap.
         const targetZoom = Math.min(Math.max(fit, current + 1), CLUSTER_CLICK_MAX_ZOOM);
         const pos = cluster.position;
         animateMapCamera(
@@ -602,8 +512,7 @@ function ClustererManager({
     clustererRef.current = clusterer;
 
     return () => {
-      // Cancel any pending batched render + cluster-zoom animation so neither
-      // fires against a torn-down clusterer/map.
+      // Cancel pending frames so nothing fires against a torn-down map.
       if (renderRafRef.current != null) {
         cancelAnimationFrame(renderRafRef.current);
         renderRafRef.current = null;
@@ -612,36 +521,26 @@ function ClustererManager({
         cancelAnimationFrame(cameraAnimRef.current);
         cameraAnimRef.current = null;
       }
-      // clearMarkers() removes all pins from the clusterer, then setMap(null)
-      // detaches the OverlayView from the map — the correct teardown sequence.
-      // onRemove() is an internal OverlayView lifecycle callback and must NOT
-      // be called directly as it can throw on unmount.
-      // MarkerClusterer inherits setMap() at runtime through OverlayViewSafe
-      // but the TypeScript class declaration doesn't surface it; cast to access
-      // it without triggering the TS2339 "does not exist" error.
+      // clearMarkers() then setMap(null) is the teardown; calling the internal
+      // onRemove() directly can throw. setMap() exists at runtime (inherited
+      // via OverlayViewSafe) but is missing from the type declaration.
       clusterer.clearMarkers();
       (clusterer as unknown as { setMap: (map: null) => void }).setMap(null);
       clustererRef.current = null;
     };
   }, [map]);
 
-  // Coalesce re-clustering into ONE render per frame. Each ClusteredMarker
-  // registers its element separately as it mounts, and MarkerClusterer's
-  // addMarker/removeMarker re-cluster + redraw the ENTIRE set by default on
-  // every call. With N markers registering one-by-one that is O(n²) (~125k
-  // clustering passes for 500 pins) — the multi-second freeze where the map is
-  // blank even though the /markers response already landed. So every add/remove
-  // is done with noDraw=true and a single requestAnimationFrame-batched
-  // render() draws the final set once the burst settles → O(n).
+  // One clusterer render per frame. addMarker/removeMarker redraw the whole
+  // set by default, which is O(n^2) as markers register one by one, so they
+  // run with noDraw=true and this batches a single render().
   const scheduleRender = React.useCallback(() => {
-    if (renderRafRef.current != null) return; // already scheduled this frame
+    if (renderRafRef.current != null) return;
     renderRafRef.current = requestAnimationFrame(() => {
       renderRafRef.current = null;
       clustererRef.current?.render();
     });
   }, []);
 
-  // Callback for each ClusteredMarker to register / deregister its element.
   const handleMarkerReady = React.useCallback(
     (id: string, el: NonNullable<AdvancedMarkerRef> | null) => {
       const clusterer = clustererRef.current;
@@ -650,7 +549,6 @@ function ClustererManager({
       const prev = markerElsRef.current.get(id);
 
       if (el === null) {
-        // Marker unmounted — remove from clusterer (noDraw; batched render below).
         if (prev) {
           clusterer.removeMarker(prev, true);
           markerElsRef.current.delete(id);
@@ -659,9 +557,8 @@ function ClustererManager({
         return;
       }
 
-      if (prev === el) return; // No change.
+      if (prev === el) return;
 
-      // Remove stale entry if element reference changed.
       if (prev) {
         clusterer.removeMarker(prev, true);
       }
@@ -693,14 +590,8 @@ function ClustererManager({
   );
 }
 
-// ─── Main provider ───────────────────────────────────────────────────────────
-
-// Lives inside <Map> so it can call useMap(). Records the live camera
-// (center + zoom) on every 'idle' into a ref owned by GoogleMapProvider.
-// `colorScheme` is a construction-time Google Maps option, so switching
-// light/dark remounts <Map> (via its `key`); this lets the remounted map
-// restore the user's current view through defaultCenter/defaultZoom instead
-// of snapping back to the initial center.
+// Records the live camera on every 'idle'. A light/dark switch remounts <Map>
+// (`colorScheme` is construction-time), and the remount restores this view.
 function CameraTracker({
   cameraRef,
 }: {
@@ -740,17 +631,10 @@ export function GoogleMapProvider({
   const { resolved: themeMode } = useThemeMode();
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
-  // Last live camera, so a colorScheme-driven <Map> remount (see below) keeps
-  // the user's current view instead of resetting to the initial center.
   const liveCameraRef = React.useRef<{ center: { lat: number; lng: number }; zoom: number } | null>(null);
 
-  // Closes the open marker popup (both the mobile portal overlay and the
-  // desktop InfoWindow key off `activeMarker`) when the caller bumps
-  // `closePopupNonce` — e.g. right before Connect/Apply opens the consent
-  // modal, so it isn't hidden behind the popup's high stacking context.
-  // Guarded with a ref (mirrors `focusNonce`'s handling in
-  // `MapViewController`/`SetView`) so mount / an unchanged nonce never fires a
-  // spurious close.
+  // Closes the open popup (mobile overlay or InfoWindow) when
+  // `closePopupNonce` changes; the ref guard skips mount and unchanged nonces.
   const prevClosePopupNonce = React.useRef<number | undefined>(closePopupNonce);
   React.useEffect(() => {
     if (prevClosePopupNonce.current !== closePopupNonce) {
@@ -773,10 +657,9 @@ export function GoogleMapProvider({
   return (
     <APIProvider apiKey={apiKey}>
       <Map
-        // colorScheme is a construction-time option, so a light↔dark switch
-        // remounts <Map> via this key; reuseMaps' cache key already includes
-        // colorScheme, so the correctly-coloured instance is created/reused.
-        // CameraTracker + liveCameraRef preserve the view across the remount.
+        // colorScheme is construction-time, so a theme switch remounts via
+        // this key (reuseMaps' cache key includes colorScheme). CameraTracker
+        // preserves the view across the remount.
         key={`gmap-${themeMode}`}
         colorScheme={themeMode === 'dark' ? ColorScheme.DARK : ColorScheme.LIGHT}
         defaultCenter={liveCameraRef.current?.center ?? { lat: center[0], lng: center[1] }}
@@ -784,18 +667,15 @@ export function GoogleMapProvider({
         gestureHandling="greedy"
         mapId="dpg-items-map"
         reuseMaps
-        // On mobile, render the Map/Satellite toggle as a compact dropdown
-        // (MapTypeControlStyle.DROPDOWN_MENU = 2) instead of the wide
-        // horizontal bar, which crowds a small screen. Desktop keeps Google's
-        // default bar.
+        // Mobile: Map/Satellite as a dropdown (DROPDOWN_MENU = 2), not the wide
+        // bar.
         mapTypeControlOptions={
           isMobile
             ? { style: 2 as google.maps.MapTypeControlStyle }
             : undefined
         }
-        // Native fullscreen only maximizes the map's own element, which would
-        // hide our overlay (filters / maximize button). We provide our own
-        // maximize control on the wrapper instead — see MapView.
+        // Native fullscreen would hide our overlay controls; MapView provides
+        // its own maximize.
         fullscreenControl={false}
         // Clicking empty map area closes any open marker popup. Marker clicks
         // do not bubble to this handler in the Google Maps API, so opening a
@@ -803,12 +683,7 @@ export function GoogleMapProvider({
         onClick={() => setActiveMarker(null)}
         className="h-full w-full rounded-lg"
       >
-        {/*
-         * MapViewController imperatively pans/zooms the Google map when the
-         * user picks a specific own-profile from the selector. Only active
-         * when initialViewSet=true so it never fights the user during normal
-         * panning or when "All items" / fit-all mode is active.
-         */}
+        {/* Drives the camera only when initialViewSet is true. */}
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <CameraTracker cameraRef={liveCameraRef} />
@@ -826,23 +701,16 @@ export function GoogleMapProvider({
           resolveMarkerImage={resolveMarkerImage}
         />
         {/*
-         * "You are here" self-marker: the user's own resolved location (profile
-         * or browser geolocation). Rendered OUTSIDE ClustererManager so it is
-         * never registered with the MarkerClusterer (hence never clustered) and
-         * `clickable={false}` so it opens no InfoWindow and never swallows a
-         * click meant for an item pin. The content is shifted down by
-         * SELF_MARKER_GOOGLE_OFFSET_Y so AdvancedMarker's bottom-centre
-         * anchoring lands the dot's CENTRE on the point.
+         * "You are here": outside the clusterer so it is never clustered, and
+         * non-clickable. The content is shifted by SELF_MARKER_GOOGLE_OFFSET_Y
+         * so AdvancedMarker's bottom-centre anchor lands on the dot's centre.
          */}
         {selfLocation && (
           <AdvancedMarker
             position={{ lat: selfLocation.lat, lng: selfLocation.lng }}
             clickable={false}
-            // `clickable={false}` disables the library's own click handling,
-            // but its wrapper div's pointer-events behavior when non-clickable
-            // is an unverified library default. Setting this explicitly
-            // guarantees the self-marker never intercepts a click meant for a
-            // co-located item pin underneath it (#394).
+            // Explicit, since the wrapper's pointer-events when non-clickable
+            // is a library default we do not rely on.
             style={{ pointerEvents: 'none' }}
             zIndex={SELF_MARKER_Z_INDEX}
             title={t('map.you_are_here_short')}
