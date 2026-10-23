@@ -7,10 +7,7 @@ export interface NotificationAuthConfig {
 
 export interface NotificationAuthInput {
   method: string;
-  /**
-   * ONLY the pathname, e.g. "/v1/notify/send"
-   * No host, no query string
-   */
+  /** Pathname only (e.g. "/notify"): no host, no query string. */
   path: string;
 }
 
