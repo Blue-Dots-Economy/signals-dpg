@@ -4,17 +4,12 @@ import { Button } from '@/components/ui/button';
 export interface EnableLocationBannerProps {
   onEnable: () => void;
   /**
-   * True when the user has BLOCKED location for this site (a real "Never allow"
-   * or a browser-imposed embargo). The browser won't re-prompt, so the CTA
-   * can't do anything — we drop it and instead tell the user (via `blockedBody`)
-   * to grant location permission in their browser. A plain dismiss (the ✕ on
-   * the prompt) is NOT blocked — the button stays and re-prompts.
+   * Location is blocked for this site ("Never allow" or a browser embargo), so
+   * the browser will not re-prompt: the CTA is dropped and `blockedBody`
+   * explains. A dismissed prompt is not blocked; the button re-prompts.
    */
   blocked?: boolean;
-  /**
-   * Copy (already translated) — required so this shared component carries no
-   * i18n namespace of its own; each caller owns its own strings.
-   */
+  /** Translated copy; each caller owns its strings. */
   title: string;
   body: string;
   blockedBody: string;
@@ -37,8 +32,7 @@ export function EnableLocationBanner({
         <span className="font-medium">{title}</span>{' '}
         <span className="text-muted-foreground">{blocked ? blockedBody : body}</span>
       </div>
-      {/* When blocked, the button can't re-prompt, so it's omitted — the body
-          tells the user to enable location in their browser instead. */}
+      {/* Omitted when blocked, since it cannot re-prompt. */}
       {!blocked && (
         <Button size="sm" variant="outline" className="shrink-0" onClick={onEnable}>
           {cta}

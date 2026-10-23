@@ -31,12 +31,7 @@ interface SupportDialogProps {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-/**
- * Maps a failed submit to the toast to show. Extracted from the submit handler
- * so the status ladder lives in one readable place instead of inflating the
- * handler, and so each failure keeps its own specific message rather than
- * collapsing into "couldn't send".
- */
+/** Maps a failed submit to its specific toast. */
 function resolveSubmitErrorToast(
   err: unknown,
   t: Translate,
@@ -61,9 +56,8 @@ function resolveSubmitErrorToast(
     typeof data?.error === 'string' &&
     data.error.startsWith('ATTACHMENT_')
   ) {
-    // Server-side attachment rejection the client-side check didn't catch (e.g.
-    // limits lowered since the config was cached). Its message names the
-    // offending file, so surface it rather than a generic failure.
+    // A server-side attachment rejection the client check missed (e.g. limits
+    // lowered since the config was cached); its message names the file.
     return {
       title: t('support.toast_attachment_rejected'),
       description: typeof data.message === 'string' ? data.message : undefined,
@@ -84,11 +78,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Limits come from the API so the form can never disagree with it; only
-  // fetched while the dialog is open.
+  // Limits come from the API, fetched only while the dialog is open.
   const { config } = useSupportConfig(open);
 
-  // Prefill contact fields from the logged-in user whenever the dialog opens.
+  // Prefill contact fields from the signed-in user on open.
   useEffect(() => {
     if (!open) return;
     setName(user?.name ?? '');
@@ -105,8 +98,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const incoming = Array.from(e.target.files ?? []);
-    // Clear the input either way, so re-picking the same file still fires
-    // onChange and a rejected pick doesn't linger in the control.
+    // Clear the input so re-picking the same file still fires onChange.
     e.target.value = '';
     if (incoming.length === 0) return;
 
@@ -155,8 +147,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     }
     setIsSubmitting(true);
     try {
-      // Encoding happens inside the submitting state: a multi-MB file takes long
-      // enough that the button must already be disabled and spinning.
+      // Encode inside the submitting state, since a large file takes a while.
       const encoded = attachments.length ? await encodeAttachments(attachments) : undefined;
       await submitSupport({
         name: trimmedName,
