@@ -30,16 +30,15 @@ import {
 /**
  * POST /api/v1/admin/participant/decrypt
  *
- * Returns DECRYPTED profile item_state for a set of item_ids (now) or a
- * user_id (future UI). Ownership is keyed, in BOTH modes, on the always-present
- * `user.onboarded_by_org_id` of the item's creator (joined via
- * `items.created_by`) — NOT on `item_metrics`, which is a lazily-materialized
- * analytics cache (populated only when an aggregator views its dashboard/export)
- * and would silently drop items that have never been dashboarded.
- *  - aggregator: only items whose creator it onboarded.
+ * Returns decrypted profile item_state for a set of item_ids or a user_id.
+ * Ownership is keyed on the item creator's `user.onboarded_by_org_id`, never on
+ * the lazily materialised `item_metrics` cache.
+ *  - aggregator: only items whose creator it onboarded, in its declared domains.
  *  - network_service: all items in served networks.
  * Requested ids that are not found / not in a served network / not owned / fail
  * to decrypt land in `skipped` with no distinction (no existence leak).
+ *
+ * Design: docs/architecture/http-participant-decrypt-scope.md
  */
 
 type DecryptRequestType = FastifyRequest<{ Body: DecryptParticipantRequestType }>;
@@ -57,11 +56,8 @@ export const participant_decrypt: FastifyPluginAsync = async (app) => {
   });
 };
 
-// Base columns fetched for every request. `item_locations` and the creator's
-// account contact are added only when actually requested (see
-// `buildSelectColumns`), so the default path (no `contact`, no
-// `include_locations`) neither reads per-row jsonb locations nor pulls account
-// PII through the handler.
+// Base columns. `item_locations` and the creator's account contact are added
+// only when requested, so the default path never pulls account PII.
 const ITEM_COLUMNS_BASE = {
   item_id: items.item_id,
   item_network: items.item_network,
@@ -74,13 +70,9 @@ const ITEM_COLUMNS_BASE = {
 } as const;
 
 /**
- * Builds the SELECT column set for one request: base item columns always;
- * `item_locations` only when `include_locations`; the creator's account
- * name/email/phone (the `contact` block's fallback source) only when a
- * `contact` block is requested.
- *
- * @param opts - The per-request snapshot options.
- * @returns The Drizzle column selection for this request.
+ * The SELECT columns for one request: `item_locations` only when
+ * `include_locations`; the creator's account name/email/phone (the `contact`
+ * fallback source) only when `contact` is requested.
  */
 function buildSelectColumns(opts: SnapshotOptions) {
   return {
@@ -101,7 +93,7 @@ type DecryptableRow = {
   item_private_state: string;
   created_at: Date;
   updated_at: Date;
-  // Present only when requested — see buildSelectColumns.
+  // Present only when requested; see buildSelectColumns.
   item_locations?: Array<{ lat: number; lng: number; label?: string }>;
   user_name?: string | null;
   user_email?: string | null;
@@ -134,18 +126,12 @@ const decryptRowSafe = (
 
 /**
  * Resolves the per-row domain contact-field context (name fallback =
- * item-type display_name_field -> domain card.title_field, via the shared
- * `resolveNameFallbackField`).
+ * item-type display_name_field, then domain card.title_field).
  *
- * The config lookup is failure-isolated like `decryptRowSafe`: a rejection
- * (transient schema-registry fetch failure, or a network id absent from the
- * loaded configs) degrades this row to an empty context — `resolveContact`
- * then falls back to the account contact for every requested canonical field —
- * instead of 500-ing the whole batch. `getNetworkConfigById` is
- * process-memoized (post-boot it's an in-memory array find) and self-heals on a
- * transient load failure (network_configs.ts), so no per-request cache is
- * needed. Only reached when `contact` is requested — `fields` (pure projection)
- * never needs domain config.
+ * Failure-isolated like `decryptRowSafe`: a config lookup failure degrades this
+ * row to an empty context (account contact for every requested field) instead
+ * of 500-ing the batch. `getNetworkConfigById` is process-memoized, so no
+ * per-request cache is needed.
  */
 async function resolveDomainContext(
   r: DecryptableRow,
@@ -183,9 +169,8 @@ async function resolveDomainContext(
   };
 }
 
-/** Clamps a stored (possibly jitter-nudged) coordinate into the valid WGS84
- * range so the validating response serializer (lat ±90 / lng ±180) can never
- * 500 the whole batch on one out-of-range point. */
+/** Clamps a stored (possibly jitter-nudged) coordinate into the WGS84 range so
+ * the validating response serializer cannot 500 the batch on one point. */
 function clampLocation(loc: { lat: number; lng: number; label?: string }): {
   lat: number;
   lng: number;
@@ -198,7 +183,7 @@ function clampLocation(loc: { lat: number; lng: number; label?: string }): {
   };
 }
 
-/** Per-request options for the three independent, optional controls (#521). */
+/** Per-request options for the three independent, optional controls. */
 interface SnapshotOptions {
   fields: string[] | undefined;
   contact: CanonicalContact[] | undefined; // already normalized (true => all three)
@@ -206,11 +191,9 @@ interface SnapshotOptions {
 }
 
 /**
- * Builds one profile snapshot from an already-decrypted row: `item_state` is
- * the full merged state, or (when `fields` is requested) a pure projection of
- * it — never both, and never canonical-special-cased. `contact` and
- * `locations` are attached independently when requested, regardless of the
- * `fields` projection.
+ * Builds one profile snapshot from a decrypted row: `item_state` is the full
+ * merged state or, when `fields` is requested, a pure projection of it.
+ * `contact` and `locations` are attached independently of `fields`.
  */
 async function buildSnapshot(
   r: DecryptableRow,
@@ -243,11 +226,9 @@ async function buildSnapshot(
 }
 
 /**
- * Decrypts every row and builds its snapshot, splitting rows into resolved
- * `profiles` and `failedIds` (rows whose decrypt failed — isolated by
- * `decryptRowSafe`). Callers derive `skipped` semantics themselves: item_ids
- * mode diffs `failedIds` against the full requested-but-not-found/not-owned
- * set; user_id mode uses `failedIds` as-is.
+ * Decrypts every row and builds its snapshot, splitting rows into `profiles`
+ * and `failedIds` (decrypt failed). item_ids mode derives `skipped` from the
+ * requested ids missing from `profiles`; user_id mode uses `failedIds`.
  */
 async function collectProfiles(
   rows: DecryptableRow[],
@@ -268,14 +249,9 @@ async function collectProfiles(
 }
 
 /**
- * Tallies account-fallback disclosures for the audit log: how many contact
- * fields resolved to the login-identity (account) value (`source: 'user'`), and
- * across how many profiles. A distinct disclosure class — login-identity
- * contact leaves the system even when the profile itself had no value — so it
- * is recorded separately from the request-shape counts.
- *
- * @param profiles - The resolved snapshots.
- * @returns `{ fields, profiles }` account-fallback counts.
+ * Tallies account-fallback disclosures for the audit log: contact fields served
+ * from the login-identity account (`source: 'user'`) and across how many
+ * profiles. A distinct disclosure class, so it is recorded separately.
  */
 function countAccountFallback(profiles: DecryptedProfileSnapshot[]): {
   fields: number;
@@ -294,38 +270,15 @@ function countAccountFallback(profiles: DecryptedProfileSnapshot[]): {
   return { fields, profiles: profilesWithFallback };
 }
 
-/** Ownership/served-network scoping shared by both query modes: aggregators
- * are restricted to items whose creator they onboarded AND to the domains they
- * declare; network_service sees all items in served networks.
+/**
+ * Ownership/served-network scoping shared by both query modes. Aggregators are
+ * restricted to items whose creator they onboarded and to their declared
+ * `metadata.domains` (defence in depth against an account spanning two
+ * domains). The domain scope is read live, so narrowing an org's domains
+ * revokes decrypt for participants it already onboarded.
  *
- * The domain condition is defence in depth for per-domain default aggregators.
- * `user.onboarded_by_org_id` is per ACCOUNT while items are per DOMAIN, so with
- * a different default per domain an account that somehow spanned two would let
- * one domain's default decrypt the other's participant. `assertSingleDomain`
- * (`services/item_service.ts`) makes such an account unreachable going forward,
- * but a single guard on a path that returns decrypted PII is thin — and legacy
- * rows that predate the lock still hold two domains. Filtering here means the
- * leak needs BOTH invariants to fail, not one.
- *
- * Scoped on the org's declared `metadata.domains`, the same source
- * `aggregator/export.ts` already filters on, so an aggregator sees exactly the
- * populations it reports on.
- *
- * CONSEQUENCE WORTH KNOWING: this makes PII access retroactively mutable by a
- * metadata edit. Ownership is historical — `user.onboarded_by_org_id` is
- * write-once — but the domain scope is read live, so NARROWING an org's
- * `metadata.domains` via `POST /api/v1/admin/aggregator/upsert` silently removes
- * its ability to decrypt participants it already onboarded. That upsert is a
- * routine sync from aggregator-dpg, not an access-control operation, and it
- * rewrites `metadata` wholesale (`admin/aggregator/upsert.ts`), so a sync that
- * drops a domain revokes decrypt for that domain's back catalogue.
- *
- * Kept anyway, for two reasons: `dashboard.ts` and `export.ts` have always
- * behaved this way, so decrypt matching them is the consistent choice rather
- * than a new hazard; and the alternative — pinning scope at onboarding time —
- * needs the per-profile ownership record from #661 to have anywhere to live.
- * Stated here so it is a documented property rather than something discovered
- * during an incident. */
+ * Design: docs/architecture/http-participant-decrypt-scope.md
+ */
 function scopeConditions(
   isAgg: boolean,
   actingOrgId: string,
@@ -360,12 +313,9 @@ export const participant_decrypt_handler = async (
   const isAgg = acting.org_type === 'aggregator';
   const networks = servedNetworks();
 
-  // Fail closed on an aggregator that declares nothing: with no domains there
-  // is no scope to honour, and defaulting to "all of them" on a PII-decrypt
-  // path is the wrong direction. `aggregator/export.ts` already refuses the
-  // same way (`NO_DOMAINS_CONFIGURED`), and `/admin/aggregator/upsert` is
-  // called with a non-empty list by both aggregator-dpg call sites, so this
-  // only catches an org mirrored before `metadata.domains` existed.
+  // Fail closed on an aggregator that declares no domains: defaulting to "all"
+  // on a PII-decrypt path is the wrong direction. Same refusal as
+  // `aggregator/export.ts`.
   const domains = isAgg ? await readConfiguredDomains(acting.org_id) : [];
   if (isAgg && domains.length === 0) {
     return reply.code(400).send({
@@ -419,10 +369,8 @@ export const participant_decrypt_handler = async (
           ...scopeConditions(isAgg, acting.org_id, networks, domains),
         ),
       )
-      // The SAME ordering object GET/POST /admin/participant use, not a
-      // restatement of it: this query cannot share `readItemsForUser` (different
-      // columns, a user join), so importing the ORDER BY is what keeps the three
-      // in step rather than a comment asserting that they are.
+      // Shares the ORDER BY with `readItemsForUser` so the participant routes
+      // list items in the same order.
       .orderBy(...ITEMS_NEWEST_FIRST)) as DecryptableRow[];
 
     const collected = await collectProfiles(rows, opts, request.log);
@@ -430,11 +378,8 @@ export const participant_decrypt_handler = async (
     skipped = collected.failedIds;
   }
 
-  // Audit: this endpoint returns decrypted PII to the caller, so every call is
-  // recorded. The log entry itself carries counts only — never item_state values.
-  // account_fallback_* records the login-identity (account) contact disclosure
-  // class: how many contact fields, across how many profiles, were served from
-  // the account row rather than the profile.
+  // Audit: every call returns decrypted PII, so every call is recorded. Counts
+  // only; never log item_state values.
   const accountFallback = countAccountFallback(profiles);
   request.log.info({
     operation: 'admin.participant.decrypt',
