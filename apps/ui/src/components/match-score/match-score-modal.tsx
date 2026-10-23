@@ -23,9 +23,8 @@ export interface MatchScoreModalProps {
   onRecalculate: () => void;
   onProceed?: () => void;
   /**
-   * #646 C4: the "why this result, in this position" panel. Optional so the
-   * modal still works where the caller has no schema/sort context to build it
-   * from (a public profile, My Actions).
+   * The "why this result, in this position" panel. Optional for callers with
+   * no schema or sort context.
    */
   explanation?: React.ReactNode;
 }
@@ -45,12 +44,9 @@ export function MatchScoreModal({
   const scoreValue = score?.score ?? 0;
   const [progressValue, setProgressValue] = React.useState(0);
 
-  // Animate progress bar when score changes
   React.useEffect(() => {
     if (score?.score !== undefined && !isLoading) {
-      // #646 §5.2: scores are 0-100 end to end now, so the percent IS the
-      // score. The previous /10 normalization existed because the provider
-      // divided by 10 on the way in.
+      // Scores are 0-100, so the score is the percent.
       const targetValue = Math.round(score.score);
       const duration = 600;
       const startTime = performance.now();
@@ -58,7 +54,6 @@ export function MatchScoreModal({
       const animate = (currentTime: number) => {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        // Ease-out function
         const easeOut = 1 - Math.pow(1 - progress, 3);
         setProgressValue(Math.round(targetValue * easeOut));
 
@@ -100,12 +95,8 @@ export function MatchScoreModal({
               <>
                 {/* Score Header */}
                 <div className="text-center space-y-4">
-                  {/* #646 §5.5: one neutral treatment. The colour used to come
-                      from an Excellent/Good/Moderate/Low band whose
-                      0.85/0.70/0.50 thresholds implied a calibration BGE-M3
-                      similarities do not have — the band read as near-constant
-                      across a result set, so colouring by it told the user
-                      nothing while looking authoritative. */}
+                  {/* One neutral colour: BGE-M3 similarities are not
+                      calibrated, so value bands would mislead. */}
                   <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-primary text-primary-foreground">
                     <Star className="h-10 w-10 fill-current" />
                   </div>
@@ -133,13 +124,8 @@ export function MatchScoreModal({
 
                 {explanation}
 
-                {/* #646 §5.5: the Matching Factors and AI Reasoning panels
-                    are gone. They rendered `score.signals` and
-                    `score.reasoning`, dpg-scoring-era fields the
-                    signals_search provider never populates — so the modal
-                    advertised explanations that were always absent. The
-                    relevance explanation below replaces them with something
-                    derivable from the schema. */}
+                {/* No factor or reasoning panels: the signals_search
+                    provider returns only a score. */}
               </>
             ) : (
               <div className="text-center py-12 text-muted-foreground">
