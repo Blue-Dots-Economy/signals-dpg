@@ -3,15 +3,10 @@ import * as schema from './schema';
 import { databasesConfig } from '../../src/config';
 import { Pool, types as pgTypes } from '@dpg/database';
 
-// Force node-postgres to coerce every timestamp shape into a JS Date — match
-// Drizzle's high-level query-builder behavior even when we drop down to raw
-// db.execute(sql`...`) for hand-written queries (e.g. metrics recompute).
-//
-// Without this, raw SQL results come back as strings for some pg builds /
-// type-parser overrides, and date arithmetic downstream throws
-// `getTime is not a function`. See `to_date` in
-// apps/api/src/services/metrics/recompute.ts for the per-call defensive
-// coercion that backstops this parser config.
+// Coerce every timestamp type into a JS Date, matching Drizzle's query builder
+// even for raw db.execute(sql`...`) queries (e.g. metrics recompute); otherwise
+// they can come back as strings and date arithmetic throws. `to_date` in
+// src/services/metrics/recompute.ts is the per-call backstop.
 //
 //   1082 = DATE
 //   1114 = TIMESTAMP (without time zone)
@@ -21,8 +16,7 @@ pgTypes.setTypeParser(1082, toDateOrNull as unknown as (val: string) => Date);
 pgTypes.setTypeParser(1114, toDateOrNull as unknown as (val: string) => Date);
 pgTypes.setTypeParser(1184, toDateOrNull as unknown as (val: string) => Date);
 
-// Exported so graceful shutdown can drain the connection pool (`pool.end()`);
-// previously the pool leaked on SIGTERM because only the HTTP server was closed.
+// Exported so graceful shutdown can drain the connection pool (`pool.end()`).
 export const pool = new Pool({
   connectionString: databasesConfig.pg_url,
   ssl: false,
