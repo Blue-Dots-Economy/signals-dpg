@@ -49,9 +49,9 @@ export function primaryLocation(locs: ItemLocation[] | null | undefined): ItemLo
 }
 
 /**
- * Order-sensitive equality of two location arrays (coords + label). Used by the
- * update path to detect a caller echoing back the already-stored (jittered)
- * coordinates, so we leave them as-is instead of jittering a jittered point.
+ * Order-sensitive equality of two location arrays (coords + label). The update
+ * path uses it to detect echoed-back stored (already jittered) coordinates, so
+ * they are not jittered twice.
  */
 export function sameLocations(a: ItemLocation[], b: ItemLocation[]): boolean {
   if (a.length !== b.length) return false;
@@ -62,12 +62,11 @@ export function sameLocations(a: ItemLocation[], b: ItemLocation[]): boolean {
 }
 
 /**
- * Jitters the coordinates of a PRIVATE (PII) primary location field so the exact
- * address is never persisted: each point is offset to a deterministic random
- * spot within the configured 100–250 m annulus (see geocoding/jitter.ts). This
- * is the authoritative server-side transform — even an API caller that submits
- * an exact coordinate for a private field has it jittered here before storage.
- * Non-private location fields are returned unchanged.
+ * Jitters the coordinates of a private (PII) primary location field so the
+ * exact address is never persisted: each point moves to a deterministic spot in
+ * the configured annulus (default 100–250 m, see geocoding/jitter.ts). This is
+ * the authoritative server-side transform, so exact coordinates from any API
+ * caller are jittered before storage. Non-private fields are returned unchanged.
  */
 export function jitterPrivateLocations(
   locations: ItemLocation[],
@@ -82,10 +81,8 @@ export function jitterPrivateLocations(
 }
 
 /**
- * Decides the coordinates to store for an item. NEVER geocodes — that happens in
- * the create/update paths. Here we apply the PII transform: a PRIVATE location
- * field's supplied coordinate is jittered (100–250 m) so an exact point can
- * never be persisted. Non-private fields are stored exactly as supplied.
+ * The coordinates to store for an item: private location fields are jittered,
+ * others are stored as supplied. Does not geocode; the create/update paths do.
  */
 function locationsForStorage(
   provided: ItemLocation[],
@@ -98,17 +95,10 @@ export class ItemServiceError extends Error {
   statusCode: number;
   errorCode: string;
   /**
-   * Extra machine-readable fields merged into the route's error body.
-   *
-   * Most service errors are `{ error, message }` and leave this undefined. It
-   * exists so a guard that moves down into the service keeps the response shape
-   * it had at the route: `DOMAIN_LOCKED` carries `locked_domain` /
-   * `requested_domain`, which is the documented body an external client can
-   * branch on.
-   *
-   * No in-repo consumer reads those two fields — `apps/ui/src/lib/domain-gate.ts`
-   * derives held domains from `items`, not from the error body — so this is
-   * about not silently narrowing a published error, not about unblocking the UI.
+   * Extra machine-readable fields merged into the route's error body, e.g.
+   * `locked_domain` / `requested_domain` on DOMAIN_LOCKED or `fields` on
+   * INVALID_ITEM_STATE. These are part of the published error contract for
+   * external clients even where the in-repo UI does not read them.
    */
   details?: Record<string, unknown>;
   constructor(
@@ -142,14 +132,13 @@ function invalidItemStateError(err: unknown): ItemServiceError {
 }
 
 /**
- * Rejects caller-supplied coordinates outside the configured country (#789).
+ * Rejects caller-supplied coordinates outside the configured country.
  *
- * Only for points the CALLER resolved — a bulk `geo_location` cell, an
- * autocomplete pick, a partner's `item_locations`. Those skip the geocoder, so
- * its country restriction never sees them. Geocoded points are not checked:
- * text geocoding stays best-effort, and failing a registration because the
- * geocoder's answer sat on a simplified border line would be worse than the
- * bug. A no-op when `GEOCODING_COUNTRY` (or the boundary file) is unset.
+ * Only for points the caller resolved (a bulk `geo_location` cell, an
+ * autocomplete pick, a partner's `item_locations`), which skip the geocoder's
+ * own country restriction. Geocoded points are not checked: geocoding is
+ * best-effort and a point on a simplified border line must not fail a
+ * registration. A no-op when `GEOCODING_COUNTRY` (or the boundary file) is unset.
  *
  * @throws {ItemServiceError} 400 LOCATION_OUTSIDE_COUNTRY, naming the point so a
  *   bulk operator can find the row.
@@ -168,9 +157,8 @@ export async function assertSuppliedLocationsInCountry(
 }
 
 /**
- * Whether `userId` is the creator of the item identified by the partition key.
- * Shared by the profile-consent routes (accept + U18) so the ownership query —
- * scoped on the partition-pruning columns — isn't hand-written per handler.
+ * Whether `userId` is the creator of the item, queried on the full partition
+ * key so Postgres can prune partitions.
  */
 export async function isItemOwnedBy(
   userId: string,
@@ -199,17 +187,16 @@ export interface CreateItemServiceParams {
   item_locations?: ItemLocation[];
   created_by: string;
   /**
-   * Whether profile_creation consent is being accepted as part of this create
-   * (the public /item/create carries a consent block). When true, a required-
-   * complete item is classified `live` immediately; when false/omitted (admin/
-   * bulk onboarding), the item stays `draft` and is promoted later via
-   * POST /consent/profile-accept. Defaults to false.
+   * Whether profile_creation consent is accepted as part of this create. When
+   * true, a complete item can go `live` immediately; when false (admin/bulk
+   * onboarding, or a gated minor), it stays `draft` until
+   * POST /consent/profile-accept promotes it. Defaults to false.
    */
   consent_accepted?: boolean;
   /**
    * Skip the per-user profile cap (MAX_PROFILES_PER_USER / the domain's
-   * `max_profiles_per_user`). Set only by trusted internal callers such as
-   * seed scripts. Defaults to false — every real create path is capped.
+   * `max_profiles_per_user`). For trusted internal callers such as seed
+   * scripts only; every request-driven create path is capped.
    */
   skip_profile_limit?: boolean;
 }
@@ -327,39 +314,18 @@ async function resolveProfileLimit(
 
 /**
  * Enforce the per-user profile cap atomically, inside the caller's transaction.
- * Mirrors assertWardLimitWithLock: a transaction-scoped advisory lock keyed on
- * the (user, network, domain, item_type) scope serializes concurrent creates so
- * two racing inserts can't both pass a `count < limit` check. Throws 409
- * PROFILE_LIMIT_REACHED when the user is already at the cap.
+ * A transaction-scoped advisory lock on (user, network, domain, item_type)
+ * serializes concurrent creates so two racing inserts can't both pass the
+ * count check. Throws 409 PROFILE_LIMIT_REACHED at the cap.
  *
- * ## Retired rows do not hold a slot (#737)
+ * Retired rows do not hold a slot: retiring is the remedy the 409 message
+ * offers. This is safe only because `retired` is terminal (no
+ * retire-create-unretire path); revisit if retire becomes reversible. The
+ * filter is a denylist so any future lifecycle state still consumes a slot.
  *
- * The count excludes `retired`, so retiring a profile frees a slot and the cap
- * measures live/draft/paused only. Three reasons this is the right shape:
- *
- *   - It is the only remedy a capped participant actually has. The 409 message
- *     names retire, and retire is what the UI offers (the per-row trash icon in
- *     `profile-row-actions.tsx`, #347). Counting retired rows made that button
- *     a no-op against the very error that recommends it.
- *   - It is what the owner already sees. The sidebar's `useMyItems` fetch
- *     EXCLUDES retired (see the note in `lib/login-profiles.ts`), so counting
- *     them meant "you have 5" while the screen listed 4.
- *   - It cannot be gamed. `retired` is terminal — `classify_item` hard-returns
- *     it and `POST /item/lifecycle` refuses every transition out with
- *     ALREADY_RETIRED — so there is no retire-create-unretire path back over
- *     the cap. That terminality is the whole safety argument; if retire ever
- *     becomes reversible, this exclusion must be revisited with it.
- *
- * Deliberately a denylist (`!= 'retired'`) rather than an allowlist over
- * live/draft/paused: a lifecycle state added later should keep consuming a slot
- * until someone decides otherwise, not silently become free. Safe against NULLs
- * because `items.lifecycle_status` is NOT NULL DEFAULT 'draft'.
- *
- * NOT changed here: the single-domain lock's own `NOT EXISTS items` guard
- * (`services/items/single_domain_lock.ts`) has no lifecycle filter either, and
- * that one is intended. It protects `user.onboarded_by_org_id` — a per-ACCOUNT,
- * write-once tenancy key that retire does not reset — so retiring every profile
- * in a domain still leaves the account locked to that domain, by design.
+ * The single-domain lock (`single_domain_lock.ts`) intentionally does count
+ * retired items: it protects the per-account tenancy key, which retire does not
+ * reset.
  */
 async function assertProfileLimit(
   exec: DbOrTx,
@@ -397,21 +363,12 @@ async function assertProfileLimit(
 }
 
 /**
- * Single-domain lock, on the create path.
+ * Single-domain lock on the create path. Enforced here so every create path
+ * (including admin api-key callers and `POST /admin/participant`) inherits it.
+ * The rule and SQL live in `services/items/single_domain_lock.ts`, shared with
+ * `POST /api/v1/user/domains`.
  *
- * Enforced at this choke point so every create path inherits it — the same
- * reasoning as the profile cap directly below. The route-level check this
- * replaced was skipped for admin api-key callers and absent entirely from
- * `POST /admin/participant`, which is precisely the aggregator/voice path where
- * a second domain could be introduced.
- *
- * The rule, the SQL and the reasoning live in
- * `services/items/single_domain_lock.ts`, shared with
- * `POST /api/v1/user/domains` — the other place an account's domain is decided.
- * They were two copies of the same statement and the copies drifted, which is
- * how the route ended up without the `NOT EXISTS items` guard.
- *
- * Only a MISMATCH is refused: a first create, a repeat in the same domain, and a
+ * Only a mismatch is refused: a first create, a repeat in the same domain, and a
  * backfilled legacy account in either of its domains all pass.
  *
  * @throws ItemServiceError 403 DOMAIN_LOCKED when the account is locked to
@@ -450,14 +407,12 @@ export async function createItemInternal(
     submittedItemState,
   });
 
-  // Single-domain lock. Before the cap: being in the wrong domain entirely is a
-  // more fundamental refusal than being at the cap within the right one, and a
-  // fixed order between the two guards keeps their locking non-reorderable.
+  // The domain lock runs before the cap: a wrong domain is the more fundamental
+  // refusal, and a fixed order keeps the two guards' locks acquired consistently.
   await assertSingleDomain(exec, params);
 
-  // Per-user profile cap (#349). Enforced at this single choke point so every
-  // create path (item/create, admin/participant, aggregator bulk + reg-links)
-  // inherits it. Runs on the caller's transaction for an atomic check-then-insert.
+  // Enforced here so every create path (item/create, admin/participant,
+  // aggregator bulk + reg-links) inherits the cap atomically.
   if (!params.skip_profile_limit) {
     await assertProfileLimit(exec, params);
   }
@@ -469,22 +424,18 @@ export async function createItemInternal(
       ? ''
       : encryptPiiBlob(JSON.stringify(itemState.privateState), getPiiKey());
 
-  // Live requires required-complete AND profile_creation consent
-  // (aggregator-dpg#464). A create that carries consent (public /item/create
-  // with a consent block, passed as `consent_accepted`) IS that acceptance, so
-  // it can go live now (#275). Consent-less callers (admin/bulk onboarding)
-  // stay draft until POST /consent/profile-accept promotes. U18: for a gated
-  // MINOR the route passes `consent_accepted=false` (self-consent must not
-  // promote a minor), so they stay draft until GUARDIAN consent promotes via
-  // the finalize/accept path — see create_item.ts and promoteItemOnProfileConsent.
+  // A create carrying consent is the profile_creation acceptance, so it can go
+  // live now. Consent-less callers stay draft until POST /consent/profile-accept.
+  // For a gated minor create_item passes `consent_accepted=false` (self-consent
+  // must not promote a minor); guardian consent promotes later via
+  // promoteItemOnProfileConsent.
   const goLiveGates = await resolveGoLiveGates(params.item_network, params.item_domain);
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: submittedItemState,
     current_status: 'draft',
-    // SS-3 (#640): read-only gate check. Tagging happens at the user level —
-    // `create_item`'s first-create bootstrap calls `tagUserForDomain` inside
-    // this same transaction, before this runs.
+    // Read-only gate check. create_item calls `tagUserWithDefaultAggregator`
+    // earlier in this same transaction.
     owner_context: await ownerGateContext(
       exec,
       goLiveGates,
@@ -492,9 +443,8 @@ export async function createItemInternal(
       params.item_network,
       params.item_domain,
     ),
-    // Guardian-aware already: create_item passes consent_accepted=false for a
-    // gated minor (self-consent must not promote), so no separate guardian
-    // check is needed on the create path.
+    // No separate guardian check here: create_item already passes false for a
+    // gated minor.
     consent_accepted: params.consent_accepted ?? false,
     gates: goLiveGates,
   });
@@ -528,9 +478,7 @@ export async function createItemInternal(
       itemDomain: items.item_domain,
       itemType: items.item_type,
       itemId: items.item_id,
-      // Surfaced so callers know whether the create committed `live` or `draft`
-      // (an incomplete/gated create stays draft) — the create email copy differs
-      // ("your profile is live" vs "complete your profile"). See create_item.ts.
+      // Callers need it to pick the create email copy (live vs complete-your-profile).
       lifecycleStatus: items.lifecycle_status,
     });
 
@@ -562,31 +510,18 @@ export interface UpdateItemInternalResult {
   };
 }
 
-/**
- * Whether a domain's configured gate set includes the SS-3 owner gate (#640).
- *
- * One predicate for "does this write need the default-aggregator work at all",
- * shared by the tag fill and the gate-context resolution so the two can never
- * disagree about when they apply.
- */
+/** Whether a domain's configured gate set includes the `owner_required` gate. */
 function gatesRequireOwner(gates: readonly GoLiveGate[]): boolean {
   return gates.includes('owner_required');
 }
 
 /**
- * The `owner_required` gate context for one profile write (#640) — read only,
- * and only when the domain actually configures the gate.
+ * The `owner_required` gate context for one profile write. Read-only: tagging
+ * happens at the account level (`tagUserForDomain` /
+ * `tagUserWithDefaultAggregator`) when the user's domain is decided.
  *
- * **No tagging happens here.** Ownership is a property of the ACCOUNT, decided
- * once when the user's domain is decided, so the write lives at the user level
- * (`tagUserForDomain`, called from the three places that establish
- * `user.domains`). Doing it per item write meant re-resolving the default on
- * every edit by a user who was already owned — work whose result is always
- * discarded.
- *
- * @returns the gate context, or undefined when the domain does not configure
- *   `owner_required` (which is every domain by default, so this normally costs
- *   nothing).
+ * @returns undefined when the domain does not configure `owner_required` (the
+ *   default), so this normally costs nothing.
  */
 async function ownerGateContext(
   exec: DbOrTx,
@@ -612,9 +547,8 @@ export async function resolveGoLiveGates(
   const networkConfig = await getNetworkConfigById(network);
   const domainConfig = networkConfig.domains.find((d) => d.id === domain);
   const gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
-  // U18: the guardian age control folds into `consent_required`. A
-  // guardian-gated domain always enforces it, even if config omitted it or the
-  // default wouldn't include it — the age gate must never be droppable.
+  // The U18 guardian check lives in `consent_required`, so a guardian-gated
+  // domain always gets that gate: the age gate must never be droppable by config.
   if (domainConfig?.guardian_consent_required && !gates.includes('consent_required')) {
     return [...gates, 'consent_required'];
   }
@@ -622,21 +556,17 @@ export async function resolveGoLiveGates(
 }
 
 /**
- * Server-authoritative U18 go-live gate. Returns true when an item must NOT be
- * flipped `draft → live` because a guardian-gated domain lacks the required
- * guardian consent. THE single source of truth for the age gate on every
- * promotion path (create self-consent, /consent/profile-accept, and item
- * update) — do not re-derive it inline. Fail-closed on two fronts:
+ * Server-authoritative U18 go-live gate: true when an item must not go
+ * `draft → live` because a guardian-gated domain lacks guardian consent. Used by
+ * /consent/profile-accept promotion and item update; the create path applies
+ * the same rule in create_item's `resolveSelfConsentPromotes`. Fails closed:
  *
- *  - **null age on a gated domain → blocked.** A missing `user.age` is
- *    never treated as "adult": age capture is client-side only (u18_precheck is
- *    a hint, not a control), so a minor account with no age must not be able to
- *    self-consent to live.
- *  - **minor with no `source='guardian'` profile_creation row → blocked.** Only
- *    guardian consent promotes a minor; the ward's own self-consent row cannot.
+ *  - Null age on a gated domain blocks: age capture is client-side
+ *    (u18_precheck is a hint, not a control), so a missing age is never "adult".
+ *  - A minor with no `source='guardian'` profile_creation row blocks: the
+ *    ward's own self-consent row cannot promote.
  *
- * A proven adult (age present and not a minor), and ANY user on a non-gated
- * domain, are never blocked.
+ * A proven adult, and any user on a non-gated domain, is never blocked.
  */
 export async function guardianGateBlocksGoLive(
   exec: DbOrTx,
@@ -651,7 +581,6 @@ export async function guardianGateBlocksGoLive(
     .where(eq(user.id, item.created_by))
     .limit(1);
 
-  // Cannot prove adulthood without an age → fail-closed on a gated domain.
   if (ward?.age == null) return true;
   if (!isMinor(ward.age)) return false;
 
@@ -668,22 +597,17 @@ export async function guardianGateBlocksGoLive(
       ),
     )
     .limit(1);
-  return !guardianRow; // minor without guardian consent → stay draft
+  return !guardianRow;
 }
 
 /**
- * Promote a single profile to `live` after its owner accepts `profile_creation`
- * consent (aggregator-dpg#464). A profile is created `draft` because per-item
- * consent can only be recorded after the item exists; when the owner accepts
- * profile consent (via POST /consent/profile-accept, on platform login or a
- * Voice AI call), a complete profile becomes discoverable.
+ * Promote a `draft` profile to `live` after its owner accepts
+ * `profile_creation` consent, re-running the write-path classifier so the
+ * completeness rules stay in one place. `paused` is sticky and `live` needs no
+ * change. Returns true if it flipped to live.
  *
- * Only a `draft` item is promoted — `paused` is sticky and `live` needs no
- * change. Re-runs the same classifier used on write (with consent now true),
- * so completeness rules stay in one place. Returns true if it flipped to live.
- *
- * Caller is expected to have already recorded the consent row (and verified the
- * caller owns the item); this only re-evaluates lifecycle.
+ * The caller must already have recorded the consent row and verified ownership;
+ * this only re-evaluates lifecycle.
  */
 export async function promoteItemOnProfileConsent(
   exec: DbOrTx,
@@ -726,11 +650,8 @@ export async function promoteItemOnProfileConsent(
   );
 
   const goLiveGates = await resolveGoLiveGates(item.item_network, item.item_domain);
-  // Reached only after the caller recorded profile_creation consent, so the
-  // consent row exists; the `consent_required` gate then reduces to the U18 age
-  // check (spec §7 / D11/D13) — fail-closed for a gated minor / null-DOB. The
-  // guardian result is folded into `consent_accepted`; the classifier just
-  // evaluates whichever gates the domain configured.
+  // The caller recorded the consent row, so `consent_required` reduces to the
+  // U18 guardian check (fail-closed for a gated minor or null age).
   const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
   const { lifecycle_status } = classify_item({
     schema: itemSchema as { required?: string[] },
@@ -757,11 +678,9 @@ export async function promoteItemOnProfileConsent(
 }
 
 /**
- * Record (or upgrade) a minor's GUARDIAN `profile_creation` consent for an item
- * and promote it live in one step. Upsert (not plain insert): a prior
- * `source='profile'` row from create_item must be upgraded to `'guardian'`, not
- * 23505'd. Shared by the U18 profile-consent verify + finalize handlers, which
- * were byte-identical. Returns whether the item was promoted to live.
+ * Record a minor's guardian `profile_creation` consent for an item and promote
+ * it live in one step. Shared by the U18 profile-consent verify and finalize
+ * handlers. Returns whether the item was promoted to live.
  */
 export async function upsertGuardianProfileConsentAndPromote(
   tx: DbOrTx,
@@ -770,9 +689,8 @@ export async function upsertGuardianProfileConsentAndPromote(
   await tx
     .insert(consent_record)
     .values(guardianProfileConsentRow(args))
-    // Append a distinct source='guardian' row (the ward's own source='profile'
-    // row from create_item is preserved). Conflict only on a repeat guardian
-    // acceptance for the same item → idempotent update, self row untouched.
+    // Adds a source='guardian' row beside the ward's own source='profile' row.
+    // A repeat guardian acceptance for the same item updates in place.
     .onConflictDoUpdate({
       target: [consent_record.userId, consent_record.itemId, consent_record.source],
       targetWhere: sql`level = 'item' AND consent_category = 'profile_creation'`,
@@ -850,8 +768,8 @@ async function computeItemStateUpdate(
     throw invalidItemStateError(err);
   }
 
-  // Live latch: a live profile must stay complete — reject an edit that empties
-  // a required field while live (see 2026-06-10-live-latch-design.md §6).
+  // Live latch: a live profile must stay complete, so an edit that empties a
+  // required field is rejected (docs/superpowers/specs/2026-06-10-live-latch-design.md).
   const unpopulatedRequired = requiredKeys.filter((k) => !is_populated(mergedFullState[k]));
   if (unpopulatedRequired.length > 0 && existingItem.lifecycle_status === 'live') {
     throw new ItemServiceError(
@@ -881,10 +799,8 @@ async function computeItemStateUpdate(
     current_status: existingItem.lifecycle_status as 'draft' | 'live' | 'paused',
     consent_accepted: consentSatisfied,
     gates: goLiveGates,
-    // Only for a draft: `owner_required` short-circuits to true on a live item
-    // (guard 2) and `paused` is sticky, so neither the tag nor the context can
-    // change the classification — and most edits in steady state are edits of
-    // live profiles.
+    // Only needed for a draft: `owner_required` passes for an already-live item
+    // and `paused` is sticky, so the lookup is skipped for most edits.
     owner_context:
       existingItem.lifecycle_status === 'draft'
         ? await ownerGateContext(
@@ -923,9 +839,8 @@ async function resolveLocationUpdate(
     Array.isArray(bodyLocations) && bodyLocations.length > 0 ? bodyLocations : null;
   if (providedCoords) {
     const stored = (existingItem.item_locations ?? []) as ItemLocation[];
-    // Echoed-back coordinates are what is already stored, so they are not
-    // re-checked: an edit to an unrelated field must not start failing on a
-    // point written before the country check existed.
+    // Echoed-back stored coordinates are not re-checked, so an unrelated edit
+    // never fails on a point stored before the country restriction applied.
     if (sameLocations(providedCoords, stored)) return stored;
     await assertSuppliedLocationsInCountry(providedCoords);
     return locationsForStorage(providedCoords, itemSchema as Record<string, unknown>);
@@ -960,9 +875,8 @@ export async function updateItemInternal(
     updated_at: sql`now()`,
   };
 
-  // Fetch the existing item + its schema once when either the state or the
-  // locations are changing: the schema is needed to merge/validate state,
-  // classify lifecycle, and coarsen a private location field.
+  // The schema is needed to merge/validate state, classify lifecycle, and
+  // jitter a private location field.
   if (body.item_state !== undefined || body.item_locations !== undefined) {
     const [existingItem] = await exec
       .select({
@@ -989,10 +903,8 @@ export async function updateItemInternal(
       );
     }
 
-    // Retire is terminal (#347): the row's PII was wiped and item_private_state
-    // cleared. Block any state/location mutation on a retired item — the owner
-    // still owns the row, so without this a PATCH would re-merge the body,
-    // re-encrypt private fields and silently re-introduce the PII retire erased.
+    // Retire wiped this row's PII and is terminal. The owner still owns the row,
+    // so without this a PATCH would re-introduce the PII retire erased.
     if (existingItem.lifecycle_status === 'retired') {
       throw new ItemServiceError(
         409,
@@ -1008,8 +920,7 @@ export async function updateItemInternal(
       itemType: existingItem.item_type,
     });
 
-    // Merged full state + address-change flag, populated only when item_state is
-    // part of this update (needed below for location resolution).
+    // Populated only when item_state is part of this update.
     let mergedFullState: Record<string, unknown> = {};
     let addressChanged = false;
 
@@ -1025,8 +936,7 @@ export async function updateItemInternal(
       Object.assign(updateValues, stateUpdate.writes);
     }
 
-    // Location resolution runs after the state merge (see resolveLocationUpdate
-    // for the precedence). `undefined` → leave item_locations unchanged.
+    // Runs after the state merge; `undefined` leaves item_locations unchanged.
     const locationUpdate = await resolveLocationUpdate(
       existingItem,
       itemSchema,

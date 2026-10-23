@@ -112,8 +112,8 @@ const buildInteractionEvents = (
  * given aggregator within the given domain. Directional: aggregates actions
  * into initiated (item-as-source) and received (item-as-target) maps, per the
  * tracked-interactions collected from the network config. Per-item status is
- * evaluated against the domain's status_rules using COMBINED (initiated +
- * received) counts, preserving the historical status semantics.
+ * evaluated against the domain's status_rules using combined (initiated +
+ * received) counts.
  */
 export const recompute_aggregator_domain_metrics = async (
   aggregator_id: string,
@@ -122,8 +122,7 @@ export const recompute_aggregator_domain_metrics = async (
   const started = Date.now();
   const now = new Date();
 
-  // Discover the network for this (aggregator, domain) via a one-row sample.
-  // All items in a (aggregator, domain) share a network in our data model.
+  // One-row sample: all items of an (aggregator, domain) share a network.
   const sample = await db.execute<{ item_network: string }>(sql`
     SELECT i.item_network
     FROM items i
@@ -144,7 +143,6 @@ export const recompute_aggregator_domain_metrics = async (
   const tracked = collect_tracked_interactions(networkConfig);
   const eventsCte = buildInteractionEvents(tracked, domain);
 
-  // Resolve status_rules for this domain.
   const domainCfg = networkConfig.domains.find((d) => d.id === domain);
   if (!domainCfg) {
     throw new Error(
@@ -296,8 +294,8 @@ export const recompute_aggregator_domain_metrics = async (
       return out;
     };
 
-    // Status DSL is fed COMBINED counts + the most-recent timestamp across
-    // both directions per bucket, preserving the pre-directional semantics.
+    // The status DSL gets combined counts and the most recent timestamp across
+    // both directions per bucket.
     const dsl_input = {
       item_age_days: age_days,
       count: Object.fromEntries(

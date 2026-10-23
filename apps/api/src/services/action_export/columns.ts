@@ -1,7 +1,6 @@
 /**
- * Profile columns of an engagement export (#770), derived from the
- * counterparty item schema — never a hardcoded list, so a network's schema
- * change reaches the file without a deploy.
+ * Profile columns of an engagement export, derived from the counterparty item
+ * schema so a network's schema change reaches the file without a deploy.
  */
 
 export interface ProfileColumn {
