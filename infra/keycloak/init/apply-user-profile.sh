@@ -2,24 +2,21 @@
 # Post-import init for the bluedots realm: declare the signals user attributes
 # and enable unmanaged attributes, via the Admin REST API.
 #
-# WHY THIS EXISTS: Keycloak 26 **ignores `kc.user.profile.config` from a realm
-# import**. Verified on 26.5.5 — after importing
+# Keycloak 26 ignores `kc.user.profile.config` from a realm import. Verified
+# on 26.5.5: after importing
 # `infra/keycloak/realms/bluedots-realm.json`, `GET /users/profile` reports no
 # `unmanagedAttributePolicy` and declares only username/email/firstName/lastName.
 #
-# The consequence is silent and severe: writes of the `phoneNumber` attribute
-# are DROPPED rather than rejected. A migrated phone-only user then has no
-# phone attribute, the OTP authenticator (`otpChoice.phoneAttribute:
-# phoneNumber`) cannot find a number to send a code to, and that user simply
-# cannot log in — with nothing in any error log to say why.
+# Writes of the `phoneNumber` attribute are then silently dropped, so a
+# phone-only user has no number for the OTP authenticator
+# (`otpChoice.phoneAttribute: phoneNumber`) and cannot log in, with nothing in
+# any error log.
 #
 # So the realm JSON is necessary but not sufficient. This must run after every
 # Keycloak boot, before the user migration. It is idempotent.
 #
-# aggregator-dpg carries the same workaround at
-# `aggregator-dpg/infra/keycloak/init/apply-user-profile.sh` (which also handles
-# SMTP and its own client mappers). This is the signals-side minimum; when the
-# shared realm's ownership moves into this repo, the two should merge.
+# aggregator-dpg carries the same workaround (plus SMTP and its own client
+# mappers) at `aggregator-dpg/infra/keycloak/init/apply-user-profile.sh`.
 #
 # Requires: curl, jq.
 set -eu
@@ -56,22 +53,19 @@ fi
 PROFILE=$(curl -fsS "${KC_URL}/admin/realms/${REALM}/users/profile" \
   -H "Authorization: Bearer ${TOKEN}")
 
-# Declare the two signals attributes explicitly, in addition to flipping the
-# unmanaged policy. Declaring them is what makes them first-class (searchable
-# via `q=phoneNumber:...`, which the migration's collision check relies on);
-# the policy is the belt-and-braces for anything not declared.
 # Two transformations:
 #
 #  1. Declare phoneNumber / phoneNumberVerified and enable unmanaged attributes,
-#     so writes to them persist at all.
+#     so writes to them persist. Declared attributes are searchable via
+#     `q=phoneNumber:...`, which the migration's collision check relies on.
 #
-#  2. **Drop `required` from email, firstName and lastName.** Keycloak's default
+#  2. Drop `required` from email, firstName and lastName. Keycloak's default
 #     profile marks all three required for the `user` role, which does not match
 #     signals' data model: `user.email` is nullable and phone-only identities are
 #     first-class, and a one-word name legitimately has no last name. With those
 #     requirements in place the VERIFY_PROFILE required action fires on first
 #     login and parks the user on "Update Account Information" — and filling in
-#     the email does NOT clear it, because lastName is still missing. Relaxing
+#     the email does not clear it, because lastName is still missing. Relaxing
 #     the profile is the fix; VERIFY_PROFILE stays enabled and simply has nothing
 #     left to demand.
 #
@@ -140,17 +134,13 @@ echo "[kc-init] email/firstName/lastName optional — phone-only login is viable
 
 echo "[kc-init] user profile ready."
 
-# ────────────────────────────────────────────────────────────────────────────
-# Acting-org claim mappers (§5.1 of the migration design)
+# Acting-org claim mappers. The realm JSON is only read on first import, so an
+# existing realm never picks up new protocol mappers; they are re-applied here
+# idempotently.
 #
-# Same reason as everything else in this script: the realm JSON is only consulted
-# on FIRST import, so a realm that already exists in Keycloak's database never
-# picks up newly-added protocol mappers. Re-applied here idempotently.
-#
-# The claim is `signals_acting_orgs` — the set of signals org ids a caller may
-# assert via `x-acting-org-id`. `signals-api` deliberately gets none: it is the
+# The claim `signals_acting_orgs` is the set of signals org ids a caller may
+# assert via `x-acting-org-id`. `signals-api` gets none: it is the
 # admin/provisioning client, not an acting-org caller.
-# ────────────────────────────────────────────────────────────────────────────
 
 ensure_acting_org_mapper() {
   target_client="$1"
@@ -209,9 +199,9 @@ ensure_acting_org_mapper signals-ui '{
   }
 }'
 
-# Service clients: a wildcard grant, preserving today's platform-wide reach for
-# the integrating DPGs as an explicit, auditable grant. TODO(§5.1): replace with
-# an enumerated org list once the set each DPG legitimately serves is known.
+# Service clients get a wildcard grant: the integrating DPGs' platform-wide
+# reach, made explicit and auditable. Known limitation: the wildcard is broader
+# than any one DPG needs; it should become a per-DPG list of orgs.
 for svc in aggregator-dpg voice-dpg; do
   ensure_acting_org_mapper "$svc" '{
     "name": "signals_acting_orgs",

@@ -2,23 +2,12 @@ import { readFile, readdir } from 'node:fs/promises';
 
 /**
  * Filesystem primitives shared by the `.properties` layer loaders (email copy,
- * SMS templates).
- *
- * Only the I/O lives here — deliberately nothing else. The two loaders stay
- * separate because their formats merge under opposite rules (an empty email
- * value falls back to the layer below; an empty SMS `template_id` is a
- * meaningful "not DLT-approved, skip the send" signal), and none of that
- * belongs in a file reader. What they genuinely share is "read this file if it
- * exists" and "list the brand sub-folders", which is what this module is.
+ * SMS templates). Merge rules differ between the two and stay in the loaders.
  */
 
 /**
- * Read a layer file, or null when it isn't there.
- *
- * Only ENOENT is absence. Anything else — a permissions error, a directory
- * where a file belongs — is a real misconfiguration and rethrows, so a
- * deployment that half-mounted its config fails loudly rather than silently
- * serving bundled content.
+ * Read a layer file, or null when it does not exist. Any other error rethrows,
+ * so a half-mounted config fails loudly instead of serving bundled content.
  */
 export async function readOptionalPropertiesFile(path: string): Promise<string | null> {
   try {
@@ -30,10 +19,8 @@ export async function readOptionalPropertiesFile(path: string): Promise<string |
 }
 
 /**
- * The immediate sub-directories of a network folder — each one a brand id.
- *
- * A missing or non-directory path simply means "no brands", since the network
- * folder itself is optional in every caller.
+ * The immediate sub-directories of a network folder, each a brand id. A missing
+ * or non-directory path means no brands.
  */
 export async function listBrandDirectories(dir: string): Promise<string[]> {
   try {

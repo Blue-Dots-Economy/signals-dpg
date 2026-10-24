@@ -1,24 +1,17 @@
 /**
- * Inverts the deployment's host-binding string into the map the API needs to
- * send a recipient to their OWN portal.
- *
- * The same string drives the UI ingress in the other direction — it derives
- * `VITE_SERVED_BINDINGS` (host -> network/domain) from the request's Host
- * header. Here we derive domain -> origin. One value, two directions, so the
- * two cannot drift into disagreeing about which host serves which domain.
+ * Inverts the deployment's host-binding string (domain -> portal origin) so an
+ * email can send a recipient to their own portal. The UI ingress reads the same
+ * string the other way (host -> network/domain), so the two cannot disagree.
  *
  * Format (identical to `ui.hostBindings`):
  *   host=network/domain;host=network/domain
  *
- * The host MAY carry an explicit `http://` / `https://` scheme and a port, in
- * which case it is used verbatim; a bare hostname gets `https://`. Deployed
- * strings are bare FQDNs; the scheme form exists so a local split-UI stack can
- * point at `http://localhost:5174`.
+ * A host with an explicit `http://` / `https://` scheme and port is used
+ * verbatim (for local split-UI stacks); a bare hostname gets `https://`.
  *
- * Never throws. One typo must not take the API down over an optional feature,
- * so a malformed entry is dropped with a warning. Warnings are RETURNED rather
- * than logged because this runs at module load, before a logger exists — the
- * caller logs them once Fastify is up.
+ * Never throws: a malformed entry is dropped with a warning so one typo cannot
+ * take the API down. Warnings are returned, not logged, because this runs at
+ * module load before a logger exists.
  */
 
 const BINDING_REGEX = /^[a-z][a-z0-9_]*\/[a-z][a-z0-9_]*$/;
@@ -31,9 +24,8 @@ export interface ParsedUiHostBindings {
 }
 
 /**
- * Strips a single layer of Helm `| quote`-style wrapping plus surrounding
- * whitespace. A ConfigMap value round-tripped through `| quote` arrives with
- * the quotes still attached.
+ * Strips one layer of quotes plus surrounding whitespace: a ConfigMap value
+ * rendered through Helm `| quote` arrives with the quotes attached.
  */
 function stripHelmQuoting(raw: string): string {
   const v = raw.trim();
@@ -93,8 +85,8 @@ export function parseUiHostBindings(raw: string | undefined): ParsedUiHostBindin
 
     const domain = binding.split('/')[1];
     if (Object.hasOwn(byDomain, domain)) {
-      // FIRST wins, not last: a vanity alias listed after the canonical host
-      // must not silently displace it.
+      // First wins, so a vanity alias listed after the canonical host cannot
+      // displace it.
       warnings.push(
         `UI_HOST_BINDINGS: duplicate entry for domain "${domain}" — the first one wins`
       );
@@ -107,11 +99,9 @@ export function parseUiHostBindings(raw: string | undefined): ParsedUiHostBindin
 }
 
 /**
- * Which parsed keys name no domain this instance serves.
- *
- * Log-only by design. Filtering unknown keys would be wrong: a domain added to
- * `network.json` ahead of the ConfigMap rollout (or vice versa) must not be
- * able to switch a working link off.
+ * Parsed keys that name no domain this instance serves. Used for logging only:
+ * filtering them out would let a network.json and ConfigMap rollout skew switch
+ * a working link off.
  */
 export function unknownBindingDomains(
   byDomain: Record<string, string>,

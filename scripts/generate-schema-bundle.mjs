@@ -1,20 +1,12 @@
 #!/usr/bin/env node
-// scripts/generate-schema-bundle.mjs
+// Assembles apps/api/db/postgres/schema.sql from the idempotent raw SQL scripts
+// under packages/database/src/utils/sql_scripts/: extensions plus the
+// partitioned item/action/event tables. Tables defined in
+// apps/api/db/postgres/schema/*.ts are owned by Drizzle and not bundled.
 //
-// Assembles apps/api/db/postgres/schema.sql from the idempotent SQL scripts
-// under packages/database/src/utils/sql_scripts/ that are NOT managed by
-// Drizzle — i.e. the Postgres-native layer (extensions + the partitioned
-// item/action/event tables with vector/geo types). The better-auth /
-// item_metrics / pii_reveal_audit / consent_record tables are owned by Drizzle
-// (apps/api/db/postgres/schema/*.ts) and applied via `drizzle-orm` migrations
-// (apps/api/drizzle/), NOT bundled here.
-//
-// This bundle is for LOCAL dev only (applied by `pnpm db:init:api` /
-// apps/api/scripts/db_init.ts). The DEPLOY path does NOT use it — the
-// migrate runner (apps/api/scripts/migrate.mjs) applies one Drizzle ledger
-// over apps/api/drizzle/ (the raw core tables live there as custom migrations).
-//
-// Source order matters — extensions first, then the core tables.
+// The bundle is a generated reference copy applied by CI's test and schema-parity jobs.
+// Nothing at runtime applies it: `pnpm db:init:api` reads the source scripts
+// directly, and deploys run the Drizzle ledger (apps/api/scripts/migrate.mjs).
 //
 // Run: pnpm schema:bundle
 // CI freshness check: pnpm schema:bundle:check
@@ -27,9 +19,8 @@ const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 const sqlDir = join(repoRoot, 'packages/database/src/utils/sql_scripts');
 const outPath = join(repoRoot, 'apps/api/db/postgres/schema.sql');
 
-// Raw (non-Drizzle) layer, in FK-safe order. Extensions first (the item/search
-// tables use vector/geo types); then the partitioned core tables. The Drizzle-
-// owned "user" table these FK to is created earlier by the drizzle migrations.
+// FK-safe order: extensions first (the tables use vector/geo types), then the
+// core tables. The Drizzle-owned "user" table they reference must exist first.
 const FILES = [
   'extensions/extensions.sql',      // pgcrypto, cube, earthdistance, vector, postgis
   'core/create_items.sql',          // items (partitioned) + item_search

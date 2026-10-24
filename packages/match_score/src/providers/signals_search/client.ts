@@ -8,10 +8,9 @@ import type {
 
 const DEFAULT_RELEVANCE_PATH = 'v1/relevance';
 
-// signals-search's /v1/relevance identifies each item by its composite primary
-// key only (with the item_ prefix dropped), and looks the stored embeddings up
-// itself — item_state / coordinates from the snapshot are not sent (the score
-// comes from the indexed vectors).
+// /v1/relevance takes only each item's composite key (without the item_
+// prefix) and scores from the indexed embeddings, so item_state and
+// coordinates are not sent.
 function toRef(item: MatchScoreItem) {
   return {
     network: item.item_network,
@@ -44,14 +43,10 @@ export class SignalsSearchClient implements MatchScoreClient {
     const rawResponse = tryParseJson(rawText);
 
     if (!response.ok) {
-      // /v1/relevance returns two EXPECTED, non-exceptional states that must NOT
-      // read as an upstream outage: 404 (one/both items not live+indexed yet —
-      // signals-search indexes asynchronously, so this is common right after an
-      // item is created) and 409 (items embedded with different model versions →
-      // not comparable). Surface these as a scoreless result so this
-      // display-only endpoint shows "score unavailable" rather than a 502. Any
-      // other status (400/401/403/5xx) or a network error is a genuine failure
-      // and still throws → the handler maps it to 502.
+      // 404 (an item not live and indexed yet, common right after creation
+      // because indexing is async) and 409 (different embedding model
+      // versions) are expected states, returned as a scoreless result. Any
+      // other status throws, and the handler maps it to 502.
       if (response.status === 404 || response.status === 409) {
         return {
           provider: 'signals_search',
@@ -69,9 +64,7 @@ export class SignalsSearchClient implements MatchScoreClient {
 
     return {
       provider: 'signals_search',
-      // #646 §5.2: one scale end to end. signals-search already emits 0-100,
-      // so this passes it through — the divide-by-10 here and the multiply-by-10
-      // in the /discover seed together meant three scales for one quantity.
+      // signals-search already emits 0-100; passed through unscaled.
       score: percentage,
       raw_response: rawResponse,
     };

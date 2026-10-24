@@ -40,9 +40,9 @@ const ActionStages = z.object({
   accept: StatementDocument,
 });
 
-// U18 (minor) document set — spec D9. Own versioned entries, never aliased to
-// the adult `documents`. guardian_declaration is the ward's attestation that
-// the named guardian is genuine (D12); it exists only in the U18 set.
+// U18 (minor) document set, versioned separately and never aliased to the
+// adult `documents`. guardian_declaration (the ward's attestation that the
+// named guardian is genuine) exists only in this set.
 const U18Documents = z.object({
   terms: ContentDocument,
   privacy: ContentDocument,
@@ -68,8 +68,8 @@ export const ConsentConfigSchema = z.object({
   u18_documents: U18Documents.optional(),
 });
 
-// Brand overrides are a partial document set — each document is optional. Built
-// explicitly because Zod 4 has no `.deepPartial()`.
+// Brand overrides are a partial document set. Built explicitly because Zod 4
+// has no `.deepPartial()`.
 export const PartialConsentConfigSchema = z.object({
   documents: z
     .object({

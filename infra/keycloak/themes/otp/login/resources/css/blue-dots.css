@@ -1,7 +1,7 @@
 /* Blue Dots Aggregator Portal — Keycloak login theme */
 
 :root {
-  /* Mirror tokens from apps/web/src/app/globals.css. Keep these in sync. */
+  /* Mirrors aggregator-dpg apps/web/src/app/globals.css. Keep in sync. */
   --bd-primary: #4f46e5;
   --bd-primary-600: #4338ca;
   --bd-primary-500: #6366f1;
@@ -94,9 +94,8 @@ button {
 }
 @supports (background: color-mix(in srgb, red, blue)) {
   .bd-hero {
-    /* Match the aggregator web BrandPanel gradient: 60% primary →
-       80% primary → 100% primary. Older ratios (30/50/65) rendered
-       vivid primaries (e.g. sienna #9c5b1f) as near-black brown. */
+    /* Matches the aggregator web BrandPanel gradient. Lower primary ratios
+       render vivid primaries as near-black. */
     background: linear-gradient(
       135deg,
       color-mix(in srgb, var(--bd-primary) 60%, #000) 0%,

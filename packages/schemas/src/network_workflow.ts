@@ -4,16 +4,12 @@ import { applyUriPatterns, isUriField } from './uri_fields';
 
 const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 
-// Go-live gate tokens (NOT field names). The single source of truth for the
-// gate vocabulary — apps/api's classifier imports these rather than redefining
-// them, so the config schema and the runtime evaluator can never drift.
-// `schema_required` is the baseline gate; `consent_required` and
-// `owner_required` are opt-in per domain (a guardian-gated domain always
-// enforces `consent_required` — see the resolver).
-//
-// `owner_required` (#640 / SS-3): the profile owner must have an owning
-// aggregator. Unlike the other two it is NOT a pure function of the item's own
-// state — see `GO_LIVE_GATE_CHECKS.owner_required` in apps/api for why.
+// Go-live gate tokens (not field names), shared by the config schema and the
+// apps/api classifier. `schema_required` is the baseline; `consent_required`
+// and `owner_required` are opt-in per domain, except that a guardian-gated
+// domain always enforces `consent_required`.
+// `owner_required` (the owner has an owning aggregator) is not a pure function
+// of the item's state; see `GO_LIVE_GATE_CHECKS.owner_required` in apps/api.
 export const PROFILE_GO_LIVE_GATES = [
   'schema_required',
   'consent_required',
@@ -21,10 +17,8 @@ export const PROFILE_GO_LIVE_GATES = [
 ] as const;
 export type GoLiveGate = (typeof PROFILE_GO_LIVE_GATES)[number];
 
-// Canonical bucket + status enums. Duplicated here from
-// apps/api/src/services/metrics/buckets.ts because @dpg/schemas is upstream
-// of apps/api — the package can't import down the tree. Both must be updated
-// in lockstep if a bucket or status is added.
+// Duplicated from apps/api/src/services/metrics/buckets.ts because this
+// package cannot import from apps/api. Keep the two in sync.
 const CANONICAL_BUCKETS = ['create', 'accept', 'reject', 'cancel'] as const;
 const CANONICAL_STATUSES = ['new', 'active', 'at_risk', 'inactive'] as const;
 const CanonicalBucketSchema = z.enum(CANONICAL_BUCKETS);
@@ -53,7 +47,6 @@ const ItemAgePredicateSchema = z.object({ item_age_days: ComparisonSchema }).str
 const DaysSinceLastPredicateSchema = z.object({ days_since_last: BucketScopedComparisonSchema }).strict();
 const CountPredicateSchema = z.object({ count: BucketScopedComparisonSchema }).strict();
 
-// Recursive predicate: leaf predicates + all/any combinators
 type PredicateInput =
   | z.input<typeof ItemAgePredicateSchema>
   | z.input<typeof DaysSinceLastPredicateSchema>
@@ -79,10 +72,8 @@ const StatusRuleSchema = z.object({
   when: z.union([PredicateSchema, z.literal('default')]),
 }).strict();
 
-// A dashboard tile declares which precomputed rollup field to render and what
-// to label it. `field` maps to a rollup key (e.g. total_items, total_users);
-// the aggregator reads the precomputed value — it never computes. Tiles are
-// grouped into profile-level and user-level sets.
+// A dashboard tile names a precomputed rollup key (e.g. total_items,
+// total_users) and its label; the aggregator reads the value, never computes it.
 const DashboardTileSchema = z.object({
   field: z.string().min(1),
   label: z.string().min(1),
@@ -92,10 +83,8 @@ const DashboardTilesSchema = z.object({
   user: z.array(DashboardTileSchema).optional(),
 }).strict();
 
-// Per-domain card display config (consumed by the UI item card). Drives which
-// fields show by default on a card and what becomes the heading / avatar; the
-// rest of the schema's fields move behind the "view more" expander. Optional —
-// domains without a `card` block fall back to a best-guess in the UI.
+// Per-domain UI item card config: default fields, heading and avatar; other
+// fields go behind "view more". Without it the UI guesses.
 const CardConfigSchema = z.object({
   title_field: z.string().min(1).optional(),
   subtitle_field: z.string().min(1).optional(),
@@ -107,64 +96,46 @@ const CardConfigSchema = z.object({
 }).strict();
 
 /**
- * Canonical contact-field mapping for a domain (#237): maps the canonical
- * name/email/phone to the domain's real item_state field name, since these
- * are named differently per network/domain (e.g. `mobile_number`,
- * `hiringManagerPhoneNumber`). Consumed by participant/decrypt field
- * resolution. All optional — `name` falls back to display_name_field /
- * card.title_field when unset.
+ * Maps canonical name/email/phone to the domain's item_state field names (e.g.
+ * `mobile_number`), used by participant/decrypt field resolution. `name`
+ * falls back to display_name_field / card.title_field when unset.
  */
 const ContactFieldsSchema = z
   .object({
-    // `.optional()` WITHOUT `.min(1)`: an empty-string value ("phone": "") on a
-    // declared key must not fail the whole cross-network parse either — at
-    // resolve time an empty mapping is falsy, so it degrades to the account
-    // fallback exactly like an absent mapping (same rationale as `.strip()`).
+    // No `.min(1)`: an empty mapping must not fail the network parse; it
+    // resolves to the account fallback like an absent one.
     name: z.string().optional(),
     email: z.string().optional(),
     phone: z.string().optional(),
   })
-  // `.strip()` (not `.strict()`): an unknown/typo'd key here must not fail the
-  // whole network-config parse — that runs for every domain, including unserved
-  // siblings, and would take down boot (app.ts awaits config with no catch).
-  // A dropped typo degrades gracefully to the account fallback at resolve time
-  // (with a `contact_map_missing` warn), rather than a hard boot failure.
+  // `.strip()`, not `.strict()`: a typo'd key in any domain, served or not,
+  // would otherwise fail the network-config parse and boot. A dropped key falls
+  // back to the account value at resolve time with a `contact_map_missing` warn.
   .strip();
 
 const NetworkDomainSchema = z.object({
   id: z.string().min(1),
   description: z.string().optional(),
-  // Optional per-domain display label (e.g. id `provider` shown as "Service
-  // Provider"). Keeps the domain id stable — avoiding a data migration — while
-  // the UI renders the friendly label. Zod strips unknown keys, so this MUST be
-  // declared or the label never reaches the client (the UI resolver then falls
-  // back to title-casing the id). Presentational only; never part of validation.
+  // Display label for the domain (e.g. `provider` shown as "Service
+  // Provider"), so the id can stay stable. Must be declared because Zod strips
+  // unknown keys; the UI title-cases the id without it. Presentational only.
   label: z.string().min(1).optional(),
-  // Optional per-domain override for the sidebar "My Profile(s)" group heading
-  // (e.g. blue_dot provider → "My Jobs"). Network-authored content, not i18n
-  // chrome; falls back to the generic label when unset.
+  // Overrides the sidebar "My Profile(s)" heading (e.g. "My Jobs").
   my_items_label: z.string().min(1).optional(),
-  // Optional per-domain "why complete your profile" prompt shown on the profile
-  // create/edit page (#376). Role-specific, network-authored content (a seeker's
-  // "why" ≠ a provider's); the UI falls back to a generic i18n message when
-  // unset. Presentational only — never part of item validation.
+  // "Why complete your profile" prompt on the profile create/edit page; the UI
+  // falls back to a generic message. Presentational only.
   profile_completion_prompt: z
     .object({ heading: z.string().min(1), body: z.string().min(1) })
     .optional(),
   minimum_cache_ttl_seconds: z.number().int().positive().optional().default(300),
-  // U18 spec D8: when true, this domain routes minors' consent through a
-  // guardian. Server-read only; never trusted from the client. Defaults off.
+  // When true, minors' consent in this domain goes through a guardian.
+  // Server-read only; never trusted from the client.
   guardian_consent_required: z.boolean().optional().default(false),
-  // Which gates a profile must clear before it goes `live` (discoverable) in
-  // this domain. Tokens — NOT field names — evaluated by `classify_item`
-  // (see `PROFILE_GO_LIVE_GATES`). Omit to use the baseline default (`schema_required`;
-  // a guardian-gated domain additionally always enforces `consent_required`).
-  // An empty array is rejected — a profile with no gates would go live
-  // instantly.
+  // Gates a profile must clear to go `live` in this domain (see
+  // `PROFILE_GO_LIVE_GATES`). Omitted means `schema_required`. An empty array
+  // is rejected: a profile with no gates would go live instantly.
   go_live_required: z.array(z.enum(PROFILE_GO_LIVE_GATES)).min(1).optional(),
-  // Optional per-domain cap on how many profiles a single user may own in this
-  // domain. Overrides the global MAX_PROFILES_PER_USER default when set (e.g.
-  // seeker=3, provider=5). Unset ⇒ the global default applies.
+  // Per-domain cap on profiles one user may own; overrides MAX_PROFILES_PER_USER.
   max_profiles_per_user: z.number().int().positive().optional(),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
@@ -187,9 +158,8 @@ const NetworkDomainSchema = z.object({
       path: ['status_rules', domain.status_rules.length - 1, 'when'],
     });
   }
-  // The U18 guardian gate lives inside `consent_required`. A guardian-gated
-  // domain that drops that gate from `go_live_required` would silently disable
-  // the age control — reject it rather than let config turn off U18 protection.
+  // The U18 guardian gate lives inside `consent_required`, so dropping it from a
+  // guardian-gated domain would silently disable the age control.
   if (
     domain.guardian_consent_required &&
     domain.go_live_required &&
@@ -243,20 +213,17 @@ export const NetworkActionInteractionSchema = z
     event_schema: JsonSchemaDocumentSchema.optional(),
     metric_categories: MetricCategoriesSchema.nullable().optional(),
     reveals_pii_on_status: z.array(z.string().min(1)).optional().default([]),
-    // Bulk-export eligibility (#639 / #769). Absent ⇒ this interaction's
-    // engagements cannot be exported (fail-closed). `requester_domains` names
-    // which side(s) may export their counterparty; it never widens disclosure —
-    // the per-row reveal is still gated by `reveals_pii_on_status`.
+    // Bulk-export eligibility. Absent means not exportable (fail-closed).
+    // `requester_domains` names which side(s) may export their counterparty; the
+    // per-row reveal is still gated by `reveals_pii_on_status`.
     export: z
       .object({ requester_domains: z.array(z.string().min(1)).min(1) })
       .strict()
       .optional(),
-    // Fields of each side's item shown to the OTHER side in the My Actions
-    // list (e.g. a seeker's education and experience to the provider they
-    // applied to). `from` = fields of the from item, `to` = fields of the to
-    // item. Only non-private item_state fields are ever returned — a private
-    // or undeclared field listed here is dropped server-side, so this can never
-    // show personal data before the reveal. Absent ⇒ no summary.
+    // Fields of each side's item shown to the other side in the My Actions
+    // list: `from` lists fields of the from item, `to` of the to item. Private
+    // or undeclared fields are dropped server-side, so this never shows
+    // personal data before the reveal.
     column_fields: z
       .object({
         from: z.array(z.string().min(1)).optional().default([]),
@@ -266,9 +233,7 @@ export const NetworkActionInteractionSchema = z
       .optional(),
   })
   .superRefine((interaction, ctx) => {
-    // A requester must be a party to the engagement: a domain outside the
-    // interaction can never own either side of one of its actions, so naming it
-    // is always a config mistake.
+    // A requester must be a party to the interaction.
     for (const [idx, domain] of (interaction.export?.requester_domains ?? []).entries()) {
       if (domain === interaction.from_domain || domain === interaction.to_domain) continue;
       ctx.addIssue({
@@ -343,7 +308,6 @@ const DashboardBucketsSchema = z.object({
     at_risk: z.string().min(1).optional(),
     inactive: z.string().min(1).optional(),
   }).strict().optional(),
-  // Directional action labels (replace the former blended by_action_status).
   by_initiated_action_status: ActionBucketLabelsSchema.optional(),
   by_received_action_status: ActionBucketLabelsSchema.optional(),
 }).strict();
@@ -354,13 +318,11 @@ export const NetworkConfigSchema = z.object({
   description: z.string().optional(),
   schema_standard: z.string().optional(),
   source_url: z.url().optional(),
-  // Network-wide toggle for the pause (voluntarily-hide) feature. When false,
-  // owners cannot pause their profiles and the UI hides the control. Resume
-  // (unpause) is always allowed so a profile paused before the feature was
-  // turned off can still be recovered. Defaults on. (#346)
+  // When false, owners cannot pause profiles. Unpause stays allowed so a
+  // profile paused earlier can still be recovered.
   pause_enabled: z.boolean().optional().default(true),
-  // Max concurrent OPEN actions between any two items — bidirectional, across
-  // action types (#370/#422). Omitted → 1 (one open apply/connect per pair).
+  // Max concurrent open actions between any two items, counted in both
+  // directions and across action types.
   max_actions_per_pair: z.number().int().positive().optional().default(1),
   domains: NetworkDomainSchema.array().default([]),
   instances: NetworkInstanceSchema.array().default([]),
@@ -607,7 +569,7 @@ export function getInteractionPiiRevealStatuses(
 
 /**
  * Domains allowed to bulk-export the counterparty of this interaction's
- * actions (#769). Empty when the interaction declares no `export` block.
+ * actions. Empty when the interaction declares no `export` block.
  *
  * @throws Error when the network does not declare the interaction — same
  *   contract as {@link getInteractionPiiRevealStatuses}.
@@ -763,10 +725,8 @@ export function getInstanceCustomItemSchemaUrl(
 /**
  * A payload that failed its JSON Schema, with one readable message per field.
  *
- * `message` keeps the historical `Invalid <label>: …` shape (now naming each
- * field), so callers that only read the message keep working. `fields` is the
- * same information keyed by field path, for callers that want to point at the
- * offending input — a bulk CSV column, a form field.
+ * `message` has the shape `Invalid <label>: field: msg, …`. `fields` holds the
+ * same information keyed by field path, for pointing at the offending input.
  */
 export class JsonSchemaValidationError extends Error {
   readonly fields: Record<string, string>;
@@ -851,10 +811,8 @@ export function validateAgainstJsonSchema(
   } = {}
 ) {
   const ignoredKeys = options.ignoredKeys ?? [];
-  // `x-uri` fields get the shared URL pattern injected before compilation. The
-  // API's ajv registers no `ajv-formats`, so `format` is ignored on every
-  // write — `pattern` is what actually bites here, and it is the SAME pattern
-  // the profile form applies client-side (packages/schemas/src/uri_fields.ts).
+  // `x-uri` fields get the shared URL `pattern` (the same one the profile form
+  // uses). `format` would be ignored: this ajv registers no `ajv-formats`.
   const schemaWithUriPatterns = applyUriPatterns(schema);
   const schemaForValidation = options.allowAdditionalProperties
     ? allowAdditionalProperties(schemaWithUriPatterns)
@@ -863,10 +821,8 @@ export function validateAgainstJsonSchema(
     ignoredKeys.length > 0
       ? relaxIgnoredProperties(omitRequiredSchemaKeys(schemaForValidation, ignoredKeys), ignoredKeys)
       : schemaForValidation;
-  // Ignored keys keep their VALUES in the payload, so an `if` condition can
-  // read them (e.g. category === 'licensed' → more fields required); their own
-  // property schemas are relaxed to `{}` in `relaxIgnoredProperties` instead,
-  // so the values are still not validated — the same outcome as dropping them.
+  // Ignored keys stay in the payload so an `if` condition can read them; their
+  // own property schemas are relaxed to `{}`, so the values are not validated.
   const finalPayload = payload;
 
   const ajv = new Ajv2020({
@@ -884,10 +840,8 @@ export function validateAgainstJsonSchema(
     return;
   }
 
-  // First message per field: allErrors can report the same field more than once
-  // (e.g. a failed type then a failed pattern), and one actionable line per
-  // field reads better than a pile-up. Errors on the payload root (no field)
-  // are kept as plain messages.
+  // Keep the first message per field; allErrors can report a field more than
+  // once. Root-level errors are kept as plain messages.
   const fields: Record<string, string> = {};
   const rootMessages: string[] = [];
   for (const error of validate.errors ?? []) {
@@ -911,8 +865,7 @@ const IF_KEYWORD = new Set(['if']);
 /**
  * Replaces each ignored key's own top-level property schema with `{}` (accept
  * anything), keeping the key declared so `additionalProperties: false` still
- * allows it. Paired with keeping the values in the payload, ignored keys are
- * readable by conditions yet not validated — what dropping them achieved.
+ * allows it.
  */
 function relaxIgnoredProperties(
   schema: Record<string, unknown>,
@@ -929,10 +882,9 @@ function relaxIgnoredProperties(
 }
 
 /**
- * Drops `ignoredKeys` from every `required` list, so the payload may omit them —
- * EXCEPT inside an `if` subschema. There `required` is part of a test ("is the
- * category present and `licensed`?"), not a requirement: stripping it would turn the
- * test vacuously true and apply its `then` to every payload.
+ * Drops `ignoredKeys` from every `required` list except inside an `if`
+ * subschema, where `required` is part of a test; stripping it there would make
+ * the test vacuously true and apply its `then` to every payload.
  */
 function omitRequiredSchemaKeys(
   schema: Record<string, unknown>,

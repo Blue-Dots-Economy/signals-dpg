@@ -20,23 +20,18 @@ export type LoadEmailMessagesFilesOptions = {
 
 /**
  * Local mode: the network default messages.properties sits beside network.json;
- * brand overrides live in immediate sub-folders named for the brand id.
- * Local mode is single-network (mirrors consent_config_loader).
+ * brand overrides live in immediate sub-folders named for the brand id. Local
+ * mode is single-network. Remote mode returns [] (not implemented).
  *
- * Remote mode: remote messages delivery is a follow-up; returns [] for now.
- *
- * Returns raw file text only — no parsing or placeholder substitution here;
- * that lives in apps/api (registry/merge semantics).
+ * Returns raw file text only; parsing and merging live in apps/api.
  */
 export async function loadEmailMessagesFiles(
   opts: LoadEmailMessagesFilesOptions
 ): Promise<LoadedEmailMessagesFile[]> {
   if (opts.source !== 'local') {
-    // Remote messages delivery is a follow-up; returns [] for now.
     return [];
   }
 
-  // Local mode represents exactly one network — use only the first entry.
   if (opts.networks.length === 0) return [];
   const network = opts.networks[0];
 
@@ -48,11 +43,8 @@ export async function loadEmailMessagesFiles(
     results.push({ network, brand: null, text: defaultText });
   }
 
-  // Unlike consent (where a brand partial requires the network base to
-  // partial-over), the bundled email defaults are always the base layer —
-  // apps/api's messages.ts merges a brand-only file straight over the
-  // instance base when no network file exists. So brand subdirectories must
-  // still be scanned even when the network-level file is absent.
+  // Brands are scanned even without a network-level file: the bundled defaults
+  // are always the base layer, so a brand-only file is valid.
   for (const brand of await listBrandDirectories(baseDir)) {
     const brandText = await readOptionalPropertiesFile(join(baseDir, brand, 'messages.properties'));
     if (brandText === null) continue;
