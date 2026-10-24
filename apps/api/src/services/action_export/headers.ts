@@ -1,5 +1,5 @@
 /**
- * Response headers of `POST /api/v1/action/export` (#770) the browser must be
+ * Response headers of `POST /api/v1/action/export` the browser must be
  * allowed to read. The UI calls the API cross-origin, so without CORS
  * `exposedHeaders` it cannot see the filename or the row / skip counts.
  */

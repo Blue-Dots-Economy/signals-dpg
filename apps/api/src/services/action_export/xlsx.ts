@@ -3,13 +3,13 @@ import { humanizeKey } from './columns';
 import { wallClockInZone, zoneHeading } from './time';
 
 /**
- * Excel workbook of an engagement export (#770). One sheet, headings in plain
- * words (the labels `buildExport` resolved from the schema), typed cells:
+ * Excel workbook of an engagement export. One sheet, headings from the labels
+ * `buildExport` resolved, typed cells:
  *
- * - text stays text — a phone number keeps its leading zero, and a value
- *   such as `=cmd` is stored as a string, never evaluated as a formula;
+ * - text stays text: a phone number keeps its leading zero, and a value such
+ *   as `=cmd` is stored as a string, never evaluated as a formula;
  * - dates are real dates in EXPORT_TIMEZONE, the zone named in the heading;
- * - the match score is a percentage, the "shared" flag reads Yes / No;
+ * - the match score is a percentage, booleans read Yes / No;
  * - lists are joined with `, ` as the UI shows them.
  */
 

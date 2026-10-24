@@ -1,16 +1,13 @@
 import type { TokenTypes } from './substitute';
 
 /**
- * The email case registry (#529): one entry per email the system sends. This
- * is the issue's "stable template_ids per case" — internal to Signals; the
- * wire template_id stays 'basic_email' (the notification service's email
- * provider registers no other template).
+ * Email case registry: one entry per email Signals sends. Case ids are internal;
+ * the wire template_id is always 'basic_email' (notification-service registers
+ * no other email template).
  *
- * Per case: which properties-file keys hold its copy, which {{tokens}} its
- * copy may use (text = escaped on substitution, html = code-built raw
- * fragments), which HTML shell wraps the body, whether a send failure is
- * critical (throws to the caller) or best-effort (logged, never blocks the
- * triggering action), and the notification-service priority.
+ * Per case: properties-file keys for its copy, allowed {{tokens}} (text =
+ * escaped on substitution, html = code-built raw fragment), HTML shell,
+ * criticality (critical rethrows; best-effort logs) and priority.
  */
 export type EmailShell = 'cta' | 'plain';
 export type EmailCriticality = 'critical' | 'best_effort';
@@ -70,12 +67,9 @@ for (const group of ACTION_GROUPS) {
 
 CASES.set('retire.cancel', ctaCase('retire.cancel', {}));
 
-// Item-lifecycle emails to the owner (#531/#534): profile = seeker, offer =
-// provider/service_provider. CTA shell (home link) + per-INSTANCE_NAME
-// sign-off, best-effort — a failed send never blocks the create/update/
-// lifecycle route. `account.aggregator_init` is the one sent when an
-// aggregator onboards a participant (in place of the self create/welcome
-// emails, which are gated off for aggregator-onboarded records).
+// Item-lifecycle emails to the owner: profile = seeker, offer =
+// provider/service_provider. `account.aggregator_init.*` replaces the create
+// email when an aggregator onboards a participant.
 const ITEM_TOKENS: TokenTypes = { name: 'text' };
 CASES.set('profile.create', ctaCase('profile.create', ITEM_TOKENS));
 CASES.set('offer.create', ctaCase('offer.create', ITEM_TOKENS));
@@ -85,11 +79,8 @@ CASES.set('profile.create_incomplete', ctaCase('profile.create_incomplete', ITEM
 CASES.set('offer.create_incomplete', ctaCase('offer.create_incomplete', ITEM_TOKENS));
 CASES.set('profile.update', ctaCase('profile.update', ITEM_TOKENS));
 CASES.set('offer.update', ctaCase('offer.update', ITEM_TOKENS));
-// Aggregator-onboarding initiation email, split per recipient role so the
-// activation copy is domain-correct: a seeker is told about discovering jobs
-// while a provider/service_provider is told about offering their services.
-// `notify_item_lifecycle` picks the suffix from resolveRecipientRole(domain),
-// so service_provider folds into the provider copy.
+// Split per recipient role; `notify_item_lifecycle` picks the suffix from
+// resolveRecipientRole(domain), so service_provider uses the provider copy.
 const AGGREGATOR_INIT_TOKENS: TokenTypes = { aggregatorOrg: 'text', networkName: 'text' };
 CASES.set(
   'account.aggregator_init.seeker',
@@ -125,6 +116,8 @@ CASES.set(
   ),
 );
 CASES.set('otp.generic', plainCase('otp.generic', { otp: 'text' }, 'critical', 'realtime'));
+// No caller in this app sends `login.otp` (Keycloak owns login); its copy keys
+// are still required in the bundled defaults.
 CASES.set(
   'login.otp',
   plainCase(
@@ -135,12 +128,8 @@ CASES.set(
       appName: 'text',
       otp: 'text',
       otpBox: 'html',
-      // Injected by the app-side sendEmail wiring (create_auth.ts): the
-      // frontend base URL and "Team <name>" sign-off name, so copy can carry
-      // a platform link and a per-deployment sign-off (email content sheet).
       siteUrl: 'text',
-      // Code-built anchor derived from siteUrl — what copy should use for a
-      // clickable platform link (degrades to plain text when unconfigured).
+      // Built from siteUrl; plain text when no URL is configured.
       siteLink: 'html',
       teamName: 'text',
     },
@@ -148,9 +137,8 @@ CASES.set(
     'realtime',
   ),
 );
-// Welcome (self-signup). `welcome` is the domain-less fallback; `.seeker` /
-// `.provider` carry role-correct copy, picked in notifications/welcome.ts from
-// resolveRecipientRole(domain) so service_provider folds into provider.
+// Welcome (self-signup). `welcome` is the domain-less fallback; welcome.ts picks
+// `.seeker`/`.provider` from resolveRecipientRole(domain).
 const WELCOME_TOKENS: TokenTypes = {
   userName: 'text',
   appName: 'text',

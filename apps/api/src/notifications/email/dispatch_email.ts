@@ -9,16 +9,12 @@ import { renderCtaShell, renderOtpBox, renderPlainShell, renderSiteLink } from '
 import { substituteHtml, substitutePlain } from './substitute';
 
 /**
- * The single email send path (#529): copy lookup → token substitution
- * (escaping boundary) → HTML shell → notification service. Criticality comes
- * from the case registry: critical sends rethrow so the caller can surface
- * delivery failure (OTP 502s, support 502); best-effort sends never throw —
- * an email failure must never block the action that triggered it.
+ * The single email send path: copy lookup, token substitution (the escaping
+ * boundary), HTML shell, then notification-service. Critical cases rethrow so
+ * the caller can surface the failure; best-effort cases log and never throw,
+ * so an email failure never blocks the triggering action.
  */
-/**
- * A file to attach to the email. Base64 rather than a Buffer because it travels
- * to the notification service as JSON; the relay decodes it (#551).
- */
+/** A file to attach. Base64 because it travels to notification-service as JSON. */
 export interface EmailAttachment {
   filename: string;
   contentType: string;
@@ -52,21 +48,12 @@ export interface DispatchEmailArgs {
   dedupeId?: string;
   replyTo?: string;
   cc?: string;
-  /**
-   * Files to attach. Kept out of `variables` because those are copy tokens that
-   * get substituted and HTML-escaped; attachments are opaque payload and must
-   * never pass through substitution.
-   */
+  /** Kept out of `variables` so attachments never pass through token substitution. */
   attachments?: EmailAttachment[];
   /** cta-shell cases only: */
   ctaUrl?: string;
   network?: string;
-  /**
-   * Brand id for copy resolution (`forContext`'s brand layer). No caller sets
-   * this yet — brand isn't resolvable at send time anywhere in the system
-   * today; this is the hook for when it is (a per-plan brand, analogous to
-   * `network`).
-   */
+  /** Brand id for the brand copy layer. No caller sets it yet. */
   brand?: string;
   /** Per-call log override (route handlers pass request.log-backed fns). */
   log?: (message: string, meta?: Record<string, unknown>) => void;
@@ -82,18 +69,14 @@ export interface EmailSenderDeps {
   fromEmail: string;
   defaultReplyTo: string;
   /**
-   * Network used for context-free sends (guardian/login OTP, welcome,
-   * support — callers that pass no `args.network`): the instance's single
-   * served network, or `null` on a multi-network instance (those sends keep
-   * base copy rather than guessing). Per-plan `args.network` (action/retire)
-   * always wins over this when present — see `send()` below.
+   * Copy network for sends that pass no `args.network` (guardian OTP, welcome,
+   * support): the instance's single served network, or `null` on a
+   * multi-network instance (base copy). `args.network` wins when present.
    */
   defaultNetwork: string | null;
   /**
-   * "Team <name>" sign-off in the cta shell (the operating org, e.g.
-   * INSTANCE_NAME "EkStep"/"ALIMCO" — per the email content sheet), NOT the
-   * network display name. Falls back to `args.fromName` when unset so
-   * sender-less test wiring keeps a sensible sign-off.
+   * "Team <name>" sign-off in the cta shell: the operating org (INSTANCE_NAME),
+   * not the network display name. Falls back to `args.fromName`.
    */
   teamName?: string;
   log: (message: string, meta?: Record<string, unknown>) => void;
@@ -113,13 +96,12 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
     );
 
     const vars: Record<string, string> = { ...args.variables };
-    // The styled OTP box is code-built (html token) even when the caller —
-    // e.g. packages/auth — only knows the plain code.
+    // The styled OTP box is code-built from the plain `otp` when the caller omits it.
     if (def.tokens.otpBox === 'html' && vars.otp !== undefined && vars.otpBox === undefined) {
       vars.otpBox = renderOtpBox(vars.otp);
     }
-    // Same for the platform link: always resolved (to plain text when there is
-    // no URL) so copy can never render a dead anchor or a literal {{token}}.
+    // The platform link is always resolved (plain text when there is no URL) so
+    // copy never renders a dead anchor or a literal {{token}}.
     if (def.tokens.siteLink === 'html' && vars.siteLink === undefined) {
       vars.siteLink = renderSiteLink(vars.siteUrl);
     }
@@ -178,14 +160,8 @@ export function createEmailSender(deps: EmailSenderDeps): EmailSender {
 }
 
 /**
- * Instance default network for context-free email sends (guardian/login OTP,
- * welcome, support — the callers that never pass `args.network`): the single
- * distinct network across `apiConfig.served_domains` bindings, mirroring how
- * `consent_configs.ts`/`email/messages.ts` derive the served-networks set.
- * `null` when the instance serves zero or more-than-one network — a
- * multi-network instance has no single right default, so those sends keep
- * base copy rather than guessing. Reused by `notify_actions.ts`'s
- * `resolveNotifierConfig()`.
+ * The single distinct network across `apiConfig.served_domains`, or `null` when
+ * the instance serves zero or several (no right default, so base copy is used).
  */
 export function getInstanceDefaultNetwork(): string | null {
   const networks = [
@@ -194,10 +170,7 @@ export function getInstanceDefaultNetwork(): string | null {
   return networks.length === 1 ? networks[0] : null;
 }
 
-/**
- * Preserves the previously-hardcoded auth-email sender when
- * NOTIFICATION_FROM_EMAIL is unset, so no config permutation loses email.
- */
+/** Sender address when NOTIFICATION_FROM_EMAIL is unset. */
 export const DEFAULT_FROM_EMAIL = 'hello@bluedotseconomy.org';
 
 let defaultSender: EmailSender | null | undefined;

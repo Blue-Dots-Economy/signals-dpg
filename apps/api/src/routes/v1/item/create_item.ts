@@ -60,13 +60,7 @@ export const create_item: FastifyPluginCallbackZod = function (fastify, _opts, d
   done();
 };
 
-/**
- * Maps a create-item failure to its HTTP status + error body, logging where
- * appropriate. Keeps the handler's catch a single statement so the deeply
- * nested error-type/DB-code branching doesn't inflate the handler's complexity.
- *
- * @returns The reply status + JSON body for the failure.
- */
+/** Maps a create-item failure to its HTTP status + error body, logging where appropriate. */
 function mapCreateItemError(
   err: unknown,
   log: CreateItemRequest['log'],
@@ -83,12 +77,9 @@ function mapCreateItemError(
     };
   }
   if (err instanceof ItemServiceError) {
-    // `details` carries the extra fields a published error shape promises —
-    // DOMAIN_LOCKED's `locked_domain` / `requested_domain`. Spread FIRST, so a
-    // future guard whose `details` happens to carry an `error` or `message` key
-    // cannot override the error code. Spread straight from `details`: object
-    // spread of `undefined` contributes nothing, so a `?? {}` fallback would
-    // only add an empty object literal.
+    // `details` carries a published error shape's extra fields (e.g.
+    // DOMAIN_LOCKED's `locked_domain` / `requested_domain`). Spread first so it
+    // cannot override the error code or message.
     return {
       status: err.statusCode,
       body: { ...err.details, error: err.errorCode, message: err.message },
@@ -136,10 +127,9 @@ async function selfCreateNeedsConsent(body: CreateItemRequest['body']): Promise<
 }
 
 /**
- * Whether a create that carries consent may promote straight to `live`. A
- * consenting create promotes (#275) EXCEPT a gated minor: on a
- * guardian-gated domain only a proven adult self-promotes; a minor / unknown
- * age stays draft until guardian consent (fail-closed, mirrors the promote path).
+ * Whether a create that carries consent may promote straight to `live`. On a
+ * guardian-gated domain only a proven adult self-promotes; a minor or unknown
+ * age stays draft until guardian consent (fail-closed).
  */
 async function resolveSelfConsentPromotes(
   body: CreateItemRequest['body'],
@@ -167,13 +157,10 @@ export const create_item_handler = async (
     });
   }
 
-  // The "admin acting on behalf of another user" flow is reserved for
-  // server-to-server callers identified by an api-key. UI sessions — even
-  // when the logged-in user happens to carry an admin role — should behave
-  // like a normal user and own the items they create. Distinguishing on
-  // the api-key header keeps that contract explicit and avoids confusing
-  // signed-in admins with a CREATED_BY_REQUIRED error when they create
-  // their own profile.
+  // Creating on behalf of another user (`created_by`) is reserved for admin
+  // api-key callers. A UI session owns what it creates even when the user has
+  // an admin role, so a signed-in admin creating their own profile does not
+  // hit CREATED_BY_REQUIRED.
   const isApiKeyCaller = Boolean(request.headers['x-api-key']);
   const isAdminApiCaller = isApiKeyCaller && callerRole === 'admin';
 
@@ -193,15 +180,11 @@ export const create_item_handler = async (
 
   const userId = isAdminApiCaller ? (body.created_by as string) : callerId;
 
-  // A direct/self create (session user or api-key-as-self) must carry consent
-  // when the domain gates go-live on `consent_required` AND the network
-  // configures a profile_creation statement — the login/gate safety net is
-  // UI-only, so this is the server-side guarantee. The admin on-behalf (bulk)
-  // path is exempt: those participants are gated at first login. A domain whose
-  // `go_live_required` omits `consent_required` (e.g. a provider configured
-  // `["schema_required"]`) goes live on completeness alone, so consent is not
-  // demanded at create; and when no profile_creation consent is configured
-  // there is nothing to accept.
+  // A self create must carry consent when the domain gates go-live on
+  // `consent_required` and a profile_creation statement is configured: the
+  // UI's consent gate is client-side only, so this is the server-side
+  // guarantee. The admin on-behalf (bulk) path is exempt; those participants
+  // are gated at first login.
   if (!isAdminApiCaller && !body.consent && (await selfCreateNeedsConsent(body))) {
     return reply.code(400).send({
       error: 'CONSENT_REQUIRED',
@@ -241,7 +224,7 @@ export const create_item_handler = async (
   }
 
   // Caller-resolved coordinates skip the geocoder, so they are held to the
-  // configured country here instead (#789).
+  // configured country here instead.
   try {
     await assertSuppliedLocationsInCountry(body.item_locations);
   } catch (err) {
@@ -261,37 +244,22 @@ export const create_item_handler = async (
     log: request.log,
   });
 
-  // U18 fail-closed: a consenting create promotes to live (#275) EXCEPT a gated
-  // minor, who stays draft until guardian consent (see resolveSelfConsentPromotes).
   const selfConsentPromotes = await resolveSelfConsentPromotes(body, userId);
 
   try {
-    // Item + consent are written in one transaction so a consent-write failure
-    // rolls the item back too (fail-closed — never a PII item without a consent
-    // row). The item event/cache-invalidation happen only after commit.
+    // Item + consent in one transaction: a consent-write failure rolls the item
+    // back (never a PII item without a consent row). Event and cache
+    // invalidation happen only after commit.
     const created = await db.transaction(async (tx) => {
-      // SS-3 (#640): give the owner an owning aggregator BEFORE the item is
-      // classified.
+      // Tag the user with the default aggregator before the item is
+      // classified: `classify_item` reads the tag through `owner_required`, so
+      // otherwise a new signup's first profile lands in `draft`.
       //
-      // This is the seam between the two levels: the tag is per USER, the
-      // draft/live decision is per ITEM. `createItemInternal` runs
-      // `classify_item`, which reads the tag through `owner_required` — so the
-      // write has to happen first or a brand-new signup's first profile is
-      // classified unowned and lands in `draft`, only going live on some later
-      // write. Same transaction, so it is atomic with the item.
-      //
-      // Unconditional, deliberately: gating this on "is this the user's first
-      // create" stranded the population the feature exists for — people who
-      // signed up before a default was nominated, and so were never tagged.
-      //
-      // Cheap on every create: one statement whose `IS NULL` guard
-      // short-circuits the org lookup for an already-owned user, matching no
-      // rows and scanning nothing.
-      //
-      // Uses the request's concrete network rather than deriving it from the
-      // bare domain — that derivation returns null when two served networks
-      // declare the same domain, which would leave the user untagged while the
-      // gate (which does know the network) still demanded an owner.
+      // Runs on every create, not just the first, so users who signed up
+      // before a default was nominated still get tagged; the `IS NULL` guard
+      // makes it a no-op for an already-owned user. Uses the request's network
+      // because deriving it from the bare domain is ambiguous when two served
+      // networks declare the same domain.
       await tagUserWithDefaultAggregator(tx, userId, body.item_network, body.item_domain);
 
       const c = await createItemInternal(tx, {
@@ -301,16 +269,10 @@ export const create_item_handler = async (
         item_state: body.item_state ?? {},
         item_locations,
         created_by: userId,
-        // A self-create that carries consent IS the profile_creation acceptance,
-        // so classify with it now (#275 gated `live` on consent but never let
-        // the create path see it → profiles were stuck `draft`). Keyed on
-        // presence, not `body.consent.category`: the consent row + version are
-        // server-resolved to `profile_creation` (the only create-time consent
-        // category), so any consent block present is that acceptance. The row is
-        // written just below in the same transaction; a consent-write failure
-        // rolls the whole create back (fail-closed). Admin/bulk callers omit
-        // this and stay draft, promoted later via /consent/profile-accept.
-        // A gated minor is forced draft (see selfConsentPromotes above).
+        // A consent block on create is the profile_creation acceptance (the
+        // only create-time category), so classify with it now. Admin/bulk
+        // callers omit it and stay draft until /consent/profile-accept; a
+        // gated minor is forced draft.
         consent_accepted: selfConsentPromotes,
       });
 
@@ -362,16 +324,10 @@ export const create_item_handler = async (
       request.log.warn({ err }, 'cache invalidation after create failed'),
     );
 
-    // Owner-facing create email (#531/#534). Fire-and-forget after commit —
-    // never blocks or fails the create. Lazy-imported so the notification/config
-    // chain stays out of this route's static module graph. An aggregator
-    // acting-org routes to the initiation email instead of the self create email.
-    // `userId` is the resolved OWNER on both paths — the session caller for a
-    // self create, and `body.created_by` for an admin-api create (validated
-    // above) — so it's the correct recipient regardless of who called.
-    // `lifecycleStatus` distinguishes a `live` create ("you're live") from a
-    // `draft` one ("complete your profile"): a create can commit draft
-    // (incomplete / gated minor) while still returning 201.
+    // Owner-facing create email. Fire-and-forget after commit, lazy-imported to
+    // keep the notification chain off this route's static graph. `userId` is
+    // the resolved owner on both paths. `lifecycleStatus` picks "you're live"
+    // vs "complete your profile", since a 201 can commit a draft.
     void import('@/notifications/notify_item_lifecycle')
       .then(({ dispatchItemLifecycleNotification }) =>
         dispatchItemLifecycleNotification(

@@ -20,9 +20,8 @@ async function loadAndParseNetworkConfigs(): Promise<NetworkConfigDocument[]> {
   return configs.map((config) => {
     const parsed = parseNetworkConfigDocument(config);
     for (const domain of parsed.domains) {
-      // Only the domains this instance actually serves are validated — an
-      // unserved sibling/peer domain in the same config (which this instance
-      // never geocodes) must not be able to fail boot.
+      // Only served domains are checked, so an unserved domain in the same
+      // config (never geocoded here) cannot fail boot.
       const isServed = apiConfig.served_domains.some(
         (binding) => binding.network === parsed.id && binding.domain === domain.id,
       );
@@ -40,10 +39,8 @@ async function loadAndParseNetworkConfigs(): Promise<NetworkConfigDocument[]> {
 
 export async function getNetworkConfigs(): Promise<NetworkConfigDocument[]> {
   if (!networkConfigsPromise) {
-    // Do NOT memoize a rejected promise: a single transient failure (e.g. a
-    // schema-registry fetch blip) would otherwise poison the cache for the
-    // process lifetime, silently degrading every downstream caller. Clear the
-    // slot on rejection so the next call retries.
+    // Don't memoize a rejected promise: one transient fetch failure would
+    // otherwise poison the cache for the process lifetime.
     const pending = loadAndParseNetworkConfigs();
     pending.catch(() => {
       if (networkConfigsPromise === pending) networkConfigsPromise = null;
@@ -55,10 +52,8 @@ export async function getNetworkConfigs(): Promise<NetworkConfigDocument[]> {
 }
 
 export async function refreshNetworkConfigs(): Promise<NetworkConfigDocument[]> {
-  // Same non-poisoning contract as getNetworkConfigs: a failed refetch must not
-  // latch a rejected promise (this is the realistic runtime path — a periodic
-  // schema refetch blip would otherwise degrade every contact resolution to the
-  // account fallback until the next successful refresh or a restart).
+  // Same as getNetworkConfigs: a failed refetch must not latch a rejected
+  // promise.
   const pending = loadAndParseNetworkConfigs();
   pending.catch(() => {
     if (networkConfigsPromise === pending) networkConfigsPromise = null;

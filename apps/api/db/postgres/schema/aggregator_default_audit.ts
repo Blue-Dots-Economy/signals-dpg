@@ -1,28 +1,19 @@
 import { pgTable, text, timestamp, uuid, index } from 'drizzle-orm/pg-core';
 
 /**
- * Append-only audit of default-aggregator changes (#640, SS-3). Written by the
+ * Append-only audit of default-aggregator changes. Written by the
  * `organization_default_aggregator_audit` trigger (migration 0014), one row per
- * binding gained or lost. No updates, no deletes wired up — same shape as
- * `pii_reveal_audit`.
+ * binding gained or lost. No updates or deletes are wired up.
  *
- * A trigger rather than application code because the default is nominated by a
- * hand-written UPDATE (a support request), which no route would ever see.
+ * `organization` has no `updated_at`, and the default decides which org may
+ * decrypt an inbound population's PII, so this is the only record of when a
+ * default changed. A trigger rather than app code because defaults are
+ * nominated by hand-written UPDATEs (support requests) that no route sees.
  *
- * Known limit: a hand-over lands as TWO rows, because exclusivity forces
- * clearing org A before setting org B — a revoke (`to_org_id` null) and a grant
- * (`from_org_id` null). The grant row of a hand-over is therefore shaped
- * exactly like a first-ever nomination. Run the two UPDATEs in ONE transaction
- * so the pair shares a `changed_at`, which is what lets an operator correlate
- * them; a transaction id column would make it explicit and is the obvious
- * follow-up if this trail is ever read programmatically.
- *
- * Why this table exists at all: `organization` has no `updated_at`, and the
- * default is stored as a plain column, so without this there would be **no
- * trace of when a default changed** — and the default decides which
- * organisation may decrypt an entire inbound population's PII. The later
- * re-assignment job needs to know when the hand-over happened; it cannot be
- * reconstructed after the fact.
+ * A hand-over lands as two rows, because exclusivity forces clearing org A
+ * before setting org B: a revoke (`to_org_id` null) and a grant (`from_org_id`
+ * null), the grant shaped like a first-ever nomination. Run both UPDATEs in one
+ * transaction so the pair shares a `changed_at` for correlation.
  *
  * `changed_by` is the Postgres role that ran the statement. If support connects
  * through one shared role, every change reads identically — the row says WHEN
@@ -42,11 +33,8 @@ export const aggregator_default_audit = pgTable(
     /** Null on the first assignment for this binding. */
     fromOrgId: text('from_org_id'),
     /**
-     * Null when the binding was REVOKED — the org stood down and nothing took
-     * over. Nullable on purpose: `bindings: []` is the documented way to stand
-     * an aggregator down, and a NOT NULL column could not represent it, so the
-     * single most consequential operation the endpoint supports would have gone
-     * unaudited.
+     * Null when the binding was revoked (the org stood down and nothing took
+     * over), e.g. via `bindings: []`.
      */
     toOrgId: text('to_org_id'),
     /** The Postgres role that ran the statement. */

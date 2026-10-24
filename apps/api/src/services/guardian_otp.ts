@@ -4,8 +4,6 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
 import { renderOrgList } from '@/notifications/email/shells';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-// The fixed-window counter used by the send rate-limit and the verify throttle
-// below; shared with the support route since #551.
 import { incrWithinWindow } from '@/utils/rate_window';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
@@ -19,23 +17,17 @@ export class GuardianOtpError extends Error {
 export type GuardianContactType = 'phone' | 'email';
 
 /**
- * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
- * notification template + the copy the guardian sees. Distinct from the OTP
- * mechanics — the code/TTL/throttles are identical across scenarios.
- *
- * For actions, `actionType` is taken straight from `network.json` (the gate
- * passes the interaction's own action type) — NOT hardcoded — so any action a
- * network defines derives its template automatically:
- *   `guardian_otp_<actionType>[_accept]_sms`.
+ * The parent-facing scenario a guardian OTP is issued for. Selects the email
+ * case (`guardian.<kind>`) and its copy; the code, TTL and throttles are the
+ * same for every scenario, and SMS always uses the one generic OTP template.
+ * For actions, `actionType` comes from the interaction in `network.json`.
  */
 export type GuardianOtpScenario =
   | { kind: 'account' } // ward wants to create an account (pre-auth signup)
   | { kind: 'profile' } // ward wants to create a profile
   | { kind: 'action'; actionType: string; stage: 'initiate' | 'accept' } // connect/apply/etc.
-  // Bulk action (#393): the ward performs many actions at once; one OTP
-  // authorises the whole batch and the email lists every provider org.
-  // `jobs` picks the copy (Bluedots "jobs" vs generic "opportunities"). SMS is
-  // unaffected — it only carries the code, so the org list is email-only.
+  // One OTP authorises a whole batch of actions; the email lists every
+  // provider org. `jobs` picks "jobs" vs "opportunities" in the copy.
   | {
       kind: 'action_bulk';
       actionType: string;
@@ -56,7 +48,7 @@ export type OtpSend = (args: {
   variables?: GuardianOtpVariables;
 }) => Promise<void>;
 
-export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min — matches template copy, #294)
+export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min; the email copy states it)
 export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
 export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
@@ -66,19 +58,15 @@ export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
 const codeKey = (scope: string) => `guardian_otp:code:${scope}`;
 const rateKey = (scope: string) => `guardian_otp:rl:${scope}`;
 const verifyRateKey = (scope: string) => `guardian_otp:vrl:${scope}`;
-// Per-guardian-CONTACT send counter. The scope rate-limit is keyed on the ward
-// (e.g. ward id / signup identifier), so on the public signup route — where the
-// caller supplies the guardian contact freely — an attacker can rotate ward
-// identifiers to spam one victim number/email past the scope cap. Hash the
-// contact so no PII lands in a Redis key.
+// Per-guardian-contact send counter. The scope limit is keyed on the ward, and
+// the public signup route lets a caller rotate ward identifiers to spam one
+// contact past it. The contact is hashed so no PII lands in a Redis key.
 const contactRateKey = (contact: string, contactType: GuardianContactType) =>
   `guardian_otp:crl:${contactType}:${createHash('sha256').update(contact).digest('hex')}`;
 
 /**
- * Map a `GuardianOtpError` to its HTTP reply shape ({status, error, message}),
- * or null when `err` isn't one (caller falls back to a 500). Reused by every
- * consent route that issues/verifies a guardian OTP so the status ladder isn't
- * hand-rolled per handler.
+ * Maps a `GuardianOtpError` to its HTTP reply shape, or null when `err` isn't
+ * one (the caller falls back to a 500).
  */
 export function guardianOtpErrorReply(
   err: unknown,
@@ -94,20 +82,20 @@ export function guardianOtpErrorReply(
   }
 }
 
-/** sha256 hex of an OTP — what we persist in Redis (never the plaintext code). */
+/** sha256 hex of an OTP; Redis stores this, never the plaintext code. */
 const hashOtp = (otp: string) => createHash('sha256').update(otp).digest('hex');
 
 function generateOtp(): string {
-  // Dev/test bypass (CREATE_TEST_OTP): fixed code so the guardian flow is
-  // exercisable without a notifier. Guarded against production in config.
+  // CREATE_TEST_OTP: fixed code for dev/test; config refuses it in production.
   if (authConfig.create_test_otp) return '000000';
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
 /**
- * Issue a guardian OTP for `scope` (e.g. a user id + purpose): rate-limit,
- * store the nonce with a short TTL, dispatch via `send`. Throws
- * `GuardianOtpError('RATE_LIMITED')` before sending when the window max is hit.
+ * Issues a guardian OTP for `scope` (e.g. a user id + purpose): rate-limits,
+ * stores the hashed code with a short TTL, and dispatches via `send`. Throws
+ * `GuardianOtpError('RATE_LIMITED')` before sending when a scope or contact
+ * window max is hit.
  */
 export async function issueGuardianOtp(args: {
   scope: string;
@@ -132,11 +120,9 @@ export async function issueGuardianOtp(args: {
   }
 
   const otp = generateOtp();
-  // Store only a hash of the code — a Redis dump / read-access then can't expose
-  // a live OTP. The plaintext code is still what gets dispatched to the guardian.
+  // Only the hash is stored, so Redis read access cannot expose a live OTP.
   await redis.set(codeKey(args.scope), hashOtp(otp), 'EX', GUARDIAN_OTP_TTL_SEC);
-  // In test-OTP mode skip the real dispatch — no notifier is required and the
-  // fixed code is already known to the tester.
+  // Test-OTP mode skips dispatch; the fixed code is already known.
   if (authConfig.create_test_otp) return;
   const send = args.send ?? defaultGuardianOtpSend;
   await send({
@@ -148,18 +134,14 @@ export async function issueGuardianOtp(args: {
   });
 }
 
-/**
- * Verify + consume a guardian OTP. Single-use: a correct code is deleted so it
- * cannot be replayed. Returns false for wrong/expired/missing codes.
- */
-// Atomic compare-and-consume: delete the stored code ONLY if it matches the
-// submitted one, in a single round-trip. Prevents the get-then-del race where
-// two concurrent verifies of the same code both succeed (double consent/action).
-// A non-match leaves the code in place so the ward can retry within its TTL.
-// Compares HASHES — the stored value is sha256(otp), so the caller hashes the
-// submitted code before this runs.
+// Atomic compare-and-delete on the stored hash, so two concurrent verifies of
+// one code cannot both succeed. A non-match leaves the code for a retry.
 const CONSUME_IF_MATCH = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end`;
 
+/**
+ * Verifies and consumes a guardian OTP. Single-use: a correct code is deleted.
+ * Returns false for wrong, expired or missing codes.
+ */
 export async function verifyGuardianOtp(args: {
   scope: string;
   otp: string;
@@ -169,9 +151,9 @@ export async function verifyGuardianOtp(args: {
 }
 
 /**
- * Throttle verify attempts per scope (brute-force guard — the core OTP is a
- * 6-digit space). Throws VERIFY_THROTTLED past the window max. Call before
- * verifyGuardianOtp on the HTTP boundary.
+ * Throttles verify attempts per scope against brute force of the 6-digit
+ * code. Throws VERIFY_THROTTLED past the window max. Call before
+ * verifyGuardianOtp.
  */
 export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
   const count = await incrWithinWindow(verifyRateKey(scope), GUARDIAN_OTP_VERIFY_WINDOW_SEC);
@@ -180,23 +162,21 @@ export async function assertVerifyAttemptAllowed(scope: string): Promise<void> {
   }
 }
 
-// Notification channel per guardian contact type (spec D7). WhatsApp is not
-// wired — do not add it here.
+// WhatsApp is not wired for guardian OTPs; do not add it here.
 const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
   phone: 'sms',
   email: 'email',
 };
 
-// SMS uses the ONE generic DLT-approved OTP template the instance already has
-// (`SMS_TEMPLATE_ID`, default `login_otp` — same as login). It only renders the
-// code, so there are no per-scenario SMS templates and no parent-facing SMS copy
-// — that lives in the email. Variable is `{ message: otp }`, matching login.
+// SMS uses the instance's one generic DLT-approved OTP template
+// (`SMS_TEMPLATE_ID`, default `login_otp`) with `{ message: otp }`. It carries
+// only the code; parent-facing copy is email-only.
 const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
 /**
- * Maps a guardian OTP scenario to its email case + variables (#529). Pure —
- * fallback values are supplied here because the copy file has no
- * conditionals: every declared placeholder always gets a value.
+ * Maps a guardian OTP scenario to its email case and variables. Fallbacks are
+ * supplied here because the copy file has no conditionals: every placeholder
+ * must get a value.
  */
 export function buildGuardianEmailDispatch(args: {
   scenario?: GuardianOtpScenario;
@@ -223,16 +203,13 @@ export function buildGuardianEmailDispatch(args: {
 }
 
 /**
- * Default dispatch: pick the channel from the guardian's contact type and send
- * via the shared notification client. Hard-fails when no provider is
- * configured — a guardian-required domain must not silently skip verification.
+ * Default dispatch: picks the channel from the contact type and sends via the
+ * notification client. Throws NO_OTP_PROVIDER when no provider is configured,
+ * so a guardian-required domain never silently skips verification.
  *
- * Email: the case + variables are mapped by `buildGuardianEmailDispatch` and
- * shipped through the central `dispatchEmail` sender (#529) — same convention
- * as the login OTP + action emails, so the copy lives in the properties file,
- * not in-repo HTML. SMS: the DLT-approved body lives in the notification
- * service, so we send a per-scenario `template_id` plus variables and let it
- * render.
+ * Email goes through `dispatchEmail` with the case from
+ * `buildGuardianEmailDispatch` (copy lives in the email messages file). SMS
+ * sends the generic OTP template; notification-service renders the body.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
@@ -253,8 +230,7 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
       variables: variables ?? {},
       teamName,
     });
-    // Critical case: dispatchEmail rethrows on failure, so a lost guardian
-    // OTP surfaces to the caller exactly as the direct notify() did.
+    // Guardian cases are critical, so dispatchEmail rethrows on failure.
     await sender.dispatchEmail({
       caseId: dispatch.caseId,
       to: contact,

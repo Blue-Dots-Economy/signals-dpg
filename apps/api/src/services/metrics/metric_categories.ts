@@ -31,13 +31,10 @@ const normalize = (
 };
 
 /**
- * Walks the network config and collects every interaction whose
- * `metric_categories` is non-null and non-empty. Each entry carries the
- * (action_type, from_domain, to_domain) tuple plus its canonical mapping.
- *
- * Recompute uses this list to aggregate item_actions in BOTH directions
- * (the same item can be source OR target). Interactions with null/empty
- * metric_categories are skipped (the historical "not tracked" sentinel).
+ * Collects every interaction whose `metric_categories` is non-empty (null or
+ * empty means "not tracked"), with its (action_type, from_domain, to_domain)
+ * tuple and canonical mapping. Recompute aggregates item_actions in both
+ * directions from this list.
  */
 export const collect_tracked_interactions = (
   networkConfig: NetworkConfigDocument,

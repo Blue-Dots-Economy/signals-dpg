@@ -42,12 +42,10 @@ const pkg = createRequire(import.meta.url)('../package.json') as {
 
 const baseJsonSchemaTransform = createJsonSchemaTransform({});
 
-// Operations served WITHOUT user auth (no preHandler on the route and no
-// group-level auth hook) — the spec-level default security is cleared for
-// these. Derived from the actual route wiring; keep in sync when a route's
-// preHandler changes (see apps/api/CLAUDE.md "Route auth wiring"). Failure
-// direction is safe: a forgotten entry documents auth on a public route — it
-// never hides auth on a protected one; runtime auth is untouched either way.
+// Operations served without user auth; the spec's default security is
+// cleared for these. Documentation only, so keep it in sync with the route
+// preHandlers (see apps/api/CLAUDE.md "Route auth wiring"). A missing entry
+// only over-documents auth on a public route; runtime auth is unaffected.
 const PUBLIC_OPERATION_URLS = new Set([
   '/',
   '/health/live',
@@ -57,8 +55,7 @@ const PUBLIC_OPERATION_URLS = new Set([
   '/api/v1/consent/status-by-identifier',
   '/api/v1/network/schemas',
   '/api/v1/network/item/fetch',
-  // The BFF login flow. Unauthenticated by definition — they are how a browser
-  // GETS a session — so the generated spec must not claim otherwise.
+  // The BFF login flow: how a browser obtains a session.
   '/api/v1/auth/session',
   '/api/v1/auth/session/login',
   '/api/v1/auth/session/callback',
@@ -71,27 +68,23 @@ const PEER_OPERATION_URLS = new Set([
   '/api/v1/network/item/count_local',
   '/api/v1/network/item/fetch_local',
   '/api/v1/network/item/markers_local',
-  // Moved off the public list (AUTH-VULN-05): it asserts identity in its body,
-  // so it is peer-authenticated like the reads above.
+  // Asserts identity in its body, so it is peer-authenticated.
   '/api/v1/network/action/perform',
 ]);
 
-// Unauthenticated responses that still must not be cached (AUTH-VULN-02).
-// `status-by-identifier` answers "is this identifier registered?", so a shared
-// proxy holding that answer re-serves the enumeration oracle without the
-// request ever reaching us; `auth/config` describes the instance's auth wiring.
-// Both are public by design — it is the *caching* that is the finding, not the
-// access. Every other public route keeps its own caching semantics.
 import { setBrowserAllowedOrigins } from '@/services/auth/oidc_flow_state';
 import { loadCountryBoundary } from '@/services/geocoding/country_boundary';
 
+// Public responses that must still not be cached. `status-by-identifier`
+// answers "is this identifier registered?", so a shared proxy would re-serve
+// that enumeration answer; `auth/config` describes the instance's auth wiring.
+// Every other public route keeps its own caching semantics.
 const NO_STORE_PUBLIC_URLS = new Set([
   '/api/v1/auth/config',
   '/api/v1/consent/status-by-identifier',
-  // Carries `authenticated` and the per-session CSRF token, and resolves no
-  // `request.user` (it reads the cookie itself), so the authenticated-response
-  // branch of the no-store hook never fires for it. Without this a shared proxy
-  // could hand one user's CSRF token to the next — the AUTH-VULN-07 class.
+  // Carries the per-session CSRF token but resolves no `request.user` (it
+  // reads the cookie itself), so the authenticated branch of the no-store hook
+  // misses it; a shared proxy could otherwise hand one user's token to another.
   '/api/v1/auth/session',
 ]);
 
@@ -133,24 +126,23 @@ const documentAuthTransform: typeof baseJsonSchemaTransform = (data) => {
 };
 
 /**
- * Builds the fully-wired Fastify app WITHOUT listening. Used by the server
- * entry (which listens), the OpenAPI dump script, and the openapi smoke test.
+ * Builds the fully wired Fastify app without listening. Used by the server
+ * entry, the OpenAPI dump script, and the OpenAPI smoke test.
  */
 export async function buildApp(): Promise<FastifyInstance> {
   const app = fastify({
     logger: true,
     trustProxy: true,
-    // Correlation id: honour + length-cap an inbound `x-request-id`, mint one
-    // when absent, log it as `reqId` (see @/request_id).
+    // Honours and length-caps an inbound `x-request-id`, mints one when
+    // absent, and logs it as `reqId` (see @/request_id).
     ...requestIdOptions,
   });
 
-  // Echo the resolved correlation id back on every response.
   registerRequestIdEcho(app);
 
-  // UI_HOST_BINDINGS is parsed at module load, before a logger exists (#569),
-  // so its warnings surface here. Malformed entries were already dropped; this
-  // is the only signal an operator gets that a portal link is misconfigured.
+  // UI_HOST_BINDINGS is parsed at module load, before a logger exists, so its
+  // warnings surface here. Malformed entries were already dropped; this is the
+  // only signal an operator gets that a portal link is misconfigured.
   for (const warning of uiHostBindings.warnings) {
     app.log.warn(warning);
   }
@@ -165,15 +157,12 @@ export async function buildApp(): Promise<FastifyInstance> {
     );
   }
 
-  // The schema cache lives on disk under tmpdir() and outlives a restart. In
-  // local mode the network is driven by NETWORK_CONFIG_LOCAL_FILE, so a stale
-  // cache from a previous network keeps being served after a switch. Wipe and
-  // rebuild on boot so local dev always reflects the configured network.
-  // Remote mode keeps the cache (schemas there are expensive to refetch).
-  // Rebuilding queries the `items` table (cacheReferencedItemSchemas), so it
-  // needs a reachable Postgres; SCHEMA_CACHE_WARMUP_ENABLED=false (used by
-  // the OpenAPI dump script) skips it — safe because route registration
-  // below is fully static and never reads the schema cache itself.
+  // The schema cache lives on disk under tmpdir() and survives restarts, so in
+  // local mode a cache from a previously configured network would keep being
+  // served. Wipe and rebuild on boot; remote mode keeps the cache because its
+  // schemas are expensive to refetch. Rebuilding queries the `items` table, so
+  // it needs Postgres; SCHEMA_CACHE_WARMUP_ENABLED=false (the OpenAPI dump)
+  // skips it, which is safe because route registration never reads the cache.
   if (
     apiConfig.network_config_source === 'local' &&
     apiConfig.schema_cache_warmup_enabled
@@ -182,26 +171,19 @@ export async function buildApp(): Promise<FastifyInstance> {
     await refreshConsumedSchemas();
   }
 
-  // Boot-time email-copy load (#529): the bundled defaults file is required,
-  // so a build defect there throws here — crash-loud at startup rather than
-  // surfacing lazily on the first attempted send. An ops override
-  // (EMAIL_MESSAGES_PATH) is also read here so per-key fallback warnings land
-  // in deploy logs immediately. Unlike the schema-cache warmup above this has
-  // no DB/Redis dependency (fs only), so it runs unconditionally — including
-  // in NETWORK_CONFIG_SOURCE=remote mode and in the OpenAPI dump, where
-  // SCHEMA_CACHE_WARMUP_ENABLED=false only gates the DB-backed warmup.
+  // Load email copy at boot: a defect in the required bundled defaults throws
+  // here rather than on the first send, and fallback warnings for an
+  // EMAIL_MESSAGES_PATH override land in deploy logs. Filesystem only, so it
+  // runs unconditionally.
   await getEmailMessages();
 
-  // SMS templates load on the same boot pass so a bad registry shows up in
-  // deploy logs immediately, not on the first send. Unlike the copy above this
-  // never throws — SMS is best-effort, and an unconfigured template just means
-  // dispatchSms skips it.
+  // Loaded at boot so a bad registry shows in deploy logs. Never throws: SMS
+  // is best-effort and dispatchSms skips an unconfigured template.
   await getSmsTemplates();
 
-  // Country boundary for the supplied-coordinate check (#789), read on the same
-  // boot pass so a missing or malformed ConfigMap is a deploy-log warning, not
-  // a surprise on the first write. Never throws: an unloadable boundary only
-  // disables that check.
+  // Country boundary for the supplied-coordinate check, loaded at boot so a
+  // bad ConfigMap is a deploy-log warning. Never throws: an unloadable
+  // boundary only disables that check.
   await loadCountryBoundary();
 
   const networkConfigs = await getNetworkConfigs();
@@ -218,24 +200,19 @@ export async function buildApp(): Promise<FastifyInstance> {
     networkAllowedOrigins
   );
 
-  // The BFF login validates `appOrigin` and the request Host against the same
-  // list, so anywhere the browser may CALL from is somewhere it may be SENT to,
-  // and the two cannot drift apart.
+  // The BFF login validates `appOrigin` and the request Host against the CORS
+  // list, so the origins a browser may call from and be redirected to match.
   setBrowserAllowedOrigins(corsAllowedOrigins);
 
-  // Add schema validator and serializer
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
   // Capture raw JSON bytes for peer_instance_guard (see plugins/raw_body.ts).
   registerRawBodyCapture(app);
 
-  // No-store on authenticated responses (AUTH-VULN-07). Any response produced
-  // for a request that resolved a user carries PII/session state, so it must not
-  // be cached by browsers or shared proxies. Public/unauthenticated responses
-  // (request.user unset) are left untouched so genuinely cacheable routes keep
-  // their own caching semantics — except the two listed in
-  // NO_STORE_PUBLIC_URLS below. A route that already set Cache-Control wins.
+  // Responses for a resolved user carry PII or session state, so they get
+  // no-store, as do NO_STORE_PUBLIC_URLS. Other public responses keep their own
+  // caching. A route that already set Cache-Control wins.
   app.addHook('onSend', async (request, reply, payload) => {
     const needsNoStore =
       request.user || NO_STORE_PUBLIC_URLS.has(request.url.split('?')[0]);
@@ -246,20 +223,15 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   /**
-   * Cookie parsing, for the BFF browser session (AUTH-VULN-03/04).
+   * Cookie parsing for the BFF browser session. Registered at the root scope
+   * before any route: registered later or in an encapsulated scope, the session
+   * routes and cookie auth channel silently see no cookies.
    *
-   * Registered at the ROOT scope and before any route, because it decorates
-   * `request.cookies` / `reply.setCookie`: registered later, or inside an
-   * encapsulated scope, the session routes and the cookie auth channel silently
-   * see no cookies at all rather than failing loudly.
-   *
-   * No `secret` is configured on purpose — the `sid` value is an opaque random
-   * id with no meaning outside Redis, so signing it would add a key to manage
-   * and prove nothing the session lookup does not already prove.
+   * No `secret`: `sid` is an opaque random id looked up in Redis, so signing
+   * it would prove nothing the lookup does not.
    */
   await app.register(cookie);
 
-  // CORS
   await app.register(cors, {
     origin: (origin, cb) => {
       if (!origin || corsAllowedOrigins.includes(origin)) {
@@ -270,16 +242,15 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    // Lets the cross-origin UI read the export filename and counts (#770).
+    // Lets the cross-origin UI read the export filename and counts.
     exposedHeaders: [...EXPORT_EXPOSED_HEADERS],
   });
 
   // Query string parser - supports bracket notation (e.g. itemState[userId]=value)
   await app.register(fastifyQs, {});
 
-  // Documentation. Gated: the always-available reference is the
-  // bluedots-docs site, so this is a secure-by-default local/dev convenience
-  // (see apiReferenceEnabled in @/config).
+  // Off by default; the published reference is the bluedots-docs site (see
+  // apiReferenceEnabled in @/config).
   if (apiReferenceEnabled) {
     await app.register(fastifySwagger, {
       openapi: {
@@ -295,22 +266,12 @@ export async function buildApp(): Promise<FastifyInstance> {
             '`docs/operations/integrating-dpgs.md` for the full auth model.',
           version: pkg.version,
         },
-        // Default for every operation; exceptions are applied per-route in
-        // documentAuthTransform below.
-        /**
-         * Two alternatives, not three requirements: a caller presents EITHER an
-         * api key OR the session cookie, and the cookie alternative additionally
-         * carries the CSRF token. Pairing them here is what makes the header
-         * discoverable to a generated client — without it the spec described a
-         * cookie session that could authenticate reads but never perform a
-         * write, because nothing said the header existed. It is enforced only on
-         * unsafe methods (see the `csrfToken` scheme's description); sending it
-         * on a GET is simply ignored.
-         */
+        // Default for every operation; documentAuthTransform applies the
+        // exceptions. Two alternatives: an api key, or the session cookie plus
+        // the CSRF token (paired so generated clients discover the header; it
+        // is enforced only on unsafe methods).
         security: [{ apiKeyAuth: [] }, { sessionAuth: [], csrfToken: [] }],
-        // Tag descriptions make starlight-openapi emit one overview page per
-        // group in the published reference (tags without a description get
-        // sidebar-group-only treatment).
+        // Tag descriptions make starlight-openapi emit an overview page per group.
         tags: [
           { name: 'health', description: 'Liveness and readiness probes for orchestrators (unauthenticated).' },
           { name: 'item', description: 'Create, fetch, update and delete items, and manage their lifecycle status.' },
@@ -411,12 +372,6 @@ export async function buildApp(): Promise<FastifyInstance> {
     },
   });
   app.register(health_routes);
-
-  // better-auth's own HTTP surface (`/api/auth/*`) was registered here under
-  // `AUTH_PROVIDER=betterauth`. It is gone with the library (#517) — the UI used
-  // it only for the OTP flow, sign-out and get-session, all replaced by the OIDC
-  // screen. `x-api-key` auth never went through it: verification is an
-  // in-process call (`plugins/auth/verify_api_key.ts`), not a route.
 
   app.register(v1_routes, { prefix: '/api/v1' });
 

@@ -51,14 +51,9 @@ type ActionItemRef = z.infer<
 >['source_item'];
 
 /**
- * Shape returned by `fetchLocalItemSnapshot` — carries item content
- * (`item_schema_url`, public `item_state`, decrypted+merged `private_state`,
- * `item_locations`) but not the network/domain/type/id/instance-url
- * identity, which lives on the request body's item ref instead. Builds the
- * full `ItemSnapshotLike` the match-score service requires by merging the
- * two. Uses the public `item_state` (never `private_state`) so decrypted PII
- * never flows into the match-score input, matching the discover match-score
- * flow.
+ * Builds the match-score `ItemSnapshotLike` from the body's item ref (identity)
+ * and a local snapshot (content). Uses the public `item_state`, never
+ * `private_state`, so decrypted PII never reaches match scoring.
  */
 function toMatchScoreSnapshot(
   ref: ActionItemRef,
@@ -104,18 +99,11 @@ export const perform_network_action: FastifyPluginAsyncZod = async function (
   fastify.route({
     url: '/action/perform',
     method: 'POST',
-    // Peer-only (AUTH-VULN-05). This body ASSERTS identity — `source_item_owner`
-    // and the `performed_by_*` audit fields decide who the action belongs to, and
-    // the handler has no independent way to check them. While the route was
-    // public, anyone who could reach the host could name any user (ids are
-    // discoverable) and have an action recorded against them; a pentest confirmed
-    // it, getting back a consent error specific to the impersonated user rather
-    // than an auth error. The HMAC guard binds the request to a peer that holds
-    // INSTANCE_SHARED_SECRET, so the identity fields are only as forgeable as
-    // that secret. The STRICT guard is deliberate: unlike the *_local reads, this
-    // route never had a legitimate unsigned caller to keep working during
-    // rollout, so it does not honour PEER_AUTH_MODE=permissive — otherwise the
-    // finding stays open in every deployment that has not flipped the flag.
+    // Peer-only (AUTH-VULN-05). This body asserts identity (`source_item_owner`,
+    // `performed_by_*`) that the handler cannot check independently, so the
+    // HMAC guard binds it to a peer holding INSTANCE_SHARED_SECRET. Strict
+    // guard: unlike the *_local reads, this route never had a legitimate
+    // unsigned caller, so it ignores PEER_AUTH_MODE=permissive.
     preHandler: [
       peer_instance_guard_strict,
       public_rate_limit('network_action_perform', 100),
@@ -186,12 +174,9 @@ export const perform_network_action_handler = async (
     });
   }
 
-  // Initiate-consent gate, enforced HERE (the write endpoint) — not only on the
-  // /action/perform proxy — because this is where the row is created and the PII
-  // action event is emitted. The proxy forwards `consent` for reveals_pii
-  // actions, so legitimate (proxied and inter-instance) calls pass; a direct
-  // call that bypasses the proxy without consent is rejected rather than
-  // creating a PII-revealing action with no consent recorded.
+  // Initiate-consent gate, enforced at this write endpoint and not only on the
+  // /action/perform proxy, so a direct call without consent cannot create a
+  // PII-revealing action. The proxy forwards `consent` for reveals_pii actions.
   if (interaction.reveals_pii_on_status.length > 0 && !body.consent?.acknowledged) {
     return reply.code(400).send({
       error: 'CONSENT_REQUIRED',
@@ -227,15 +212,11 @@ export const perform_network_action_handler = async (
     }
   }
 
-  // Self-action guard: you cannot perform an action on your own profile. The UI
-  // filters the viewer's own pins from the map/list, but the API is the control
-  // — a crafted request (or a UI gap) must still be rejected here. Same item is
-  // unambiguously self. The owner-equality branch compares only the DB-resolved
-  // source owner (`sourceItemSnapshot.created_by`) — never `body.source_item_owner`,
-  // which is caller-asserted and could be forged to dodge the check. That means a
-  // REMOTE source (no local snapshot) relies on the item-id check alone; a remote
-  // instance vouches for its own users' ownership, and its two-profiles-of-one-user
-  // case is enforced at that instance's own perform endpoint.
+  // Self-action guard; the UI also hides the viewer's own pins, but the API is
+  // the control. Owner equality uses only the DB-resolved source owner, never
+  // the caller-asserted `body.source_item_owner`. A remote source (no local
+  // snapshot) relies on the item-id check alone; its instance enforces the
+  // two-profiles-of-one-user case at its own perform endpoint.
   const isSelfAction =
     body.source_item.item_id === body.target_item.item_id ||
     (sourceItemSnapshot !== null &&
@@ -296,14 +277,12 @@ export const perform_network_action_handler = async (
     });
   }
 
-  // Action + initiate-consent are written in one transaction so a consent-write
-  // failure rolls the action back too (fail-closed — never a PII-revealing
-  // action without a consent row). The action event is emitted only after commit.
-  // Pair cap (#370/#422): at most `max_actions_per_pair` (default 1) OPEN
-  // actions between these two items, bidirectional + type-agnostic. Enforced
-  // HERE (the single write endpoint every perform — self, proxied, or
-  // inter-instance — funnels through) inside the insert txn with a pair-scoped
-  // advisory lock, so concurrent submits can't both land.
+  // Action + initiate-consent in one transaction: never a PII-revealing action
+  // without a consent row. The action event is emitted only after commit.
+  // Pair cap: at most `max_actions_per_pair` (default 1) open actions between
+  // these two items, bidirectional and type-agnostic. Enforced here, the single
+  // write endpoint every perform funnels through, under a pair-scoped advisory
+  // lock so concurrent submits cannot both land.
   let capExceeded = false;
   const created = await db
     .transaction(async (tx) => {
@@ -463,10 +442,10 @@ export const perform_network_action_handler = async (
     );
   }
 
-  // Match score (#439): computed ONCE at create, for all interaction types,
-  // and stored on the row. Fire-and-forget so connect latency is unaffected;
-  // null when the source snapshot is unavailable (cross-instance) or the
-  // relevance service errors. Never recomputed on status change.
+  // Match score: computed once at create and stored on the row; never
+  // recomputed on status change. Fire-and-forget so connect latency is
+  // unaffected. Stays null when a snapshot is unavailable (cross-instance) or
+  // scoring errors.
   void computeActionMatchScore(
     toMatchScoreSnapshot(body.source_item, sourceItemSnapshot),
     toMatchScoreSnapshot(body.target_item, targetItemSnapshot),

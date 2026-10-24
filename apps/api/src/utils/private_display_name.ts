@@ -1,21 +1,15 @@
 /**
- * Read-time private display-name resolution for aggregator-scoped reads
+ * Read-time private display names for aggregator reads
  * (GET /aggregator/dashboard, GET /aggregator/export).
  *
- * The precomputed `item_metrics.display_name` only ever sees the masked
- * public state, so items whose display field is `private: true` (e.g.
- * purple_dot seeker `beneficiary_name`) surface as a mask or item_id.
- * This helper decrypts those — and ONLY those — at read time. Items whose
- * display field is public (e.g. provider `organisation_name`) are skipped
- * entirely: their precomputed name is already correct, and skipping them
- * avoids a redundant `items` fetch + decrypt per page.
+ * `item_metrics.display_name` is computed from the masked public state, so an
+ * item whose display field is `private: true` shows a mask or its item_id.
+ * Only those items are fetched and decrypted here; public display fields
+ * already have the right precomputed name.
  *
- * Failure contract: name resolution must never fail the read. Every
- * failure class (unknown network config, items lookup error, missing key,
- * corrupt blob) degrades to the precomputed name for the affected rows and
- * emits one PII-free structured warning so a misconfigured environment
- * (e.g. absent SIGNALS_PII_KEY) is diagnosable instead of silently
- * reproducing the masked-name bug.
+ * Never fails the read: every failure (config, lookup, missing key, corrupt
+ * blob) keeps the precomputed name and logs one PII-free warning, so a missing
+ * SIGNALS_PII_KEY is diagnosable.
  */
 
 import { db } from '@api/db/postgres/drizzle_config';
@@ -30,7 +24,7 @@ export interface NameResolutionLog {
   warn: (obj: Record<string, unknown>, msg: string) => void;
 }
 
-/** Extracts a loggable, PII-free error identifier (PiiCryptoError.code or name). */
+/** PII-free error identifier (PiiCryptoError.code or name). */
 function errorType(err: unknown): string {
   if (err instanceof Error) {
     const code = (err as { code?: unknown }).code;
@@ -40,36 +34,20 @@ function errorType(err: unknown): string {
 }
 
 /**
- * Resolves real display names for metric rows whose schema declares a
- * `private: true` display field.
- *
- * Per item type the display field is the schema's `display_name_field`,
- * else the domain's `card.title_field` (the existing UI hint for "the
- * field that titles this item"). Types whose resolved field is not
- * `private: true` are excluded — the precomputed name already covers them.
- *
- * Reads the page's item rows in one query per network/domain group,
- * decrypts each non-empty `item_private_state` blob, and returns
- * `item_id → name` for rows where the merged state carries a non-empty
- * string at the display field. Everything else falls back to the
- * precomputed name.
- *
- * @param rows - The page's metric rows (already scoped to the acting aggregator).
- * @param log - Optional request logger for PII-free failure warnings.
- * @returns Map of item_id to decrypted display name; missing keys mean "keep precomputed".
+ * Returns `item_id → decrypted display name` for rows whose display field
+ * (`display_name_field`, else `card.title_field`) is `private: true`. One
+ * items query per network/domain group. A missing key means "keep the
+ * precomputed name".
  */
 export async function resolve_private_display_names(
   rows: Array<{ itemId: string; itemNetwork: string; itemDomain: string; itemType: string }>,
   log?: NameResolutionLog,
 ): Promise<Map<string, string>> {
-  // Keyed by item_id alone: the items PK is composite
-  // (network, domain, type, item_id), but item_id is gen_random_uuid() —
-  // globally unique across partitions.
+  // Keyed by item_id alone: it is a gen_random_uuid(), unique across partitions.
   const out = new Map<string, string>();
   if (rows.length === 0) return out;
 
-  // Group by network/domain — both pin the items partition and select the
-  // right schema set.
+  // Network/domain pins the items partition and the schema set.
   const groups = new Map<string, typeof rows>();
   for (const r of rows) {
     const key = `${r.itemNetwork} ${r.itemDomain}`;
@@ -81,19 +59,14 @@ export async function resolve_private_display_names(
   for (const group of groups.values()) {
     const { itemNetwork: network, itemDomain: domain } = group[0];
 
-    // Per item type: the display field that needs read-time decryption.
-    // Only schema fields marked `private: true` qualify — a public display
-    // field (provider organisation_name) is already correct in item_metrics.
     let private_fields: Record<string, string>;
     try {
       const cfg = await getNetworkConfigById(network);
       const domainCfg = cfg.domains.find((d) => d.id === domain);
       private_fields = Object.fromEntries(
         Object.entries(domainCfg?.item_schemas ?? {}).flatMap(([type, doc]) => {
-          // Shared display-name precedence (display_name_field -> card.title_field).
           const field = resolveNameFallbackField(domainCfg as DomainConfigForName | undefined, type);
           if (field === undefined) return [];
-          // Only schema fields marked `private: true` need read-time decryption.
           const schema = doc as { properties?: Record<string, { private?: unknown } | undefined> };
           if (schema.properties?.[field]?.private !== true) return [];
           return [[type, field]];
@@ -140,8 +113,7 @@ export async function resolve_private_display_names(
       for (const r of item_rows) {
         const field = private_fields[r.item_type];
         if (!field) continue;
-        // No private blob → the merged state would surface the masked
-        // public value (e.g. "R***"); keep the precomputed name instead.
+        // No private blob: the merged state would only hold the masked value.
         if (!r.item_private_state) continue;
         try {
           const { mergedState } = decryptItemPrivate({
@@ -171,9 +143,8 @@ export async function resolve_private_display_names(
         );
       }
     } catch (err) {
-      // Documented guarantee: name resolution never fails the read — a
-      // transient items-lookup error degrades this group to precomputed
-      // names instead of 500ing the dashboard or truncating the export.
+      // A lookup error degrades this group to precomputed names rather than
+      // failing the dashboard or truncating the export.
       log?.warn(
         {
           operation: 'resolve_private_display_names',

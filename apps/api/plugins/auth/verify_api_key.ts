@@ -1,33 +1,20 @@
 /**
- * Native `x-api-key` verification — the in-process replacement for
- * better-auth's `authInstance.api.verifyApiKey` (#517).
+ * In-process `x-api-key` verification.
  *
- * **The `apikey` table is a cross-repo contract, not a better-auth artifact.**
- * Three independent implementations agree on the same hash today:
+ * The `apikey` table is a cross-repo contract: this file, signals-search's
+ * `src/api/auth.ts` (direct SQL) and the automation's
+ * `provision_service_users.sql` (raw Postgres `digest()`) must agree on the
+ * hash, `base64url(sha256(raw_key))` unpadded. Changing it forces every partner
+ * to rotate keys.
  *
- *   1. this file,
- *   2. signals-search's `src/api/auth.ts` (direct SQL, another repo — #516),
- *   3. the automation's `provision_service_users.sql`, which seeds rows with a
- *      raw Postgres `digest()` and never loads better-auth at all.
+ * Not implemented on purpose:
  *
- * That is why the library can go while the table stays: (3) already proves the
- * hash is derivable without better-auth. The scheme is
- * `base64url(sha256(raw_key))` — unpadded, `+/` → `-_` — matching
- * `@better-auth/api-key`'s `defaultKeyHasher` byte for byte, so **no partner
- * has to rotate a key** across this change.
- *
- * Deliberately NOT ported from the plugin:
- *
- * - **Rate limiting.** The plugin's 10 000/hr ceiling was per-key and gated on
- *   `apikey.rate_limit_enabled`, which `provision_service_users.sql` seeds
- *   `false` for every service key. It was already inert for every key that
- *   exists, so porting it would add a limiter that has never once engaged.
- *   Instance-wide limits are #669's territory.
- * - **`remaining` decrementing.** Checked here, never written — same stance
- *   signals-search takes, and for the same reason: two writers racing on a
- *   counter neither of them owns. Seeded keys carry `remaining = NULL`
- *   (unlimited), so the column gates nothing today; it is read only so that a
- *   key manually given a quota still runs out.
+ * - Per-key rate limiting: `provision_service_users.sql` seeds
+ *   `rate_limit_enabled = false` for every service key.
+ * - Decrementing `remaining`: it is read, never written, as in signals-search,
+ *   so two services never race on a counter neither owns. Seeded keys carry
+ *   `remaining = NULL` (unlimited); it only matters for a key manually given a
+ *   quota.
  */
 
 import { createHash } from 'node:crypto';
@@ -36,9 +23,8 @@ import { db } from '../../db/postgres/drizzle_config';
 import { apikey as apikeyTable } from '../../db/postgres/schema/auth';
 
 /**
- * `base64url(sha256(raw))`, unpadded — `@better-auth/api-key`'s
- * `defaultKeyHasher`. Node's `'base64url'` digest encoding is already unpadded
- * and uses the `-_` alphabet, so it needs no post-processing.
+ * `base64url(sha256(raw))`, unpadded. Node's `'base64url'` digest is already
+ * unpadded with the `-_` alphabet.
  */
 export function hashApiKey(raw: string): string {
   return createHash('sha256').update(raw).digest('base64url');

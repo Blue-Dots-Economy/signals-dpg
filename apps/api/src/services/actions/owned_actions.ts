@@ -3,9 +3,8 @@ import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 import { item_actions } from '@dpg/database';
 
 /**
- * The owner-scoped action row set shared by `GET /action/fetch` and
- * `POST /action/export` (#770). One builder, so the list view and an export
- * can never disagree about which rows belong to the caller.
+ * Filters for the owner-scoped action rows shared by `GET /action/fetch` and
+ * `POST /action/export`, so the list and an export always select the same rows.
  */
 export interface OwnedActionsFilters {
   action_id?: string;
@@ -106,12 +105,9 @@ function ownerCondition(
 }
 
 /**
- * WHERE clause for the caller's own actions under the given filters.
- *
- * Ownership is always applied: `initiated` = caller owns the source item,
- * `received` = caller owns the target, `all` = either. `item_id` narrows to
- * one of the caller's items on the same side(s). The caller must separately
- * verify `item_id` is theirs — this only builds the filter.
+ * WHERE clause for the caller's own actions under the given filters. Ownership
+ * is always applied. The caller must separately verify that `item_id` /
+ * `item_ids` are theirs; this only builds the filter.
  */
 export function buildOwnedActionsWhere(
   userId: string,
@@ -132,11 +128,7 @@ export interface OwnedRowSides {
   target_item_owner: string | null;
 }
 
-/**
- * The item on the side of the action the caller does NOT own — the
- * counterparty. `received` ⇒ source, `initiated` ⇒ target; for `all` it is
- * resolved per row.
- */
+/** The item on the side of the action the caller does not own (the counterparty). */
 export const counterpartyItemId = (row: OwnedRowSides, userId: string): string =>
   row.target_item_owner === userId ? row.source_item_id : row.target_item_id;
 
@@ -185,8 +177,7 @@ export function facetsForDomain<V>(
 
 /**
  * Case-insensitive substring search over names the caller may already see.
- * Callers pass only UNMASKED names (a public name, or a private one revealed
- * on this row) — a masked value like "A***" must never be offered, or search
+ * Callers must pass only unmasked names: offering a masked value like "A***"
  * would let a caller probe hidden names letter by letter.
  */
 export function matchesActionSearch(

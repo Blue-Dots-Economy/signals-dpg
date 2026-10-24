@@ -1,11 +1,4 @@
-/**
- * Structural JSON Schema shape we need for profile completion scoring.
- *
- * Intentionally narrow + local (not pulling in `@types/json-schema`) — we
- * only ever read `properties` (key set) and `required` (which keys count
- * as weight 1.0). Everything else in a real JSON Schema is irrelevant
- * here.
- */
+/** The narrow JSON Schema shape profile completion and the go-live gates read. */
 export interface JSONSchemaLike {
   type?: string;
   properties?: Record<string, unknown>;
@@ -13,10 +6,8 @@ export interface JSONSchemaLike {
 }
 
 /**
- * Predicate shared by profile_completion_pct and actionable_tags' "missing_X"
- * derivation (Task 4). Returns true for any value we consider "the user
- * filled this in." Critically: boolean false and numeric 0 are POPULATED
- * (legitimate values); empty strings and empty arrays are NOT.
+ * Whether the user filled a value in. Boolean false and numeric 0 count as
+ * populated; blank strings and empty arrays do not.
  */
 export const is_populated = (v: unknown): boolean => {
   if (v === null || v === undefined) return false;
@@ -26,15 +17,9 @@ export const is_populated = (v: unknown): boolean => {
 };
 
 /**
- * Schema-driven profile completion percentage — **required-only**.
- *
- * Mirrors the lifecycle classifier (`classify_item`): only fields listed in
- * `schema.required` count. `filled_required / total_required × 100`, rounded.
- * Optional fields contribute nothing. A schema with no required fields is
- * vacuously complete → 100.
- *
- * (Previously a weighted formula — required ×1.0 + optional ×0.5. Unified to
- * required-only so there is a single completion notion across the system.)
+ * Profile completion percentage over `schema.required` fields only, rounded,
+ * so there is one completion notion across the system. A schema with no
+ * required fields is 100.
  */
 export const profile_completion_pct = (
   payload: Record<string, unknown> | null | undefined,

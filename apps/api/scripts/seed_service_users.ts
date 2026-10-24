@@ -2,8 +2,7 @@
  * Local-dev seed for the integrating-DPG service users.
  *
  * Each service user lives inside an organization with type='network_service'
- * and owns one apikey. Run after `pnpm db:push:api` so the better-auth
- * tables exist.
+ * and owns one apikey. Run after `pnpm db:push:api` so the auth tables exist.
  *
  * Run from repo root:  pnpm db:seed:services:api
  * Run inside apps/api: pnpm db:seed:services
@@ -25,11 +24,8 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: '../../.env' });
 
-// Build our own pg pool + drizzle instance rather than importing
-// `apps/api/db/postgres/drizzle_config`, which transitively pulls in
-// the API's full Zod env validation (INSTANCE_NAME, INSTANCE_ENV, etc.).
-// A standalone DB-only script shouldn't require app-context env vars —
-// matches the pattern db_init.ts uses for the same reason.
+// Own pg pool + drizzle rather than the API's drizzle_config, which runs the
+// full Zod env validation a DB-only script should not need.
 const pgUrl =
   process.env.POSTGRES_URL ??
   `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
@@ -44,20 +40,15 @@ import {
   apikey,
 } from '../db/postgres/schema/auth.js';
 
-// The org type below is `network_service` — network-wide scope. Which org type
-// a principal gets determines its reach, because acting-org reach is checked by
-// TYPE downstream, not by which org id a caller asserts (see the scope model in
-// `src/middleware/acting_org.ts`). A principal that should reach only PART of
-// the network cannot be expressed that way: it needs the `signals_acting_orgs`
-// claim and `ACTING_ORG_SOURCE=claim_preferred`, enabled in the same change
-// that adds it here.
+// `network_service` gives network-wide reach: acting-org reach is checked by
+// org type, not by which org id is asserted (`src/middleware/acting_org.ts`).
+// A principal limited to part of the network needs the `signals_acting_orgs`
+// claim and `ACTING_ORG_SOURCE=claim_preferred` instead.
 //
-// Slugs must match `provision_service_users.sql` in the charts repo, which is
-// what production actually runs — the slug is also the lookup key that
-// `service_account.ts` resolves a Keycloak client id against. Note the voice
-// bot's org is `raya-voice-bot`, NOT `voice-dpg`: `voice-dpg` is the name of
-// its Keycloak client, and the two were named independently. Renaming either
-// to match the other is its own change.
+// Slugs must match `provision_service_users.sql` in the charts repo (what
+// production runs); `service_account.ts` resolves a Keycloak client id against
+// the slug. The voice bot's org is `raya-voice-bot` while its Keycloak client
+// is `voice-dpg`: they were named independently.
 const SERVICES = [
   { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local' },
   { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local' },
@@ -132,15 +123,10 @@ const ensure_apikey = async (
     return { minted: false, raw_key: null };
   }
   const raw_key = `sk_signals_${randomBytes(24).toString('hex')}`;
-  // The `apikey` table stores SHA-256(key) base64url-encoded (no padding) and
-  // the hash is compared at verify time, so we insert the hash, never the raw
-  // key. Node's `digest('base64url')` is unpadded and uses the `-_` alphabet,
-  // which is exactly the scheme. Three places must agree on it and none of them
-  // share code: this script, `plugins/auth/verify_api_key.ts`, and the
-  // automation's `provision_service_users.sql` (raw Postgres `digest()`).
-  // signals-search is a fourth, in another repo (#516). Originally inherited
-  // from `@better-auth/api-key`'s `defaultKeyHasher`; #517 removed that library
-  // but deliberately kept the scheme so no partner had to rotate a key.
+  // Store the hash, never the raw key: base64url(SHA-256(key)), unpadded. Four
+  // places must agree and share no code: this script,
+  // `plugins/auth/verify_api_key.ts`, the automation's
+  // `provision_service_users.sql`, and signals-search.
   const hashed_key = createHash('sha256').update(raw_key).digest('base64url');
   const now = new Date();
   await db.insert(apikey).values({

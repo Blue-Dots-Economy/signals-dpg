@@ -10,13 +10,9 @@ export function isServedDomainBinding(network: string, domain: string) {
 
 /**
  * The network that serves `domain` on this instance, or null when it is not
- * served or is ambiguous.
- *
- * `user.domains` records a bare domain (no network), but a default aggregator is
- * per (network, domain) — so the network has to be recovered from the
- * instance's served bindings. Ambiguity is possible in principle (`blue_dot`
- * and `purple_dot` both declare `seeker`), so two matches return null rather
- * than a guess: assigning PII-decrypt rights on a coin flip is worse than
+ * served or is ambiguous. `user.domains` records a bare domain, but a default
+ * aggregator is per (network, domain). Two matches (e.g. `seeker` in two
+ * networks) return null: assigning PII-decrypt rights on a guess is worse than
  * leaving the participant untagged.
  */
 export function resolveServedNetworkForDomain(domain: string): string | null {

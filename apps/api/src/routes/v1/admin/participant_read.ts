@@ -29,27 +29,23 @@ import { isMinor } from '@/services/minor';
  *                otherwise returns items: [].
  * For either tier: returns { user_id: null } if user not found.
  *
- * Consent reporting (#692):
+ * Consent reporting:
  * - `compliance` is a `[{key, value}]` array using the same key vocabulary the
- *   POST body accepts. It replaced `user_consent: {terms_accepted, …}`, which
- *   named one concept two ways and answered in a different shape than it was
- *   written in.
- * - Every `value` is VERSION-SCOPED: `true` only when a row exists at the
- *   document version this instance currently serves. Previously any accepted
- *   version counted, so a participant on a superseded document read as
- *   consented forever and the channel had no way to tell.
+ *   POST body accepts.
+ * - Every `value` is version-scoped: `true` only when a row exists at the
+ *   document version this instance currently serves, so a participant on a
+ *   superseded document is re-prompted.
  * - A minor is rejected with 400 `U18_NOT_ALLOWED` for `network_service`
- *   callers (never for aggregators — see the gate for why). An aggregator
- *   therefore DOES read a minor, so the version comparison resolves the u18
- *   document set for one; see `consentVariantForAge`.
+ *   callers, never for aggregators (see the gate). An aggregator therefore does
+ *   read a minor, so the comparison resolves the u18 document set; see
+ *   `consentVariantForAge`.
  * - `?network=` selects which network's documents define "current"; it defaults
  *   to the served network on a single-network instance, and a value this
  *   instance does not serve is refused (`NETWORK_NOT_SERVED`) rather than
  *   answered all-false.
  *
- * Error responses are intentionally not declared in the route schema, matching
- * the sibling POST /admin/participant, which likewise returns 400s (including
- * its own U18_NOT_ALLOWED) with only its 200 declared.
+ * Error responses are not declared in the route schema, matching the sibling
+ * POST /admin/participant.
  */
 
 type GetParticipantRequestType = FastifyRequest<{ Querystring: GetParticipantQueryType }>;
@@ -91,7 +87,6 @@ export const participant_read_handler = async (
   }
   const acting_org = orgCheck.acting_org;
 
-  // Look up existing user
   const conditions = [];
   if (email_norm) conditions.push(eq(user.email, email_norm));
   if (phone_norm) conditions.push(eq(user.phoneNumber, phone_norm));
@@ -111,7 +106,6 @@ export const participant_read_handler = async (
 
   const existing = existingRows[0] ?? null;
 
-  // User not found
   if (!existing) {
     return reply.code(200).send({
       user_id: null,
@@ -142,21 +136,15 @@ export const participant_read_handler = async (
     .limit(1);
   const age = ageRow?.age ?? null;
 
-  // U18 (#692, mirroring the POST's #309/#331 gate): a minor is not readable by
-  // the channels that cannot legitimately act on one. The voice bot would
-  // otherwise be told "consent incomplete" and then be unable to complete it —
-  // the POST answers `U18_NOT_ALLOWED` for every caller — so it is told plainly
-  // to route the user to the portal instead.
+  // A minor is not readable by `network_service` callers (e.g. the voice bot):
+  // the POST refuses minors for every caller, so the bot is told plainly to
+  // route the user to the portal rather than "consent incomplete".
   //
-  // Scoped to `network_service` on purpose. `aggregator` callers keep the
-  // 200: their only use of this endpoint is `probeUser`, a read-only
-  // "resume or start fresh" identity check that reads just `user_id`/`items`
-  // and never consent, and it treats a 400 as a hard ValidationError. Rejecting
-  // them would break registration for an already-onboarded minor.
+  // Aggregators keep the 200: aggregator-dpg's `probeUser` reads only
+  // `user_id`/`items` and treats a 400 as a hard error, which would break
+  // registration for an already-onboarded minor.
   //
-  // Placed AFTER the disclose verdict, exactly as the POST places its age gates
-  // after the ownership verdict: `U18_NOT_ALLOWED` reveals minor status, so it
-  // must never answer a caller that is not entitled to see this user at all.
+  // After the disclose verdict, because `U18_NOT_ALLOWED` reveals minor status.
   if (isMinorBlockedForCaller(age, acting_org.org_type)) {
     return reply.code(400).send({
       error: 'U18_NOT_ALLOWED',
@@ -165,9 +153,7 @@ export const participant_read_handler = async (
     });
   }
 
-  // The network whose consent documents the accepted versions are compared
-  // against. Resolved before the reads because a version comparison is
-  // meaningless without it.
+  // The network whose consent documents define "current".
   const networkCheck = resolveComplianceNetwork(request.query.network);
   if (!networkCheck.ok) {
     return reply.code(400).send({
@@ -196,18 +182,10 @@ export const participant_read_handler = async (
   });
 };
 
-// --- helpers ---
-
 /**
- * Canonicalises the lookup identifier from the query string.
- *
- * Stored phone numbers are canonical E.164 ("+91..."). Callers may send the
- * number without the leading "+" (e.g. "919876543210"), so it is prepended
- * before the exact-match lookup; otherwise an existing user would silently
- * miss.
- *
- * @param query - The validated query string (email and/or phone_number).
- * @returns The normalised pair, each `null` when not supplied.
+ * Canonicalises the lookup identifier. Stored phone numbers are E.164
+ * ("+91..."); callers may omit the "+", so it is prepended before the
+ * exact-match lookup.
  */
 function normalizeLookupIdentifier(query: GetParticipantQueryType): {
   email: string | null;
@@ -227,14 +205,8 @@ const READABLE_ORG_TYPES = new Set(['aggregator', 'network_service']);
 type ReadableActingOrg = NonNullable<GetParticipantRequestType['acting_org']>;
 
 /**
- * Validates the acting org and narrows it to non-null for the handler.
- *
- * Integrating DPGs — aggregator-dpg and the Raya voice bot alike — hold
- * `network_service` orgs, so both read through that type (#518 retired the
- * separate `voice` type, which granted the same reach).
- *
- * @param acting_org - The request's acting org, if the auth layer resolved one.
- * @returns The org on success, or the status/error/message to reply with.
+ * Validates the acting org and narrows it to non-null. Integrating DPGs
+ * (aggregator-dpg, the Raya voice bot) hold `network_service` orgs.
  */
 function resolveReadableActingOrg(
   acting_org: GetParticipantRequestType['acting_org'],
@@ -260,40 +232,21 @@ function resolveReadableActingOrg(
   return { ok: true, acting_org };
 }
 
-/**
- * Whether this caller must be refused because the participant is a minor.
- *
- * See the call site for why the rejection is scoped to `network_service` and
- * why it runs only after the disclosure verdict.
- *
- * @param age - The participant's stored age, or null when none is on file.
- * @param orgType - The acting org's type.
- * @returns True when the read must answer `U18_NOT_ALLOWED`.
- */
+/** Whether this caller must be refused because the participant is a minor; see the call site. */
 function isMinorBlockedForCaller(age: number | null, orgType: string): boolean {
   if (orgType === 'aggregator') return false;
   return age != null && isMinor(age);
 }
 
 /**
- * The network to compare accepted consent versions against.
+ * The network to compare accepted consent versions against (`consent_config`
+ * is per-network). An explicit `?network=` wins; otherwise a single served
+ * network is used.
  *
- * `consent_config` is per-network, so there is no single `current_version`
- * without picking one. An explicit `?network=` wins; otherwise the instance's
- * served bindings decide, which resolves every single-network deployment (all
- * of them today) without the caller changing anything.
- *
- * A requested network outside the served set is REFUSED rather than answered.
- * Answering it would be worse than an error: `resolveConsentVersion` finds no
- * config for an unknown network and returns `null` for every category, so a
- * typo (`blue-dot` for `blue_dot`) produced a confident `200` with every flag
- * `false` — indistinguishable from "genuinely not consented", which for a voice
- * channel means re-collecting consent the participant already gave. A consent
- * answer for a network this instance does not serve is not an answer.
- *
- * @param requested - The `?network=` query value, when supplied.
- * @returns The resolved network, or a failure naming which of the two problems
- *   it hit — an unserved value, or an ambiguity that must not be guessed.
+ * A requested network outside the served set is refused: `resolveConsentVersion`
+ * returns `null` for an unknown network, so a typo would otherwise answer a
+ * confident all-`false` 200 and a voice channel would re-collect consent the
+ * participant already gave.
  */
 function resolveComplianceNetwork(
   requested: string | undefined,
@@ -301,10 +254,8 @@ function resolveComplianceNetwork(
   | { ok: true; network: string }
   | { ok: false; error: string; message: string } {
   const served = servedNetworks();
-  // No served bindings at all (an unconfigured instance): there is nothing to
-  // check membership against, so an explicitly named network is taken at its
-  // word rather than refused. The typo guard below still applies to every
-  // instance that actually declares SERVED_DOMAINS, which is all of them.
+  // No served bindings (an unconfigured instance): nothing to check membership
+  // against, so an explicitly named network is taken at its word.
   if (served.length === 0) {
     return requested
       ? { ok: true, network: requested }
@@ -335,35 +286,21 @@ function resolveComplianceNetwork(
 }
 
 /**
- * The document set a participant's rows were written against.
+ * The document set a participant's rows were written against. A ward's rows are
+ * written with `variant: 'u18'` against `u18_documents`, which has its own
+ * `current_version` per category, so comparing them to the adult counter would
+ * report a guardian-completed ward as un-consented.
  *
- * The write side discriminates on it — `signup_guardian.ts` and
- * `u18_profile_consent.ts` write a ward's rows with `variant: 'u18'`, against
- * `u18_documents`, which carries its OWN `current_version` per category. A read
- * that always resolved the adult version would compare a u18 row against the
- * wrong counter the moment the two sets diverge, and report a guardian-completed
- * ward as un-consented to the aggregator that onboarded them (the caller class
- * deliberately exempt from the U18 rejection, so it does reach here).
- *
- * `age == null` resolves to `'adult'`, and either way the mismatch direction is
- * safe: comparing a row against the other set's counter yields `false`, which
- * re-prompts rather than claiming a consent that was never verified.
- *
- * @param age - The participant's stored age, or null when none is on file.
- * @returns The variant to resolve versions against.
+ * `age == null` resolves to `'adult'`. A mismatch is safe either way: it yields
+ * `false`, which re-prompts rather than claiming unverified consent.
  */
 function consentVariantForAge(age: number | null): 'adult' | 'u18' {
   return age != null && isMinor(age) ? 'u18' : 'adult';
 }
 
 /**
- * Cache key for one resolved document version: a category plus the brand the
- * row was written under. NUL-joined so no brand string can collide with a
- * category name.
- *
- * @param category - Consent category.
- * @param brand - The row's stored brand, or null for the network default.
- * @returns The map key.
+ * Cache key for one resolved document version: category + the row's brand
+ * (null = network default). NUL-joined so no brand can collide with a category.
  */
 function versionKey(category: string, brand: string | null): string {
   return `${category}\u0000${brand ?? ''}`;
@@ -371,15 +308,7 @@ function versionKey(category: string, brand: string | null): string {
 
 /**
  * Resolves the current version for each distinct (category, brand) pair.
- *
- * Deduped up front rather than while iterating rows: claiming a map slot before
- * awaiting left a window where a key was present with a placeholder value, and
- * the placeholder write was dead the moment the await returned.
- *
- * @param pairs - The (category, brand) pairs present on the rows.
- * @param network - Network whose documents define "current".
- * @param variant - Adult or u18 document set.
- * @returns Key from `versionKey` to the current version, or null when unconfigured.
+ * Returns `versionKey` → current version, or null when unconfigured.
  */
 async function resolveVersionsFor(
   pairs: Array<{ category: string; brand: string | null }>,
@@ -408,30 +337,15 @@ async function resolveVersionsFor(
 }
 
 /**
- * Whether a consent row exists at the version this instance currently serves.
+ * User-level compliance: whether a consent row exists at the version this
+ * instance currently serves. The response carries no version, so the caller
+ * cannot detect a superseded acceptance itself.
  *
- * The whole point of #692. These reads used to test only "a row of this
- * category exists", so a participant who accepted an older document was
- * reported as consented forever: prod migrated users carry `document_version 1`
- * while the live document is version 2, and the voice channel was told their
- * consent was complete while the portal correctly re-prompted them. Because the
- * response carries no version, the channel could not detect this itself, so
- * those accounts stayed pinned to the superseded document indefinitely.
+ * Each row is compared against the current version for its own stored `brand`,
+ * not the network default: `resolveConsentVersion` prefers a brand override and
+ * the write side records the brand, so resolving only the default would report
+ * a brand cohort as consented after the brand bumped its terms.
  *
- * Each row is compared against the current version for its OWN stored `brand`,
- * not against the network default. `resolveConsentVersion` prefers a brand
- * override when one exists (as `mergeConsentConfig` does in the UI) and the
- * write side passes `brand` (`participant_consent.ts`), so resolving only the
- * default would break both ways once a brand's counter diverges: a brand that
- * bumps its terms would leave its whole cohort reported `true` against the
- * default's older number — a false positive, the worse direction for a consent
- * answer — while a default that bumps alone would re-prompt a brand cohort that
- * is already current. Reading the brand off the row needs no new request param
- * and cannot disagree with what was written.
- *
- * @param userId - The participant.
- * @param network - Network whose documents define "current".
- * @param age - The stored age; selects the document set and reports `has_age`.
  * @returns One entry per reported key, every key always present.
  */
 async function readCompliance(
@@ -441,10 +355,8 @@ async function readCompliance(
 ): Promise<Array<{ key: ParticipantComplianceKey; value: boolean }>> {
   const variant = consentVariantForAge(age);
 
-  // Network-scoped now, where it used to be deliberately network-agnostic:
-  // the comparison is against THIS network's document, so a row accepted on
-  // another network cannot satisfy it. No behavioural change on the
-  // single-network deployments that exist today.
+  // Network-scoped: a row accepted on another network cannot satisfy this
+  // network's document.
   const rows = await db
     .select({
       category: consent_record.consentCategory,
@@ -461,18 +373,14 @@ async function readCompliance(
       ),
     );
 
-  // One resolve per distinct (category, brand) present on a row. Config lookups
-  // are cached, and a participant holds a handful of rows at most.
   const currentFor = await resolveVersionsFor(
     rows.map((r) => ({ category: r.category, brand: r.brand ?? null })),
     network,
     variant,
   );
 
-  // An unconfigured category resolves to `null`. Reported as `false`, and this
-  // is a decision rather than a fallthrough: with no document there is nothing
-  // that could have been accepted, and `false` sends the caller to a consent
-  // flow rather than letting it proceed on an unverifiable claim.
+  // An unconfigured category resolves to `null` and is reported `false`, so the
+  // caller goes to a consent flow rather than proceeding on an unverifiable claim.
   const acceptedAt = (category: 'terms' | 'privacy'): boolean =>
     rows.some((r) => {
       if (r.category !== category) return false;
@@ -488,18 +396,9 @@ async function readCompliance(
 }
 
 /**
- * Item ids whose `profile_creation` consent is accepted at the current version.
- *
- * Same version blindness as `readCompliance` had, and the same fix — including
- * the network predicate and the per-row brand resolution, which this function
- * originally lacked even though `readCompliance`'s own comment explains why a
- * row accepted on another network must not satisfy the query. Drives
+ * Item ids whose `profile_creation` consent is accepted at the current version,
+ * with the same network and per-row brand rules as `readCompliance`. Drives
  * `ParticipantItemSnapshot.profile_consent_accepted`.
- *
- * @param itemIds - Candidate items.
- * @param network - Network whose document defines "current".
- * @param age - The stored age; selects the document set.
- * @returns The subset consented at the current version.
  */
 async function readProfileConsentedItemIds(
   itemIds: string[],
@@ -541,10 +440,9 @@ async function readProfileConsentedItemIds(
 }
 
 /**
- * Reported when there is nothing to disclose — user not found, or an aggregator
- * that did not onboard them. Every key is present and `false` so a caller never
- * has to tell "denied" from "key missing"; the two non-disclosing branches are
- * deliberately indistinguishable from "nothing accepted".
+ * Reported when there is nothing to disclose (user not found, or an aggregator
+ * that did not onboard them). Every key is present and `false`, so both
+ * branches are indistinguishable from "nothing accepted".
  */
 const EMPTY_COMPLIANCE: Array<{ key: ParticipantComplianceKey; value: boolean }> = [
   { key: 'user_terms', value: false },

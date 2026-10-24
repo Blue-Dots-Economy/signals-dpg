@@ -1,10 +1,6 @@
-// Must be the first import: @/app (below) transitively pulls in @/config,
-// whose module-top-level loadEnv() parses process.env immediately on
-// evaluation. dotenv/config has to run before that or a local .env's values
-// won't be visible yet. (`pnpm dev:api` / `build:api` already pre-load the
-// root .env via scripts/turbo-with-root-env.mjs before this process starts,
-// but direct invocations — e.g. a future `node dist/server.js` against a
-// local .env — depend on this import order.)
+// Must be the first import: @/config parses process.env when it is evaluated,
+// so a local .env must be loaded before it. (`pnpm dev:api` also pre-loads the
+// root .env; direct invocations rely on this.)
 import 'dotenv/config';
 import { apiConfig } from '@/config';
 import { buildApp } from '@/app';
@@ -33,9 +29,7 @@ async function shutdown(signal: string) {
   app.log.info(`Shutting down (${signal})`);
 
   try {
-    // Drain the HTTP server first (stop accepting requests), then close the
-    // backing connections that were previously leaked on shutdown: the Postgres
-    // pool and the Redis client.
+    // Drain the HTTP server first, then close the Postgres pool and Redis.
     await app.close();
     await pool.end();
     await redis.quit();

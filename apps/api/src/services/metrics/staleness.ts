@@ -9,11 +9,8 @@ export const TTL_SECONDS = Number(
 );
 
 /**
- * Map (aggregator_id, domain) to a stable signed 63-bit int for
- * pg_advisory_lock (single-arg form). SHA-256 first 8 bytes of
- * "<aggregator_id>:<domain>", top bit masked off to stay positive.
- * Different (org, domain) pairs get different lock keys, so multi-
- * domain aggregators can recompute domains in parallel.
+ * A stable positive 63-bit pg_advisory_lock key for (aggregator_id, domain),
+ * so an aggregator's domains recompute in parallel.
  */
 const lock_key_for = (aggregator_id: string, domain: string): bigint => {
   const hash = createHash('sha256').update(`${aggregator_id}:${domain}`).digest();
@@ -26,14 +23,11 @@ export interface StalenessResult {
 }
 
 /**
- * Per-(aggregator, domain) staleness check + recompute under PG advisory
- * lock. Multi-domain orgs hit this in parallel — each (org, domain) has
- * its own lock, so domains don't block each other.
+ * Per-(aggregator, domain) staleness check and recompute under a Postgres
+ * advisory lock. Used by the aggregator dashboard and CSV export routes.
  *
- * Callers: dashboard route (Task 10) + CSV export route (Task 11).
- *
- * When force=true: skips the TTL check (treats as stale) and uses BLOCKING
- * pg_advisory_lock so a concurrent recompute is awaited, not skipped.
+ * `force` skips the TTL check and waits for a concurrent recompute instead of
+ * skipping on contention.
  */
 export const check_and_refresh_if_stale = async (
   aggregator_id: string,
@@ -61,8 +55,6 @@ export const check_and_refresh_if_stale = async (
   }
 
   const lock_key = lock_key_for(aggregator_id, domain);
-  // force=true uses BLOCKING pg_advisory_lock so a concurrent recompute is
-  // awaited; non-force uses pg_try_advisory_lock to skip-on-contention.
   const lock_sql = force
     ? sql`SELECT pg_advisory_lock(${lock_key.toString()}::bigint) AS locked`
     : sql`SELECT pg_try_advisory_lock(${lock_key.toString()}::bigint) AS locked`;

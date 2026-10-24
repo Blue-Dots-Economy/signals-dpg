@@ -8,10 +8,8 @@ export interface JSONSchemaLike {
 }
 
 /**
- * Resolve the JSON Schema for a given (network, domain, item_type).
- * Plan B's recompute calls this per item — one aggregator can host
- * items across multiple (network, domain, item_type) triples. Throws if
- * the triple has no schema configured.
+ * The JSON Schema for a (network, domain, item_type). Throws if the triple has
+ * no schema configured.
  */
 export const get_item_schema = async (
   network: string,

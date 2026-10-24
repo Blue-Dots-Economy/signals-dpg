@@ -2,13 +2,8 @@ import { createNotificationClient } from '@dpg/notification';
 import { notification } from '@/config';
 
 /**
- * Creates and returns a notification client if all required configuration is present.
- * Returns undefined if any required environment variables are missing.
- * 
- * Required configuration:
- * - NOTIFICATION_SERVICE_ENDPOINT
- * - NOTIFICATION_SERVICE_KEY_ID
- * - NOTIFICATION_SERVICE_SECRET
+ * The notification client, or undefined when NOTIFICATION_SERVICE_ENDPOINT,
+ * _KEY_ID or _SECRET is unset.
  */
 export const getNotificationClient = () => {
   if (

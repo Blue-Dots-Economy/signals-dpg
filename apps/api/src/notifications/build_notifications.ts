@@ -3,15 +3,14 @@ import { normalizeInstanceUrl } from '@/utils/action_event_runtime';
 import type { NotificationShape } from './types';
 
 export interface OwnerSide {
-  /** Better-auth user id of the item owner; null when the owner has no user. */
+  /** User id of the item owner; null when the owner has no user. */
   ownerUserId: string | null;
-  /** Item id of this side's item — used to resolve a display/service name. */
+  /** Used to resolve a display/service name. */
   itemId: string;
-  /** Item domain (role) for this side, e.g. "seeker" / "provider". */
+  /** Item domain (role), e.g. "seeker" / "provider". */
   domain: string;
-  /** Network the item belongs to. */
   network: string;
-  /** Instance URL hosting this side's item — used for the locality check. */
+  /** Instance hosting this side's item, for the locality check. */
   instanceUrl: string;
 }
 
@@ -24,14 +23,13 @@ export interface NotificationEvent {
   updateCount: number;
   source: OwnerSide;
   target: OwnerSide;
-  /** Base URL of the instance handling this event. */
   currentInstanceUrl: string;
 }
 
 export interface NotificationPlan {
   recipientUserId: string | null;
   recipientDomain: string;
-  /** Counterparty item id — used to resolve the provider's service name. */
+  /** Used to resolve the provider's service name. */
   counterpartyItemId: string;
   counterpartyDomain: string;
   counterpartyNetwork: string;
@@ -63,9 +61,8 @@ function planFor(
 }
 
 /**
- * Pure: derives the notification plans for an action event. Emits one plan per
- * owner side hosted on the current instance (the locality check), so that the
- * Phase-2 cross-instance trigger site can reuse this unchanged.
+ * Derives the notification plans for an action event: one per owner side
+ * hosted on this instance.
  *
  * - create  → INBOUND_REQUEST (target) + OUTBOUND_REQUEST (source)
  * - status  → INBOUND_STATUS (source)  + OUTBOUND_STATUS (target)

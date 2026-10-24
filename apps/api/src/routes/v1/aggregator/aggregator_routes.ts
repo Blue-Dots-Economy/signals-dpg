@@ -7,7 +7,8 @@ import { aggregator_export } from './export.js';
 /**
  * Mounts /api/v1/aggregator/*. Mirrors the admin_routes wiring shim:
  * every request through this scope first passes through
- *   1. auth_middleware - populates request.user from apikey / session.
+ *   1. auth_middleware - populates request.user (api key, session cookie or
+ *      service bearer).
  *   2. acting_org preHandler - populates request.acting_org from the
  *      x-acting-org-id header.
  * Individual route plugins narrow further to org_type === 'aggregator'.

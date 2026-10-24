@@ -3,23 +3,15 @@ import { item_actions } from '@dpg/database';
 import type { NetworkConfig } from '@dpg/config';
 import { CANONICAL_BUCKETS } from '@/services/metrics/buckets';
 
-// The metric_categories buckets that mean an action is DONE (no longer open):
-// every canonical bucket except `create`. Reused from the metrics module so the
-// two stay in lockstep if the bucket set ever changes.
+// metric_categories buckets that mean an action is no longer open: every
+// canonical bucket except `create`. Shared with the metrics module.
 const TERMINAL_BUCKETS = CANONICAL_BUCKETS.filter((b) => b !== 'create');
 
 /**
- * Max concurrent OPEN actions per item pair (#370, original #422). One rule for
- * the whole pair — **bidirectional** (an open action A→B *or* B→A counts the
- * same) and **type-agnostic** (an open `apply` and an open `connect` between the
- * same two items share the one budget). Configured network-wide via
- * `max_actions_per_pair`; unset → 1.
- *
- * "Open" = not terminal. Terminal statuses (an action here no longer counts, so
- * the pair frees up) are the accept/reject/cancel buckets of every interaction's
- * `metric_categories`, plus a fallback set for interactions that declare none.
- * So once an existing action is accepted / completed / cancelled / rejected, a
- * fresh action between the pair is allowed again — matching #422.
+ * Max concurrent open actions per item pair. The cap is bidirectional (A→B and
+ * B→A count the same) and type-agnostic (`apply` and `connect` share it), set
+ * network-wide via `max_actions_per_pair` (default 1). Once an action reaches a
+ * terminal status the pair frees up.
  */
 
 /** Thrown inside the perform transaction when the pair is already at the cap. */
@@ -36,10 +28,9 @@ export function maxActionsPerPair(cfg: Pick<NetworkConfig, 'max_actions_per_pair
 }
 
 /**
- * Network-wide set of statuses that DON'T count toward the pair cap. Union of
- * every interaction's accept/reject/cancel buckets, plus common terminal names
- * as a fallback for interactions with no `metric_categories` (e.g. blue_dot's
- * `connect` provider→provider).
+ * Network-wide statuses that don't count toward the pair cap: every
+ * interaction's non-`create` metric buckets, plus common terminal names for
+ * interactions with no `metric_categories`.
  */
 export function terminalStatuses(cfg: NetworkConfig): string[] {
   const set = new Set<string>([
@@ -66,12 +57,11 @@ export function terminalStatuses(cfg: NetworkConfig): string[] {
 type TxLike = Parameters<Parameters<typeof import('@api/db/postgres/drizzle_config').db.transaction>[0]>[0];
 
 /**
- * Race-safe pair-cap guard. MUST run inside the same transaction as the action
- * insert: it takes a pair-scoped advisory lock (so concurrent submits for the
- * same pair serialize), recounts the OPEN actions for the unordered
- * `{source, target}` pair regardless of type/direction, and throws
- * {@link ActionPairCapError} if the pair is already at/over `cap`. Existing
- * over-cap pairs are simply blocked from new actions — nothing is mutated.
+ * Race-safe pair-cap guard. Must run in the same transaction as the action
+ * insert: a pair-scoped advisory lock serializes concurrent submits, then the
+ * open actions for the unordered pair are recounted. Throws
+ * {@link ActionPairCapError} at or over `cap`; existing over-cap pairs are
+ * left as they are.
  */
 export async function assertPairCapAvailable(
   tx: TxLike,
@@ -83,11 +73,9 @@ export async function assertPairCapAvailable(
     terminal: string[];
   },
 ): Promise<void> {
-  // Stable, order-independent lock key for the pair (sorted so A→B and B→A map
-  // to the same lock). hashtextextended → bigint for pg_advisory_xact_lock.
-  // Explicit codepoint comparator (not the default `.sort()`, and not
-  // `localeCompare`): a lock key needs a locale-independent, stable total
-  // order, and it satisfies typescript:S2871.
+  // Sorted so A→B and B→A share one lock. Code-point comparator, not
+  // `localeCompare`: the key needs a locale-independent order (and it
+  // satisfies typescript:S2871).
   const [a, b] = [args.sourceItemId, args.targetItemId].sort((x, y) => {
     if (x < y) return -1;
     return x > y ? 1 : 0;
