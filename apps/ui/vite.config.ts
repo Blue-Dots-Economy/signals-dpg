@@ -5,21 +5,16 @@ import fs, { existsSync, renameSync } from 'node:fs';
 import path from 'path';
 
 /**
- * Reads designer brand.json files from `examples/schemas/<network>/brand.json`
- * and injects per-network CSS custom properties as a `<style data-brand-themes>`
- * block inside index.html's <head>. Runs at build AND in dev (via Vite's
- * transformIndexHtml hook). No codegen output committed; brand.json is the
- * sole source of truth.
- *
- * Networks without a brand.json keep whatever the static `:root[data-network=…]`
- * blocks in index.css define — so the existing hardcoded fallbacks still apply.
- *
- * Optional `theme` override block on brand.json wins over the derived values.
+ * Reads brand.json files from `examples/schemas/<network>/[<brand>/]` and
+ * injects per-network CSS custom properties as a `<style data-brand-themes>`
+ * block in index.html's <head>, at build and in dev (transformIndexHtml).
+ * brand.json is the sole source of truth; nothing is generated into the repo.
+ * Networks without one keep the static `:root[data-network=…]` blocks in
+ * index.css. A brand.json `theme` block overrides the derived values.
  */
 function brandThemePlugin(): Plugin {
   const schemasDir = path.resolve(__dirname, '..', '..', 'examples', 'schemas');
 
-  // ─── colour helpers ──────────────────────────────────────────────────────
   const hexToRgb = (hex: string) => {
     const m = hex.replace('#', '').match(/^([0-9a-f]{6}|[0-9a-f]{3})$/i);
     if (!m) return null;
@@ -81,8 +76,7 @@ function brandThemePlugin(): Plugin {
       (s) => (s.name ?? '').toLowerCase() === `${colour} ${suffix}`.toLowerCase(),
     );
 
-  // Quote font-family names that contain spaces / punctuation so the CSS
-  // declaration stays valid (e.g. `"Open Sans"` not `Open Sans`).
+  // Quote font-family names containing spaces or punctuation (`"Open Sans"`).
   const cssFontFamily = (primary: string | undefined) => {
     const base = (primary ?? '').trim();
     if (!base) return '';
@@ -200,19 +194,16 @@ function brandThemePlugin(): Plugin {
     if (brandJson?.copy && typeof brandJson.copy === 'object' && !Array.isArray(brandJson.copy)) {
       meta.copy = brandJson.copy as Record<string, string>;
     }
-    // Optional "seeded by" footer mark rendered at the bottom of the sidebar.
-    // Absent ⇒ no footer logo (opt-in per network/brand).
+    // Optional "seeded by" footer mark at the bottom of the sidebar (opt-in).
     if (typeof brandJson?.footerLogo === 'string' && brandJson.footerLogo.length > 0) {
       meta.footerLogo = brandJson.footerLogo;
     }
     if (typeof brandJson?.footerLogoLight === 'string' && brandJson.footerLogoLight.length > 0) {
       meta.footerLogoLight = brandJson.footerLogoLight;
     }
-    // Attribution rows ("Owned by …", "Managed by …"). Each entry is validated
-    // individually and bad ones are dropped rather than failing the build — a
-    // malformed brand.json must not take the whole UI down, and the footer is
-    // decorative. `label` and `name` are required; the logos are optional so a
-    // party with no artwork yet still renders as a letter tile.
+    // Attribution rows ("Owned by …"). Invalid entries are dropped, not fatal:
+    // a malformed brand.json must not break the build for a decorative footer.
+    // `label` and `name` are required; logos are optional (letter tile).
     if (Array.isArray(brandJson?.footerAttribution)) {
       const rows = brandJson.footerAttribution
         .filter(
@@ -236,8 +227,7 @@ function brandThemePlugin(): Plugin {
     return meta;
   };
 
-  // Derive CSS token lines from a brand.json for base networks (full synthesis
-  // via colours: or theme: is both allowed here — networks define the baseline).
+  // CSS token lines for a base network (`colours:` synthesis or `theme:`).
   const tokenLinesFromNetwork = (brandJson: any, networkId: string): string => {
     const tokens = tokensFromTheme(deriveTheme(brandJson, networkId));
     return Object.entries(tokens)
@@ -246,11 +236,9 @@ function brandThemePlugin(): Plugin {
       .join('\n');
   };
 
-  // Derive CSS token lines for brand subfolders — strictly override-only.
-  // Brand blocks express token deltas via the explicit `theme:` map; we do NOT
-  // run the colours: synthesis branch here (that would emit a full token set and
-  // defeat cascade inheritance from the network base). If a brand has no theme:
-  // keys, emit nothing — it still inherits all tokens from the network base.
+  // CSS token lines for a brand subfolder: override-only, from the explicit
+  // `theme:` map. No `colours:` synthesis, which would emit a full token set
+  // and break inheritance from the network base.
   const tokenLinesFromBrand = (brandJson: any): string => {
     if (!brandJson?.theme || typeof brandJson.theme !== 'object') return '';
     const fontFamily = cssFontFamily(brandJson?.typography?.primaryFont);
@@ -264,8 +252,8 @@ function brandThemePlugin(): Plugin {
 
   type RegistryEntry = BrandMeta & { brands: Record<string, BrandMeta> };
 
-  // Scan all network and brand subdirectories once, returning CSS blocks and
-  // the registry together so nothing is computed twice.
+  // Scans network and brand directories once, returning CSS blocks and the
+  // registry together.
   const scanSchemas = (): {
     styleTag: string;
     registry: Record<string, RegistryEntry>;
@@ -287,14 +275,12 @@ function brandThemePlugin(): Plugin {
         continue;
       }
 
-      // Emit base network block.
       const baseLines = tokenLinesFromNetwork(brand, name);
       blocks.push(`:root[data-network="${name}"] {\n${baseLines}\n}`);
 
-      // Accumulate base network registry entry.
       registry[name] = { ...extractMeta(brand), brands: {} };
 
-      // Scan subdirectories for per-brand overrides.
+  // Per-brand override subdirectories.
       for (const entry of fs.readdirSync(networkDir)) {
         const subDir = path.join(networkDir, entry);
         const subStat = fs.statSync(subDir, { throwIfNoEntry: false });
@@ -308,13 +294,12 @@ function brandThemePlugin(): Plugin {
           continue;
         }
 
-        // Override-only: emit only tokens present in this brand's theme: block.
+        // Override-only: only tokens in this brand's theme: block.
         const brandLines = tokenLinesFromBrand(subBrand);
         if (brandLines) {
           blocks.push(`:root[data-network="${name}"][data-brand="${entry}"] {\n${brandLines}\n}`);
         }
 
-        // Accumulate brand registry entry.
         registry[name].brands[entry] = extractMeta(subBrand);
       }
     }
@@ -326,8 +311,7 @@ function brandThemePlugin(): Plugin {
     return { styleTag, registry };
   };
 
-  // Eagerly scan once so that both `config()` and `transformIndexHtml` share
-  // the same result without scanning the filesystem twice.
+  // Scanned once, shared by `config()` and `transformIndexHtml`.
   const { styleTag: cachedStyleTag, registry: cachedRegistry } = scanSchemas();
 
   return {
@@ -341,7 +325,7 @@ function brandThemePlugin(): Plugin {
     },
     transformIndexHtml(html) {
       if (!cachedStyleTag) return html;
-      // Inject just before </head> so it overrides matching :root blocks in
+      // Inject before </head> so it overrides matching :root blocks in
       // index.css (same specificity, later source wins).
       return html.replace('</head>', `${cachedStyleTag}\n</head>`);
     },
@@ -375,10 +359,8 @@ export default defineConfig(({ mode }) => {
                   next();
                 });
               },
-              // The build emits dist/index.tourist.html (Rollup keeps the source
-              // filename); rename it to index.html so the tourist build is servable
-              // at / by a static host. No-op in dev (closeBundle doesn't run there,
-              // and the guard covers it anyway).
+              // Rename dist/index.tourist.html to index.html so a static host
+              // serves the tourist build at /. Does not run in dev.
               closeBundle() {
                 const built = path.resolve(__dirname, 'dist/tourist/index.tourist.html');
                 const target = path.resolve(__dirname, 'dist/tourist/index.html');
@@ -389,15 +371,12 @@ export default defineConfig(({ mode }) => {
         : []),
     ],
     resolve: {
-      // Mirror the tsconfig `paths` so Vite resolves the same aliases the
-      // type-checker does. `@dpg/*` -> packages/*/src (workspace source);
-      // listed before `@` since both are matched in order. Array form is
-      // required for the regex `@dpg/*` mapping.
+      // Mirror the tsconfig `paths`. `@dpg/*` → packages/*/src, listed before
+      // `@` since matching is in order (array form for the regex mapping).
       alias: [
-        // Lean, dependency-free subpath: the UI only needs the pure geo
-        // helpers, NOT the @dpg/schemas barrel (which re-exports DB-bound
-        // modules via @dpg/database → pg, breaking the browser build).
-        // This specific entry must precede the generic @dpg/* mapping.
+        // Dependency-free subpath: the @dpg/schemas barrel re-exports
+        // DB-bound modules (@dpg/database → pg), which break the browser
+        // build. Must precede the generic @dpg/* mapping.
         {
           find: '@dpg/schemas/location_fields',
           replacement: path.resolve(
@@ -405,8 +384,7 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/location_fields.ts',
           ),
         },
-        // Same reasoning as location_fields above: a dependency-free subpath so
-        // the browser bundle never pulls the DB-bound @dpg/schemas barrel.
+        // Dependency-free subpath, as above.
         {
           find: '@dpg/schemas/uri_fields',
           replacement: path.resolve(
@@ -414,7 +392,7 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/uri_fields.ts',
           ),
         },
-        // Same reasoning: pure export-eligibility helper (#771).
+        // Dependency-free export-eligibility helper, as above.
         {
           find: '@dpg/schemas/export_eligibility',
           replacement: path.resolve(
@@ -438,9 +416,8 @@ export default defineConfig(({ mode }) => {
       : undefined,
     server: {
       port: uiPort,
-      // Fail loudly if the port is taken instead of silently falling back to
-      // 5174 — the fallback port isn't in the API's CORS allow-list, so a
-      // silent switch surfaces as confusing CORS/500 errors in the browser.
+      // Fail if the port is taken instead of falling back to 5174, which is
+      // not in the API's CORS allow-list and surfaces as confusing errors.
       strictPort: true,
     },
     preview: {

@@ -1,22 +1,11 @@
 /**
- * Turning AJV's `pattern` complaint into something a person can act on.
+ * Readable copy for a failed AJV `pattern`, whose own message is the raw
+ * regex. The regex comes from network.json, so the copy does too. Most
+ * specific first:
  *
- * The regex lives in `network.json`, so the copy has to come from there too — a
- * lookup table of known patterns in this repo would be wrong the moment a
- * network adds a field we have never seen. AJV's own message is the raw regex
- * ("must match pattern \"^\\s*$|^\\s*([hH][tT]...\""), which tells the user
- * nothing, so it must never reach them.
- *
- * Three layers, most specific first:
- *
- *  1. `x-error-message` on the field — the schema author's own copy, for any
- *     pattern in any network. This is the escape hatch for a rule only the
- *     author can explain ("Enter a 10-digit mobile number, no spaces").
- *  2. `x-uri` on the field — the marker already implies the rule, so the URL
- *     copy is built in and authors get it for free.
- *  3. A readable generic naming the field ("Please enter a valid Mobile."), so a
- *     network that declares a bare `pattern` and no copy still says something
- *     useful instead of showing a regex.
+ *  1. The field's `x-error-message`, authored with the pattern.
+ *  2. Built-in URL copy for an `x-uri` field.
+ *  3. A generic naming the field ("Please enter a valid Mobile.").
  */
 
 /** Per-field copy for a failed `pattern`, authored in network.json. */
@@ -29,11 +18,7 @@ export interface FieldErrorMessages {
   generic: (label: string) => string;
 }
 
-/**
- * Resolve the message for a failed `pattern` on `propertySchema`. Callers apply
- * this only to `pattern` errors — every other AJV keyword already produces
- * readable text ("must have required property 'Name'").
- */
+/** Only for `pattern` errors; other AJV keywords already read well. */
 export function resolvePatternErrorMessage(
   propertySchema: Record<string, unknown> | undefined,
   isUriField: boolean,

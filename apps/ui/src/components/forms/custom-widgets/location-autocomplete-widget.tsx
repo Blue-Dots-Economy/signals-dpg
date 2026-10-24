@@ -6,9 +6,7 @@ import { getGeoProvider } from '@/lib/geo/provider';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
 import type { GeoComponents, GeoSuggestion } from '@/lib/geo/types';
 
-/** A selected place reported to the form: the exact point plus the address
- * components, so the page can coarsen a private field to its city centroid
- * (using the components) before submit. */
+/** A selected place reported to the form: the exact point plus its address components. */
 export interface ResolvedPlace {
   lat: number;
   lng: number;
@@ -29,18 +27,14 @@ export function LocationAutocompleteWidget({
   registry,
   options,
 }: WidgetProps) {
-  // RJSF v6 no longer spreads `formContext` onto widget props — it lives only
-  // on the registry. Reading the (always undefined) prop silently disabled
-  // every callback below, so a picked suggestion's coordinate never reached
-  // the page and `ui:options.isPrimaryLocation` was inert (#506).
+  // RJSF v6 exposes `formContext` only on the registry, not as a widget prop.
   const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
   const [text, setText] = React.useState<string>((value as string) ?? '');
   const [suggestions, setSuggestions] = React.useState<GeoSuggestion[]>([]);
   const [open, setOpen] = React.useState(false);
-  // Open the list upward when the input is near the bottom of the viewport
-  // (e.g. sitting just above the pinned action-bar footer), so the suggestions
-  // aren't hidden below the fold.
+  // Open the list upward near the viewport bottom (e.g. above the pinned
+  // action bar).
   const [dropUp, setDropUp] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const provider = React.useMemo(() => getGeoProvider(), []);
@@ -48,16 +42,12 @@ export function LocationAutocompleteWidget({
   const blurRef = React.useRef<number | undefined>(undefined);
   const abortRef = React.useRef<AbortController | null>(null);
 
-  // Keep the input in sync when RJSF pushes a new value (e.g. edit-mode
-  // prefill). This intentionally does NOT trigger a search — searching is
-  // driven only by user typing (see runSearch in handleInput), so selecting a
-  // suggestion (which calls onChange and updates `value`) never re-opens the
-  // dropdown.
+  // Sync the input when RJSF pushes a new value. No search here: only typing
+  // searches, so selecting a suggestion never re-opens the list.
   React.useEffect(() => {
     setText((value as string) ?? '');
   }, [value]);
 
-  // Cancel any pending work on unmount.
   React.useEffect(
     () => () => {
       window.clearTimeout(debounceRef.current);
@@ -84,8 +74,7 @@ export function LocationAutocompleteWidget({
         setSuggestions(results);
         setOpen(results.length > 0);
         if (results.length > 0) {
-          // ~260px covers the list height + the footer; if there's less room
-          // below the input than that, flip the list upward.
+          // ~260px covers the list plus the footer.
           const r = inputRef.current?.getBoundingClientRect();
           setDropUp(!!r && window.innerHeight - r.bottom < 260);
         }
@@ -95,34 +84,26 @@ export function LocationAutocompleteWidget({
 
   function handleInput(next: string) {
     setText(next);
-    // Emit `undefined` (not "") when cleared, so a required location field goes
-    // back to invalid — an empty string counts as "present" for JSON-Schema
-    // `required`, which let an emptied location slip past validation (a normal
-    // text widget clears to undefined, which is why other required fields did
-    // invalidate on clear but this one didn't).
+    // `undefined`, not "", when cleared: an empty string satisfies JSON Schema
+    // `required`.
     onChange(next === '' ? undefined : next);
-    // The freshly typed text is no longer a resolved place — drop prior coords
-    // so the submit-time fallback re-geocodes (or the next selection sets them).
-    // Only the primary field feeds item_locations.
+    // Typed text is unresolved, so drop prior coords; submit geocodes the
+    // text instead. Only the primary field feeds item_locations.
     if (isPrimary) ctx.onLocationResolved?.(null);
     runSearch(next);
   }
 
   async function choose(s: GeoSuggestion) {
-    // Cancel any pending/in-flight search so selecting never re-opens the list.
+    // Cancel any pending search so selecting never re-opens the list.
     window.clearTimeout(debounceRef.current);
     abortRef.current?.abort();
     setText(s.label);
     onChange(s.label);
     setSuggestions([]);
-    // Close the dropdown immediately — before any async work — so the UI stays
-    // responsive regardless of how long the coarse geocode takes.
     setOpen(false);
 
-    // Report the selected place — exact point plus its address components. The
-    // page decides how to use it: for a public field the exact point is stored;
-    // for a PRIVATE field the page coarsens to the city centroid (via the
-    // components) at submit time, so the exact point never leaves the browser.
+    // The page submits the exact point; for a private field the server
+    // jitters it before storing.
     if (isPrimary) {
       ctx.onLocationResolved?.({ lat: s.lat, lng: s.lng, components: s.components });
     }
@@ -173,10 +154,8 @@ export function LocationAutocompleteWidget({
           )}
         >
           {suggestions.map((s, i) => (
-            // `role="option"` on the item itself, not a nested <button>: an
-            // option is what `aria-activedescendant` above can point at, and a
-            // listbox may only contain options. It keeps its own click handler,
-            // so a mouse behaves exactly as before.
+            // `role="option"` on the item, not a nested <button>: a listbox may
+            // only contain options, and `aria-activedescendant` targets them.
             <li
               key={`${s.lat},${s.lng},${i}`}
               id={optionId(i)}
@@ -186,14 +165,13 @@ export function LocationAutocompleteWidget({
                 'cursor-pointer px-3 py-2 text-sm',
                 i === activeIndex ? 'bg-accent' : 'hover:bg-accent',
               )}
-              // onMouseDown (not onClick) so selection runs before the input's
-              // blur fires; preventDefault keeps focus from flicking away.
+              // onMouseDown so selection runs before the input's blur;
+              // preventDefault keeps focus in the input.
               onMouseDown={(e) => {
                 e.preventDefault();
                 void choose(s);
               }}
-              // Hovering moves the keyboard highlight too, so the two never
-              // disagree about which option Enter would take.
+              // Hover moves the keyboard highlight, so Enter takes what is shown.
               onMouseEnter={() => setActiveIndex(i)}
             >
               {s.label}

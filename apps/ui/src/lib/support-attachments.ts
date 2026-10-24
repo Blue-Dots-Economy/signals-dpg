@@ -1,12 +1,9 @@
 import type { SupportAttachment, SupportConfig } from '@/lib/support-api';
 
 /**
- * Client-side half of the support-attachment rules (#551). The server validates
- * everything again — this exists so a user learns a file is too big before
- * spending time uploading it, not as the enforcement point.
- *
- * Pure and DOM-light (only `File`/`btoa`), so the rules are unit-testable
- * without rendering the dialog.
+ * Client-side half of the support-attachment rules. The server validates
+ * everything again; this only tells the user a file is unacceptable before the
+ * upload.
  */
 
 /** Rejection reasons, mapped to i18n keys by the caller. */
@@ -27,12 +24,9 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * The `accept` attribute for the picker: MIME types *and* extensions.
- *
- * Types alone leave real files unselectable — macOS resolves `accept` through
- * its UTI table, which doesn't map `.m4a` (an iPhone voice memo) onto
- * `audio/mp4`, so the file shows up greyed out. Extensions are matched
- * literally, so listing both makes the picker agree with the API.
+ * The `accept` attribute for the picker: MIME types and extensions. Types
+ * alone leave real files unselectable (macOS does not map `.m4a` onto
+ * `audio/mp4`), so extensions are listed too.
  */
 export function pickerAccept(config: Pick<SupportConfig, 'allowedTypes' | 'allowedExtensions'>): string {
   return [...config.allowedTypes, ...(config.allowedExtensions ?? [])].join(',');
@@ -80,10 +74,9 @@ export function validateAttachmentSelection(
 }
 
 /**
- * Base64-encode a file for the JSON body. Chunked rather than one
- * `String.fromCodePoint(...bytes)` call — spreading a multi-megabyte array into
- * arguments overflows the call stack. Every byte is 0–255, so code points and
- * char codes coincide here.
+ * Base64-encode a file for the JSON body. Chunked because spreading a
+ * multi-megabyte array into one `String.fromCodePoint` call overflows the
+ * stack.
  */
 export async function fileToBase64(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());

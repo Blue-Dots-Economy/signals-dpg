@@ -23,7 +23,7 @@ export function isFieldVisible(
     if (!Array.isArray(allowed)) return false;
     const value = formData[controlField];
     if (Array.isArray(value)) {
-      // multi-select control → visible if any selected value is allowed
+      // Multi-select control: visible if any selected value is allowed.
       return value.some((v) => allowed.includes(v));
     }
     if (value === undefined || value === null || value === '') return false;
@@ -45,9 +45,8 @@ export interface ResolveResult {
  * `required`) and clear their values from formData. Chain-aware: iterates to a
  * fixpoint so hiding a control also hides (and clears) its dependents.
  *
- * Pure — never mutates its inputs. Scope is top-level properties (all current
- * `x-show-if` usage is top-level). Emits a dev-only `console.warn` when an
- * `x-show-if` references a control field that does not exist (authoring typo).
+ * Pure; never mutates its inputs. Top-level properties only. Warns in dev when
+ * an `x-show-if` references a control field that does not exist.
  */
 export function resolveVisibleSchema(
   schema: RJSFSchema,
@@ -96,9 +95,8 @@ export function resolveVisibleSchema(
     prunedSchema.required = (schema.required as string[]).filter((r) => !hidden.has(r));
   }
 
-  // Code-point ordering, NOT localeCompare: `hidden` is joined into the memo
-  // signature that keys the RJSF schema/uiSchema caches, so it must be a stable
-  // function of the visible set alone — never of the runtime locale.
+  // Code-point ordering, not localeCompare: `hidden` keys the RJSF schema
+  // caches, so it must not depend on the runtime locale.
   const sortedHidden = [...hidden].sort((a, b) => {
     if (a < b) return -1;
     return a > b ? 1 : 0;

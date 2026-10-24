@@ -13,26 +13,18 @@ export function createApiClient() {
     },
   });
 
-  // No Authorization header: the session rides an httpOnly cookie the browser
-  // attaches itself (`withCredentials` above), and the token it stands for
-  // never reaches this code. A cookie is sent on cross-site requests too, so
+  // No Authorization header: the session is an httpOnly cookie the browser
+  // attaches (`withCredentials`). Cookies also go on cross-site requests, so
   // state-changing calls carry a CSRF token the API checks against the session.
   client.interceptors.request.use(async (config) => {
     const method = (config.method ?? 'get').toUpperCase();
     if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
       let csrf = getCsrfToken();
-      /**
-       * The token is held in memory and populated by `fetchBffSession()` in the
-       * AuthProvider effect. React runs CHILD effects before parent ones, so on
-       * a first login the callback page's chain (resolve user → flush the
-       * parked consent) can start before the provider's fetch has landed —
-       * sending the write without a token, earning a 403 nothing retries, and
-       * losing that user's consent acknowledgment.
-       *
-       * Awaiting here closes the race deterministically. `fetchBffSession` uses
-       * `fetch`, not this client, so there is no recursion, and once the token
-       * is cached this costs nothing.
-       */
+      // React runs child effects before parent ones, so on a first login the
+      // callback page's writes (e.g. the parked consent) can start before the
+      // AuthProvider's `fetchBffSession()` has populated the token, and the
+      // write would get a 403. Awaiting here closes that race. `fetchBffSession`
+      // uses `fetch`, not this client, so there is no recursion.
       if (!csrf) {
         await fetchBffSession();
         csrf = getCsrfToken();
@@ -43,42 +35,25 @@ export function createApiClient() {
   });
 
   /**
-   * A dead session must TERMINATE the client's, not just fail one request.
+   * Raises `emitSessionExpired()` on a 401 that means the session is gone, so
+   * auth-context can end the client session. A session dying mid-use is
+   * detected only here (`fetchSession` runs on mount only).
    *
-   * There was no response interceptor at all, so nothing ever told the app its
-   * credentials had stopped working: `auth-context` kept reporting
-   * `isAuthenticated`, every `enabled: isAuthenticated` query kept polling, and
-   * React Query's `retry` tripled each failure. Measured on an expired session:
-   * bursts of nine 401s per poll cycle, indefinitely, with no redirect. The BFF
-   * did not change that — `fetchSession` runs on mount only, so a session dying
-   * mid-use is discovered ONLY here.
+   * `UNAUTHORIZED` alone also answers an anonymous caller, so it counts only
+   * when `getCsrfToken() !== null` (this browser held a session; a 401 does not
+   * clear it). The gate sits here, not in the handler, because the emit is
+   * latched once per page and an anonymous 401 would spend the latch.
+   * `TOKEN_EXPIRED` covers the Bearer-token path (resolve_session.ts), which has
+   * no CSRF token. `NO_ACTIVE_SESSION` is still matched, though the API no longer emits it.
    *
-   * ## Why the trigger is not just `code === 'UNAUTHORIZED'`
-   *
-   * Under the cookie session a dead session resolves to `UNAUTHORIZED` — but so
-   * does a request from someone who was never signed in. Firing on the code
-   * alone would tell a logged-out visitor their session expired.
-   *
-   * The gate must therefore be HERE, before `emitSessionExpired`, not inside the
-   * handler: that emit is latched to fire once per page, so an anonymous 401
-   * would spend the latch and swallow a real expiry later in the same page.
-   *
-   * `getCsrfToken()` is the non-React signal for "we hold a session" — it is
-   * populated only by a successful `fetchBffSession`, and a 401 does not clear
-   * it. `TOKEN_EXPIRED` covers the Bearer-token path (resolve_session.ts), which
-   * carries no CSRF token; `NO_ACTIVE_SESSION` is no longer emitted by the API
-   * (#517 retired betterauth) and is matched only as a leftover.
-   *
-   * Deliberately narrow either way: a 401 from a route the user merely may not
-   * call has to stay an ordinary error. A 5xx never qualifies — the API answers
-   * a dependency outage with 503 precisely so it does not read as a logout
-   * (see `bff-session.ts`'s `unknown`).
+   * A 401 from a route the user may not call stays an ordinary error, and a 5xx
+   * never qualifies: the API answers a dependency outage with 503 so it does not
+   * read as a logout (see `bff-session.ts`'s `unknown`).
    */
   client.interceptors.response.use(
     (response) => response,
     (error: unknown) => {
-      // Optional-chained: an interceptor that throws on a malformed rejection
-      // would replace the real failure with a TypeError, hiding it.
+      // Optional chaining: throwing here on a malformed rejection would hide the real failure.
       const res = (error as { response?: { status?: number; data?: { code?: string } } } | undefined)
         ?.response;
       const code = res?.data?.code;

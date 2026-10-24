@@ -1,8 +1,7 @@
 /**
- * Reads a VITE_* key from runtime config first (window.__DPG_UI_CONFIG__,
- * written by the chart into /config.js at deploy time), then falls back to
- * the build-time value baked in by Vite (import.meta.env). Lets a single
- * UI image be reconfigured per deployment without rebuilds.
+ * Reads a VITE_* key from runtime config first (`window.__DPG_UI_CONFIG__`,
+ * written by the chart into /config.js at deploy time), then the build-time
+ * `import.meta.env` value, so one UI image is reconfigurable per deployment.
  */
 export function getRuntimeEnv<K extends keyof ImportMetaEnv>(
   key: K,

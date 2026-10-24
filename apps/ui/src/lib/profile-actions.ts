@@ -1,13 +1,7 @@
 /**
- * Shared, framework-agnostic helpers for the profile action flow (Apply/Connect
- * + match/instance routing). Extracted so the SAME rules live in one place
- * across every surface that initiates actions — the home-page browse (list +
- * map popup) and the public profile page. Keeping the interaction-matrix
- * flattening, instance-URL resolution, and open-action detection here prevents
- * the two call sites from drifting (a fix to gating or routing lands once).
- *
- * Pure functions only — no React, no I/O. Callers supply the network config,
- * the already-fetched actions, and the current API base URL.
+ * Pure helpers for the profile action flow (Apply/Connect, match and instance
+ * routing), shared by the home-page browse (list + map popup) and the public
+ * profile page so gating and routing rules cannot drift between them.
  */
 import type { DotActionSchema, DotNetworkSchema } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
@@ -72,10 +66,9 @@ export function resolveTargetInstanceUrl(
 }
 
 /**
- * Action statuses that TERMINATE a source/target pair, freeing it for a new
- * action. A non-terminal action means one is already open, so the pair's
- * Apply/Connect CTA is disabled (#370/#422). The server cap is the real guard;
- * the UI check just pre-empts the click.
+ * Action statuses that terminate a source/target pair, freeing it for a new
+ * action. While a non-terminal action is open, the pair's Apply/Connect CTA is
+ * disabled. The server cap is the real guard; the UI only pre-empts the click.
  */
 export const OPEN_ACTION_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
   'accepted',

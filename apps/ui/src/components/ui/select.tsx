@@ -78,11 +78,8 @@ function SelectContent({
           className={cn(
             "p-1",
             position === "popper" &&
-              // `min-h`, not `h`: a fixed height equal to the trigger clamps the
-              // viewport to a single row, so a popper-positioned list longer
-              // than one item renders as a one-row sliver. Only the birth-year
-              // select uses popper today, so item-aligned selects elsewhere
-              // are unaffected.
+              // `min-h`, not `h`: a fixed trigger height clamps a popper list to
+              // one row.
               "min-h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1"
           )}
         >

@@ -41,8 +41,6 @@ export interface NetworkTheme {
   tokens: NetworkThemeTokens;
 }
 
-// TODO: Add dark-mode token variants per network when dark-mode toggle ships.
-
 const blue_dot: NetworkTheme = {
   name: 'Blue Dots',
   tagline: {

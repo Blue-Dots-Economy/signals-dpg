@@ -22,9 +22,7 @@ export function DatePickerWidget({
   const [open, setOpen] = React.useState(false);
   const dateValue = value ? new Date(value as string) : undefined;
 
-  // The RJSF field template already renders the field label (and required
-  // asterisk); rendering our own <Label> here double-labelled every date
-  // field. Rely on the field template's label, like the other widgets.
+  // No <Label>: the field template already renders it.
   return (
     <div className="space-y-2">
       <Popover open={open} onOpenChange={setOpen}>

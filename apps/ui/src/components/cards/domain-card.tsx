@@ -28,10 +28,9 @@ interface DomainCardProps {
   networkItem?: Item;
   matchScore?: MatchScoreResult | null;
   /**
-   * #646 C1: the sort the SERVER applied, which decides WHICH quantity this
-   * card shows — a relevance %, a distance, or an age. Undefined outside the
-   * browse list (e.g. a share preview), where no sort applies and no metric
-   * is shown.
+   * The sort the server applied, which decides whether the pill shows a
+   * relevance %, a distance or an age. Undefined outside the browse list,
+   * where the pill falls back to the profile relevance score.
    */
   sortApplied?: BrowseSort;
   /** Which quantity `relevance` means; only used for the pill tooltip. */
@@ -44,7 +43,7 @@ interface DomainCardProps {
   selectionMode?: boolean;
   /** When live, shows a Share button in the card header. Full item (for its key). */
   shareItem?: Item | null;
-  /** Disable the action CTA(s) — an open action already exists for this pair (#370/#422). */
+  /** Disable the action CTAs: an open action already exists for this pair. */
   actionsDisabled?: boolean;
   actionsDisabledReason?: string;
 }
@@ -91,8 +90,7 @@ export function DomainCard({
     );
   }
 
-  // #646 C1: the card's ranking basis. Resolved here rather than inline
-  // because it decides BOTH which pill renders and whether one can render.
+  // The card's ranking basis; decides which pill renders and whether one can.
   const cardMetric = sortApplied
     ? resolveCardMetric({
         sortApplied,
@@ -104,12 +102,9 @@ export function DomainCard({
       })
     : undefined;
 
-  // A distance or an age is NOT a match score, so the pill showing one must
-  // not depend on the match-score plumbing. Gating on `onCalculateMatch`
-  // (supplied only by MatchScoreCard, and only for a viewer WITH a profile)
-  // meant a signed-out viewer sorting by Newest or Nearest saw no metric at
-  // all — which defeats #646 C1 for exactly the audience browsing without an
-  // account. Relevance still needs that path; the other two do not.
+  // A distance or age is not a match score, so it shows without
+  // `onCalculateMatch` (which only viewers with a profile get). Relevance
+  // still needs it.
   const metricOnly = cardMetric != null && cardMetric.kind !== 'relevance';
   const showMatch = !!networkItem && (!!onCalculateMatch || metricOnly);
   const showActions = actions.length > 0 && !!onAction;
@@ -118,11 +113,9 @@ export function DomainCard({
       <>
         {showMatch && (
           <MatchScoreButton
-            // Pass a metric ONLY inside a sorted list. With no `sortApplied`
-            // there is no basis to follow (a share preview, a public profile),
-            // so omitting the prop lets MatchScoreButton fall back to the
-            // profile relevance score — an explicit `null` would suppress the
-            // pill entirely there.
+            // Pass a metric only inside a sorted list. Omitting the prop lets
+            // MatchScoreButton fall back to the profile relevance score; an
+            // explicit `null` would suppress the pill.
             {...(sortApplied ? { metric: cardMetric } : {})}
             basis={relevanceBasis ?? null}
             localItem={localItem ?? null}
@@ -157,9 +150,8 @@ export function DomainCard({
       cardConfig={cardConfig}
       data={data}
       domainLabel={domainLabel}
-      // In select mode the SelectableCard wrapper owns the interaction and
-      // blocks pointer events into the card, so the card must not also be a
-      // focusable button nested inside that wrapper's own `role="button"`.
+      // In select mode the SelectableCard wrapper owns the interaction, so the
+      // card must not add a focusable control inside its `role="button"`.
       onClick={selectionMode ? undefined : onClick}
       actions={footer}
       headerAction={

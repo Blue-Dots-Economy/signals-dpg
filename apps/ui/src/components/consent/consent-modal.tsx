@@ -20,9 +20,8 @@ export interface ConsentModalProps {
   initialTab: ConsentModalTab;
   config: ConsentConfigDocument;
   /**
-   * Which document set to show. 'u18' renders the minor/guardian copy
-   * (`u18_documents`) so a guardian sees the U18 terms/privacy, not the adult
-   * ones. Falls back to the adult `documents` when a U18 set isn't configured.
+   * 'u18' shows the minor/guardian copy (`u18_documents`), falling back to
+   * the adult `documents` when no U18 set is configured.
    */
   variant?: 'adult' | 'u18';
   onAccept?: () => void;

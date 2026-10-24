@@ -1,16 +1,10 @@
 /*
- * Config-driven Google Analytics (gtag.js) loader.
- *
- * Served as a static asset and referenced from index.html / index.tourist.html
- * immediately after /config.js. It loads gtag.js ONLY when the deployment's
- * runtime config (window.__DPG_UI_CONFIG__, written by the Helm chart at deploy
- * time) provides a VITE_ANALYTICS_GA_ID. No GA measurement ID is committed to
- * this repo — each deployment opts in purely via its own config.js. On every
- * deployment that does not set the id, this script is a no-op.
- *
- * Kept dependency-free and isolated on purpose: a future cookie-consent gate can
- * be layered in by setting gtag('consent', 'default', ...) before the config
- * call, without touching the rest of the app. See bluedots-automation#12.
+ * Config-driven Google Analytics (gtag.js) loader, referenced from index.html
+ * and index.tourist.html right after /config.js. Loads gtag.js only when the
+ * runtime config (window.__DPG_UI_CONFIG__) sets VITE_ANALYTICS_GA_ID; no
+ * measurement id is committed, and without one this script is a no-op.
+ * Dependency-free so a cookie-consent gate can later set
+ * gtag('consent', 'default', ...) before the config call.
  */
 (function () {
   var cfg = window.__DPG_UI_CONFIG__ || {};

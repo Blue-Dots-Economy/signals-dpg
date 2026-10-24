@@ -119,10 +119,8 @@ import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
 type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['children']>[0];
 
 /**
- * True when the map covers so much longitude that "zoom out" is not a usable
- * instruction any more. 120° is roughly a continental view — well before the
- * whole-world zoom, and comfortably inside the 180° span that used to break
- * the server-side bbox query.
+ * True when the map spans so much longitude that "zoom out" is no usable
+ * instruction. 120° is roughly a continental view.
  */
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
 
@@ -132,11 +130,8 @@ export function isWideViewport(viewport: MapViewport | null): boolean {
 }
 
 /**
- * Which empty-map message to show. Three distinct situations that used to
- * share one string: a FAILED load is not an empty area, and at a world-scale
- * viewport "zoom out to find results" is advice the user cannot act on —
- * they are already as far out as it goes, and zooming out is what emptied the
- * map.
+ * Which empty-map message to show. A failed load is not an empty area, and at
+ * a world-scale viewport "zoom out" is advice the user cannot act on.
  */
 export function mapEmptyMessageKey(opts: { isError: boolean; wideViewport: boolean }): string {
   if (opts.isError) return 'home.map_load_failed';
@@ -144,16 +139,10 @@ export function mapEmptyMessageKey(opts: { isError: boolean; wideViewport: boole
   return 'home.map_no_items_in_area';
 }
 
-// Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel node
-// scrolls into view. Disconnects on cleanup / when disabled. Shared by the
-// single-domain list and the "All" tab merged list (Task 5 §5.1 paging).
-//
-// `onIntersect` is read through a ref (kept fresh every render) rather than
-// placed in the effect's dependency array — the hooks this drives
-// (`useInfiniteBrowseItems`) hand back a new closure identity on every render,
-// so depending on it directly would tear down and recreate the
-// IntersectionObserver (and re-fire its callback) on every unrelated
-// re-render instead of only on real intersection changes.
+// Bottom-sentinel scroll observer: fires `onIntersect` when the sentinel
+// scrolls into view. `onIntersect` is read through a ref because
+// `useInfiniteBrowseItems` returns a new closure every render, which would
+// otherwise recreate the IntersectionObserver on every re-render.
 function useLoadMoreSentinel(
   onIntersect: () => void,
   enabled: boolean,
@@ -164,14 +153,10 @@ function useLoadMoreSentinel(
   enabledRef.current = enabled;
   const observerRef = React.useRef<IntersectionObserver | null>(null);
 
-  // Callback ref (stable, empty deps → runs only when the sentinel node itself
-  // mounts/unmounts, not every render). This re-attaches the observer to the
-  // *current* node: the "All" tab renders the sentinel in more than one branch,
-  // so the live node can swap without `enabled` changing — a useEffect([enabled])
-  // kept observing a stale, unmounted node and never fired (needed a tab switch
-  // to remount). rootMargin pre-triggers 200px before the 1px sentinel reaches
-  // the fold, so firing no longer depends on that exact pixel crossing the edge
-  // (flaky under max-scroll clamping / momentum scrolling).
+  // Callback ref with empty deps, so it re-attaches to the current node: the
+  // "All" tab renders the sentinel in more than one branch, so the live node can
+  // swap without `enabled` changing. rootMargin fires 200px before the 1px
+  // sentinel reaches the fold, which is robust to scroll clamping and momentum.
   return React.useCallback((node: HTMLDivElement | null) => {
     if (observerRef.current) {
       observerRef.current.disconnect();
@@ -191,15 +176,9 @@ function useLoadMoreSentinel(
   }, []);
 }
 
-// Task 6 (#203 §5.2): a map marker's popup lazily fetches the full item only
-// once the popup is actually shown — the active `MapProvider` only invokes
-// `renderPopup(marker)` while a marker is selected/open (see
-// `google-maps-provider.tsx` / `leaflet-provider.tsx`), so this component's
-// `useItemDetail` call only fires for the marker the user clicked, not for
-// every viewport marker. Hooks can't be called inside the `renderPopup`
-// callback itself, hence a standalone component (mirrors the
-// hooks can't be called inside a `renderPopup` callback), rather than an
-// inline hook call.
+// A marker popup lazily fetches the full item only while shown: the map
+// provider calls `renderPopup(marker)` only for the open marker. Hooks cannot
+// run inside that callback, hence a standalone component.
 function MarkerDetailPopup({
   networkId,
   marker,
@@ -217,30 +196,23 @@ function MarkerDetailPopup({
 }: Readonly<{
   networkId: string | null;
   marker: MapMarker;
-  // The `Marker` (network-api) this popup's marker was derived from — carries
-  // `item_instance_url` for routed fetches, which the lightweight `MapMarker`
-  // shape does not.
+  // The network-api `Marker` this marker came from; carries
+  // `item_instance_url` for routed fetches.
   sourceMarker: NetworkMarker | undefined;
-  // The clicked marker's domain item type (e.g. `job_posting_1.0`), derived by
-  // the parent from the network config — the by-id detail fetch filters on it.
+  // The marker's domain item type (e.g. `job_posting_1.0`), derived by the
+  // parent from the network config; the by-id fetch filters on it.
   itemType?: string;
   schema?: RJSFSchema;
   cardConfig?: DotCardConfig | null;
   localItem: Item | null;
   connectAction?: DotActionSchema;
   onConnect?: (baseItemId: string) => void;
-  // Disable the connect CTA when an action is already open for this pair
-  // (#370/#422) — parity with the list cards.
+  // Disables the connect CTA when an action is already open for this pair.
   connectDisabled?: boolean;
   connectDisabledReason?: string;
-  // Task 7 (#203 §5.2 cleanup): lifts this popup's already-fetched full item
-  // up to the parent. Home-page's `onActionSubmit` needs the full `Item`
-  // (network/domain/type/instance_url) to build a connect-action's
-  // `target_item`, but a map-only item (one loaded via viewport markers, never
-  // paged into the list feeds) has no other source now that the full
-  // `useBrowseItems` fetch is gone — this reuses the popup's own
-  // `useItemDetail` result instead of re-fetching or reintroducing a full
-  // browse feed.
+  // Lifts the fetched full item to the parent, whose `onActionSubmit` needs it
+  // to build a connect-action's `target_item`. A map-only item (never paged
+  // into the list feeds) has no other source.
   onItemResolved?: (item: Item) => void;
   /** Forwarded to `MarkerPopupCard` — `'list'` in the phone bottom sheet. */
   cardVariant?: 'popup' | 'list';
@@ -249,12 +221,10 @@ function MarkerDetailPopup({
   const { data: popupNetworkConfig } = useNetworkConfig(networkId ?? null);
   // Marker ids are `${item_id}#${locationIndex}` — strip the suffix to look up the item.
   const baseItemId = marker.id.includes('#') ? marker.id.split('#')[0] : marker.id;
-  // Fetch from the clicked marker's OWN id + domain (always present on the map
-  // marker) — do NOT gate on finding `sourceMarker` in the live markers array,
-  // which churns as the viewport refetches and would otherwise leave the popup
-  // stuck on "Loading…" with no request ever firing. `sourceMarker` (when
-  // present) only supplies the optional owning-instance URL for a routed fetch;
-  // its absence just means the network fetch discovers the item by id.
+  // Fetch from the marker's own id + domain; do not wait for `sourceMarker` in
+  // the live markers array, which churns as the viewport refetches and would
+  // leave the popup on "Loading…". `sourceMarker` only adds the optional
+  // owning-instance URL.
   const itemDomain = marker.domain ?? sourceMarker?.item_domain;
 
   const { item, isLoading } = useItemDetail(
@@ -263,10 +233,8 @@ function MarkerDetailPopup({
       ? {
           item_id: baseItemId,
           item_domain: itemDomain,
-          // The domain's item type (e.g. `profile_1.0` / `job_posting_1.0`).
-          // Slim markers don't carry it, so the parent derives it from the
-          // domain config and passes it in — without it the by-id fetch would
-          // filter on the wrong (default) type and match nothing.
+          // Slim markers carry no item type, so the parent derives it from the
+          // domain config; without it the by-id fetch matches nothing.
           item_type: itemType,
           item_instance_url: sourceMarker?.item_instance_url,
         }
@@ -288,11 +256,9 @@ function MarkerDetailPopup({
     );
   }
 
-  // The slim map marker carries no item_state (its `data` is just
-  // `{ item_locations }`) and only a generic `label`, so the popup card would
-  // render empty fields and an "Item — <place>" title. Enrich it with the
-  // fetched full item's state + real title so the card shows the actual profile
-  // / posting details. Keep the clicked marker's location/precision/domain.
+  // The slim marker carries no item_state and only a generic label, so enrich
+  // it with the fetched item's state and real title. Keep the marker's
+  // location, precision and domain.
   const resolvedTitle = cardConfig?.title_field
     ? String((item.item_state as Record<string, unknown>)[cardConfig.title_field] ?? '').trim()
     : '';
@@ -324,16 +290,8 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map(n => n.trim()).filter(Boolean);
 }
 
-/**
- * Resolve the instance URL for a target item
- * Priority:
- * 1. Item's own item_instance_url (if available and not localhost)
- * 2. Network config instances lookup by domain
- * 3. Current API base URL as fallback
- */
-// Resolves the landing-page default view mode from VITE_DEFAULT_VIEW_MODE.
-// Falls back to 'map' when the env var is missing or holds an unrecognised
-// value, so a fresh install ships with the map-first experience.
+// The landing-page view mode from VITE_DEFAULT_VIEW_MODE; 'map' when missing or
+// unrecognised.
 function resolveDefaultViewMode(): ViewMode {
   const raw = getRuntimeEnv('VITE_DEFAULT_VIEW_MODE');
   if (raw === 'list' || raw === 'map') return raw;
@@ -342,10 +300,8 @@ function resolveDefaultViewMode(): ViewMode {
 
 
 /**
- * Whether the active profile's domain still requires profile_creation consent
- * before go-live, from its `go_live_required` gates (mirrors network.json). A
- * domain that goes live on completeness alone (`["schema_required"]`) never
- * prompts. Absent config ⇒ require (safe default, matches the login gate).
+ * Whether the domain requires profile_creation consent before go-live, from
+ * its `go_live_required` gates. Absent config requires it.
  */
 function domainNeedsProfileConsent(
   domains:
@@ -411,12 +367,7 @@ function computeRequiresGuardianGate(
   return Boolean(user && network && wardDomain && isGuardianConsentRequiredDomain(network, wardDomain));
 }
 
-/**
- * Derive the U18 guardian-flow display state from the stored status + gate signals.
- *
- * @returns The resolved-adult short-circuit, the DOB-vs-guardian entry step, the
- *   birth/minor-guardian sub-flags, and whether the guardian flow should show.
- */
+/** Derives the U18 guardian-flow display state from the stored status and gate signals. */
 function deriveU18GuardianState(p: {
   status: U18StatusResponse | null;
   statusLoading: boolean;
@@ -474,14 +425,9 @@ function computeHasProfileAnchor(p: {
   );
 }
 
-/** The effective location source for the list note wording ('none' maps to 'profile' harmlessly). */
 /**
- * A resolved list note → its display string.
- *
- * The interpolated `locationSource` is itself a translation key, so the note
- * needs two `t` calls rather than one. Doing that inline made a ternary nested
- * inside `t`'s argument list (Sonar S3358), which read as though the whole note
- * were conditional when only its values are.
+ * A resolved list note to its display string. The interpolated
+ * `locationSource` is itself a translation key, so it needs a second `t` call.
  */
 function formatListNote(t: TFunction, note: ListNoteResult): string {
   if (!note.values) return t(note.key);
@@ -491,6 +437,7 @@ function formatListNote(t: TFunction, note: ListNoteResult): string {
   });
 }
 
+/** The location source for the list-note wording ('none' reads as 'profile'). */
 function noteLocationSource(resolvedLocationSource: string): 'browser' | 'profile' {
   return resolvedLocationSource === 'browser' ? 'browser' : 'profile';
 }
@@ -534,10 +481,8 @@ function parseMapDomainsParam(searchParams: URLSearchParams): string[] {
 }
 
 /**
- * `?f_<field>=a,b` → the active facet set.
- *
- * One param per field rather than a single encoded blob, so a link carrying
- * filters stays readable and a single facet can be edited by hand.
+ * `?f_<field>=a,b` → the active facet set. One param per field keeps a filter
+ * link readable and hand-editable.
  */
 function parseFacetParams(searchParams: URLSearchParams): Record<string, string[]> {
   const result: Record<string, string[]> = {};
@@ -555,19 +500,11 @@ function parseFacetParams(searchParams: URLSearchParams): Record<string, string[
 }
 
 /**
- * Split the action-consent sentinel out of a submitted action form.
- *
- * `ConsentCheckbox` (inside `ActionModal`) stashes its acknowledgement under
- * `ACTION_CONSENT_SENTINEL` in the same `formData` as the action's own
- * requirement answers. It has to come back out: the sentinel is not a
- * requirement and must never reach the server inside
- * `requirements_snapshot`.
- *
- * The validation is deliberately structural rather than a cast — the value
- * arrives as `unknown` from a schema-driven form, so an unacknowledged or
- * malformed sentinel yields `undefined` (no consent claimed) instead of a
- * half-built object. Both the single-action and bulk-action paths carried this
- * same predicate inline.
+ * Splits the action-consent sentinel out of a submitted action form.
+ * `ConsentCheckbox` stores its acknowledgement under `ACTION_CONSENT_SENTINEL`
+ * in the same `formData` as the requirement answers, and it must never reach
+ * the server inside `requirements_snapshot`. Validated structurally: a
+ * malformed or unacknowledged sentinel yields `undefined` (no consent claimed).
  */
 function splitActionConsent(formData: Record<string, unknown>): {
   consent: { acknowledged: true; version: number; brand?: string | null } | undefined;
@@ -590,13 +527,10 @@ function splitActionConsent(formData: Record<string, unknown>): {
 }
 
 /**
- * Where an item actually lives, for an action payload.
- *
- * A stored `item_instance_url` pointing at localhost means the item was
- * created on whichever API this build talks to, so the configured URL is the
- * honest answer; anything else resolves through the network config. Four call
- * sites had this same ternary inline — source and target, for both the single
- * and the bulk action path.
+ * Where an item lives, for an action payload. A stored localhost
+ * `item_instance_url` means the item was created on the API this build talks
+ * to, so the configured URL is used; anything else resolves through the
+ * network config.
  */
 function instanceUrlForAction(item: Item, network: DotNetworkSchema): string {
   return item.item_instance_url?.includes('localhost')
@@ -605,16 +539,10 @@ function instanceUrlForAction(item: Item, network: DotNetworkSchema): string {
 }
 
 /**
- * Whether the server actually RANKED by relevance.
- *
- * Optimistic before the first response lands, so the list note does not
- * flicker in on arrival — but NOT once a response has come back reporting no
- * order at all, because the ranking basis is then unknown and the note must
- * not claim profile-relevance for it.
- *
- * A module-level function rather than an inline expression because `HomePage`
- * sits at the cognitive-complexity limit and inlining these three terms
- * tipped it over.
+ * Whether the server ranked by relevance. Optimistic before the first
+ * response so the list note does not flicker in, but false once a response
+ * reports no order, since the note must not then claim profile relevance.
+ * Module-level to keep `HomePage` under the cognitive-complexity limit.
  */
 function resolveRelevanceApplied(
   applied: BrowseSort | undefined,
@@ -637,28 +565,22 @@ export function HomePage() {
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     searchParams.get('domain')
   );
-  // Map filter: multi-select domain filter (URL param: ?map_domains=seeker,provider)
+  // Map domain filter (?map_domains=seeker,provider).
   const [mapSelectedDomains, setMapSelectedDomains] = React.useState<string[]>(() =>
     parseMapDomainsParam(searchParams),
   );
-  // Map filter: enum-field filters (URL params: ?f_<key>=value1,value2)
-  // Each active field gets its own param namespaced with the "f_" prefix.
+  // Map enum-field filters, one param per field (?f_<key>=value1,value2).
   const [mapSelectedFields, setMapSelectedFields] = React.useState<Record<string, string[]>>(() =>
     parseFacetParams(searchParams),
   );
-  // Map viewport (Task 6, #203 §5.2): null until the map reports its first
-  // `onViewportChange` (debounced pan/zoom settle). The map's own initial
-  // center/zoom comes from the existing `focusPoint`/`userLocation`/default
-  // logic below — this state only tracks what the map has told us it's
-  // actually showing, so `useMapMarkers` stays disabled (no markers query)
-  // until that first report lands.
+  // Map viewport: null until the map reports its first settled
+  // `onViewportChange`, so `useMapMarkers` stays disabled until then.
   const [mapViewport, setMapViewport] = React.useState<MapViewport | null>(null);
-  // The full `Item` most recently resolved by an open marker popup's
-  // `useItemDetail` fetch (Task 7, #203 §5.2 cleanup) — see
-  // `MarkerDetailPopup`'s `onItemResolved` doc comment for why this exists.
+  // The full `Item` last resolved by an open marker popup (see
+  // `MarkerDetailPopup`'s `onItemResolved`).
   const [mapDetailItem, setMapDetailItem] = React.useState<Item | null>(null);
-  // Phone map (#745): a tapped marker opens in a bottom sheet instead of the
-  // provider's popup bubble. `null` = closed.
+  // Phone map: a tapped marker opens in a bottom sheet instead of the
+  // provider's popup. `null` = closed.
   const isMobile = useIsMobile();
   const [sheetMarker, setSheetMarker] = React.useState<MapMarker | null>(null);
   // Leaving the map closes it, so returning to the map does not re-open it.
@@ -666,11 +588,9 @@ export function HomePage() {
     if (viewMode !== 'map') setSheetMarker(null);
   }, [viewMode]);
   const configuredNetworkIds = parseNetworkIds(import.meta.env.VITE_NETWORK_ID);
-  // The set of domains this deployment serves (VITE_SERVED_BINDINGS), or null
-  // when unset (serve all domains). When exactly ONE domain is served, that is
-  // the forced acting/browse domain (the single-domain portal); with multiple,
-  // the acting domain is derived from the logged-in user (whitelisted combined
-  // UI). Memoised — runtime config is fixed for the session's lifetime.
+  // Domains this deployment serves (VITE_SERVED_BINDINGS), or null for all.
+  // Exactly one served domain is the forced browse domain (single-domain
+  // portal). Runtime config is fixed for the session, hence memoised once.
   const servedScope = React.useMemo(() => getServedScope(), []);
   const boundDomain = resolveBoundDomain(servedScope);
 
@@ -684,27 +604,24 @@ export function HomePage() {
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
-  // Minor ward doing a bulk action (#393/#453): the gated items come back
-  // GUARDIAN_OTP_REQUIRED after one OTP is sent to the guardian. Stash the
-  // payloads to resubmit with the code — one guardian OTP dialog for the batch,
-  // mirroring the single-action flow (no raw error).
+  // Minor ward bulk action: gated items come back GUARDIAN_OTP_REQUIRED after
+  // one OTP goes to the guardian. Stash the payloads to resubmit with the code
+  // (one guardian OTP dialog for the batch).
   const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
     payloads: PerformActionPayload[];
     sourceInstanceUrl?: string;
     actionType: string;
-    // Non-guardian failures from a mixed batch, carried through so they can be
-    // reselected once the guardian OTP dialog resolves (they still need a retry).
+    // Non-guardian failures from a mixed batch, reselected once the guardian
+    // dialog resolves so they can be retried.
     otherFailedIds?: string[];
   } | null>(null);
-  // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
-  // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
-  // confirm). Holds the deferred bulk submit + its action type (for the panel).
+  // Minor ward: the "a code will be sent to your guardian" confirm shown before
+  // a bulk action dispatches the OTP. Holds the deferred submit and action type.
   const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
     { run: () => void; actionType: string } | null
   >(null);
 
-  // Networks list + resolved selected network (config tier). Replaces the raw
-  // mount-fetch + resolve effects; `allNetworks`/`network` are now query-derived.
+  // Networks list and the resolved selected network.
   const { data: networksData } = useNetworkConfigs();
   const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
     if (!networksData) return [];
@@ -716,20 +633,17 @@ export function HomePage() {
   const { data: resolvedNetwork } = useResolvedNetwork(selectedNetworkId);
   const network = resolvedNetwork;
 
-  // My profiles across domains (own-data tier) + profile-consent status
-  // (config tier). Replace the coordinated raw fetch; the gate reads both.
+  // My profiles across domains and their profile-consent status.
   const { data: myItems, isFetched: myItemsFetched } = useMyItems(network);
   const consentQuery = useProfileConsentStatus(network);
   const consentedProfileIds = consentQuery.data ?? new Set<string>();
-  // Settled = query resolved either way (fail-open: an error yields an empty set
-  // and still marks loaded, so the gate can prompt). Signed-out users have no
-  // profiles/consent to wait for — resolved immediately.
+  // Settled = resolved either way (fail-open: an error yields an empty set, so
+  // the gate can still prompt). Signed-out users resolve immediately.
   const profilesResolved = !user || myItemsFetched;
   const consentLoaded = !user || consentQuery.isSuccess || consentQuery.isError;
   const queryClient = useQueryClient();
 
-  // Default the selected network to the first available once the list loads
-  // (only when nothing is selected yet) — previously done in the mount fetch.
+  // Default to the first network once the list loads, if none is selected.
   React.useEffect(() => {
     if (selectedNetworkId) return;
     const first = allNetworks[0]?.id;
@@ -744,8 +658,8 @@ export function HomePage() {
     setActiveProfileId(getStoredActiveProfileId(selectedNetworkId));
   }, [selectedNetworkId]);
 
-  // Resolve a map marker's label from its domain's card.title_field so titles
-  // are correct even in the "All" view where markers span multiple domains.
+  // A marker's label comes from its own domain's card.title_field, so titles
+  // are right in the "All" view where markers span domains.
   const resolveMarkerLabel = React.useCallback(
     (item: { id: string; domain?: string; data: Record<string, unknown> }) => {
       const domain = item.domain
@@ -758,14 +672,14 @@ export function HomePage() {
     [network]
   );
 
-  // Restore or auto-select the active profile once per network, when my-profiles
-  // have settled. A ref guards against re-running on a background refetch
-  // (which must not reset the user's manual selection).
+  // Restore or auto-select the active profile once per network after
+  // my-profiles settle. The ref stops a background refetch from resetting a
+  // manual selection.
   const restoredForNetwork = React.useRef<string | null>(null);
   React.useEffect(() => {
     if (!user) {
-      // Signed out: clear selection + any open consent gate, and allow
-      // restoration to re-run on next sign-in.
+      // Signed out: clear selection and any open consent gate; allow restore
+      // on the next sign-in.
       setActiveProfileId(null);
       setPendingConsentProfileId(null);
       restoredForNetwork.current = null;
@@ -787,27 +701,22 @@ export function HomePage() {
     }
   }, [user, network, myItemsFetched, myItems]);
 
-  // Derive the active profile from myItems
   const myItem = React.useMemo(() => {
     if (!myItems.length) return null;
     return myItems.find((i) => i.item_id === activeProfileId) ?? myItems[0] ?? null;
   }, [myItems, activeProfileId]);
 
-  // Item ids the active profile already has an OPEN action with — either
-  // direction (I initiated to them, or they to me). Their Connect/Apply CTA is
-  // disabled: at most one open action per pair (#370/#422). The server cap is
-  // the real guard; this just pre-empts the click. "Open" = not a terminal
-  // status; the same terminal set the backend frees a pair on.
+  // Item ids the active profile already has an open action with, in either
+  // direction; their Connect/Apply CTA is disabled (one open action per pair).
+  // The server cap is the real guard.
   const { data: myActionsData } = useActions('all', { enabled: !!user, limit: 100 });
   const openActionItemIds = React.useMemo(
     () => computeOpenActionItemIds(myActionsData?.actions ?? [], activeProfileId),
     [myActionsData, activeProfileId],
   );
 
-  // A draft (incomplete) profile can't apply/connect — the API rejects it with
-  // PROFILE_NOT_LIVE. Prompt the user to finish their profile (with a shortcut
-  // to the edit form) instead of surfacing that error. Returns true when the
-  // profile is draft (caller should abort the action).
+  // A draft profile cannot act (the API returns PROFILE_NOT_LIVE), so prompt to
+  // finish it instead. Returns true when the caller should abort.
   const promptCompleteDraftProfile = React.useCallback(
     (profile: Item): boolean => {
       if (profile.lifecycle_status !== 'draft') return false;
@@ -826,7 +735,7 @@ export function HomePage() {
     [navigate, t],
   );
 
-  // Derive the active profile's first location (profile-first), or null to trigger browser-geo fallback
+  // The active profile's first location, or null to fall back to browser geo.
   const profileLocation = React.useMemo(
     () =>
       myItem?.item_locations?.[0]
@@ -835,9 +744,9 @@ export function HomePage() {
     [myItem],
   );
 
-  // Resolve: profile location → browser geo → null. Gate the browser auto-prompt
-  // on profilesResolved so a logged-in user with a profile location isn't prompted
-  // during the async profile-load window.
+  // Profile location → browser geo → null. The browser prompt waits for
+  // profilesResolved so a user with a profile location is not prompted while
+  // profiles load.
   const [preferredSource, setPreferredSource] =
     React.useState<PreferredLocationSource>('profile');
 
@@ -848,48 +757,36 @@ export function HomePage() {
   } = useUserLocation(profileLocation, profilesResolved, preferredSource);
   const geoPermission = useGeolocationPermission();
 
-  // The toggle only makes sense when there's a profile location to switch away
-  // from and the browser can actually provide the alternative.
+  // The toggle needs a profile location to switch from and a browser that can
+  // provide the alternative.
   const canToggleLocation = computeCanToggleLocation(profileLocation, browserLocation.isSupported);
 
-  // When the user picked "current location" but the browser request errored
-  // (denied / unavailable), offer to enable it. Gated on canToggleLocation so
-  // the banner only appears while a profile location exists — i.e. results are
-  // still sorted by the profile fallback, which the banner copy reflects.
+  // "Current location" picked but the browser request errored: offer to enable
+  // it. Only while a profile location exists, since the banner copy says
+  // results fall back to it.
   const showLocationBanner = computeShowLocationBanner(
     canToggleLocation,
     preferredSource,
     browserLocation.status,
   );
 
-  // Bumped whenever the user picks a source so the map recenters on the chosen
-  // anchor even when the resolved coordinate is unchanged — e.g. switching back
-  // to "My profile" after a "Current location" attempt that was denied and fell
-  // back to the same profile coordinate, so panning-away is undone.
-  //
-  // Re-picking the ALREADY-ACTIVE source is a real path now, and deliberately
-  // still bumps this: the map's `LocationSourceSelect` is an option list, so
-  // tapping "My profile" after panning away means "take me back", and it does.
-  // (The list's switch is a radix single-toggle, which deselects to '' on a
-  // second press and so cannot reach here twice.)
+  // Bumped on every source pick so the map recenters even when the resolved
+  // coordinate is unchanged (e.g. back to "My profile" after a denied browser
+  // request, or re-picking the active source after panning away).
   const [recenterNonce, setRecenterNonce] = React.useState(0);
 
-  // Bumped right before a marker popup's Connect/Apply action opens the
-  // consent modal, so the map provider closes the popup first — otherwise the
-  // popup (a map overlay in a high stacking context) sits on top of the
-  // modal's bottom-sheet Drawer on mobile, making the consent checkbox +
-  // Confirm unreachable (Issue #1).
+  // Bumped before a marker popup's Connect/Apply opens the consent modal, so
+  // the map closes the popup first; otherwise the popup sits above the
+  // mobile bottom-sheet and hides the consent checkbox and Confirm.
   const [closePopupNonce, setClosePopupNonce] = React.useState(0);
 
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
       setPreferredSource(next);
       setRecenterNonce((n) => n + 1);
-      // An explicit "Current location" click always retries the geolocation
-      // request. The auto-request effect only fires from an `idle` state, so
-      // without this a second click after a dismiss/error would do nothing —
-      // whereas the browser will re-prompt on a fresh request while the
-      // permission is still promptable (i.e. not a real block).
+      // An explicit "Current location" click always retries: the auto-request
+      // only fires from `idle`, and the browser re-prompts while permission is
+      // still promptable.
       if (next === 'browser' && browserLocation.status !== 'loading') {
         void browserLocation.request();
       }
@@ -897,8 +794,8 @@ export function HomePage() {
     [browserLocation],
   );
 
-  // Profile-creation consent gate. Profiles created via the aggregator channel
-  // have no profile_creation consent recorded; selecting one must first prompt.
+  // Profile-creation consent gate: aggregator-created profiles have no
+  // profile_creation consent recorded, so selecting one prompts first.
   const { config: consentConfig } = useConsentConfig();
   const { brand } = useNetworkTheme();
   const profileDoc = consentConfig?.documents.profile_creation;
@@ -906,36 +803,28 @@ export function HomePage() {
     (v) => v.version === profileDoc.current_version,
   );
   const profileStatement = profileVersion?.statement ?? '';
-  // Whether the active profile's DOMAIN gates go-live on `consent_required`
-  // (mirrors `go_live_required` in network.json). A domain that goes live on
-  // completeness alone (e.g. a provider configured `["schema_required"]`) never
-  // prompts for profile_creation consent. Absent config ⇒ require (safe default,
-  // matches the login-gate behaviour).
+  // Whether the active profile's domain gates go-live on `consent_required`.
+  // Absent config requires it.
   const profileConsentRequired = computeProfileConsentRequired(
     profileStatement,
     network?.domains,
     myItem?.item_domain,
   );
 
-  // Shared profile_creation-consent accept flow (adult self-accept OR minor
-  // guardian-OTP), extracted into a hook so it isn't duplicated with
-  // profile-form-page. `dialogs` hosts the guardian OTP/capture dialogs;
-  // `guardianActive` is true while one is open, so the ProfileConsentModal below
-  // hides itself instead of stacking.
+  // Shared profile_creation consent accept flow (adult self-accept or minor
+  // guardian OTP). `dialogs` hosts the guardian dialogs; `guardianActive` hides
+  // the ProfileConsentModal below while one is open.
   const {
     accept: acceptProfileConsentFlow,
     dialogs: consentAcceptDialogs,
     guardianActive,
   } = useProfileConsentAccept();
 
-  // Gate the auto-selected profile: if it lacks profile_creation consent, prompt.
+  // Prompt when the auto-selected profile lacks profile_creation consent.
   React.useEffect(() => {
     if (
-      // Never gate a signed-out user. `activeProfileId` can briefly hold a
-      // stale localStorage value (from a prior session) after sign-out or when
-      // a different/no-profile user signs in — before the restore effect nulls
-      // it. Requiring `user` + that the id is a real OWNED profile in myItems
-      // stops the consent modal flashing for logged-out or profile-less users.
+      // `activeProfileId` can briefly hold a stale stored value after sign-out
+      // or a user switch, so require a user and an owned profile.
       !user ||
       !myItems.some((p) => p.item_id === activeProfileId) ||
       !profilesResolved ||
@@ -959,13 +848,10 @@ export function HomePage() {
     pendingConsentProfileId,
   ]);
 
-  // U18 guardian consent gate (Phase 6). Domain is derived from the ward's
-  // own existing profile item — never a registration dropdown. Only wards
-  // whose profile domain is `guardian_consent_required` AND who still need
-  // the adult-equivalent terms/privacy consent (the same signal the ordinary
-  // flow uses; the guardian-OTP-verify endpoint records those categories on
-  // success) are routed through the guardian flow — everyone else (adults,
-  // ungated domains, users with no profile yet) is unaffected.
+  // U18 guardian consent gate. The domain comes from the ward's own profile
+  // item. Only wards in a `guardian_consent_required` domain who still need
+  // terms/privacy consent go through the guardian flow (the guardian OTP
+  // verify records those categories).
   const wardDomain = myItem?.item_domain ?? null;
   const requiresGuardianGate = computeRequiresGuardianGate(user, network, wardDomain);
   const {
@@ -975,27 +861,21 @@ export function HomePage() {
   } = useConsentGate();
   const [guardianFlowDismissed, setGuardianFlowDismissed] = React.useState(false);
 
-  // Re-evaluate from scratch if the acting network or ward domain changes
-  // (e.g. switching networks, or the active profile changing) instead of
-  // staying dismissed forever.
+  // Re-evaluate when the network or ward domain changes.
   React.useEffect(() => {
     setGuardianFlowDismissed(false);
   }, [network?.id, wardDomain]);
 
-  // Stored U18 status (birth month/year captured ONCE at login). We read it
-  // instead of re-asking the DOB at profile-creation time: if birth data is
-  // already stored we skip the DOB step entirely, and a stored ADULT is never
-  // routed through the guardian flow at all.
+  // Stored U18 status (birth year captured once). Stored birth data skips the
+  // DOB step, and a stored adult never enters the guardian flow.
   const [u18Status, setU18Status] = React.useState<U18StatusResponse | null>(null);
   const [u18StatusLoading, setU18StatusLoading] = React.useState(false);
-  // Bumped after the guardian flow completes so the stored status (birth data +
-  // guardianVerified) is re-read — otherwise it stays stale and a later profile
-  // creation re-triggers the DOB step even though the ward already finished it.
+  // Bumped after the guardian flow completes so the stored status is re-read;
+  // a stale one would re-trigger the DOB step at the next profile creation.
   const [u18StatusReload, setU18StatusReload] = React.useState(0);
   React.useEffect(() => {
-    // Fetch whenever authenticated + on a network — NOT only when a profile
-    // already exists. Otherwise the very first profile creation can't tell the
-    // ward is a minor (no prior profile → no fetch) and skips the guardian gate.
+    // Fetch even with no profile yet, or the first profile creation cannot
+    // tell the ward is a minor.
     if (!user || !network) {
       setU18Status(null);
       return;
@@ -1004,26 +884,21 @@ export function HomePage() {
     setU18StatusLoading(true);
     getU18Status(network.id)
       .then((s) => { if (!cancelled) setU18Status(s); })
-      // On failure fall back to the DOB-capture path (u18Status stays null →
-      // initialStep 'dob'); never leave a minor ungated on a transient error.
+      // On failure u18Status stays null → initialStep 'dob'; a transient error
+      // never leaves a minor ungated.
       .catch(() => { if (!cancelled) setU18Status(null); })
       .finally(() => { if (!cancelled) setU18StatusLoading(false); });
     return () => { cancelled = true; };
   }, [user, network, network?.id, u18StatusReload]);
 
-  // U18 guardian-flow display state, derived from the stored status + gate
-  // signals. See `deriveU18GuardianState` for the per-flag rationale:
-  //  - resolvedAdult: stored data resolves the ward as an adult → no guardian
-  //    gate; the ordinary consent flow (ProfileConsentModal) handles T&P.
-  //  - initialStep: DOB is captured ONCE and reused — skip the DOB step when
-  //    birth data is already stored; capture it here only when nothing is stored.
-  //  - birthUnresolved: minor status not yet resolved (no birth captured) — must
-  //    run the flow (DOB step) even when T&P is already satisfied, else a
-  //    bulk/form ward who self-accepted T&P at login is never asked for DOB and
-  //    the server can't detect a minor, bypassing the gate.
-  //  - minorNeedsGuardian: a resolved minor who isn't guardian-verified yet must
-  //    be gated even when T&P happens to be satisfied, else they land in the app
-  //    un-gated with no way to attach a guardian.
+  // U18 guardian-flow display state (see `deriveU18GuardianState`):
+  //  - resolvedAdult: stored data says adult, so no guardian gate.
+  //  - initialStep: skip the DOB step when birth data is already stored.
+  //  - birthUnresolved: run the DOB step even when terms/privacy are satisfied,
+  //    or a bulk/form ward who accepted at login is never asked and the server
+  //    cannot detect a minor.
+  //  - minorNeedsGuardian: gate an unverified minor even when terms/privacy
+  //    are satisfied, or they land with no way to attach a guardian.
   const {
     initialStep: u18InitialStep,
     showFlow: showU18GuardianFlow,
@@ -1037,7 +912,7 @@ export function HomePage() {
   });
 
   // Acting domain: ?as= test override → served binding → active profile →
-  // network default. Drives the connect-action source (from_domain).
+  // network default. Drives the connect-action source domain.
   const currentDomain =
     searchParams.get('as') ??
     boundDomain ??
@@ -1045,12 +920,9 @@ export function HomePage() {
     network?.domains[0]?.id ??
     'student_profile';
 
-  // Viewer domain for Browse scoping: ?as= → the single served domain (when
-  // exactly one is served) → the logged-in user's own profile domain → null.
-  // A signed-in viewer only browses the domains their domain can initiate
-  // toward (e.g. a seeker sees providers, not other seekers) in bound portals
-  // and the combined UI alike. Null (only a signed-out / no-profile visitor)
-  // means network-wide browse — all to_domains (computeVisibleDomains).
+  // Viewer domain for browse scoping: ?as= → single served domain → own
+  // profile domain → null. A signed-in viewer browses only domains their domain
+  // can initiate toward; null (signed out / no profile) browses all to_domains.
   const viewerDomain =
     searchParams.get('as') ?? boundDomain ?? myItem?.item_domain ?? null;
 
@@ -1067,17 +939,12 @@ export function HomePage() {
     [mapSelectedDomains, visibleDomains],
   );
 
-  // Domains whose fields drive the browse filters. This MUST match the domains
-  // actually queried, or the facet is silently dropped and that domain comes
-  // back unfiltered: `resolveAllowedFacetFields` honours a facet only when the
-  // field is declared for the item's own domain, and drops it with no error so
-  // a caller cannot enumerate undeclared/private fields (Q6). blue_dot's
-  // seeker and provider schemas share ZERO field names, so a mismatch here
-  // means every facet is a no-op.
-  //
-  // The map is multi-domain and takes its selection from `mapSelectedDomains`;
-  // the list is single-domain on `selectedDomain`. Reading `selectedDomain` in
-  // both cases scoped the panel to a stale domain on the map (Q7).
+  // Domains whose fields drive the browse filters. Must match the domains
+  // actually queried: the server silently drops a facet not declared for the
+  // item's own domain (so undeclared/private fields cannot be enumerated), and
+  // blue_dot's seeker and provider schemas share no field names. The map is
+  // multi-domain (`mapSelectedDomains`); the list is single-domain
+  // (`selectedDomain`).
   const filterFieldDomains = React.useMemo(() => {
     if (viewMode === 'map') return mapDomains;
     if (selectedDomain) {
@@ -1088,12 +955,10 @@ export function HomePage() {
     return counterparts.length > 0 ? counterparts : visibleDomains;
   }, [visibleDomains, viewerDomain, selectedDomain, viewMode, mapDomains]);
 
-  // #644 (spec D19): a domain is ALWAYS selected — `null` no longer means
-  // "all", it is only a transient pre-network state. This resolves the default
-  // once the network and visible domains are known, and also repairs a
-  // selection that has become invalid (a stale `?domain=`, or a domain the
-  // interaction matrix stopped showing). Previously that case reset to `null`,
-  // i.e. back to the All tab, which no longer exists.
+  // A domain is always selected; `null` is only a transient pre-network state.
+  // Resolves the default once the network and visible domains are known, and
+  // repairs an invalid selection (stale `?domain=`, or a domain the
+  // interaction matrix no longer shows).
   React.useEffect(() => {
     if (!network || visibleDomains.length === 0) return;
     const resolved = resolveDefaultDomain({
@@ -1106,12 +971,10 @@ export function HomePage() {
 
     setSelectedDomain(resolved);
 
-    // Only REWRITE the URL when repairing a param that was actually present
-    // and invalid. Writing it while merely resolving a default would (a) race
-    // with other `setSearchParams` callers in the same tick — a network switch
-    // sets `network` and deletes `domain`, and this effect would clobber that
-    // — and (b) pin a shared link to the sharer's default instead of letting
-    // each viewer resolve their own.
+    // Rewrite the URL only when repairing a param that was present. Writing a
+    // resolved default would race other `setSearchParams` callers in the same
+    // tick (a network switch deletes `domain`) and pin a shared link to the
+    // sharer's default.
     if (selectedDomain !== null) {
       setSearchParams((prev) => {
         prev.set('domain', resolved);
@@ -1120,69 +983,23 @@ export function HomePage() {
     }
   }, [network, selectedDomain, visibleDomains, myItem, setSearchParams]);
 
-  // #203 Task 7: the enum-field facet filters (`mapSelectedFields`, driven by
-  // `BrowseFiltersPanel`) now reach the server on the MAP path — sent as
-  // `item_state.<field>` markers params (`network-api.ts`'s `fetchNetworkMarkers`
-  // serializes each field's selected values as REPEATED query params, which
-  // the server's `qs`-based parser auto-arrays into `string[]`, matching
-  // `buildWhereClause`'s `= ANY(...)` facet filter — see Task 3). Computed
-  // here (not down at `singleDomainCards` below, its other consumer) so it's
-  // available before `useMapMarkers` needs it.
+  // Enum-field facet filters sent to the server on the map path as
+  // `item_state.<field>` params (see `fetchNetworkMarkers`). Computed here so
+  // it is ready before `useMapMarkers`.
   const activeFieldFilters = React.useMemo(
     () => Object.fromEntries(Object.entries(mapSelectedFields).filter(([, vals]) => vals.length > 0)),
     [mapSelectedFields],
   );
 
-  // Task 6 (#203 §5.2): the map view is now sourced from viewport-scoped
-  // markers rather than a full per-domain browse feed (that full fetch was
-  // removed from this page entirely in Task 7 of the caching epic). The
-  // top-bar free-text `search` now ALSO filters the map (map-native-text-search,
-  // #394): it's forwarded to `useMapMarkers` below, which sends it to the
-  // server as `/markers?q=` — a value-match against public (non-private)
-  // `item_state` fields, viewport-scoped, same as the list's search. The list
-  // still applies `search` itself via `buildFilteredCardsForDomain` below;
-  // the two are independent filters over the same query, not one deriving
-  // from the other. `BrowseFiltersPanel`'s enum-field facets, by contrast,
-  // drive the map server-side directly via `activeFieldFilters` — #394
-  // removed the `filterable: true` gate that used to additionally restrict
-  // this to a network.json-marked subset; every declared, non-private enum
-  // field the panel offers (the same full set the list uses,
-  // `getEnumFilterFieldsForDomains`) is now sent and applied by the server's
-  // facet guard (`resolveAllowedFacetFields`). See #360 for the proper
-  // long-term schema-driven search/filter declaration. The domain
-  // multi-select below (a client-side array-membership check on the
-  // already-fetched markers) remains client/list-only; free-text search, per
-  // the comment above, is sent to the server for both the map and the list.
-  //
-  // Even at low zoom for an anonymous / no-location visitor we now fetch the
-  // slim viewport markers (coords only, capped at MAP_FETCH_LIMIT) and cluster
-  // them, rather than the old count-only pull that showed just aggregate text.
-  // Clustering already bounds on-screen density, and a visitor needs to SEE
-  // where items are to know where to zoom — "N results, zoom in" gave no clue
-  // where. A small non-blocking count pill (below) keeps the aggregate visible.
-  // `meta.total` still reports the true match count regardless of the fetch cap.
-  // #644 (spec D11/D12): the map is MULTI-domain and is NOT bound to the
-  // list's single selection. It already issues one `/markers` request per
-  // domain, so several domains cost nothing structural.
-  //
-  // This previously followed `selectedDomain`, which was correct while the
-  // "All" tab existed (null meant "every visible domain"). With the All tab
-  // gone a domain is always selected, so that rule would pin the map to one
-  // domain permanently and remove its multi-domain view entirely.
-  //
-  // The selection now decides WHICH domains are FETCHED rather than which
-  // fetched markers survive a post-filter (spec D12) — deselecting a domain
-  // saves a request instead of wasting one. Empty selection means all visible,
-  // matching the control's own semantics.
+  // Design: docs/architecture/ui-home-browse.md
+  // The map fetches slim viewport markers per selected domain (empty selection
+  // = all visible) and clusters them; free-text `search` and the facets are
+  // applied server-side.
   const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
 
-  // #394: per-target-domain anchor. `myItem` (the resolved active profile,
-  // defined above) supplies the anchor's own domain; `anchorItemIdForTarget`
-  // consults the schema's interaction matrix (`network.actions[].interactions`)
-  // to decide whether that domain may anchor discover calls for `targetDomain`.
-  //
-  // Declared here, above the map's totals, rather than beside the list feed it
-  // was written for: both feeds need it, and this is the first consumer.
+  // Per-target-domain profile anchor: `anchorItemIdForTarget` consults the
+  // interaction matrix to decide whether the active profile may anchor
+  // discover calls for `targetDomain`. Used by both the map totals and the list.
   const anchorFor = React.useCallback(
     (targetDomain: string): string | undefined =>
       anchorItemIdForTarget({
@@ -1194,31 +1011,21 @@ export function HomePage() {
     [activeProfileId, myItem, network],
   );
 
-  // Filter-scoped totals for the MAP's filter bar (N5). The list already has
-  // this number from the feed it renders, so the extra count requests are
-  // enabled on the map only.
+  // Filter-scoped totals for the map's filter bar; the list gets its total from
+  // its own feed, so these requests run on the map only.
   const browseTotals = useBrowseTotals(
     network,
     mapDomains,
     activeFieldFilters,
     search,
     viewMode === 'map',
-    // The same per-target-domain anchor the list feed uses. Without it a typed
-    // query does not narrow this count, and the bar reported the whole network
-    // as matching while the map drew one pin.
+    // The list's anchor too, or a typed query does not narrow this count.
     anchorFor,
   );
 
 
-  // On the "All" tab the Filters-panel domain multi-select narrows which pins
-  // show (client-side membership check — every `Marker` carries `item_domain`).
-  // On a single-domain tab the fetch above is already scoped to that domain, so
-  // that multi-select (an "All"-tab control) does not apply.
-  // The viewer's own item ids across every domain — the map must never render
-  // the viewer's own pins. The list feed already drops them (`excludeOwnItems`),
-  // but the `/markers` path had no such filter, so an own profile showed on the
-  // map with a Connect button (you can't act on yourself). All domains, not just
-  // `currentDomain`, because the "All" map view spans domains.
+  // The viewer's own item ids across every domain: the map never renders the
+  // viewer's own pins (they cannot act on themselves).
   const ownMapItemIds = React.useMemo(
     () => new Set((myItems ?? []).map((it) => it.item_id)),
     [myItems],
@@ -1241,10 +1048,8 @@ export function HomePage() {
     [myItems, currentDomain]
   );
 
-  // --- Task 5 (#203 §5.1): paged infinite-scroll list view ------------------
-  // The selected domain's full schema object (needed by the paged hook), and
-  // the coords used to drive server-side nearest ordering. Coords are omitted
-  // (null) when there is no known location — the hook then fetches unordered.
+  // Paged list view. The selected domain's schema object, and the coords for
+  // server-side nearest ordering (null when no location is known).
   const selectedDomainObj = React.useMemo(
     () => (selectedDomain ? (network?.domains.find((d) => d.id === selectedDomain) ?? null) : null),
     [network, selectedDomain],
@@ -1254,31 +1059,18 @@ export function HomePage() {
     [userLocation],
   );
 
-  // #644: the area filter and the sort are now explicit UI state.
-  //
-  // `area` defaults to `anywhere`, which sends NO coordinates — the list spans
-  // the whole network. Previously `browseCoords` was forwarded unconditionally
-  // and signals-search turns a spatial clause into a hard `s_dwithin` filter,
-  // so every signed-in viewer silently saw only items within ~30 km. The
-  // resolved location is now merely the CENTRE OFFERED when the user picks a
-  // radius, and the ordering centre when they pick `nearest`.
+  // Area filter and sort. `area` defaults to `anywhere`, which sends no
+  // coordinates: signals-search turns a spatial clause into a hard distance
+  // filter, so the resolved location is only offered as the radius centre and
+  // used as the `nearest` ordering centre.
   const [area, setArea] = React.useState<BrowseArea>(DEFAULT_BROWSE_AREA);
   const [sort, setSort] = React.useState<BrowseSort>('relevance');
 
-  // An active RADIUS is re-centred on whatever "Search near" currently
-  // resolves, rather than on the centre captured when it was picked.
-  //
-  // `AreaSelect` snapshots `center` into the area state at pick time (the
-  // shape #644 specifies), so without this, choosing "Within 5 km" while on
-  // "My profile" and then switching to "Current location" left the radius
-  // measuring from the profile — the control said one thing and the query did
-  // another. `browseCoords` follows `preferredSource`
-  // (`useUserLocation(profileLocation, profilesResolved, preferredSource)`),
-  // so re-deriving here is all it takes.
-  //
-  // Falls back to the captured centre when no location resolves at all:
-  // dropping the filter silently would be worse than measuring from where the
-  // user last asked. `viewport` is untouched — its centre IS the rectangle.
+  // An active radius is re-centred on whatever "Search near" currently
+  // resolves, not the centre `AreaSelect` captured at pick time, so switching
+  // location source moves the radius too. Falls back to the captured centre
+  // when no location resolves. `viewport` is untouched: its centre is the
+  // rectangle.
   const resolvedArea = React.useMemo<BrowseArea>(
     () =>
       area.mode === 'radius' ? { ...area, center: browseCoords ?? area.center } : area,
@@ -1289,15 +1081,12 @@ export function HomePage() {
     () => deriveBrowseParams({ search, activeFieldFilters, area: resolvedArea, sort }),
     [search, activeFieldFilters, resolvedArea, sort],
   );
-  // Passed to the feed as the ORDERING centre only — it never filters.
+  // The ordering centre only; it never filters.
   const browseLocation = browseCoords;
-  // #394: shared discover params for both list paths — q/filters/relevance are
-  // the same regardless of which domain is being browsed. `anchorItemId` is
-  // deliberately NOT included here: signals-search enforces the network's
-  // interaction matrix and 403s (`INTERACTION_NOT_ALLOWED`) when the anchor's
-  // domain has no defined interaction with the browsed domain (e.g. a seeker
-  // browsing seekers), so the anchor must be computed PER target domain (see
-  // `anchorFor` below) rather than shared.
+  // Discover params shared by the list paths. `anchorItemId` is not shared:
+  // signals-search returns 403 `INTERACTION_NOT_ALLOWED` when the anchor's
+  // domain has no interaction with the browsed domain, so it is computed per
+  // target domain (`anchorFor`).
   const browseHookOpts = React.useMemo(
     () => ({
       q: browseParams.q,
@@ -1308,22 +1097,19 @@ export function HomePage() {
     }),
     [browseParams],
   );
-  // True when the active feed is served by the discover BFF (q OR filters OR
-  // relevance) — the server has already applied text + facet filtering, so the
-  // client-side filters in `buildFilteredCardsForDomain` must be bypassed.
+  // True when the discover BFF serves the feed (q, filters or relevance); the
+  // server already filtered, so `buildFilteredCardsForDomain` skips its own.
   const listDiscover = isDiscoverActive(browseParams);
 
-  // Single-domain paged fetch. Enabled only while a specific domain tab is
-  // selected; disabled (and thus inert) on the "All" tab.
+  // Single-domain paged fetch.
   const singleDomainList = useInfiniteBrowseItems(
     network,
     selectedDomainObj,
     browseLocation,
     {
-      // #644: don't fetch until a VALID domain is resolved. `selectedDomain`
-      // can transiently hold a stale/unbrowsable `?domain=` before the
-      // default-domain effect repairs it, and fetching that would waste a
-      // request — and, for a non-interacting domain, draw a 403 on the anchor.
+      // Wait for a valid domain: `selectedDomain` can briefly hold a stale
+      // `?domain=`, and fetching it wastes a request (or draws a 403 on the
+      // anchor for a non-interacting domain).
       enabled:
         selectedDomain !== null && visibleDomains.some((d) => d.id === selectedDomain),
       ...browseHookOpts,
@@ -1331,26 +1117,14 @@ export function HomePage() {
     },
   );
 
-  // Own-item filtering is a view concern (mirrored below by
-  // Own-item filtering is a view concern — apply it to the paged feed so a
-  // viewer never sees their own profile in their own browse list. Runs UPSTREAM
-  // of the discover bypass so it applies in both modes.
+  // Drop the viewer's own items from the feed, in both discover modes.
   const singleDomainItems = React.useMemo(() => {
     const own = excludeOwnItems(singleDomainList.items, localProfileItemIds);
 
-    // #646 C1: under `nearest` the card's pill IS the distance, so it has to
-    // resolve on both discover paths. signals-search returns a per-item
-    // `distanceMeters`; the NATIVE fallback does not (it orders by distance
-    // but projects no distance column, and adding one would have to be
-    // threaded through the peer-instance fetch too). Without this the pill
-    // simply vanished whenever signals-search was down — which is every local
-    // run, and any production outage.
-    //
-    // Computed from the same stored coordinates the server orders by, so the
-    // two agree to haversine-vs-spheroid error, far below the precision of a
-    // "4.2 km" label. Those coordinates carry PII jitter in both cases
-    // (`.claude/rules/database-conventions.md`), so this exposes nothing the
-    // ordering did not already.
+    // Under `nearest` the card's pill is the distance. signals-search returns
+    // `distanceMeters`; the native fallback orders by distance but does not
+    // project it, so compute it client-side from the same stored (PII-jittered)
+    // coordinates. Haversine error is far below the label's precision.
     if (singleDomainList.sortApplied !== 'nearest' || !browseCoords) return own;
 
     return own.map((item) => {
@@ -1361,43 +1135,28 @@ export function HomePage() {
     });
   }, [singleDomainList.items, singleDomainList.sortApplied, localProfileItemIds, browseCoords]);
 
-  // Single-domain: bottom sentinel advances the paged fetch. Server already
-  // orders nearest-first (§4.1), so no client `sortByNearest` for this path.
-  // (`useLoadMoreSentinel` reads the callback through a ref, so passing the
-  // hook's non-memoized `fetchNextPage` directly is safe — see its comment.)
+  // Bottom sentinel advances the paged fetch; the server already orders
+  // nearest-first. Passing the non-memoized `fetchNextPage` is safe (the
+  // sentinel reads it through a ref).
   const singleDomainSentinelRef = useLoadMoreSentinel(
     singleDomainList.fetchNextPage,
     singleDomainList.hasNextPage,
   );
 
-  // Single source of truth for the list federation-degradation banner
-  // (mirrors the map's `mapMarkers.partial` from P4): single-domain tab reads
-  // the one paged feed directly, "All" tab is the OR above.
-  // #644: one paged feed drives the list — a domain is always selected, so
-  // these read it directly. They previously forked between the single-domain
-  // feed and an OR / first-non-undefined across the "All" tab's per-domain
-  // feeds, which no longer exist.
+  // List federation-degradation banner and note inputs, from the one paged feed.
   const listPartial = singleDomainList.partial;
   const listDegraded = singleDomainList.degraded;
   const listDistanceMeters = singleDomainList.distanceMeters;
-  // #644: label from what the server DID, never from what we asked for — a
-  // `relevance` request with no anchor and no text degrades to `newest`.
+  // Label from what the server did, not what was asked: a `relevance` request
+  // with no anchor and no text degrades to `newest`.
   const listSortApplied = singleDomainList.sortApplied;
-  // A response arrived carrying no order — see the hook. Kept separate from
+  // A response arrived carrying no order (see the hook); distinct from
   // `listSortApplied === undefined`, which also covers "nothing loaded yet".
   const listSortUnreported = singleDomainList.sortUnreported;
-  // #394 (review fix): whether the viewer actually has a profile anchor being
-  // sent for the browsed domain(s) — derived from the SAME rule that gates
-  // the anchor itself (`anchorFor`/`anchorItemIdForTarget`, both built on
-  // `domainsInteract`), not the looser "signed in with an active profile"
-  // check this used to be. A directory-style network can have a selected (or,
-  // on "All", every visible) domain with NO interaction edge to the viewer's
-  // own profile domain — no anchor is sent for that view at all, and the note
-  // must not claim profile-relevance when nothing was actually anchored.
-  // Single-domain tab: gate on that one target domain via `anchorFor` (the
-  // exact function `singleDomainList` calls above). "All"/no-selection view:
-  // true iff the viewer's profile domain interacts with at least one visible
-  // domain (mirrors `computeVisibleDomains`' own per-domain anchor gating).
+  // Whether a profile anchor is actually sent for the browsed domain, using the
+  // same `domainsInteract` rule that gates the anchor. A directory-style
+  // network can have no interaction edge to the viewer's domain, and the note
+  // must not then claim profile relevance.
   const activeProfileDomain = myItem?.item_domain ?? null;
   const hasProfileAnchor = computeHasProfileAnchor({
     selectedDomain,
@@ -1416,17 +1175,12 @@ export function HomePage() {
     hasLocation,
     degraded: listDegraded,
     distanceMeters: listDistanceMeters,
-    // The EFFECTIVE source of the coordinate actually sent (not the toggle
-    // preference): logged out / no profile → useUserLocation falls back to the
-    // browser coordinate, so the note must say "current location", not "your
-    // profile location". `preferredSource` stays 'profile' by default even when
-    // no profile exists, which produced the wrong wording. 'none' can't reach
-    // the km-bearing note branch (hasLocation would be false), so map it to the
-    // 'profile' default harmlessly.
+    // The effective source of the coordinate actually sent, not the toggle
+    // preference: with no profile, useUserLocation uses the browser coordinate.
     locationSource: noteLocationSource(resolvedLocationSource),
   });
 
-  // Active schema: from the selected browsing domain, or first visible domain
+  // Active schema: the selected domain's, else the first visible domain's.
   const activeSchema = React.useMemo(() => {
     if (!network) return undefined;
     const domainId = selectedDomain ?? visibleDomains[0]?.id;
@@ -1435,7 +1189,7 @@ export function HomePage() {
     return domain.item_schemas ? Object.values(domain.item_schemas)[0] : undefined;
   }, [network, selectedDomain, visibleDomains]);
 
-  // Build domain → schema map for sidebar profile title resolution
+  // Domain → schema map for sidebar profile titles.
   const userSchemas = React.useMemo(() => {
     if (!network) return {};
     const map: Record<string, RJSFSchema> = {};
@@ -1446,9 +1200,8 @@ export function HomePage() {
     return map;
   }, [network]);
 
-  // Get all available actions for a given target domain
-  // Browse requires an active profile (myItem) as the source; the shared helper
-  // flattens the interaction matrix for currentDomain -> targetDomain.
+  // Available actions toward a target domain. Requires an active profile as
+  // the source.
   const getActionsForDomain = React.useCallback(
     (targetDomainId: string): DotActionSchema[] =>
       myItem ? flattenInteractionActions(network, currentDomain, targetDomainId) : [],
@@ -1458,13 +1211,11 @@ export function HomePage() {
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
-      // Draft source profile can't act — prompt to complete it, don't submit.
       if (promptCompleteDraftProfile(myItem)) {
         setBulkConnectOpen(false);
         return;
       }
-      // Minor ward: confirm before the guardian OTP is dispatched (the bulk
-      // perform below is what sends it) — same "proceed?" step as single actions.
+      // Minor ward: confirm before the bulk perform below sends the guardian OTP.
       if (
         !confirmed &&
         u18Status?.isMinor === true &&
@@ -1480,18 +1231,15 @@ export function HomePage() {
       }
       setBulkConnectBusy(true);
       try {
-        // Task 7 (#203 §5.2 cleanup): bulk-select only renders in the LIST
-        // view (see `browseSelection.selectMode` below), so its candidates are
-        // always sourced from whichever paged list feed is currently active —
-        // never from the map/markers, so no `mapDetailItem` fallback is needed
-        // here (contrast `onActionSubmit` below).
+        // Bulk select only renders in the list view, so candidates come from
+        // the paged list feed, never the map.
         const allItems = singleDomainItems;
         const ids = Array.from(browseSelection.selected);
         const targets = ids
           .map((id) => allItems.find((i) => i.item_id === id))
           .filter((t): t is Item => !!t);
 
-        // Guard: nothing valid to send (e.g. selection went stale after a reload)
+        // Nothing valid to send (e.g. the selection went stale after a reload).
         if (targets.length === 0) {
           setBulkConnectOpen(false);
           browseSelection.exitSelect();
@@ -1525,20 +1273,19 @@ export function HomePage() {
           });
 
         const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
-        // New actions must surface without waiting for the 60s poll (§C5).
+        // New actions surface without waiting for the poll.
         queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         setBulkConnectOpen(false);
 
-        // The three-way decision lives in `resolveBulkOutcome` (pure, above);
-        // this only reacts to it.
+        // `resolveBulkOutcome` makes the three-way decision; this reacts to it.
         const outcome = resolveBulkOutcome(env, targets, payloads);
 
         if (outcome.kind === 'all') {
           toast.success(t('home.bulk_connected_all', { count: outcome.succeeded }));
           browseSelection.exitSelect();
         } else if (outcome.kind === 'guardian') {
-          // A code has already gone to the guardian — the OTP dialog owns the
-          // resubmit from here.
+          // A code has already gone to the guardian; the OTP dialog owns the
+          // resubmit.
           setBulkConnectOpen(false);
           setBulkGuardianChallenge({
             payloads: outcome.payloads,
@@ -1583,7 +1330,7 @@ export function HomePage() {
     ],
   );
 
-  // Legacy: single active action for the selected domain (for CardGrid)
+  // The single active action for the selected domain (for CardGrid).
   const activeAction = React.useMemo<DotActionSchema | null>(() => {
     const toDomain = selectedDomain ?? visibleDomains[0]?.id;
     if (!toDomain) return null;
@@ -1591,19 +1338,14 @@ export function HomePage() {
     return actions[0] ?? null;
   }, [getActionsForDomain, selectedDomain, visibleDomains]);
 
-  // Build per-domain card items filtered by search, domain, and status, for
-  // the LIST view (the map view reads viewport markers instead — decoupled
-  // in Task 6/7, #203 §5.2).
-  // Derive enum filter field metadata once (used in the memos below and in MapView)
+  // Enum filter field metadata, used below and by MapView.
   const enumFilterFields = React.useMemo(
     () => (network ? getEnumFilterFieldsForDomains(network.domains) : []),
     [network],
   );
 
-  // Task 5 (#203 §5.1): the search/enum/map-domain filter, applied to the
-  // paged feeds (the full-fetch `domainItems` snapshot this used to read from
-  // was removed in Task 7). Single-domain list cards (server already orders
-  // nearest-first — no client `sortByNearest`).
+  // List cards: the search/enum filter applied to the paged feed (bypassed in
+  // discover mode). The server already orders nearest-first.
   const singleDomainCards = React.useMemo(
     () =>
       selectedDomain
@@ -1617,29 +1359,23 @@ export function HomePage() {
     [selectedDomain, singleDomainItems, search, activeFieldFilters, enumFilterFields, listDiscover],
   );
 
-  // #645 §4.1: the applied-filter state (chips, per-chip removal, reset, and
-  // Every facet the queried domain will actually honour, key → human label.
-  // Serves both the chip labels and the stale-facet prune below, so the two
-  // can never disagree about what counts as a valid facet. Mirrors the
-  // server's allowlist (declared + non-private) rather than the narrower
-  // enum-only set the filter panel renders — see `resolveFacetFieldLabels`.
+  // Every facet the queried domain will honour, key → label. Feeds both the
+  // chips and the stale-facet prune, so they agree. Mirrors the server's
+  // allowlist (declared + non-private), not the panel's enum-only set.
   const facetFieldLabels = React.useMemo(
     () => resolveFacetFieldLabels(filterFieldDomains),
     [filterFieldDomains],
   );
 
-  // Memoized: the stale-facet pruning effect below depends on it, and a fresh
-  // identity each render would re-run that effect on every render.
+  // Memoized: the stale-facet prune effect below depends on it.
   const handleMapFieldsChange = React.useCallback((fields: Record<string, string[]>) => {
     setMapSelectedFields(fields);
     setSearchParams((prev) => {
-      // Remove all existing f_* params before re-writing
       const keysToDelete: string[] = [];
       for (const key of prev.keys()) {
         if (key.startsWith('f_')) keysToDelete.push(key);
       }
       for (const key of keysToDelete) prev.delete(key);
-      // Write active field selections as ?f_<key>=value1,value2
       for (const [fieldKey, values] of Object.entries(fields)) {
         if (values.length > 0) {
           prev.set(`f_${fieldKey}`, values.map(encodeURIComponent).join(','));
@@ -1649,24 +1385,15 @@ export function HomePage() {
     });
   }, [setSearchParams]);
 
-  // Drop facets the queried domain cannot honour (Q6/Q7).
-  //
-  // Switching domain used to leave the previous domain's facets in state AND
-  // in the `?f_*` params. The server then dropped each one silently
-  // (`resolveAllowedFacetFields` — an undeclared field is never an error, so a
-  // caller cannot probe for private fields) and returned that domain
-  // UNFILTERED, while the chip bar still advertised the filter as active. With
-  // blue_dot's seeker and provider schemas sharing no field names, every facet
-  // survived a domain switch as a visible no-op.
-  //
-  // Pruning here rather than at each call site is deliberate: the chips, the
-  // trigger badge, the `?f_*` params and the request all read this one state,
-  // so they stay consistent by construction. Goes through
-  // `handleMapFieldsChange` so the URL is rewritten too — otherwise a reload
-  // would restore what was just pruned.
+  // Drop facets the queried domain cannot honour. The server silently drops an
+  // undeclared field (so private fields cannot be probed) and returns the
+  // domain unfiltered, while the chip would still look active. Pruning this one
+  // state keeps chips, badge, `?f_*` params and the request consistent; going
+  // through `handleMapFieldsChange` rewrites the URL so a reload does not
+  // restore the pruned facets.
   React.useEffect(() => {
     const allowed = new Set(Object.keys(facetFieldLabels));
-    if (allowed.size === 0) return; // schemas not resolved yet — prune nothing
+    if (allowed.size === 0) return; // schemas not resolved yet
     const stale = Object.keys(mapSelectedFields).filter((key) => !allowed.has(key));
     if (stale.length === 0) return;
     const next = { ...mapSelectedFields };
@@ -1674,8 +1401,8 @@ export function HomePage() {
     handleMapFieldsChange(next);
   }, [facetFieldLabels, mapSelectedFields, handleMapFieldsChange]);
 
-  // "is anything applied") lives in one hook so the four always agree and a
-  // page component this size doesn't also carry a loop and a switch.
+  // Applied-filter state (chips, per-chip removal, reset, "anything applied")
+  // lives in one hook so the four always agree.
   const {
     chips: appliedChips,
     onRemove: handleRemoveChip,
@@ -1685,33 +1412,23 @@ export function HomePage() {
     search,
     setSearch,
     activeFieldFilters,
-    // `handleMapFieldsChange`, NOT the bare `setMapSelectedFields`: facets are
-    // mirrored into the URL as `?f_<key>=…` and that handler is what rewrites
-    // them. Clearing state alone left the params in place, so a reload
-    // re-seeded the very filters the user had just cleared.
+    // Not the bare `setMapSelectedFields`: facets are mirrored into `?f_<key>`
+    // params, and only this handler rewrites them.
     setFieldFilters: handleMapFieldsChange,
     fieldLabels: facetFieldLabels,
     area,
     setArea,
   });
 
-  // The map applies facets and the search text; it does not apply `area` or
-  // `sort`. Clearing from there must not silently reset controls the user
-  // cannot see.
+  // The map applies facets and search text but not `area` or `sort`, so
+  // clearing from there must not reset controls the user cannot see.
   const handleClearFacetsOnly = React.useCallback(() => {
     setSearch('');
     handleMapFieldsChange({});
   }, [setSearch, handleMapFieldsChange]);
 
-  // Only the domains this viewer can actually browse.
-  //
-  // REVERSES spec D7, which listed every domain in the network and marked the
-  // non-interacting ones disabled-with-a-reason. That produced a permanently
-  // dead `Seeker` button in the middle of the primary browse control for any
-  // signed-in seeker, which reads as a broken toggle rather than as an
-  // explanation. `computeVisibleDomains` (and so the interaction matrix) is
-  // unchanged and still governs what is fetchable — the difference is only
-  // that a domain the viewer cannot browse is no longer rendered.
+  // Only the domains this viewer can browse; a non-interacting domain is not
+  // rendered at all (a permanently disabled button reads as broken).
   const domainOptions = React.useMemo<DomainOption[]>(
     () =>
       visibleDomains.map((d) => ({
@@ -1725,10 +1442,9 @@ export function HomePage() {
 
   const handleDomainSelect = (domainId: string) => {
     setSelectedDomain(domainId);
-    // Switching the browse domain changes the available filter fields, so reset
-    // the map domain + enum-field selections: a leftover domain chip from
-    // another scope would otherwise hide every item, and stale field chips would
-    // show as active even though their group is no longer rendered.
+    // New domain, new filter fields: reset the map domain and enum-field
+    // selections, or a leftover chip hides every item or shows as active
+    // with no group rendered.
     setMapSelectedDomains([]);
     setMapSelectedFields({});
     setSearchParams((prev) => {
@@ -1742,17 +1458,10 @@ export function HomePage() {
   };
 
   const handleViewModeChange = (mode: ViewMode) => {
-    // Spec D27: the map is multi-domain, the list takes exactly one. Carry the
-    // map's selection across so the list shows something the viewer was just
-    // looking at. `collapseToSingleDomain` existed for this and was never
-    // called, so the collapse never happened — pick two domains on the map,
-    // switch to list, and you landed on whatever `selectedDomain` happened to
-    // hold, possibly a domain outside the map selection entirely.
-    //
-    // Only when the current list domain is NOT already one of the map's, so
-    // toggling map↔list does not reshuffle a choice the viewer already made.
-    // An empty map selection means "all visible", which any list domain
-    // already satisfies.
+    // The map is multi-domain and the list takes one, so on map → list collapse
+    // the map's selection to one of its domains. Only when the list domain is
+    // not already one of the map's, so toggling does not reshuffle a choice;
+    // an empty map selection means "all visible".
     const collapsed =
       mode === 'list' &&
       mapSelectedDomains.length > 0 &&
@@ -1760,9 +1469,8 @@ export function HomePage() {
         ? collapseToSingleDomain(mapSelectedDomains, visibleDomains)
         : null;
 
-    // Deliberately NOT `handleDomainSelect`: that clears `map_domains` and the
-    // facet params, which would throw away the map selection the viewer is
-    // about to switch back to.
+    // Not `handleDomainSelect`: that clears `map_domains` and the facet params,
+    // losing the map selection the viewer may switch back to.
     if (collapsed) setSelectedDomain(collapsed);
 
     setViewMode(mode);
@@ -1787,7 +1495,7 @@ export function HomePage() {
   const handleNetworkSelect = (networkId: string) => {
     setSelectedNetworkId(networkId);
     // Domain is network-specific; clearing it lets the default-domain effect
-    // (#644, spec D19) resolve one for the newly selected network.
+    // resolve one for the new network.
     setSelectedDomain(null);
     setSearchParams((prev) => {
       prev.set('network', networkId);
@@ -1811,15 +1519,13 @@ export function HomePage() {
 
   const showNetworkSelector = computeShowNetworkSelector(servedScope, allNetworks.length);
 
-  // `|| undefined` preserves the "absent → undefined" contract the downstream
-  // `?? 'items'` / prop defaults rely on (the shared resolver returns '').
+  // `|| undefined` keeps the "absent → undefined" contract downstream defaults
+  // rely on (the resolver returns '').
   const currentDomainLabel = formatDomainLabel(selectedDomain, network?.domains) || undefined;
 
-  // Get dynamic actions for the selected domain
   const actions = resolveDomainActions(selectedDomain, getActionsForDomain, activeAction);
 
-  // Label the pending profile so the user knows which profile the (repeating)
-  // consent popup is for — reuses the sidebar's title-field candidates.
+  // Names the profile the (repeating) consent prompt is for.
   const pendingProfileLabel = React.useMemo(() => {
     if (!pendingConsentProfileId) return undefined;
     const profile = myItems.find((p) => p.item_id === pendingConsentProfileId);
@@ -1833,22 +1539,20 @@ export function HomePage() {
     return value ? String(value) : profile.item_domain;
   }, [pendingConsentProfileId, myItems, userSchemas]);
 
-  // Nested render fn (not a const element) so the guardian-gate + brand
-  // conditionals live inside a function, keeping HomePage's cognitive complexity
-  // within bounds (SonarCloud S3776); called from both return branches below.
+  // Render function rather than an element to keep HomePage's cognitive
+  // complexity within bounds (Sonar S3776).
   const renderU18GuardianFlowModal = () =>
     showU18GuardianFlow && network ? (
       <U18GuardianFlow
         network={network.id}
         brand={brand === 'standard' ? null : brand}
         purpose={{ kind: 'profile' }}
-        // Skip the DOB step when birth data is already stored (captured at
-        // login) — we never re-ask the date of birth at profile-creation time.
+        // Skip the DOB step when birth data is already stored.
         initialStep={u18InitialStep}
         onComplete={() => {
           setGuardianFlowDismissed(true);
-          // Re-read stored U18 status so guardianVerified/birth data are fresh —
-          // stops a later profile creation from re-asking the DOB.
+          // Re-read stored U18 status so a later profile creation does not
+          // re-ask the DOB.
           setU18StatusReload((n) => n + 1);
           void refetchU18Gate();
         }}
@@ -1862,8 +1566,8 @@ export function HomePage() {
 
   const profileConsentModal = (
     <ProfileConsentModal
-      // The U18 first-login gate takes priority; and `guardianActive` hides this
-      // while the shared hook's guardian OTP/capture dialog is open (don't stack).
+      // The U18 gate takes priority, and `guardianActive` hides this while a
+      // guardian dialog is open.
       open={Boolean(pendingConsentProfileId) && !showU18GuardianFlow && !guardianActive}
       statement={profileStatement}
       profileLabel={pendingProfileLabel}
@@ -1876,11 +1580,10 @@ export function HomePage() {
           setPendingConsentProfileId(null);
           return;
         }
-        // Adult self-accept OR a minor's guardian-OTP flow — the shared hook
-        // handles the branch, records consent, promotes draft→live, updates the
-        // profileConsent + my-items caches, and toasts once. For a minor, onDone
-        // runs only after the guardian OTP verifies. On failure the hook toasts
-        // and does NOT call onDone, so the prompt stays open for a retry.
+        // The shared hook handles adult self-accept or a minor's guardian OTP,
+        // records consent, promotes draft→live, updates caches and toasts.
+        // `onDone` runs only on success (for a minor, after the guardian OTP
+        // verifies), so a failed attempt leaves the prompt open.
         await acceptProfileConsentFlow({
           network: network.id,
           brand: brand === 'standard' ? null : brand,
@@ -1891,8 +1594,8 @@ export function HomePage() {
           },
           version: profileDoc.current_version,
           isMinor: u18Status?.isMinor === true,
-          // Guardian capture may reclassify the ward (or capture a guardian);
-          // re-sync U18 status so a retry runs with the corrected status.
+          // Guardian capture may reclassify the ward; re-sync U18 status so a
+          // retry uses it.
           onGuardianStatusChanged: () => setU18StatusReload((n) => n + 1),
           onDone: () => {
             setActiveProfileId(pending);
@@ -1904,10 +1607,8 @@ export function HomePage() {
     />
   );
 
-  // Guardian OTP challenge for a MINOR's BULK action (#453). One dialog for the
-  // whole batch; the code resubmits the stashed payloads via performActionsBulk.
   // "A code will be sent to your guardian — proceed?" confirm before a minor's
-  // bulk action dispatches the OTP (mirrors the single-action confirm).
+  // bulk action dispatches the OTP.
   const bulkGuardianConfirmModal = (
     <Dialog
       open={!!bulkGuardianConfirm}
@@ -1962,9 +1663,8 @@ export function HomePage() {
           const otherFailedIds = ch.otherFailedIds ?? [];
           setBulkGuardianChallenge(null);
           if (otherFailedIds.length > 0) {
-            // Mixed batch: the guardian-gated items went through, but other
-            // items failed for a non-guardian reason — keep those selected so
-            // the ward can retry them, and say so rather than claim "all done".
+            // Mixed batch: keep the non-guardian failures selected for retry
+            // rather than claim everything succeeded.
             toast.warning(
               t('home.bulk_connected_partial', {
                 succeeded: env2.summary.succeeded,
@@ -1978,8 +1678,8 @@ export function HomePage() {
           }
           return;
         }
-        // Still failing (wrong/expired code, throttled …) — throw a classified
-        // error so GuardianOtpDialog shows the inline message and stays open.
+        // Still failing (wrong/expired code, throttled): throw a classified
+        // error so GuardianOtpDialog shows it inline and stays open.
         const firstFail = env2.results.find((r) => r.status === 'error');
         const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
         throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
@@ -2019,26 +1719,10 @@ export function HomePage() {
     );
   }
 
-  // Task 7 (#203 §5.2 cleanup): re-sourced from the list totals — keyed on
-  // `selectedDomain` (which paged feed is actually driving the list), not
-  // `headerDomain` (a display-only label that can be non-null even on the
-  // "All" tab when exactly one domain is visible). This also resolves the
-  // P3-deferred header-count-vs-list-total mismatch: the header now reports
-  // the same server-side total the "Showing X of Y" list indicator uses,
-  // instead of a client-filtered card count.
-  // #644: the toolbar count must follow the VIEW, not always the list feed.
-  // Found in browser QA: on the map the bar read "22 listings" (the list's
-  // single-domain total) while the map showed 66 markers across two domains,
-  // because the map is multi-domain and the list is not. Each view reports its
-  // own total.
-  // Which domains the control shows as selected. The map is multi-domain and
-  // takes its own selection (empty meaning "all visible"); the list is
-  // single-select on the one domain driving its feed (spec D11). Hoisted out
-  // of the JSX because nesting the two conditions inline was unreadable.
-  // Deliberately NOT memoized: this sits AFTER the `if (!network) return`
-  // guard above, so a hook here would run on some renders and not others —
-  // "rendered more hooks than during the previous render". It is a two-branch
-  // array build; memoizing it would buy nothing and cost correctness.
+  // Which domains the control shows as selected: the map's own selection
+  // (empty = all visible), or the list's single domain. Not memoized: this is
+  // after the `if (!network) return` guard, so a hook here would break the
+  // rules of hooks.
   const toolbarSelectedDomains = ((): string[] => {
     if (viewMode === 'map') {
       return mapSelectedDomains.length > 0
@@ -2054,47 +1738,31 @@ export function HomePage() {
   if (hasProfileAnchor) relevanceBasis = 'profile';
   else if (search.trim()) relevanceBasis = 'search';
 
-  // Relevance needs BOTH a query vector (an anchor or typed text) and a live
-  // signals-search: the native fallback does no ranking, so a relevance
-  // request there comes back `sort_applied: 'newest'`. Offering the option in
-  // either case produced a menu that ticked relevance while the trigger read
-  // "Newest" (Q2).
+  // Relevance needs a query vector (anchor or typed text) and a live
+  // signals-search; the native fallback does no ranking and reports
+  // `sort_applied: 'newest'`.
   const relevanceAvailable = relevanceBasis !== null && !listDegraded;
 
-  // The bar states "how many match these filters" in BOTH views, so switching
-  // list<->map no longer changes the number for an unexplained reason. The
-  // VIEWPORT count keeps its own home: the pill on the map, whose whole job is
-  // "how many are in this area".
+  // The bar shows "how many match these filters" in both views; the map's
+  // viewport count lives in its own pill.
   const contentCount = viewMode === 'map' ? browseTotals.total : singleDomainList.total;
   const contentLoading =
     viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading;
 
-  // Suppressed on an empty list — it would falsely imply results are shown;
-  // `BrowseEmptyState` carries the radius-aware explanation there instead.
-  // Suppressed during loading too (contentCount 0), where the skeleton shows.
+  // Suppressed on an empty or loading list, where `BrowseEmptyState` or the
+  // skeleton explains instead.
   const listNoteText = listNote && contentCount > 0 ? formatListNote(t, listNote) : null;
 
 
-  // Single filters element surfaced in the top bar (next to search) and, when
-  // the map is maximized, in the map overlay (the top bar is hidden in
-  // fullscreen). Each location instantiates its own popover state; the filter
-  // selection itself is controlled via the shared props below.
-  // Nested render fn (not const elements) so the select-button / header-actions /
-  // guest-vs-signed-in conditionals live inside a function, keeping HomePage's
-  // cognitive complexity within bounds (SonarCloud S3776). Called each render, so
-  // no memo dependency array to keep in sync.
   // Bulk-select toggle, rendered over the results rather than in the filter
-  // bar: it acts ON the results instead of choosing them, so grouping it with
-  // sort/location/filters implied it was another way to narrow the list.
+  // bar because it acts on the results instead of choosing them.
   const browseSelectButton =
     myItem && viewMode === 'list' ? (
       <Button
         type="button"
         variant={browseSelection.selectMode ? 'default' : 'outline'}
         size="sm"
-        // `size="sm"` is h-8 (32px), below the touch minimum every other
-        // control in this browse chrome honours. It is a primary action on the
-        // list, so it gets the same treatment.
+        // `size="sm"` is below the touch minimum; match the rest of the chrome.
         className="pointer-coarse:min-h-11"
         data-tour="bulk-select"
         onClick={() =>
@@ -2108,29 +1776,14 @@ export function HomePage() {
       </Button>
     ) : null;
 
-  /**
-   * The browse toolbar, as a render FUNCTION rather than an element.
-   *
-   * Not a hoisted const like `listFiltersPanel` above, and the distinction
-   * matters: cognitive complexity is measured PER FUNCTION, and this subtree
-   * carries nine points of it — the `network ?` guard plus four
-   * view-dependent ternaries, each paying a nesting increment for sitting
-   * inside that guard. Held as an element those nine land on `HomePage`,
-   * which was already at its limit; held as a function they are budgeted
-   * here, next to the props they actually describe. Same idiom as
-   * `renderPageHeader` below.
-   */
-  // The same control the toolbar renders on the map, for the MAXIMIZED map's
-  // overlay: fullscreen covers the page header, so without this the map's one
-  // location control disappears exactly when the map is the whole screen.
-  // A plain element rather than a render function — it takes no branch, so it
-  // costs this component (already at the cognitive-complexity limit) nothing.
+  // The map's location control, repeated in the maximized map's overlay
+  // because fullscreen covers the page header.
   const mapLocationControl = (
     <LocationSourceSelect
       value={preferredSource}
-      // What the map is ACTUALLY centred on. Same trap the list note documents
-      // above: `preferredSource` stays 'profile' even with no profile
-      // location, while `useUserLocation` resolves to the browser coordinate.
+      // What the map is actually centred on: `preferredSource` stays 'profile'
+      // even with no profile location, while `useUserLocation` resolves to the
+      // browser coordinate.
       effectiveValue={noteLocationSource(resolvedLocationSource)}
       onChange={handleLocationSourceChange}
       profileAvailable={profileLocation !== null}
@@ -2138,6 +1791,9 @@ export function HomePage() {
     />
   );
 
+  // A render function rather than an element: cognitive complexity is
+  // measured per function, and this subtree's view-dependent ternaries would
+  // push `HomePage` over its limit (Sonar S3776).
   const renderBrowseToolbar = () =>
     network ? (
       <BrowseToolbar
@@ -2154,9 +1810,8 @@ export function HomePage() {
           if (next[0]) handleDomainSelect(next[0]);
         }}
         count={contentLoading ? undefined : contentCount}
-        // Map only: names the items that can never be pins at any zoom, so
-        // the part of the gap with the map's viewport pill that zooming
-        // out will never close is stated rather than inferred.
+        // Map only: items that can never be pins, so the gap with the
+        // viewport pill that zooming out will not close is stated.
         notMappable={viewMode === 'map' ? browseTotals.notMappable : undefined}
         sort={sort}
         sortApplied={listSortApplied}
@@ -2168,9 +1823,7 @@ export function HomePage() {
         onSortChange={setSort}
         area={area}
         defaultCenter={browseCoords}
-        // The location source now lives WITH the distance, in one control
-        // (#644 QA redesign) — the standalone "Search near" toggle asked
-        // the same question a second time, in a second place.
+        // The location source lives with the distance, in one control.
         locationSource={preferredSource}
         effectiveLocationSource={noteLocationSource(resolvedLocationSource)}
         onLocationSourceChange={handleLocationSourceChange}
@@ -2179,12 +1832,9 @@ export function HomePage() {
         onAreaChange={setArea}
         chips={appliedChips}
         onRemoveChip={handleRemoveChip}
-        // Clear-all must offer to clear only what APPLIES to the view in
-        // front of the user. On the map, Sort and Location are not
-        // rendered and `area` never reaches `useMapMarkers` at all (the
-        // map scopes by viewport), so counting them left a lone "Clear
-        // all" on the map offering to clear something invisible that was
-        // having no effect there.
+        // Clear-all offers only what applies to the current view: the map
+        // renders no Sort or Location and ignores `area` (it scopes by
+        // viewport).
         onClearAll={viewMode === 'map' ? handleClearFacetsOnly : handleClearAll}
         canClearAll={viewMode === 'map' ? appliedChips.length > 0 : canClearAll}
       />
@@ -2194,10 +1844,7 @@ export function HomePage() {
     return (
       <>
         {!user && <GuestHero />}
-        {/* Signed-in only, and now its sole remaining job: prompt a viewer who
-            has no profile yet. Title/description/count all moved or went away
-            (#645) — see `ContentHeader`. The domain control and the location
-            controls that briefly shared this space are both in the toolbar. */}
+        {/* Signed-in only: prompts a viewer who has no profile yet. */}
         {user && (
           <ContentHeader
             count={undefined}
@@ -2211,7 +1858,7 @@ export function HomePage() {
   const filtersPanel = (
     <BrowseFiltersPanel
       // The map's own copy, shown only while maximized (the toolbar is behind
-      // the overlay), where it floats over tiles rather than sitting in a row.
+      // the overlay).
       trigger="overlay"
       domains={visibleDomains}
       filterFieldDomains={filterFieldDomains}
@@ -2221,14 +1868,8 @@ export function HomePage() {
     />
   );
 
-  // Task 6 (#203 §6): the page-header mount of the filters panel (passed to
-  // `PageShell` below) — as opposed to `filtersPanel` above, which is also
-  // reused as MapView's OWN copy rendered only while the map is maximized
-  // (the header is covered in fullscreen; see `MapView`'s `filtersSlot` doc).
-  // #394: previously this mount marked the selected facet chips
-  // paused/not-applied when the discover BFF fell back to native — since the
-  // fallback now applies facet filters natively, that pausing no longer
-  // applies and this is identical to `filtersPanel` above.
+  // The toolbar's filters panel; `filtersPanel` above is the maximized map's
+  // copy.
   const listFiltersPanel = (
     <BrowseFiltersPanel
       domains={visibleDomains}
@@ -2239,9 +1880,9 @@ export function HomePage() {
     />
   );
 
-  // One marker-details renderer for both shapes: the desktop popup bubble and
-  // the phone bottom sheet (#745). `onBeforeConnect` closes whichever is open,
-  // so the action's own modal does not end up underneath it.
+  // One marker-details renderer for the desktop popup and the phone bottom
+  // sheet. `onBeforeConnect` closes whichever is open so the action's modal is
+  // not underneath it.
   const renderMarkerDetail = (
     marker: MapMarker,
     triggerAction: TriggerAction,
@@ -2263,8 +1904,7 @@ export function HomePage() {
     const markerSchema = markerDomain?.item_schemas
       ? (Object.values(markerDomain.item_schemas)[0] as import('@rjsf/utils').RJSFSchema)
       : activeSchema;
-    // Domain's item type (e.g. `job_posting_1.0`) for the by-id
-    // detail fetch — slim markers don't carry it.
+    // The domain's item type for the by-id detail fetch; slim markers lack it.
     const markerItemType = markerDomain?.item_schemas
       ? Object.keys(markerDomain.item_schemas)[0]
       : undefined;
@@ -2291,8 +1931,7 @@ export function HomePage() {
   };
 
   // The sheet's heading: the item's configured title once its detail has
-  // loaded (`onItemResolved` lifts it into `mapDetailItem`), the marker's
-  // generic label until then.
+  // loaded (via `mapDetailItem`), the marker's generic label until then.
   const markerSheetTitle = (marker: MapMarker): string => {
     const baseItemId = marker.id.split('#')[0];
     const titleField = network?.domains.find((d) => d.id === marker.domain)?.card?.title_field;
@@ -2310,20 +1949,12 @@ export function HomePage() {
       networks={pickNetworksForShell(showNetworkSelector, allNetworks)}
       selectedNetwork={selectedNetworkId}
       onNetworkSelect={handleNetworkSelect}
-      // #645 (spec D10): the sidebar no longer carries domain selection —
-      // domain IS a filter and now lives in the browse toolbar with the
-      // others. `hideBrowse` keeps the sidebar's other groups intact.
+      // Domain selection lives in the browse toolbar; `hideBrowse` keeps the
+      // sidebar's other groups.
       hideBrowse
-      // Still passed despite `hideBrowse`, because the sidebar reads
-      // `my_items_label` out of it to title the viewer's own-items group — a
-      // provider's items are job postings, so that group is "My Jobs", not
-      // "My Profile(s)". Dropping this prop along with the domain selector is
-      // what made the heading fall back to the generic label here while the
-      // edit page, which passes both, got it right.
-      //
-      // The NETWORK's domains, not `visibleDomains`: the latter is the
-      // browsable counterparty set, which excludes the viewer's own domain —
-      // so the lookup for a provider's own label would never match.
+      // Still needed: the sidebar reads `my_items_label` from it to title the
+      // own-items group (e.g. "My Jobs" for a provider). The network's domains,
+      // not `visibleDomains`, which excludes the viewer's own domain.
       domains={network.domains}
       currentDomainLabel={currentDomainLabel}
       myItems={myItems}
@@ -2353,8 +1984,8 @@ export function HomePage() {
         />
       )}
       <ActionHandler
-          // Minor on a guardian-gated domain → confirm before the guardian OTP
-          // is dispatched (server issues it on the first submit).
+          // Minor on a guardian-gated domain: confirm before the guardian OTP
+          // is dispatched (the server issues it on the first submit).
           guardianConfirmRequired={
             u18Status?.isMinor === true &&
             !!network &&
@@ -2368,8 +1999,8 @@ export function HomePage() {
               });
               throw new Error('No source item');
             }
-            // Draft source profile can't act — prompt to complete it. Throw an
-            // ActionAbortedError so ActionHandler suppresses its generic toast.
+            // Draft source profile: prompt to complete it. ActionAbortedError
+            // suppresses ActionHandler's generic toast.
             if (promptCompleteDraftProfile(myItem)) {
               throw new ActionAbortedError('source profile is draft');
             }
@@ -2379,13 +2010,9 @@ export function HomePage() {
               });
               throw new Error('No user');
             }
-            // Task 7 (#203 §5.2 cleanup): this handler serves BOTH the list
-            // view (card actions) and the map view (a popup's connect button),
-            // so the target lookup must cover both. List-driven targets are
-            // always in one of the paged feeds; a map-driven target may be a
-            // viewport marker never paged into either list feed, so fall back
-            // to `mapDetailItem` — the full `Item` the open popup already
-            // resolved via `useItemDetail` (see `MarkerDetailPopup`).
+            // Serves both list card actions and the map popup's connect button.
+            // A map-driven target may never have been paged into the list, so
+            // fall back to `mapDetailItem` (resolved by the open popup).
             const listItems = singleDomainItems;
             const targetItem =
               listItems.find((i) => i.item_id === targetItemId) ??
@@ -2397,13 +2024,9 @@ export function HomePage() {
               throw new Error('Target item not found');
             }
 
-            // Extract consent sentinel placed by ConsentCheckbox inside ActionModal.
-            // Must not appear in requirements_snapshot sent to the server.
+            // The consent sentinel must not reach requirements_snapshot.
             const { consent, requirementsSnapshot } = splitActionConsent(formData);
 
-            // Resolve source item instance URL (where my profile is stored)
-            // IMPORTANT: If the source item has localhost as instance_url,
-            // it means it was created on the current API instance
             const sourceItemInstanceUrl = instanceUrlForAction(myItem, network);
 
             const targetItemInstanceUrl = instanceUrlForAction(targetItem, network);
@@ -2427,10 +2050,10 @@ export function HomePage() {
                 requirements_snapshot: requirementsSnapshot,
                 ...(consent ? { consent } : {}),
               },
-              sourceItemInstanceUrl, // Call the SOURCE instance (where myItem exists)
+              sourceItemInstanceUrl, // the source instance, where myItem lives
               guardianOtp
             );
-            // New actions must surface without waiting for the 60s poll (§C5).
+            // New actions surface without waiting for the poll.
             queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
@@ -2440,49 +2063,24 @@ export function HomePage() {
           {(triggerAction) =>
             viewMode === 'list' ? (
               <>
-                {/* Federation-degradation indicator (#203 §6): some peer instances
-                    didn't answer in time on at least one loaded page, so the list
-                    feed (single-domain or, on the "All" tab, at least one visible
-                    domain) is known-partial. Mirrors the map's `mapMarkers.partial`
-                    banner (P4) — same styling, in-flow above the grid instead of
-                    `fixed` (the list has no maximize overlay to sit above). */}
+                {/* Federation degradation: some peer instances did not answer
+                    in time, so the list is known-partial. In-flow here; the
+                    map's banner is `fixed`. */}
                 {listPartial && (
                   <p className="mb-3 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">
                     {t('home.list_partial')}
                   </p>
                 )}
-                {/* List note (#394): the list always calls discover now (profile
-                    anchor + resolved viewer location when available), so this
-                    explains what's driving the results — relevance-to-profile,
-                    proximity, both, or (when the discover BFF fell back to
-                    native — signals-search unreachable/unconfigured/timed out)
-                    that ranking itself is temporarily unavailable. Exactly one
-                    variant renders at a time; see `resolveListNote`. */}
-                {/* #644: one domain is always selected — the "All" tab and its
-                    client-merged, client-re-sorted union are gone (spec D8).
-                    Paged infinite scroll (§5.1), rendered in the SERVER's order
-                    for whichever sort was applied; no client-side re-sort. */}
+                {/* The list note says what drives the results (profile
+                    relevance, proximity, both, or ranking unavailable on the
+                    native fallback); see `resolveListNote`. */}
+                {/* Paged infinite scroll in the server's order; no client
+                    re-sort. */}
               <>
-                {/* No "Showing N of M" here. The toolbar above already states
-                    the total for the active filters, and the list is infinite
-                    scroll — so "shown" is just "however far you happen to have
-                    scrolled", which tells the reader nothing and duplicated a
-                    count sitting ~40px away. */}
-                {/* The list note and bulk-select share ONE line: the note is
-                    short and left-aligned, the button is right-aligned, and
-                    stacking them left an empty band between the filter bar and
-                    the cards.
-
-                    Bulk-select sits over the CONTENT rather than in the filter
-                    bar because it acts ON the results instead of choosing
-                    them. `items-baseline` so the button does not drag the
-                    note's text off the line, and the row is skipped entirely
-                    when neither part is present.
-
-                    The note is suppressed on an empty list — it would falsely
-                    imply results are shown; `BrowseEmptyState` carries the
-                    radius-aware explanation there instead. Suppressed during
-                    loading too (contentCount 0), where the skeleton shows. */}
+                {/* No "Showing N of M": the toolbar states the total and the
+                    list is infinite scroll. */}
+                {/* The list note and bulk-select share one line;
+                    `items-baseline` keeps the note's text on it. */}
                 {(listNoteText || browseSelectButton) && (
                   <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
                     <p className="min-w-0 text-xs text-muted-foreground">{listNoteText}</p>
@@ -2500,9 +2098,9 @@ export function HomePage() {
                   onAction={(itemId, _type, actionSchema) => {
                     triggerAction(_type, actionSchema, itemId);
                   }}
-                  // #644: `selectedDomain === null` is the transient state before the
-                  // default-domain effect resolves one. The feed is disabled then, so
-                  // isLoading is false and the grid would flash "no listings".
+                  // `selectedDomain === null` is the transient state before the
+                  // default domain resolves; the feed is disabled, so show
+                  // loading rather than "no listings".
                   loading={singleDomainList.isLoading || selectedDomain === null}
                   emptyState={
                     <BrowseEmptyState
@@ -2522,8 +2120,8 @@ export function HomePage() {
                   openActionItemIds={openActionItemIds}
                   openActionReason={t('actions.pair_open_disabled', 'A request is already open with this profile.')}
                   selection={browseSelection}
-                  // #646 C1: each card's pill shows whatever drove its
-                  // position, keyed off what the SERVER actually applied.
+                  // Each card's pill shows what drove its position, per the
+                  // sort the server applied.
                   sortApplied={listSortApplied}
                   relevanceBasis={relevanceBasis}
                 />
@@ -2582,13 +2180,11 @@ export function HomePage() {
                   )}
                   renderPopup={(marker) =>
                     renderMarkerDetail(marker, triggerAction, 'popup', () =>
-                      // Close the marker popup first so it doesn't cover
-                      // the consent modal the action is about to open.
+                      // Close the popup so it does not cover the consent modal.
                       setClosePopupNonce((n) => n + 1),
                     )
                   }
-                  // Phone: no popup bubble — the tapped marker opens in the
-                  // bottom sheet below instead.
+                  // Phone: the tapped marker opens in the bottom sheet instead.
                   showPopup={!isMobile}
                   onMarkerSelect={isMobile ? setSheetMarker : undefined}
                 />
@@ -2603,45 +2199,25 @@ export function HomePage() {
                   >
                     {sheetMarker &&
                       renderMarkerDetail(sheetMarker, triggerAction, 'list', () =>
-                        // Close the sheet first: the action opens its own
-                        // bottom sheet, which must not stack under this one.
+                        // Close the sheet: the action opens its own bottom
+                        // sheet, which must not stack under this one.
                         setSheetMarker(null),
                       )}
                   </MarkerDetailSheet>
                 )}
-                {/* "Search this area" — the dense-map escape hatch #644
-                    describes, placed where you need it.
-                    
-                    The Area control lives in the LIST view, so without this
-                    the only way to apply a viewport was to leave the map,
-                    open a dropdown, and pick "the area shown on the map"
-                    about a map no longer on screen. The realistic sequence is
-                    the opposite: the pill says "1500+ in this area — zoom
-                    in", you are already at max zoom, and you want the full
-                    list FOR THAT AREA.
-                    
-                    Sends the bounds and switches view in one action. */}
+                {/* "Search this area": applies the map viewport as the list's
+                    area and switches to the list in one action. */}
                 {mapViewport?.minLat !== undefined &&
                   mapViewport.minLng !== undefined &&
                   mapViewport.maxLat !== undefined &&
                   mapViewport.maxLng !== undefined &&
-                  // Zoomed in enough for "this area" to mean something, AND
-                  // searching it would actually change the result — either the
-                  // map cannot draw everything in view, or there are matching
-                  // items outside it. Gating on `truncated` alone made this
-                  // unreachable: it needs >500 markers in one viewport, so a
-                  // network with tens of items never qualified.
-                  //
-                  // Compared against `mappable`, NOT `total`: `total` counts
-                  // items with no coordinates at all, and those can never be
-                  // inside ANY viewport. Against `total`, a single
-                  // un-geocoded item made "items exist outside the view"
-                  // permanently true, so the button was offered at every zoom
-                  // above the floor forever — which is how it turned up over a
-                  // whole-city view with two listings.
+                  // Offered when zoomed in far enough and searching would change
+                  // the result: the map cannot draw everything in view, or
+                  // matching items lie outside it. Compared against `mappable`,
+                  // not `total`, which counts items with no coordinates.
                   (mapViewport.zoom ?? 0) >= SEARCH_AREA_MIN_ZOOM &&
                   (mapMarkers.truncated || mapMarkers.total < browseTotals.mappable) && (
-                    // Hidden while any modal is open — see MapCountPill.
+                    // Hidden while any modal is open (see MapCountPill).
                     <div className="pointer-events-none fixed bottom-20 left-1/2 z-[2100] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                       <button
                         type="button"
@@ -2665,21 +2241,17 @@ export function HomePage() {
                       </button>
                     </div>
                   )}
-                {/* The VIEWPORT count, for every visitor. The toolbar above
-                    states the filter total instead (N5), so this is the only
-                    place the "how many are in this area" number appears —
-                    which is why it is no longer gated on being signed out.
-                    `fixed` + high z-index so it stays above the map's own
-                    maximize overlay (z-[2000]). */}
+                {/* The viewport count, for every visitor (the toolbar shows
+                    the filter total). `fixed` and a high z-index keep it above
+                    the maximize overlay. */}
                 <MapCountPill
                   total={mapMarkers.total}
                   shown={mapItems.length}
                   truncated={mapMarkers.truncated}
                 />
-                {/* Federation-degradation indicator (#203 §6): some peer instances
-                    didn't answer in time, so the viewport marker set is known-partial.
-                    `fixed` (not `absolute`) so it stays visible above the map's own
-                    maximize overlay (z-[1000]) in both normal and maximized mode. */}
+                {/* Federation degradation: some peer instances did not answer
+                    in time, so the marker set is known-partial. `fixed` keeps
+                    it above the maximize overlay. */}
                 {mapMarkers.partial && (
                   <div className="pointer-events-none fixed left-1/2 top-20 z-[2100] w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 px-4 in-data-[scroll-locked]:hidden">
                     <p className="pointer-events-auto mx-auto w-fit max-w-full rounded-md bg-amber-50 px-3 py-1.5 text-center text-xs font-medium text-amber-900 shadow-md ring-1 ring-amber-300 dark:bg-amber-950 dark:text-amber-100 dark:ring-amber-800">

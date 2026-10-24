@@ -8,7 +8,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 
 type JsonSchema = RJSFSchema | DotProfileSchema | DotNetworkSchema | DotActionSchema;
 
-const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min — aligns with the config staleTime tier
+const SCHEMA_CACHE_TTL_MS = 5 * 60 * 1000; // matches the config staleTime tier
 
 interface CacheEntry {
   schema: JsonSchema;

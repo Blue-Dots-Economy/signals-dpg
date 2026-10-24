@@ -21,10 +21,8 @@ import type { Action } from '@/lib/action-api';
 interface ActionListProps {
   initiatedActions: Action[];
   receivedActions: Action[];
-  // Tab badge counts (#439 follow-up): the true server-side total for each
-  // tab, independent of how many rows the infinite query has loaded so far.
-  // Falls back to the loaded array length when undefined (e.g. tests that
-  // don't pass it, or a query that hasn't resolved a first page yet).
+  // Tab badge counts: the server-side total per tab, not the loaded rows.
+  // Falls back to the loaded length when undefined.
   initiatedTotal?: number;
   receivedTotal?: number;
   isLoading: boolean;
@@ -35,14 +33,13 @@ interface ActionListProps {
   onStatusUpdate: (action: Action, targetStatus: string) => void;
   onRefresh: () => void;
   isRefetching: boolean;
-  /** Selection state owned by the page (drives bulk accept/reject/cancel). */
+  /** Selection state owned by the page. */
   selection: CardSelection;
   /** Open the bulk confirm dialog for the given target status. */
   onBulkAction: (targetStatus: string) => void;
   /**
-   * Bulk export is enabled for the viewer's domain (#771): cards in an
-   * exportable status become selectable on both tabs, and `exportControls`
-   * are shown.
+   * Bulk export is enabled for the viewer's domain: cards in an exportable
+   * status become selectable on both tabs, and `exportControls` are shown.
    */
   exportEnabled?: boolean;
   /**
@@ -61,8 +58,7 @@ interface ActionListProps {
   onSelectAllLoaded?: () => void;
   /** How the (cross-tab) selection splits between the Sent and Received tabs. */
   selectionSplit?: { sent: number; received: number };
-  // ── Toolbar (#439 Task 13) — all state/URL-wiring lives on the page; this
-  // component only renders `ActionToolbar` and forwards its callbacks. ──────
+  // Toolbar: state and URL wiring live on the page; forwarded to `ActionToolbar`.
   toolbarStatus: ActionStatusFilter;
   toolbarSort: ActionSort;
   activeFacets: ActiveFacet[];
@@ -71,24 +67,20 @@ interface ActionListProps {
   onOpenFilters: () => void;
   onRemoveFacet: (field: string, value: string) => void;
   onClearFilters: () => void;
-  // ── Infinite scroll (#439 Task 13) — the server now does the filtering, so
-  // this component renders every row it's given (no client-side re-filter). ─
+  // Infinite scroll. The server filters, so every row given is rendered.
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
 }
 
-// The actionable "class" of a card for the current tab — used as the selection
-// lock group. null = not actionable (can't be selected). The first card picked
-// locks the class, so a batch is always homogeneous: on the Received tab you
-// bulk accept/reject a set of PENDING items OR bulk complete a set of ACCEPTED
-// items (never mixed); on the Initiated tab you bulk cancel PENDING items.
+// A card's actionable class for the tab, used as the selection lock group
+// (null means not selectable). The first pick locks the class, so a batch is
+// homogeneous: Received bulk accept/reject (pending) or complete (accepted),
+// Initiated bulk cancel (pending).
 type ActionClass = 'pending' | 'accepted';
 
-// With bulk export enabled (#771) a card in any exportable status (config:
-// the network's reveal statuses, e.g. accepted + completed) is selectable on
-// both tabs, in the same group as Received+accepted — so engagements the
-// viewer started, and completed ones, can be downloaded too.
+// With bulk export enabled, a card in any exportable status is selectable on
+// both tabs, in the 'accepted' group, so it can be downloaded.
 function actionClassFor(
   tab: 'initiated' | 'received',
   status: string,
@@ -135,12 +127,8 @@ export function ActionList({
 }: Readonly<ActionListProps>) {
   const { t } = useTranslation();
 
-  // The server already applied status/sort/facets (#439) — render every row
-  // handed down, no client-side re-filter.
   const actions = activeTab === 'initiated' ? initiatedActions : receivedActions;
 
-  // A card is selectable when it has an actionable class for this tab. The
-  // lock group is that class, so the first pick fixes pending-vs-accepted.
   const isSelectable = (a: Action) =>
     actionClassFor(activeTab, a.action_status, exportEnabled ? exportStatuses : []) !== null;
   const hasSelectable = actions.some(isSelectable);
@@ -161,8 +149,7 @@ export function ActionList({
   ];
   const activeIdx = tabs.findIndex((tab) => tab.id === activeTab);
 
-  // Content region resolved without a nested ternary (empty → list, then
-  // error → that), extracted per typescript:S3358.
+  // Extracted to avoid a nested ternary (typescript:S3358).
   const emptyOrListContent =
     actions.length === 0 ? (
       <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed py-14 text-center">
@@ -235,7 +222,7 @@ export function ActionList({
 
   return (
     <div className="w-full space-y-5">
-      {/* Toolbar: status/sort/filters (server-driven, #439) + select/refresh */}
+      {/* Toolbar: status, sort, filters, select, refresh */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <ActionToolbar
           status={toolbarStatus}
@@ -243,8 +230,7 @@ export function ActionList({
           activeFacets={activeFacets}
           onStatusChange={(status) => {
             onStatusChange(status);
-            // Changing the status can hide selected cards; drop out of
-            // select mode so the selection never goes invisible/stale.
+            // A status change can hide selected cards, so leave select mode.
             selection.exitSelect();
           }}
           onSortChange={onSortChange}
@@ -254,8 +240,8 @@ export function ActionList({
         />
 
         <div className="flex items-center gap-2">
-          {/* One entry point: Export starts selection; every selection action
-              (download, complete, select all) lives in the bulk bar (#771). */}
+          {/* Export starts selection; every selection action lives in the
+              bulk bar. */}
           {selection.selectMode ? (
             <Button variant="outline" size="sm" onClick={() => selection.exitSelect()}>
               <X className="mr-2 h-4 w-4" />
@@ -349,11 +335,9 @@ export function ActionList({
         >
           {exportEnabled && selection.lockKey === 'accepted' && exportControls}
           {selection.lockKey === 'accepted' ? (
-            // Accepted selection → bulk complete, but only when every selected
-            // card is a Received + accepted one: complete never applies to a
-            // Sent or already-completed card and must not silently act on part
-            // of the selection (#771). Without a page-supplied answer, fall
-            // back to "nothing from Sent is selected".
+            // Bulk complete only when every selected card is Received +
+            // accepted, so it never acts on part of the selection. Without
+            // `canComplete`, falls back to "nothing from Sent is selected".
             (canComplete ?? (selectionSplit?.sent ?? 0) === 0) && (
               <button
                 type="button"
@@ -364,7 +348,7 @@ export function ActionList({
               </button>
             )
           ) : activeTab === 'received' ? (
-            // Received + pending selection → bulk accept / reject.
+            // Received + pending: bulk accept / reject.
             <>
               <button
                 type="button"
@@ -382,7 +366,7 @@ export function ActionList({
               </button>
             </>
           ) : (
-            // Initiated + pending selection → bulk cancel.
+            // Initiated + pending: bulk cancel.
             <button
               type="button"
               onClick={() => onBulkAction('cancelled')}

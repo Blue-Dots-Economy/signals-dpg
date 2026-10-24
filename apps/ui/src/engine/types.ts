@@ -2,8 +2,6 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { LucideIcon } from 'lucide-react';
 import type { GoLiveGate } from '@dpg/schemas';
 
-// ─── Schema Types ───────────────────────────────────────────────
-
 export interface DotProfileSchema {
   info: string;
   name: string;
@@ -25,46 +23,37 @@ export interface DotActionSchema {
   reveals_pii_on_status?: string[];
 }
 
-// ─── Status Rules ──────────────────────────────────────────────
-
 /**
- * A single status rule from the network config. The `when` field is either a
- * predicate object (evaluated by the server) or the literal string "default"
- * (always-match fallback, must be last in the array).
+ * A status rule from the network config. `when` is a server-evaluated predicate
+ * or the literal "default" (always-match fallback, must be last).
  */
 export interface StatusRule {
   status: string;
   /** Human-readable label for display. Falls back to `status` when absent. */
   label?: string;
-  /** Optional longer description for tooltips / filter panel copy. */
+  /** Longer description for tooltips / filter panel copy. */
   description?: string;
-  /**
-   * Predicate evaluated by the server. The client receives this opaquely; it
-   * is used only to enumerate the distinct status values for the filter panel.
-   */
+  /** Server-evaluated; the client treats it as opaque. */
   when: Record<string, unknown> | 'default';
 }
 
 /**
- * Per-domain card display config (network.json `card` block). Controls which
- * fields a card shows by default and which become "view more" rows, plus the
- * heading / avatar source. All fields optional — the UI falls back to a
- * best-guess when a domain has no `card` block.
+ * Per-domain card display config (network.json `card` block). All fields are
+ * optional; the UI falls back to a best guess when a domain has no `card` block.
  */
 export interface DotCardConfig {
   /** Field key whose value is the card heading. */
   title_field?: string;
-  /** Optional field key rendered as a secondary line under the title. */
+  /** Field key rendered as a secondary line under the title. */
   subtitle_field?: string;
   /** Field key used to derive avatar initials (defaults to title_field). */
   avatar_from?: string;
   /** Ordered field keys shown collapsed; everything else moves behind "view more". */
   default_fields?: string[];
   /**
-   * Ordered field keys revealed behind "view more". When provided, ONLY these
-   * (in this order) are shown as extra rows and any other schema field is
-   * omitted from the card entirely. When omitted, all remaining non-empty
-   * schema fields are shown (in schema order) — the previous behaviour.
+   * Field keys revealed behind "view more". When set, only these (in this
+   * order) are shown as extra rows. When omitted, all remaining non-empty
+   * schema fields are shown in schema order.
    */
   extra_fields?: string[];
 }
@@ -72,16 +61,11 @@ export interface DotCardConfig {
 export interface DotNetworkDomain {
   id: string;
   description: string;
-  /**
-   * Optional display label (network.json). When present the UI shows this
-   * instead of title-casing the domain id — e.g. id `provider` shown as
-   * "Service Provider". Falls back to the title-cased id when unset.
-   */
+  /** Display label; falls back to the title-cased id when unset. */
   label?: string;
   /**
-   * Optional per-domain override for the sidebar "My Profile(s)" group heading
-   * (e.g. "My Jobs" for a provider). Network-authored in network.json; falls
-   * back to the generic label when unset.
+   * Per-domain heading for the sidebar "My Profile(s)" group (e.g. "My Jobs");
+   * falls back to the generic label when unset.
    */
   my_items_label?: string;
   default_item_schemas?: {
@@ -89,37 +73,27 @@ export interface DotNetworkDomain {
   };
   item_schemas?: Record<string, RJSFSchema>;
   /**
-   * Lifecycle status rules for items in this domain. Defined in network.json
-   * per-domain. The client uses these to enumerate filter options and to
-   * derive a best-effort status for each item client-side (see item-status.ts).
+   * Lifecycle status rules for items in this domain. The UI does not read
+   * these today.
    */
   status_rules?: StatusRule[];
-  /** Card display config — see {@link DotCardConfig}. */
   card?: DotCardConfig;
   /**
-   * U18 guardian consent (Phase 6): when true, a minor holding a profile in
-   * this domain is routed through the guardian consent flow instead of the
-   * ordinary adult consent gate. Mirrors `guardian_consent_required` in
-   * network.json (see apps/api/src/services/minor.ts on the server side).
+   * When true, a minor holding a profile in this domain goes through the
+   * guardian consent flow instead of the adult consent gate.
    */
   guardian_consent_required?: boolean;
   /**
-   * Go-live gate tokens for this domain (mirrors `go_live_required` in
-   * network.json). When present and it does NOT include `consent_required`,
-   * the UI skips the Terms/Privacy consent gate at signup for this domain —
-   * the profile goes live on completeness alone. Absent ⇒ treat as requiring
-   * consent (safe default).
+   * Go-live gate tokens (network.json `go_live_required`). When present without
+   * `consent_required`, the UI skips the Terms/Privacy gate at signup for this
+   * domain. Absent means consent is required.
+   *
+   * Typed from @dpg/schemas so a new token cannot drift from this union.
    */
-  // Imported rather than re-declared: the vocabulary is owned by
-  // PROFILE_GO_LIVE_GATES in @dpg/schemas, so a new token cannot silently
-  // leave this union behind (it already had — `owner_required`, #640).
   go_live_required?: GoLiveGate[];
   /**
-   * Optional per-domain "why complete your profile" prompt shown at the top of
-   * the create/edit page (#376), to motivate a first-time user to finish. The
-   * message is role-specific (a seeker's "why" ≠ a provider's), so it's authored
-   * per domain in network.json; when unset, a generic i18n fallback is used.
-   * Presentational only — not part of item validation.
+   * Per-domain "why complete your profile" prompt on the create/edit page;
+   * a generic i18n fallback is used when unset. Presentational only.
    */
   profile_completion_prompt?: {
     heading: string;
@@ -137,7 +111,7 @@ export interface DotNetworkInteraction {
   requirement_schema: RJSFSchema;
   event_schema?: RJSFSchema;
   reveals_pii_on_status?: string[];
-  /** Bulk-export eligibility (#769): which side(s) may export the counterparty. */
+  /** Bulk-export eligibility: which side(s) may export the counterparty. */
   export?: { requester_domains: string[] };
   /** Status buckets; `create` = still waiting on the receiver. */
   metric_categories?: {
@@ -167,17 +141,12 @@ export interface DotNetworkSchema {
   display_name: string;
   description: string;
   schema_standard: string;
-  /**
-   * Network-wide toggle for the pause (voluntarily-hide) feature. When false,
-   * the UI hides the "Pause profile" control. Absent ⇒ enabled (default). (#346)
-   */
+  /** Shows the "Pause profile" control. Absent means enabled. */
   pause_enabled?: boolean;
   domains: DotNetworkDomain[];
   instances?: DotNetworkInstance[];
   actions: Record<string, DotNetworkAction>;
 }
-
-// ─── Schema Input Types ────────────────────────────────────────
 
 export type SchemaInput =
   | RJSFSchema
@@ -187,8 +156,6 @@ export type SchemaInput =
   | string
   | { url: string }
   | { api: string; baseUrl?: string };
-
-// ─── Card Types ────────────────────────────────────────────────
 
 export interface CardField {
   key: string;
@@ -204,8 +171,6 @@ export interface ActionButton {
   actionSchema: DotActionSchema;
 }
 
-// ─── Map Types ─────────────────────────────────────────────────
-
 export type MapMarkerPrecision = 'exact' | 'geocoded_full_address';
 
 export interface MapMarker {
@@ -216,7 +181,7 @@ export interface MapMarker {
   data: Record<string, unknown>;
   precision: MapMarkerPrecision;
   geocodedFrom?: string;
-  /** The item's domain string (e.g. "seeker", "provider"). Used to pick the marker icon. */
+  /** The item's domain (e.g. "seeker"); picks the marker icon. */
   domain?: string;
 }
 
@@ -225,61 +190,46 @@ export interface MapProviderProps {
   zoom: number;
   markers: MapMarker[];
   onMarkerClick?: (id: string) => void;
-  /** When true, the provider should NOT auto-fit bounds on first render */
+  /** When true, the provider does not auto-fit bounds on first render. */
   initialViewSet?: boolean;
   /**
-   * Monotonic counter bumped by the caller on an explicit "recenter" intent
-   * (e.g. the user picks a location source). The provider recenters on `center`
-   * even when the coordinate is unchanged — so re-selecting the same anchor
-   * after the user has panned still snaps back. Ignored when `initialViewSet`
-   * is false.
+   * Counter bumped on an explicit "recenter" intent. The provider recenters on
+   * `center` even when the coordinate is unchanged, so re-selecting the same
+   * anchor after panning still snaps back. Ignored when `initialViewSet` is false.
    */
   focusNonce?: number;
   /**
-   * Monotonic counter bumped by the caller to close any currently open marker
-   * popup (e.g. right before a Connect/Apply action opens a modal) — the
-   * marker popup renders in a high stacking context (a map overlay), so on
-   * mobile it would otherwise sit on top of a bottom-sheet modal. Mirrors
-   * `focusNonce`'s "bump signals intent" pattern, but the effect is closing
-   * the popup rather than recentering the map.
+   * Counter bumped to close any open marker popup, e.g. before a modal opens:
+   * the popup sits in a map overlay and would otherwise cover a mobile
+   * bottom-sheet modal.
    */
   closePopupNonce?: number;
   /**
-   * The user's own resolved location (profile OR browser geolocation — see
-   * `useUserLocation`). When set, the provider renders a single distinct
-   * "You are here" self-marker at this point, separate from the item pins and
-   * never clustered/clickable. Null/undefined → no self-marker (e.g. no profile
-   * location AND browser geolocation is denied/blocked).
+   * The user's own location (see `useUserLocation`). When set, the provider
+   * renders a separate, non-clustered, non-clickable "You are here" marker.
    */
   selfLocation?: { lat: number; lng: number } | null;
   children?: React.ReactNode;
-  /** Optional custom popup renderer; falls back to the default MarkerPopupCard. */
+  /** Custom popup renderer; falls back to MarkerPopupCard. */
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   /**
-   * Draw the provider's own marker popup (Leaflet bubble / Google InfoWindow or
-   * mobile overlay). Default true. The phone home map turns it off and shows
-   * the marker's details in a bottom sheet instead, driven by `onMarkerClick`.
+   * Draw the provider's own marker popup. Default true. The phone home map turns
+   * it off and shows details in a bottom sheet via `onMarkerClick`.
    */
   showPopup?: boolean;
   /**
-   * Optional per-marker icon resolver. Defaults to a domain-based lucide icon
-   * (see `getIconForDomain`). Callers can override to pick an icon from other
-   * marker data (e.g. the tourist app keys on `data.category`). Signals leaves
-   * this unset, so its markers are unchanged.
+   * Per-marker icon resolver. Defaults to a domain-based lucide icon
+   * (`getIconForDomain`); the tourist app keys on `data.category`.
    */
   resolveIcon?: (marker: MapMarker) => LucideIcon;
   /**
-   * Optional per-marker image resolver. When it returns a URL, the marker is
-   * rendered as that image (in a white circle) instead of the lucide pin —
-   * used by the tourist app to show the RubiX favicon for RubiX listings.
-   * Returns null/undefined to fall back to the icon pin.
+   * Per-marker image resolver. A returned URL renders that image in a white
+   * circle instead of the icon pin (the tourist app's RubiX favicon).
    */
   resolveMarkerImage?: (marker: MapMarker) => string | null | undefined;
   /**
-   * Optional viewport-change callback. When provided, the active provider
-   * emits `{lat, lng, radiusMeters}` on debounced (~300ms) `moveend`/`idle`.
-   * Unset (e.g. the tourist app) → the provider attaches no listener at all,
-   * so panning/zooming behaves exactly as before this prop existed.
+   * Called with the viewport on debounced (~300ms) `moveend`/`idle`. When
+   * unset (e.g. the tourist app) the provider attaches no listener.
    */
   onViewportChange?: (viewport: MapViewport) => void;
 }
@@ -290,27 +240,14 @@ export interface MapProvider {
 }
 
 /**
- * The map's current viewport, reported on debounced pan/zoom settle
- * (Leaflet `moveend` / Google `idle`). `radiusMeters` is the half-diagonal —
- * the great-circle distance from `center` to a corner of the current bounds —
- * a simple, provider-agnostic proxy for "how much area is visible".
+ * The map's viewport, reported on debounced pan/zoom settle (Leaflet `moveend`
+ * / Google `idle`). `radiusMeters` is the half-diagonal (center to a bounds
+ * corner), a provider-agnostic proxy for visible area.
  *
- * `zoom` (#203 §7) is the native map zoom level at the moment of the report.
- * Optional — additive on top of the original `{lat, lng, radiusMeters}` shape
- * so callers that construct a `MapViewport` by hand (existing tests, the
- * `useMapMarkers` bucketing logic) don't need to supply it. Both live map
- * providers always populate it when emitting to `onViewportChange`; it is
- * currently consumed only by the home-page's anonymous count-first gating.
- *
- * `minLat`/`minLng`/`maxLat`/`maxLng` (#203 map-serverside-search Task 4) are
- * the current `map.getBounds()` corners — the bbox the server-side markers
- * query filters by, replacing the client-computed radius for the map path.
- * Optional for the same reason `zoom` is: both live providers always
- * populate them alongside `zoom` on every emit going forward, but the list's
- * distance path, the tourist app (never emits at all), and hand-built
- * viewports in existing tests only ever have center + radius. Callers that
- * need the bbox (`useMapMarkers`, the markers query key) fall back to the
- * radius shape when these are unset.
+ * `zoom` and the bbox corners are optional because hand-built viewports (the
+ * list's distance path, tests) carry only center + radius. Both live providers
+ * always populate them. Callers that need the bbox (`useMapMarkers`, the
+ * markers query key) fall back to the radius shape when they are unset.
  */
 export interface MapViewport {
   lat: number;
@@ -323,32 +260,22 @@ export interface MapViewport {
   maxLng?: number;
 }
 
-// ─── Plugin Types ──────────────────────────────────────────────
-
 export interface RendererPlugin {
   name: string;
   components: Map<string, React.ComponentType<Record<string, unknown>>>;
 }
 
-// ─── View Mode ─────────────────────────────────────────────────
-
 export type ViewMode = 'list' | 'map';
-
-// ─── Filter State ──────────────────────────────────────────────
 
 export interface FilterState {
   search: string;
   selectedDomain: string | null;
   viewMode: ViewMode;
-  /**
-   * Active status filter values (e.g. ["new", "active"]). An empty array means
-   * "show all" (no status filter applied).
-   */
+  /** Active status filter values; empty means no status filter. */
   selectedStatuses: string[];
   /**
-   * Active domain filter values for the map filters panel (multi-select,
-   * separate from the sidebar's single-domain tab selector).
-   * An empty array means "show all domains".
+   * Domain filter values for the map filters panel (multi-select, separate from
+   * the sidebar's single-domain tab). Empty means all domains.
    */
   selectedDomains: string[];
 }

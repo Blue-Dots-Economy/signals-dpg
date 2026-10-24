@@ -51,11 +51,8 @@ export function SelectableCard({
     >
       {/* Block clicks from reaching the inner card's own handlers while selecting. */}
       <div className="pointer-events-none">{children}</div>
-      {/* Every selectable card shows a checkbox in select mode: an empty outline
-          when unselected (signals "click to select"), filled + branded when
-          selected. Non-selectable (dimmed) cards show no checkbox. It sits on
-          the card's corner, outside the content box, so it never covers the
-          card's own header (e.g. an action card's timestamp). */}
+      {/* Checkbox on selectable cards only, on the corner outside the content
+          so it never covers the card header. */}
       {interactive && (
         <span
           data-testid="selectable-card-check"

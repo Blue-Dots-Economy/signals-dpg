@@ -34,7 +34,7 @@ interface MarkerPopupCardProps {
   actions?: DotActionSchema[];
   /** Initiate the connect flow for this marker. */
   onConnect?: () => void;
-  /** Disable the connect CTA (an action is already open for this pair, #370/#422). */
+  /** Disable the connect CTA (an action is already open for this pair). */
   connectDisabled?: boolean;
   /** Shown on hover when the connect CTA is disabled. */
   connectDisabledReason?: string;
@@ -46,12 +46,11 @@ interface MarkerPopupCardProps {
   schema?: RJSFSchema | null;
   /** Per-domain card config from network.json. */
   cardConfig?: DotCardConfig | null;
-  /** Network domains config — enables display labels (e.g. `provider` → "Service Provider"). Passed by callers that already have query context; cluster popups omit it and fall back to title-case. */
+  /** Network domains, for display labels (`provider` to "Service Provider"). Without it the domain is title-cased. */
   domains?: ReadonlyArray<{ id: string; label?: string }> | null;
   /**
-   * `'popup'` (default) is the compact card sized for a map bubble. `'list'`
-   * is the full-size browse card, for the phone map's bottom sheet, which has
-   * the room — and should match the list view it sits over.
+   * `'popup'` is the compact card for a map bubble; `'list'` is the full-size
+   * browse card, for the phone map's bottom sheet.
    */
   cardVariant?: 'popup' | 'list';
 }
@@ -104,9 +103,7 @@ export function MarkerPopupCard({
           </Button>
         )}
         {canConnect && (
-          // Native-title span so the "already open" reason still shows on hover
-          // even though the button itself is disabled (no TooltipProvider needed
-          // in the map overlay).
+          // A native-title span, because a disabled button shows no hover title.
           <span
             className="flex-1"
             title={connectDisabled ? connectDisabledReason : undefined}

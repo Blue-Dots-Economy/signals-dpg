@@ -25,9 +25,9 @@ interface AuthState extends AuthIdentifier {
   name?: string;
   redirectTo?: string;
   pendingConsent?: ConsentAcceptBody | null;
-  /** Carries the age (+ chosen domain for new signups) captured in the auth
-   * flow before this OTP: set for a brand-new signup, and for an existing minor
-   * who picked their year of birth pre-OTP (see login-page.tsx). Null otherwise. */
+  /** The age (and, for a new signup, the chosen domain) captured before this
+   * OTP: set for a new signup and for an existing minor who picked a birth
+   * year pre-OTP (see login-page.tsx). Null otherwise. */
   signupExtras?: SignupExtras | null;
 }
 
@@ -44,9 +44,8 @@ export function OtpPage() {
   const [isLoading, setIsLoading] = useState(false);
   const { countdown, restart: restartCountdown } = useResendCountdown(60);
   const [inlineError, setInlineError] = useState<{ title: string; description: string } | null>(null);
-  // #453: an existing gated minor is held on a blocking guardian flow AFTER the
-  // login OTP (ownership proven) and BEFORE landing on home — never home-first.
-  // Null until the post-verify u18 check decides the ward needs it.
+  // An existing gated minor is held on a blocking guardian flow after the login
+  // OTP and before landing on home. Null until the post-verify check decides.
   const [guardianGate, setGuardianGate] = useState<{ initialStep: 'dob' | 'guardian' } | null>(null);
 
   const state = location.state as AuthState | null;
@@ -56,13 +55,9 @@ export function OtpPage() {
     if (!identifierLabel) navigate('/auth/login');
   }, [identifierLabel, navigate]);
 
-  // Final step once verification (and, for a gated minor, the guardian flow)
-  // has settled: toast + land. #376: if the user has no *completed* profile
-  // (none, or all still draft), route them straight to the profile create/edit
-  // page — instead of home, where they wouldn't know what to do. That decision
-  // (including its precedence over `redirectTo` and its fail-open behaviour)
-  // now lives in `resolvePostLoginLanding`, shared with the OIDC callback so
-  // the two login paths can't drift (#558).
+  // Final step once verification (and any guardian flow) has settled: toast
+  // and land. The landing (profile form for a user with no completed profile)
+  // comes from `resolvePostLoginLanding`, shared with the OIDC callback.
   const finishSignIn = async () => {
     if (!state) return;
     toast.success(state.userExists ? t('auth.toast_welcome_back') : t('auth.toast_account_created'), {
@@ -94,11 +89,9 @@ export function OtpPage() {
         }
       }
 
-      // Persist consent that was accepted pre-OTP on the login page.
-      // The write is best-effort: on failure we toast but still navigate
-      // (the user is authenticated; they will be re-prompted next login).
-      // A known minor was shown the adult copy pre-OTP; they are asked again
-      // with the U18 documents after sign-in instead (#626).
+      // Persist consent accepted pre-OTP. Best-effort: on failure toast but
+      // still navigate; the user is re-prompted next login. A known minor saw
+      // the adult copy and is asked again with the U18 documents after sign-in.
       if (
         state.pendingConsent &&
         (await preLoginConsentApplies(state.pendingConsent.network, state.pendingConsent.brand ?? null))
@@ -110,24 +103,22 @@ export function OtpPage() {
         }
       }
 
-      // U18 age/guardian was collected in the auth flow BEFORE this OTP (signup
-      // gate, or the existing-user pre-check). Persist it now that the session
-      // exists. Best-effort like the consent-accept write above — never block
-      // sign-in on it.
+      // Persist the age/domain collected before this OTP, now that the session
+      // exists. Best-effort; never blocks sign-in.
       if (state.signupExtras) {
         const { domain, age } = state.signupExtras;
-        // New signup: hand the chosen domain off to profile-form-page (one-shot)
-        // AND persist it on the user so profile creation is restricted to it.
+        // New signup: hand the domain to profile-form-page (one-shot) and
+        // persist it on the user so profile creation is restricted to it.
         if (!state.userExists) {
           setStoredSignupDomain(themeId, domain);
           try {
             await setUserDomains([domain]);
           } catch {
-            // Best-effort — profile-form falls back to held items if unset.
+            // Best-effort: profile-form falls back to held items if unset.
           }
         }
-        // Age only exists for guardian-gated flows; persist it for the now-auth
-        // user (idempotent for a signup minor already materialized on create).
+        // Age exists only for guardian-gated flows. Idempotent for a signup
+        // minor already materialized on create.
         if (age !== undefined) {
           try {
             await submitU18Dob({ network: themeId, age });
@@ -137,18 +128,11 @@ export function OtpPage() {
         }
       }
 
-      // Existing gated minor (#453): now that the login OTP has proven number
-      // ownership, run the guardian flow HERE — before home — instead of
-      // deferring it to the home page. New signups already cleared the pre-auth
-      // guardian flow (their signupExtras path), so this only affects returning
-      // users. Best-effort: if the status lookup fails, fall through to home;
-      // the home-page guardian gate remains as a backstop, and the API gate is
-      // the real fail-closed control regardless.
-      // An existing minor picked their year of birth pre-OTP; it's persisted
-      // just above (signupExtras → submitU18Dob), so u18/status now reports
-      // isMinor. Run the AUTHENTICATED guardian flow here — before home — since
-      // the guardian APIs need this session. Starts at the guardian step (DOB
-      // already known). onComplete/onNotMinor calls finishSignIn.
+      // Existing gated minor: now that the login OTP proved ownership, run the
+      // authenticated guardian flow before home (the guardian APIs need this
+      // session). New signups already cleared the pre-auth guardian flow.
+      // Best-effort: a failed lookup falls through to home, whose gate is a
+      // backstop; the API gate is the real control.
       if (state.userExists) {
         try {
           const u18 = await getU18Status(themeId);
@@ -194,10 +178,8 @@ export function OtpPage() {
 
   if (!identifierLabel) return null;
 
-  // Blocking guardian gate for an existing minor (#453) — replaces the OTP form
-  // inside the same AuthShell (mirrors the pre-auth SignupGuardianFlow), so the
-  // ward never sees home until the guardian is verified. `onNotMinor` (DOB
-  // resolved adult) and `onComplete` (guardian verified) both proceed home.
+  // Blocking guardian gate for an existing minor, so the ward never sees home
+  // until the guardian is verified. `onNotMinor` and `onComplete` both proceed.
   if (guardianGate) {
     return (
       <AuthShell>
@@ -240,8 +222,7 @@ export function OtpPage() {
         </p>
       </div>
 
-      {/* OTP input — left-aligned so the box row shares the form column's
-          left edge with the "Back" link and "Enter verification code" heading. */}
+      {/* OTP input, left-aligned with the form column. */}
       <div className="mb-6 flex justify-start">
         <OtpInput onComplete={handleOtpComplete} disabled={isLoading} />
       </div>
@@ -261,7 +242,7 @@ export function OtpPage() {
         </div>
       )}
 
-      {/* Resend — left-aligned to match the rest of the form column. */}
+      {/* Resend, left-aligned with the form column. */}
       <div className="text-left text-sm">
         {countdown > 0 ? (
           <p className="text-muted-foreground">{t('auth.otp_resend_countdown', { count: countdown })}</p>
