@@ -1075,6 +1075,21 @@ describe('GoogleMapProvider', () => {
     expect(screen.queryByTestId('info-window')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['a positive integer', '5000', 5000],
+    ['a non-number', 'abc', 1_000_000],
+    ['a negative number', '-1', 1_000_000],
+    ['a fraction', '1.5', 1_000_000],
+  ])('reads the InfoWindow zIndex from VITE_MAP_POPUP_Z_INDEX (%s)', async (_label, raw, expected) => {
+    setRuntimeConfig({ VITE_GOOGLE_MAPS_API_KEY: 'test-key', VITE_MAP_POPUP_Z_INDEX: raw });
+    bridge().gmap = createFakeGoogleMap();
+    render(googleElement({ markers: [ALPHA] }));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Alpha Academy' }));
+
+    expect(lastProps('InfoWindow').zIndex).toBe(expected);
+  });
+
   it("closes the InfoWindow from Google's own close affordance", async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
