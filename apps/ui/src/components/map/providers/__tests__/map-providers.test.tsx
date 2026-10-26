@@ -1065,6 +1065,8 @@ describe('GoogleMapProvider', () => {
     expect(onMarkerClick).toHaveBeenCalledWith('alpha');
     const info = lastProps('InfoWindow');
     expect(info.headerDisabled).toBe(true);
+    // Above every pin and cluster bubble, so they never paint over the card.
+    expect(info.zIndex).toBe(1_000_000);
     expect(info.anchor).toBe(
       recordsOf('AdvancedMarker').find((r) => r.props.clickable !== false)?.el,
     );

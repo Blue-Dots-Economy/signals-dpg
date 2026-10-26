@@ -38,10 +38,13 @@ const markerDomainMap = new WeakMap<object, string>();
 // as "You" (spreadCoLocatedMarkers fans it ~10m off, which is sub-pixel at low
 // zoom), the self-marker (previously z 1000) rendered on top and swallowed the
 // click — the item's card wouldn't open until fully zoomed in. Ordering:
-// self (0) < item pins (500) < clusters (1000 + count). A co-located item pin
-// now renders on top and is directly clickable.
+// self (0) < item pins (500) < clusters (1000 + count) < popup. A co-located
+// item pin now renders on top and is directly clickable. Advanced markers share
+// a stacking order with the InfoWindow, so the popup needs an explicit zIndex
+// above every cluster or the pins paint over the card.
 const SELF_MARKER_Z_INDEX = 0;
 const ITEM_MARKER_Z_INDEX = 500;
+const POPUP_Z_INDEX = 1_000_000;
 
 // Cluster-click zoom (see onClusterClick). One click smoothly zooms to the
 // level that reveals the cluster's contents — the SAME target Google's default
@@ -415,7 +418,7 @@ function ClusteredMarker({
               document.body,
             )
           : markerEl && (
-              <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled>
+              <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled zIndex={POPUP_Z_INDEX}>
                 <div ref={popupContentRef}>
                   {renderPopup ? (
                     renderPopup(marker)
