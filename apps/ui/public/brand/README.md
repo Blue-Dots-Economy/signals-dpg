@@ -114,13 +114,12 @@ alimco's `brand.json` under `examples/schemas/purple_dot/alimco/` declares
 copy of its own, so it still inherits all of those from purple_dot. Add them
 there if alimco ever needs its own colours, favicon or title.
 
-`up-gzb` and `ka-dhwd` carry the **refreshed Blue Dots lockup** (uppercase
-wordmark, solid dot, "Seeded by EkStep") supplied for the Ghaziabad and Dharwad
-rollouts, while the base `blue-dot/` folder keeps the current lockup every other
-deployment renders. The two brands ship the same artwork and the same
-`brand.json` today; they are separate folders so either can diverge without
-touching the other. Only the strapline lockup was supplied, so every variant
-here is that single artwork — see the note under Variant set.
+`up-gzb` carries the **Rojgar Mitra logo** supplied for the Ghaziabad rollout.
+`ka-dhwd` carries the **refreshed Blue Dots lockup** (uppercase wordmark, solid
+dot, "Seeded by EkStep") supplied for the Dharwad rollout. The base `blue-dot/`
+folder keeps the current lockup every other deployment renders. Only one
+artwork was supplied per brand, so every variant is that single artwork — see
+the note under Variant set.
 
 ## Variant set
 
@@ -134,11 +133,14 @@ here is that single artwork — see the note under Variant set.
 
 - **`logo.png` and `logo-light.png` are required** — the app has light/dark
   themes and auto-selects the light variant on dark backgrounds.
-- `up-gzb` / `ka-dhwd` ship the same strapline lockup for every variant: the designer
+- `ka-dhwd` ships the same strapline lockup for every variant: the designer
   supplied only the with-strapline artwork (dark + light), and nothing in the
   UI requests `withStrapline`/`onBrand` today — `portal-header.tsx` asks for
   `default`/`light` only. Swap in a trimmed wordmark for `logo.png` if a
   no-strapline version is ever supplied.
+- `up-gzb` ships the Rojgar Mitra logo for every variant. Only a light-theme
+  version was supplied, so the dark-background variants (`light`,
+  `withStraplineLight`, `onBrand`) are the same artwork until a dark one is.
 - The others are recommended; omit `onBrand` if `logo.png` already reads well
   on the hero background.
 
