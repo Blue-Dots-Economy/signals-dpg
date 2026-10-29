@@ -2,7 +2,8 @@ name: CI
 
 on:
   pull_request:
-    branches: [develop, main, feature]
+    # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+    branches: [develop, main, feature, 'release/**']
   # main: required for SonarCloud. The organization's plan analyses the MAIN
   # branch only (branch/PR analysis is a paid feature), so without a push
   # trigger here the default branch is never scanned and the dashboard reports
@@ -13,7 +14,8 @@ on:
   # commit, and this workflow no longer publishes anything, so the second
   # post-merge run duplicated the PR run without gating a release.
   push:
-    branches: [develop, main]
+    # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+    branches: [develop, main, 'release/**']
   workflow_dispatch:
 
 concurrency:
