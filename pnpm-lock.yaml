@@ -9,10 +9,10 @@ overrides:
   fast-uri@>=4.0.0 <4.2.3: 4.2.3
   source-map-js@<1.2.2: 1.2.2
   qs@<6.16.0: 6.16.0
-  follow-redirects: 1.16.1
+  follow-redirects@<1.16.1: 1.16.1
   undici@>=7.0.0 <7.30.1: 7.30.1
   undici@>=8.0.0 <8.12.2: 8.12.2
-  zod@<4.6.6: 4.6.6
+  zod@>=4.0.0 <4.6.6: 4.6.6
 
 importers:
 
