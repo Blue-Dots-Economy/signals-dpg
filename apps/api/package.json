@@ -37,11 +37,11 @@
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
     "@types/pg": "^8.23.1",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^4.1.12",
     "drizzle-kit": "^0.31.11",
-    "read-excel-file": "^9.3.10",
+    "read-excel-file": "^9.3.12",
     "tsx": "^4.23.15",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.2",
