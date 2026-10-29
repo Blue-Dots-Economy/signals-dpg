@@ -17,8 +17,8 @@
   "license": "ISC",
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
-    "vitest": "^4.1.11",
-    "@vitest/coverage-v8": "^4.1.11"
+    "vitest": "^4.1.12",
+    "@vitest/coverage-v8": "^4.1.12"
   },
   "dependencies": {
     "notification": "workspace:*",
