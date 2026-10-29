@@ -29,7 +29,19 @@ overrides:
 #     selectors are widened to catch the versions the previous floors produced.
 #   source-map-js 1.2.1 -> CVE-2026-93749 (HIGH), DoS via malformed indexed
 #     source maps. Fixed in 1.2.2. Arrives via @tailwindcss/node and css-tree.
-  'fast-uri@>=3.0.0 <3.1.8': 3.1.8
-  'fast-uri@>=4.0.0 <4.1.5': 4.1.5
+#   fast-uri 3.1.8/4.1.5 -> CVE-2026-110180/110306/110095/110725 (host/XSS/
+#     path-traversal bypasses). Fixed in 3.1.9 / 4.2.3.
+#   follow-redirects 1.16.0 (via axios, apps/ui) -> CVE-2026-111755/111756
+#     (credential-header leaks). Fixed in 1.16.1.
+#   undici 7.29.1/8.11.2 (via @scalar/json-magic, jsdom) -> CVE-2026-109869/
+#     109841/109924 (DoS, SRI bypass). Fixed in 7.30.1 / 8.12.2.
+#   zod 4.6.5 (via @scalar/types) -> CVE-2023-54404, memory exhaustion on
+#     unbounded container schemas. Fixed in 4.6.6.
+  'fast-uri@>=3.0.0 <3.1.9': 3.1.9
+  'fast-uri@>=4.0.0 <4.2.3': 4.2.3
   'source-map-js@<1.2.2': 1.2.2
   'qs@<6.16.0': 6.16.0
+  'follow-redirects@<1.16.1': 1.16.1
+  'undici@>=7.0.0 <7.30.1': 7.30.1
+  'undici@>=8.0.0 <8.12.2': 8.12.2
+  'zod@>=4.0.0 <4.6.6': 4.6.6
