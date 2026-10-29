@@ -10,9 +10,8 @@
 # the release tag creates. `base` only matters for v*.*.* and extra tags.
 # Run with dry_run first to preview the notes.
 #
-# The pin below is the bluedots-automation feature-branch head. Repin to the
-# feature squash SHA once bluedots-automation merges, then to @main once
-# promoted. The same SHA is passed as automation-ref so the scripts match.
+# The pin below is bluedots-automation's `feature` commit for #297. Repin to
+# @main once it is promoted. The same SHA is passed as automation-ref so the scripts match.
 
 name: Create release
 
