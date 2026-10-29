@@ -5,8 +5,10 @@
 # .github/workflows/create-release.yml so the four service repos can't drift
 # apart. This workflow replaced this repo's `cut-release.yaml`.
 #
-# Sprint tags (`YYYYMM-sN-rcN`) come from main only; the reusable workflow
-# rejects them from any other base. Run with dry_run first to preview the notes.
+# Sprint tags pick their own branch: candidate (YYYYMM-sN-rcN) from develop,
+# release (YYYYMM-sN) from main, hotfix (YYYYMM-sN.M) from release/YYYYMM-sN, which
+# the release tag creates. `base` only matters for v*.*.* and extra tags.
+# Run with dry_run first to preview the notes.
 #
 # The pin below is the bluedots-automation feature-branch head. Repin to the
 # feature squash SHA once bluedots-automation merges, then to @main once
@@ -18,14 +20,13 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. 202610-s1-rc1 or v1.2.0"
+        description: "Release tag: candidate 202611-s1-rc1, release 202611-s1, hotfix 202611-s1.1, or v1.2.0"
         required: true
         type: string
       base:
-        description: "Branch to cut the tag from. Sprint tags must come from main."
-        type: choice
-        options: [main, develop]
-        default: main
+        description: "Only for v*.*.* / extra tags; sprint tags pick their own branch (rc → develop, release → main, hotfix → release/<sprint>)"
+        type: string
+        default: ''
       dry_run:
         description: "Check everything and preview the notes, but create nothing"
         type: boolean
@@ -44,7 +45,7 @@ permissions: {}
 jobs:
   release:
     permissions: { contents: write, actions: write }
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/create-release.yml@50c93ab023866fbcab6524deb02a7ae22ef5b3da # feat/create-release 2026-10-22 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/create-release.yml@5e870eed83cf7cfa897ba94f3fe8a562680ffe03 # feat/create-release 2026-10-29 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
     with:
       tag: ${{ inputs.tag }}
       base: ${{ inputs.base }}
@@ -53,6 +54,6 @@ jobs:
       docs_only: ${{ inputs.docs_only }}
       ci-workflow: ci.yaml
       build-workflow: build-images.yaml
-      automation-ref: 50c93ab023866fbcab6524deb02a7ae22ef5b3da
+      automation-ref: 5e870eed83cf7cfa897ba94f3fe8a562680ffe03
     secrets:
       docs-token: ${{ secrets.DOCS_SYNC_TOKEN }}

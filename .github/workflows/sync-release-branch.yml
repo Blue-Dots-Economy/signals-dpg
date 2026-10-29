@@ -1,0 +1,29 @@
+# Sync release branch
+#
+# Thin caller. When a hotfix lands on release/<YYYYMM-sN> (the branch the release
+# tag creates, see create-release.yml), this opens PRs release/<sprint> -> develop
+# and -> feature for whichever is missing commits, so the fix is carried back.
+# All logic lives once in bluedots-automation's
+# .github/workflows/sync-release-branch.yml.
+#
+# Merge these PRs with a merge commit, NOT squash, so the fix keeps its history
+# and the next promotion does not conflict.
+#
+# Requires the repo setting "Allow GitHub Actions to create and approve pull
+# requests" (Settings -> Actions -> General) to be on. PRs opened by GITHUB_TOKEN
+# do not trigger CI on their own: close and reopen the PR to run it.
+
+name: Sync release branch
+
+on:
+  push:
+    branches: ['release/**']
+
+permissions: {}
+
+jobs:
+  sync:
+    permissions: { contents: read, pull-requests: write }
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/sync-release-branch.yml@5e870eed83cf7cfa897ba94f3fe8a562680ffe03 # feat/create-release 2026-10-29 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
+    with:
+      automation-ref: 5e870eed83cf7cfa897ba94f3fe8a562680ffe03
