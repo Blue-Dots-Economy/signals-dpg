@@ -24,6 +24,6 @@ permissions: {}
 jobs:
   sync:
     permissions: { contents: read, pull-requests: write }
-    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/sync-release-branch.yml@5e870eed83cf7cfa897ba94f3fe8a562680ffe03 # feat/create-release 2026-10-29 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
+    uses: Blue-Dots-Economy/bluedots-automation/.github/workflows/sync-release-branch.yml@5edcfe23f26b23821e6810f32135cd49ea25329d # feat/create-release 2026-10-29 -- repin to the feature squash SHA once bluedots-automation merges, then to @main once promoted
     with:
-      automation-ref: 5e870eed83cf7cfa897ba94f3fe8a562680ffe03
+      automation-ref: 5edcfe23f26b23821e6810f32135cd49ea25329d
