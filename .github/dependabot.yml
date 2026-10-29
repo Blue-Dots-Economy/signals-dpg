@@ -85,24 +85,14 @@ updates:
       - dependency-name: "@better-auth/api-key"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
-      # radix-ui 1.7.0 bumps its own @radix-ui/react-alert-dialog dependency to a
-      # version that pulls a newer @radix-ui/react-dialog generation than vaul
-      # (unrelated, unbumped) bundles internally. The two Dialog Contexts stop
-      # being the same module instance, so DialogTitle — rendered by this repo's
-      # own dialog.tsx, which imports Dialog from the `radix-ui` meta-package —
-      # throws "DialogTitle must be used within Dialog" wherever responsive-dialog
-      # forwards a title into vaul's mobile Drawer (#830 CI: 9 apps/ui failures,
-      # all Drawer/Dialog mobile-viewport tests). Confirmed by holding radix-ui
-      # alone at 1.6.7 while taking the other six #830 updates: failures clear.
-      # Minor is held alongside major since the break shipped in a minor.
+      # radix-ui >=1.7 pulls a newer @radix-ui/react-dialog than vaul bundles, so
+      # the mobile Drawer throws "DialogTitle must be used within Dialog" (#830).
+      # The break shipped in a minor, so minor is held too.
       - dependency-name: "radix-ui"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
-      # i18next 26.5 changes TFunction's call signature, so the `t` it hands out
-      # no longer fits the local `Translate` type in
-      # apps/ui/src/components/actions/my-actions/actions-table.tsx (6x TS2345
-      # on #861/#863). Minor held until that type is widened to accept TFunction;
-      # patches on 26.4 still land. Lift this entry in the same PR as the fix.
+      # i18next 26.5's TFunction no longer fits the local `Translate` type in
+      # actions-table.tsx (#863). Lift together with that type fix.
       - dependency-name: "i18next"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
