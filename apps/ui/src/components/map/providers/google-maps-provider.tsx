@@ -31,11 +31,21 @@ import { useViewportReportEmitter } from './use-viewport-report';
  */
 const markerDomainMap = new WeakMap<object, string>();
 
-// Stacking: self (0) < item pins (500) < clusters (1000 + count). The
+// Stacking: self (0) < item pins (500) < clusters (1000 + count) < popup. The
 // non-interactive "You" marker sits below item pins so an item on the same
-// point (fanned only ~10 m, sub-pixel at low zoom) stays clickable.
+// point (fanned only ~10 m, sub-pixel at low zoom) stays clickable. Advanced
+// markers share a stacking order with the InfoWindow, so the popup needs an
+// explicit zIndex above every cluster.
 const SELF_MARKER_Z_INDEX = 0;
 const ITEM_MARKER_Z_INDEX = 500;
+// Popup zIndex. Runtime-env so it can be raised per deploy (config.js) without
+// a rebuild; default 1,000,000, which a cluster only reaches near a million
+// pins. Read at render, not module load, so a late config.js still applies.
+const DEFAULT_POPUP_Z_INDEX = 1_000_000;
+function resolvePopupZIndex(): number {
+  const n = Number(getRuntimeEnv('VITE_MAP_POPUP_Z_INDEX'));
+  return Number.isSafeInteger(n) && n > 0 ? n : DEFAULT_POPUP_Z_INDEX;
+}
 
 // Zoom cap for a cluster click; co-located points zoom straight to it.
 const CLUSTER_CLICK_MAX_ZOOM = 20;
@@ -357,7 +367,7 @@ function ClusteredMarker({
               document.body,
             )
           : markerEl && (
-              <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled>
+              <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled zIndex={resolvePopupZIndex()}>
                 <div ref={popupContentRef}>
                   {renderPopup ? (
                     renderPopup(marker)

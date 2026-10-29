@@ -42,6 +42,8 @@ interface ImportMetaEnv {
   readonly VITE_MAP_CLUSTER_DISABLE_ZOOM?: string;
   /** Duration (ms) of the smooth cluster-click zoom animation. Falls back to 2000; 0 = instant. */
   readonly VITE_MAP_CLUSTER_ZOOM_ANIM_MS?: string;
+  /** zIndex of the Google map's marker popup; must exceed every pin and cluster. Falls back to 1000000. */
+  readonly VITE_MAP_POPUP_Z_INDEX?: string;
   readonly VITE_ACTION_POLL_INTERVAL_MS?: string;
   // Max profiles fetched per network request; set per deployment via the
   // chart's ui.runtimeConfig. Read through getRuntimeEnv (network-api.ts).
