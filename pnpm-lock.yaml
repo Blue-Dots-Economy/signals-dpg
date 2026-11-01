@@ -38,7 +38,7 @@ importers:
     dependencies:
       '@fastify/cookie':
         specifier: ^11.1.3
-        version: 11.1.5
+        version: 11.1.3
       '@fastify/cors':
         specifier: ^11.3.1
         version: 11.3.1
@@ -105,7 +105,7 @@ importers:
         version: 0.31.11
       read-excel-file:
         specifier: ^9.3.12
-        version: 9.3.13
+        version: 9.3.12
       tsx:
         specifier: ^4.23.15
         version: 4.23.15
@@ -141,7 +141,7 @@ importers:
         version: 6.11.0(@rjsf/utils@6.11.0(react@19.3.1))
       '@tanstack/react-query':
         specifier: ^5.104.5
-        version: 5.105.0(@types/react@19.3.0)(react@19.3.1)
+        version: 5.104.5(@types/react@19.3.0)(react@19.3.1)
       '@vis.gl/react-google-maps':
         specifier: ^1.10.1
         version: 1.10.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -164,14 +164,14 @@ importers:
         specifier: ~26.4.7
         version: 26.4.7(typescript@7.0.2)
       i18next-browser-languagedetector:
-        specifier: ^8.2.1
-        version: 8.2.1
+        specifier: ^8.2.2
+        version: 8.2.2
       leaflet:
         specifier: ^1.9.4
         version: 1.9.4
       lucide-react:
         specifier: ^1.61.0
-        version: 1.63.0(@types/react@19.3.0)(react@19.3.1)
+        version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       next-themes:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -192,7 +192,7 @@ importers:
         version: 19.3.1(react@19.3.1)
       react-i18next:
         specifier: ^17.0.16
-        version: 17.1.9(i18next@26.4.7(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2)
+        version: 17.1.8(i18next@26.4.7(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2)
       react-leaflet:
         specifier: ^5.0.0
         version: 5.0.0(leaflet@1.9.4)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -235,7 +235,7 @@ importers:
         version: 14.6.8(@testing-library/dom@10.4.1)
       '@types/google.maps':
         specifier: ^3.66.7
-        version: 3.66.8
+        version: 3.66.7
       '@types/leaflet':
         specifier: ^1.9.22
         version: 1.9.22
@@ -1049,8 +1049,8 @@ packages:
   '@fastify/ajv-compiler@4.0.6':
     resolution: {integrity: sha512-NtuzM0SfaMJbGlnjr9LWQUN5LzgSrbB8tf/wRZNas+4E1O/Nmzl53e7ruT61HDZyRCJGC6FxIogmNZO1c5ETBA==}
 
-  '@fastify/cookie@11.1.5':
-    resolution: {integrity: sha512-hs7e0otf7n/lJMpt63EFdQb5/u8kO6DeexEtLPVTybSdItC6SwJ1O0vtTyWvKNR70LZcHLlsUr/y3jFpqtyWRA==}
+  '@fastify/cookie@11.1.3':
+    resolution: {integrity: sha512-RBhlMNsmSG6C5KGiTkhSXBF75xIrUMSytDDBcpnVewhJ8XVYnJTu+SV6FYKXClIRsBuRjOfKbBSULvnPD3X/mg==}
 
   '@fastify/cors@11.3.1':
     resolution: {integrity: sha512-gZXNzd6FLHzOIfvoK4+Az3Wko2V6Y0MIsLxpyo4AEYl7a9q1JBPwPaxLea4nkr++8FCiJiPpYYo6E02uZW0dqw==}
@@ -2359,11 +2359,11 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tanstack/query-core@5.105.0':
-    resolution: {integrity: sha512-7p56vRmT/z4UJ6sctGIdl5WRUQyUv53IUpUwEKi2g97zMbO7zh8ZsCLffGAvCPBR4xD72e3VXsDyLwXHhoNTMQ==}
+  '@tanstack/query-core@5.104.5':
+    resolution: {integrity: sha512-Q94gI8Opd+CbdVNOdj8ZCyV8WqLYitrDq1t96Xc8WZT6lY0r5iRnJLXYDxMex7EEf2v+mXvn4FcjaBKSxXZQ9A==}
 
-  '@tanstack/react-query@5.105.0':
-    resolution: {integrity: sha512-y+hMuDERvgg6ay1da0V1a6ZC0ZONt7dELxSFkqRZuwm7p1TTZs0MoXrPlBRflIpRoYjvzQVYxycnLImpFLhWrw==}
+  '@tanstack/react-query@5.104.5':
+    resolution: {integrity: sha512-RORgFe052U+93weaNuqg7qHq7vNVNzXN/VrXqD4bbAuQCWUqOl2lV5Ui9flWk5CVvMyL/Bh27QWhzwH0aaOx9g==}
     peerDependencies:
       '@types/react': ^18 || ^19
       react: ^18 || ^19
@@ -2457,8 +2457,8 @@ packages:
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
-  '@types/google.maps@3.66.8':
-    resolution: {integrity: sha512-79smuL2cQ28Uqo01YlPCcHNCq96iyZQhvXinCBl9NvxsVP8kEel1cLsKtImNcwv0x4stX3QGgEUsE1ObXyCs5A==}
+  '@types/google.maps@3.66.7':
+    resolution: {integrity: sha512-4EhLRkBtF5TMBAifddMeK+tn5MS6Sa6cMwrg4TbQiPlV4nU9IbKwHJ5csBfnpykNmXwqy+a9y0/38ZezOwtxmg==}
 
   '@types/hast@3.0.4':
     resolution: {integrity: sha512-WPs+bbQw5aCj+x6laNGWLH3wviHtoCv/P3+otBhbOhJgG8qtpdAMlTCxLtsTWA7LH1Oh/bFCHsBn0TPS5m30EQ==}
@@ -3307,8 +3307,8 @@ packages:
     resolution: {integrity: sha512-dFcAjpTQFgoLMzC2VwU+C/CbS7uRL0lWmxDITmqm7C+7F0Odmj6s9l6alZc6AELXhrnggM2CeWSXHGOdX2YtwA==}
     engines: {node: '>= 6'}
 
-  i18next-browser-languagedetector@8.2.1:
-    resolution: {integrity: sha512-bZg8+4bdmaOiApD7N7BPT9W8MLZG+nPTOFlLiJiT8uzKXFjhxw4v2ierCXOwB5sFDMtuA5G4kgYZ0AznZxQ/cw==}
+  i18next-browser-languagedetector@8.2.2:
+    resolution: {integrity: sha512-99PKPDVeLj7s4nDJAz+z664/6IWEb2EyssTsknyzc1MY+mmtAXpx3BP862MrKLGRtmSJnlUioPuOE22F+RR+ng==}
 
   i18next@26.4.7:
     resolution: {integrity: sha512-p/3hqy6EcuqRs6wNwBYwGGC1fzBJSMxV9zMuN814ab/7QjdZbXfjXwuPZdQbngX6KDOTxM01uUiZyqmMB8ghZg==}
@@ -3592,8 +3592,8 @@ packages:
     resolution: {integrity: sha512-U4N8FgzmWxc8k1VH8Kr6lQg18U7Fjvby6wXHVRX/ZZ7IwWbRMgrRbP0Wrb5q5NVinryp4SQampHKdvtecItxUg==}
     engines: {node: 20 || >=22}
 
-  lucide-react@1.63.0:
-    resolution: {integrity: sha512-GkBfQG+FUJ41x6y3/lNXiOziVU0Rcqqq0TCzhHS8avsFXHZmOdmfBqsVTvHSaVmbI+wbdGkxHRmhYWhD3N4/yA==}
+  lucide-react@1.61.0:
+    resolution: {integrity: sha512-v2SQPPPNjnr+BlhL9Spuzmo5yR+hLkftfuE4E3jaxdNPgSH0hJKPcLJBP7yAta87jQNPsSERS59PJjCJ/CorBA==}
     peerDependencies:
       '@types/react': '*'
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
@@ -4024,8 +4024,8 @@ packages:
     peerDependencies:
       react: ^19.3.1
 
-  react-i18next@17.1.9:
-    resolution: {integrity: sha512-OgYqIH13XHPlWTaaI795Dz+k2AdKnXcOxNQVnf750T8Ij0TYWp1nYvXRpoJBulPqlyk2OAbn1PM4tFKiIj/byA==}
+  react-i18next@17.1.8:
+    resolution: {integrity: sha512-vGH+Tbhqbv5LdN9KvC9GEmQ6ATxJAjyxPEK0zSCSRlkeDqCPNxVtEOvDNRAz+51HTxc6QPwhnHaFD7ICu6pD1A==}
     peerDependencies:
       i18next: '>= 26.2.0'
       react: '>= 16.8.0'
@@ -4119,8 +4119,8 @@ packages:
     resolution: {integrity: sha512-QNhWdt7nrgVWWQG58QuGsAR3jv3Hbe4mb4vz7w2csnHavciZJgda1CPNaldF6eVxv90ud3jUXpKlHL69gO38yw==}
     engines: {node: '>=0.10.0'}
 
-  read-excel-file@9.3.13:
-    resolution: {integrity: sha512-dzSGFNBVOk4QkFXE37cREK7DOEVAMNYyXO1QIOoquJ24HhA2hZAZ9WYwf4KddjiV6ZMtsY3OM2JSVLpCg++9jA==}
+  read-excel-file@9.3.12:
+    resolution: {integrity: sha512-benNAoQbe5HqoTi3qrQkR8wMeHq0gVWLt2Br73hVvmBPGdzMf9OLGsps/812AfZ+bvzVYsUyhF77Y3o4B51yCA==}
     engines: {node: '>=18'}
 
   readdirp@5.1.1:
@@ -5081,7 +5081,7 @@ snapshots:
       ajv-formats: 3.0.1(ajv@8.20.0)
       fast-uri: 4.2.3
 
-  '@fastify/cookie@11.1.5':
+  '@fastify/cookie@11.1.3':
     dependencies:
       cookie: 2.0.1
       fastify-plugin: 6.0.1
@@ -5137,7 +5137,7 @@ snapshots:
 
   '@googlemaps/js-api-loader@2.1.1':
     dependencies:
-      '@types/google.maps': 3.66.8
+      '@types/google.maps': 3.66.7
 
   '@googlemaps/markerclusterer@2.6.2':
     dependencies:
@@ -6088,7 +6088,7 @@ snapshots:
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       cmdk: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      lucide-react: 1.63.0(@types/react@19.3.0)(react@19.3.1)
+      lucide-react: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       react: 19.3.1
       tailwind-merge: 3.6.0
     transitivePeerDependencies:
@@ -6341,11 +6341,11 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.3.5(@types/node@26.6.5)(esbuild@0.28.2)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  '@tanstack/query-core@5.105.0': {}
+  '@tanstack/query-core@5.104.5': {}
 
-  '@tanstack/react-query@5.105.0(@types/react@19.3.0)(react@19.3.1)':
+  '@tanstack/react-query@5.104.5(@types/react@19.3.0)(react@19.3.1)':
     dependencies:
-      '@tanstack/query-core': 5.105.0
+      '@tanstack/query-core': 5.104.5
       react: 19.3.1
     optionalDependencies:
       '@types/react': 19.3.0
@@ -6426,7 +6426,7 @@ snapshots:
 
   '@types/geojson@7946.0.16': {}
 
-  '@types/google.maps@3.66.8': {}
+  '@types/google.maps@3.66.7': {}
 
   '@types/hast@3.0.4':
     dependencies:
@@ -6549,7 +6549,7 @@ snapshots:
   '@vis.gl/react-google-maps@1.10.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@googlemaps/js-api-loader': 2.1.1
-      '@types/google.maps': 3.66.8
+      '@types/google.maps': 3.66.7
       fast-equals: 6.0.2
       react: 19.3.1
       react-dom: 19.3.1(react@19.3.1)
@@ -7218,9 +7218,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  i18next-browser-languagedetector@8.2.1:
+  i18next-browser-languagedetector@8.2.2:
     dependencies:
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
 
   i18next@26.4.7(typescript@7.0.2):
     optionalDependencies:
@@ -7450,7 +7450,7 @@ snapshots:
 
   lru-cache@11.5.3: {}
 
-  lucide-react@1.63.0(@types/react@19.3.0)(react@19.3.1):
+  lucide-react@1.61.0(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       react: 19.3.1
     optionalDependencies:
@@ -8101,7 +8101,7 @@ snapshots:
       react: 19.3.1
       scheduler: 0.28.0
 
-  react-i18next@17.1.9(i18next@26.4.7(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2):
+  react-i18next@17.1.8(i18next@26.4.7(typescript@7.0.2))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(typescript@7.0.2):
     dependencies:
       '@babel/runtime': 7.29.7
       html-parse-stringify: 4.0.1
@@ -8193,7 +8193,7 @@ snapshots:
 
   react@19.3.1: {}
 
-  read-excel-file@9.3.13:
+  read-excel-file@9.3.12:
     dependencies:
       fflate: 0.8.3
       saxen: 11.2.0
