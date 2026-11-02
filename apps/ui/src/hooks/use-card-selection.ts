@@ -1,30 +1,25 @@
 import * as React from 'react';
 
 export interface CardSelection {
-  /** Whether select mode is active. */
   selectMode: boolean;
-  /** Turn select mode on. */
   enterSelect: () => void;
-  /** Turn select mode off AND clear selection + lock. */
+  /** Turns select mode off and clears the selection and lock. */
   exitSelect: () => void;
-  /** Currently selected item ids. */
   selected: Set<string>;
-  /** True when this id is selected. */
   isSelected: (id: string) => boolean;
   /**
-   * Toggle an id. `groupKey` is the lock group the id belongs to (e.g. its
-   * domain, or its status). The first toggle in an empty selection sets the
-   * lock; while a lock is set, toggling an id from a different group is ignored.
+   * Toggles an id. `groupKey` is its lock group (e.g. domain or status). The
+   * first toggle into an empty selection sets the lock; ids from another group
+   * are then ignored.
    */
   toggle: (id: string, groupKey?: string) => void;
-  /** Returns true when an id may be selected given the current lock. */
+  /** Whether an id in `groupKey` may be selected under the current lock. */
   canSelect: (groupKey?: string) => boolean;
-  /** Empty the selection (and release the lock) but stay in select mode. */
+  /** Empties the selection and releases the lock, staying in select mode. */
   clear: () => void;
   /** The group key the batch is locked to, or null when nothing is selected. */
   lockKey: string | null;
-  /** Replace the selection with the given ids (used to keep failed ids selected). */
-  /** Replace the selection; `groupKey` locks it to that group (e.g. select-all). */
+  /** Replaces the selection; `groupKey` locks it to that group (e.g. select-all). */
   setSelected: (ids: string[], groupKey?: string) => void;
 }
 
@@ -60,7 +55,6 @@ export function useCardSelection(): CardSelection {
           if (next.size === 0) setLockKey(null);
           return next;
         }
-        // Adding: enforce lock.
         if (lockKey !== null && groupKey !== undefined && groupKey !== lockKey) {
           return prev; // ignore off-lock additions
         }

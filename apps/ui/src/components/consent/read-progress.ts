@@ -1,14 +1,7 @@
 /**
- * Scroll-gating logic for the consent gate.
- *
- * All decisions live in {@link computeReadProgress}, a pure function over plain
- * numbers. This repo's Vitest environment is happy-dom, which — like jsdom —
- * performs no real layout: every offset and scroll property reads 0 unless a
- * test stubs it — so testing this through the DOM would mean stubbing
- * geometry on every element. Keeping the logic pure makes it directly
- * testable; the hook only measures and delegates.
- *
- * @module apps/ui/src/components/consent/read-progress
+ * Scroll-gating logic for the consent gate. Decisions live in the pure
+ * {@link computeReadProgress} because happy-dom does no layout; the hook only
+ * measures and delegates.
  */
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 
@@ -42,14 +35,9 @@ export interface ReadProgress {
 }
 
 /**
- * Decides which documents have been read, which is in hand, and how far the
- * tracker's line should extend.
- *
- * @param scroll - Scroll container geometry.
- * @param sections - Section geometry, in document order.
- * @param alreadyRead - Ids already read; never dropped, so scrolling back up
- *   cannot un-read a document.
- * @returns Progress across the whole stack.
+ * Decides which documents have been read, which is current, and how far the
+ * tracker line extends. `sections` is in document order. Ids in `alreadyRead`
+ * are never dropped, so scrolling back up cannot un-read a document.
  */
 export function computeReadProgress(
   scroll: ScrollBox,
@@ -60,9 +48,8 @@ export function computeReadProgress(
     return { readIds: [], currentId: null, fillPercent: 100, allRead: true };
   }
 
-  // A container that has not been laid out yet is 0x0, which would otherwise
-  // satisfy the unscrollable test below and mark every document read before
-  // the reader has seen anything. Unmeasured is not evidence of anything.
+  // An unlaid-out 0x0 container would pass the unscrollable test below and
+  // mark everything read unseen.
   if (scroll.clientHeight === 0 || scroll.scrollHeight === 0) {
     const readIds = sections.filter((s) => alreadyRead.includes(s.id)).map((s) => s.id);
     return {
@@ -74,10 +61,8 @@ export function computeReadProgress(
   }
 
   const viewBottom = scroll.scrollTop + scroll.clientHeight;
-  // Content that cannot scroll has, by definition, already been shown in full.
-  // Without this a document shorter than the viewport — the 111-character
-  // profile statement — would never be markable as read and would lock the
-  // form permanently on every network.
+  // Content that cannot scroll is already shown in full; without this a
+  // document shorter than the viewport could never be marked read.
   const unscrollable =
     scroll.clientHeight > 0 && scroll.scrollHeight <= scroll.clientHeight + TOLERANCE;
 
@@ -96,26 +81,11 @@ export function computeReadProgress(
   }
 
   const readIds = sections.filter((s) => read.has(s.id)).map((s) => s.id);
-  // The fill line spans the N-1 gaps *between* the N per-document dots, so a
-  // document's own reading progress only shows up once the reader has moved
-  // on to the NEXT document — matching the sibling aggregator repo's
-  // identical geometry (apps/web/src/components/consent/read-progress.ts),
-  // which this intentionally mirrors for parity across three-and-up document
-  // stacks.
-  //
-  // That model degenerates at exactly two documents: with one gap,
-  // `(readIds.length + fractionOfCurrent) / segments` already reads 1/1 =
-  // 100% the instant the FIRST document finishes — before a single pixel of
-  // the second has been read. Signals' gate is always exactly two documents
-  // (privacy + terms), so it hits this every time, not as an edge case.
-  //
-  // Widening the denominator to `sections.length` (instead of `- 1`) would
-  // fix it, but would also change the fill trajectory for three-or-more
-  // documents — e.g. at 1 of 3 read, halfway through the 2nd: 75% today
-  // under the gap model vs 50% under a whole-count model — a real behaviour
-  // change for the aggregator's three-document flows this repo does not
-  // want to diverge from. So only the exact two-document case gets the wider
-  // denominator; three-and-up keeps the unchanged gap model.
+  // The fill spans the N-1 gaps between the N tracker dots, mirroring
+  // aggregator-dpg's read-progress.ts. With exactly two documents (the
+  // Signals gate: privacy + terms) that one gap would read 100% as soon as
+  // the first finishes, so two documents use N segments instead; three or
+  // more keep the gap model for parity with the aggregator.
   const segments = sections.length === 2 ? sections.length : Math.max(1, sections.length - 1);
   const fillPercent = Math.min(100, ((readIds.length + fractionOfCurrent) / segments) * 100);
 
@@ -123,18 +93,10 @@ export function computeReadProgress(
 }
 
 /**
- * Bootstrap progress, before the first measurement has run.
- *
- * Deliberately NOT `computeReadProgress({...0x0...}, [], [])`: an empty
- * `sections` array hits the pure function's empty-document-list branch,
- * which reports `allRead: true` so a genuinely empty list cannot block
- * forever. Here "no sections yet" means "not measured", the opposite — and
- * an unmeasured gate must never render its checkbox enabled. `useEffect`
- * runs after paint, so a wrong `true` here is briefly visible in a real
- * browser before `measure()` ever runs.
- *
- * @param docIds - Ids of the documents the gate is about to render, in order.
- * @returns Nothing-read progress, except for a genuinely empty `docIds` list.
+ * Progress before the first measurement: nothing read, unless `docIds` is
+ * empty. Not `computeReadProgress` with no sections, which reports
+ * `allRead: true`; an unmeasured gate must not render its checkbox enabled,
+ * even for the frame before the effect measures.
  */
 export function initialProgress(docIds: readonly string[]): ReadProgress {
   return {
@@ -147,13 +109,8 @@ export function initialProgress(docIds: readonly string[]): ReadProgress {
 
 /**
  * Tracks read progress for a scroll container holding `docIds` in order.
- *
- * Re-measures on scroll and on resize: a web-font swap, async Markdown render,
- * or orientation change all move the geometry after first paint.
- *
- * @param scrollRef - Ref to the scrolling element.
- * @param docIds - Ids of the documents rendered inside it, in order.
- * @returns Current progress.
+ * Re-measures on scroll and resize, since font swaps, async Markdown and
+ * orientation changes move the geometry after first paint.
  */
 export function useReadProgress(
   scrollRef: RefObject<HTMLElement | null>,
@@ -165,19 +122,10 @@ export function useReadProgress(
   const measure = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Section geometry via getBoundingClientRect, NOT offsetTop/offsetHeight.
-    // offsetTop is relative to the nearest *positioned* ancestor, which for
-    // this reader is the dialog/drawer's own `fixed` wrapper -- not the
-    // scroller -- because the reader itself has no `position`. That mixed
-    // offsetTop (dialog-relative) with `scrollTop + clientHeight` (scroller-
-    // content-relative): two different coordinate systems offset by a
-    // constant (the reader's distance from the dialog's top edge), so the
-    // last section's read check could never be satisfied — the gate was
-    // permanently unreachable in every real browser while every unit test,
-    // whose stubs set offsetTop directly, stayed green. A getBoundingClientRect
-    // delta is computed relative to the scroller's own rect, so it lands in
-    // the scroller's content space regardless of which ancestor happens to
-    // be positioned.
+    // getBoundingClientRect deltas, not offsetTop: offsetTop is relative to
+    // the nearest positioned ancestor, which may not be the scroller, and
+    // mixing it with `scrollTop + clientHeight` can make the last section
+    // unreachable. Rect deltas land in the scroller's content space.
     const readerRect = el.getBoundingClientRect();
     const sections: SectionBox[] = [];
     for (const id of docIds) {
@@ -193,11 +141,8 @@ export function useReadProgress(
       sections,
       readRef.current,
     );
-    // Union, don't replace: computeReadProgress only re-emits an id whose
-    // section was found in *this* call's `sections`. A transiently missing
-    // DOM node (remount, conditional render, a measurement racing layout)
-    // would otherwise silently drop that id from the bookkeeping and the
-    // tracker would go backwards. Stickiness is the whole guarantee.
+    // Union, not replace: a transiently missing section node would otherwise
+    // drop its id and the tracker would go backwards.
     readRef.current = Array.from(new Set([...readRef.current, ...next.readIds]));
     setProgress(next);
   }, [scrollRef, docIds]);

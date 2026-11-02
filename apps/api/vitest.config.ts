@@ -2,11 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    // apps/api/CLAUDE.md), so tests there were invisible to the runner: the
-    // coverage `include` below already counts `plugins/**/*.ts`, which is why
-    // auth_middleware.ts reported 0% despite having a passing test file.
-    // Naming a path on the CLI bypasses `include`, so this only shows up on a
-    // full run.
+    // `plugins/` lives outside `src/` (apps/api/CLAUDE.md), so it is listed
+    // explicitly or its tests never run. Naming a path on the CLI bypasses
+    // `include`, so a missing entry only shows up on a full run.
     include: [
       'src/**/__tests__/**/*.test.ts',
       'plugins/**/__tests__/**/*.test.ts',
@@ -22,9 +20,8 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
-      // Still emit the lcov report when some tests fail. Without this, a single
-      // failing test zeroes the entire api coverage upload — SonarCloud then
-      // reports 0% for every api file even though the rest of the suite ran.
+      // Still emit the lcov report when some tests fail; otherwise one failing
+      // test zeroes the whole api coverage upload to SonarCloud.
       reportOnFailure: true,
       include: ['src/**/*.ts', 'plugins/**/*.ts'],
       exclude: [

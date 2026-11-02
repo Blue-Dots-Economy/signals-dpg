@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 
 /**
- * A resend countdown: ticks from `initialSeconds` down to 0 (one interval,
- * cleaned up on unmount / retick), and `restart()` resets it. Shared by the
- * login OTP page and the guardian OTP step so the timer isn't reimplemented.
+ * A resend countdown from `initialSeconds` to 0; `restart()` resets it. Shared
+ * by the login OTP page and the guardian OTP step.
  */
 export function useResendCountdown(initialSeconds = 60): {
   countdown: number;

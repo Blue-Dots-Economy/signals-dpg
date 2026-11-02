@@ -33,9 +33,9 @@ export function PractitionerCard({
 
   const isRubix = isRubixListing(data);
 
-  // RubiX listings: RubiX is the source of truth, so only the Explore action is
-  // offered (Call + Get Directions are disabled), and the avatar becomes the
-  // RubiX favicon — theme-matched (dark-bg icon on dark theme, light-bg on light).
+  // RubiX listings: RubiX is the source of truth, so only Explore is offered
+  // (Call and Get Directions are disabled) and the avatar is the theme-matched
+  // RubiX favicon.
   const avatarImageUrl = isRubix
     ? resolved === 'dark'
       ? rubixDarkBg

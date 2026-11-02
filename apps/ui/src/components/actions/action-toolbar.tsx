@@ -35,12 +35,8 @@ const STATUSES: ActionStatusFilter[] = ['All', 'Pending', 'Accepted', 'Rejected'
 export const ACTION_STATUS_FILTERS: ActionStatusFilter[] = STATUSES;
 
 /**
- * Maps a status chip to the raw `action_status` values it should match on the
- * server (`action_status` is an OR'd list — see `FetchMyActionsQuery`).
- * `All` → `null` means "don't filter by status at all". Relocated here from
- * `action-list.tsx` (#439 Task 9) so both the page (which builds the hook's
- * query params from the chip) and any other status-chip consumer share one
- * definition instead of duplicating it.
+ * Maps a status chip to the `action_status` values it matches on the server
+ * (an OR'd list). `All` maps to `null`: no status filter.
  */
 export const FILTER_STATUSES: Record<ActionStatusFilter, string[] | null> = {
   All: null,
@@ -64,12 +60,9 @@ export const STATUS_LABEL_KEYS: Record<ActionStatusFilter, string> = {
 };
 
 /**
- * Presentational toolbar for the My Actions page: a sort dropdown, a Filters
- * button (with active-count badge), and — once any filter is active — a row of
- * removable tokens plus "Clear all". Status is now a filter inside the sheet
- * (like facets), so it shows here only as a removable token, not as inline
- * chips. Owns no state: every value comes in via props, every change goes out
- * via a callback. The page wires this to the URL-backed filter/sort state.
+ * My Actions toolbar: sort, a Filters button with an active-count badge, and
+ * removable tokens plus "Clear all" once a filter is active. Status is edited
+ * in the filters sheet and only shown here as a token. Stateless.
  */
 export function ActionToolbar({
   status,

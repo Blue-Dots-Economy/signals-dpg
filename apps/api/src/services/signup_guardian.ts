@@ -1,17 +1,14 @@
 /**
- * Pre-auth, signup-scoped guardian consent (U18 spec, pre-signup phase).
+ * Pre-auth guardian consent for a self-signup minor.
  *
- * For a self-signup MINOR, the account doesn't exist yet at the point the
- * guardian must be captured + OTP-verified — it has to happen BEFORE the
- * ward's own login OTP. There is no session and no user id to key state on,
- * so this whole flow is keyed on the signup identifier (the ward's own email
- * or phone) instead, held in Redis with a short TTL, and only materialized
- * onto the `minor_guardian` / `consent_record` tables once better-auth
- * actually creates the user (see `materializeSignupGuardian`, wired via
- * `afterUserCreate` in `apps/api/src/routes/auth/create_auth.ts`).
+ * The guardian is captured and OTP-verified before the ward's account exists,
+ * so there is no user id: state is keyed on the ward's signup identifier
+ * (email or phone) in Redis with a short TTL, and written to `minor_guardian` /
+ * `consent_record` when Keycloak provisioning first creates the local user
+ * (`materializeSignupGuardian`, called from `services/auth/provisioning.ts`).
  *
- * The Redis key is a hash of the normalized identifier, never the identifier
- * itself — the raw email/phone must not sit in a Redis key.
+ * The Redis key is a hash of the normalized identifier; the raw email/phone
+ * must not appear in a Redis key.
  */
 import { createHash } from 'node:crypto';
 import { redis } from '@api/db/secondary/redis';
@@ -58,7 +55,7 @@ export class SignupGuardianError extends Error {
   }
 }
 
-const PENDING_TTL_SEC = 1800; // 30 min — long enough to clear an OTP round-trip, short enough to not linger
+const PENDING_TTL_SEC = 1800; // 30 min: long enough for an OTP round-trip
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
@@ -72,7 +69,6 @@ function normalizeIdentifier(identifier: SignupIdentifier): { type: 'email' | 'p
   return { type: 'phone', value: normalizePhone(identifier.phoneNumber) };
 }
 
-/** SHA-256 hex of the normalized identifier — never the raw identifier. */
 function hashIdentifier(normalizedValue: string): string {
   return createHash('sha256').update(normalizedValue).digest('hex');
 }
@@ -125,10 +121,10 @@ export interface StartSignupGuardianInput {
 }
 
 /**
- * Capture + kick off OTP verification for a guardian on behalf of a would-be
- * minor signup. Throws a typed `SignupGuardianError` (or a `GuardianOtpError`
- * bubbled up from `issueGuardianOtp`) for every failure path; never writes
- * partial state on a throw.
+ * Captures a guardian for a would-be minor signup and sends the OTP. Throws
+ * `SignupGuardianError` or, from `issueGuardianOtp`, `GuardianOtpError`. The
+ * pending record is written before the OTP is issued, so it remains if the
+ * send fails (it expires with its TTL).
  */
 export async function startSignupGuardian(input: StartSignupGuardianInput): Promise<void> {
   const served = apiConfig.served_domains.some(
@@ -145,19 +141,18 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
     throw new SignupGuardianError('NOT_A_MINOR');
   }
 
-  // Resolve the single OTP channel (phone preferred when both are given).
+  // Phone is preferred when both contacts are given.
   const channel = resolveOtpChannel({ guardianEmail: input.guardianEmail, guardianPhone: input.guardianPhone });
 
-  // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
-  // No ward id yet (account not created), so count all wards on this ref.
+  // No ward id exists yet, so every ward on this ref counts. Re-checked under
+  // a lock at materialization.
   const ref = guardianRef(channel.contact);
   if (await isGuardianWardLimitReached(channel.contact, null)) {
     throw new SignupGuardianError('GUARDIAN_WARD_LIMIT');
   }
 
-  // Hard block: a guardian contact may not equal the ward's own signup
-  // identifier (a ward can't be their own guardian). Allowing it with an ack is
-  // a possible FUTURE use case — deliberately disabled for now.
+  // A ward can't be their own guardian; `sameContactAcknowledged` is not
+  // honoured here.
   const ident = normalizeIdentifier(input.identifier);
   const sameContact = guardianContactMatchesWard({
     wardEmail: ident.type === 'email' ? ident.value : null,
@@ -186,9 +181,7 @@ export async function startSignupGuardian(input: StartSignupGuardianInput): Prom
   };
   await writePending(hash, pending);
 
-  // Issued against the plaintext channel contact (the encrypted blob above is
-  // for at-rest storage only) — may throw GuardianOtpError (RATE_LIMITED /
-  // NO_OTP_PROVIDER), which the route maps directly.
+  // Sent to the plaintext contact; the encrypted copy is for storage only.
   await issueGuardianOtp({
     scope: otpScope(hash),
     contact: channel.contact,
@@ -204,10 +197,9 @@ export interface VerifySignupGuardianInput {
 }
 
 /**
- * Verify the guardian OTP for a pending signup-scoped guardian capture.
- * Flips the pending record's `verified` flag but does NOT touch any table —
- * materialization onto the ward's user row happens later, once the account
- * actually exists (`materializeSignupGuardian`).
+ * Verifies the guardian OTP for a pending signup capture. Only sets the
+ * pending record's `verified` flag; nothing is written to Postgres until
+ * `materializeSignupGuardian`.
  */
 export async function verifySignupGuardian(input: VerifySignupGuardianInput): Promise<void> {
   const ident = normalizeIdentifier(input.identifier);
@@ -217,7 +209,6 @@ export async function verifySignupGuardian(input: VerifySignupGuardianInput): Pr
   const pending = await readPending(hash);
   if (!pending) throw new SignupGuardianError('NO_PENDING_SIGNUP');
 
-  // May throw GuardianOtpError('VERIFY_THROTTLED') — the route maps it.
   await assertVerifyAttemptAllowed(scope);
 
   const ok = await verifyGuardianOtp({ scope, otp: input.otp });
@@ -235,17 +226,13 @@ export interface MaterializeSignupGuardianUser {
 }
 
 /**
- * Called from the better-auth `afterUserCreate` hook right after a genuinely
- * new user row is created. Looks up a verified pending signup-guardian
- * capture by the new user's email and/or phone (whichever the signup used),
- * and — only if found and verified — materializes it onto the new user id:
- * the `minor_guardian` row (already-encrypted blobs written directly, never
- * re-encrypted) plus the three U18 consent rows (guardian_declaration
- * source='self', terms + privacy source='guardian'), all in one transaction.
- * The pending Redis key is deleted afterward so it can't be replayed.
- *
- * A no-op (returns without writing anything) for a normal adult/non-gated
- * signup, where no pending capture exists.
+ * Called by Keycloak provisioning right after a new local user row is created.
+ * Finds a verified pending capture by the user's email or phone and, in one
+ * transaction, writes the ward's age, the `minor_guardian` row (encrypted
+ * blobs copied as-is) and the three U18 consent rows (guardian_declaration
+ * source='self', terms and privacy source='guardian'). The pending key is then
+ * deleted so it can't be replayed. A no-op when no verified capture exists.
+ * Throws when the network's u18 consent versions are not configured.
  */
 export async function materializeSignupGuardian(user: MaterializeSignupGuardianUser): Promise<void> {
   const candidateHashes: string[] = [];
@@ -269,10 +256,8 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
 
     const acceptedAt = new Date();
     await db.transaction(async (tx) => {
-      // Re-enforce the ward cap atomically at materialization (the pre-auth
-      // start-time check can race across concurrent signups sharing a guardian).
+      // The start-time cap check can race across concurrent signups.
       await assertWardLimitWithLock(tx, pending.guardianRef, user.id);
-      // Age lives on the user row now (captured pre-auth in the pending record).
       await setWardAge(user.id, pending.age, tx);
       await writeEncryptedGuardian(
         user.id,
@@ -318,5 +303,4 @@ export async function materializeSignupGuardian(user: MaterializeSignupGuardianU
     await redis.del(pendingKey(hash));
     return;
   }
-  // No verified pending capture for this user — normal adult/non-gated signup.
 }

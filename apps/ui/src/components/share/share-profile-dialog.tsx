@@ -20,20 +20,12 @@ export interface ShareProfileDialogProps {
 }
 
 /**
- * Share sheet for a live profile: the share link rendered as a QR code, plus
- * "Copy link" and "Download QR".
+ * Share sheet for a live profile: the link as an on-screen QR (to be scanned
+ * from the phone), "Copy link" and "Download QR". No "copy QR image": Firefox
+ * cannot write images to the clipboard.
  *
- * The QR is shown on screen deliberately — the common case is holding the
- * phone up for the person in front of you to scan, not downloading a file.
- * Download is the secondary path (print it, put it on a flyer).
- *
- * There is intentionally no "copy QR image" action: Firefox cannot write image
- * data to the clipboard at all, and an action that silently fails for an entire
- * browser is worse than one we never offered.
- *
- * The image is generated in the browser from `buildProfileShareUrl` with the
- * fixed `PROFILE_QR_OPTIONS` — no API call, no storage. Generating it again
- * later reproduces the same code, so a QR printed months ago still works.
+ * The QR is generated in the browser from `buildProfileShareUrl` with fixed
+ * `PROFILE_QR_OPTIONS`, so it is reproducible and a printed QR keeps working.
  */
 export function ShareProfileDialog({
   item,
@@ -44,9 +36,8 @@ export function ShareProfileDialog({
   const [dataUrl, setDataUrl] = React.useState<string | null>(null);
   const [failed, setFailed] = React.useState(false);
 
-  // Narrow to the four key fields, memoised on their values. Call sites build
-  // the `item` object inline, so depending on the object identity below would
-  // re-encode on every render (and, since encoding sets state, never settle).
+  // Memoised on the four key values: call sites build `item` inline, and
+  // depending on its identity would re-encode on every render, never settling.
   const qrItem = React.useMemo<ProfileQrItem>(
     () => ({
       item_network: item.item_network,
@@ -59,18 +50,13 @@ export function ShareProfileDialog({
 
   const shareUrl = buildProfileShareUrl(qrItem);
 
-  // Encode only while the dialog is open — a card grid can mount dozens of
-  // share buttons, and none of them should be rasterising a 512px QR upfront.
+  // Encode only while open, since a card grid mounts many share buttons.
   React.useEffect(() => {
     if (!open) return;
     let cancelled = false;
     setFailed(false);
-    // Clear the previous QR too, not just the error. If this instance ever saw
-    // a different `item` while open, a stale data URL would render — and
-    // download — the previous profile's QR under the new profile's filename.
-    // Not reachable today (card-grid keys on item.id, leaflet nests a popup per
-    // marker, and each ShareProfileButton owns its own dialog), so this is the
-    // component defending itself rather than a live bug.
+    // Clear the previous QR too, so a changed `item` can never show or
+    // download the old profile's QR.
     setDataUrl(null);
     generateProfileQrDataUrl(qrItem)
       .then((url) => {
@@ -153,9 +139,8 @@ export function ShareProfileDialog({
             <Copy className="h-4 w-4" aria-hidden="true" />
             {t('share.copy_link', 'Copy link')}
           </Button>
-          {/* Not disabled while the QR is still encoding: encoding is
-              near-instant, and a silently disabled button explains nothing if
-              it ever fails. `onDownload` toasts instead. */}
+          {/* Not disabled while encoding; `onDownload` toasts if the QR is
+              not ready. */}
           <Button type="button" className="flex-1" onClick={onDownload}>
             <Download className="h-4 w-4" aria-hidden="true" />
             {t('share.download_qr', 'Download QR')}

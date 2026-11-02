@@ -11,12 +11,7 @@ export interface ActionableTagsInput {
   schema: ActionableTagsSchema;
 }
 
-/**
- * Underscores are trimmed by index rather than /^_+|_+$/g: that pattern
- * backtracks quadratically on a long run. The input is a schema field name
- * (operator-set), so this is not a reachable DoS — the linear form is simply
- * free, and does not depend on the input staying operator-set.
- */
+/** Trimmed by index rather than /^_+|_+$/g, which backtracks quadratically on a long run. */
 const trimUnderscores = (s: string): string => {
   let start = 0;
   let end = s.length;
@@ -29,13 +24,9 @@ const slugify = (s: string): string =>
   trimUnderscores(s.trim().toLowerCase().replaceAll(/[^a-z0-9]+/g, '_'));
 
 /**
- * Schema-derived `missing_<required_field>` tags only.
- *
- * Network-specific business tags (`all_applications_rejected`,
- * `no_recent_activity`, `no_applications_yet`, `decisions_overdue`) are
- * removed — those names baked Jobs vocabulary into Signals. If a future
- * product need calls for business tags, add them via a config-driven
- * `tag_rules` array reusing the status-rule DSL.
+ * Schema-derived `missing_<required_field>` tags only. Network-specific
+ * business tags do not belong here; they would need config-driven rules so no
+ * network's vocabulary is baked into Signals.
  */
 export const compute_actionable_tags = (i: ActionableTagsInput): string[] => {
   const tags: string[] = [];

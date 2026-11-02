@@ -1,19 +1,11 @@
 /**
- * The one place a local `user` row is created.
+ * The one place a local `user` row is created, shared by first-login
+ * provisioning (`provisioning.ts`) and admin onboarding
+ * (`routes/v1/admin/participant.ts`) so columns and 23505 race handling cannot
+ * drift between them.
  *
- * Extracted from `provisioning.ts`'s `createMirror` so that admin onboarding
- * (`routes/v1/admin/participant.ts`) can stop creating its user through
- * better-auth's `signUpEmail` and write the row directly instead. Two hand-rolled
- * inserts would drift — over the columns, over the 23505 race handling, or over
- * which of them remembered `updatedAt` — so there is exactly one.
- *
- * Phase 2 of docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md.
- *
- * **What this deliberately does not do:** write an `account` row, set a password,
- * or synthesise an email. Those are `signUpEmail` artifacts, not requirements —
- * `user.email` is nullable, and a phone-only participant should simply have no
- * email rather than a `<uuid>@no-email.local` address that nothing can deliver to
- * and no lookup can ever match.
+ * No `account` row, password or synthesised email is written: `user.email` is
+ * nullable, and a phone-only participant has no email.
  */
 
 import { eq } from 'drizzle-orm';
@@ -30,25 +22,20 @@ function pgErrorCode(err: unknown): string | undefined {
 }
 
 /**
- * Just the query surface this module uses, so a caller can hand in either the
- * shared `db` handle or a transaction — the admin-onboarding path needs the
- * insert to roll back with the profile-item creation beside it.
+ * The query surface this module uses, so a caller can pass `db` or a
+ * transaction (admin onboarding rolls the insert back with the profile item).
  */
 export type UserWriteExecutor = Pick<typeof db, 'insert' | 'select'>;
 
-/**
- * A bare RFC-4122 UUID. Keycloak generates ids in this shape and the migration
- * script preserves them, so this is an invariant check rather than a conversion.
- */
+/** A bare UUID, the shape Keycloak ids take. An invariant check, not a conversion. */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface LocalUserInsert {
   /**
-   * The row's primary key, which **is** the Keycloak `sub`
-   * (`keycloak user.id == sub == signals user.id`, design §2.3/§6.1). Must be a
-   * bare UUID: `items.created_by` and every `*_owner` column key on it, and a
-   * prefixed id (the `usr_` form `seed_service_users.ts` uses for service
-   * accounts, which never log in through Keycloak) would break the round trip.
+   * The row's primary key, which is the Keycloak `sub`. Must be a bare UUID:
+   * `items.created_by` and every `*_owner` column key on it, and a prefixed id
+   * (the `usr_` form `seed_service_users.ts` uses for service accounts) could
+   * never be a Keycloak subject.
    */
   id: string;
   name: string;
@@ -58,9 +45,8 @@ export interface LocalUserInsert {
   phoneNumberVerified: boolean;
   /**
    * Columns the caller owns. First-login provisioning sets the consent booleans
-   * here; admin onboarding instead supplies its onboarding attribution, age and
-   * domains — and deliberately leaves the consent booleans alone, because
-   * consent lives in the ledger since #309.
+   * here; admin onboarding supplies onboarding attribution, age and domains and
+   * leaves the consent booleans alone, because consent lives in the ledger.
    */
   extra?: Partial<typeof userTable.$inferInsert>;
 }
@@ -77,17 +63,11 @@ export type LocalUserWriteResult =
 /**
  * Insert the local `user` row.
  *
- * Defaults (`role`, `image`, `banned`, `banReason`, `banExpires`, the timestamps)
- * were read off the rows the two existing paths actually produced, so neither
- * caller's row shape changes.
- *
- * @param input - Identity columns, plus any caller-owned columns via `extra`.
- * @param log - Used for the race warning and the unexpected-failure error.
  * @param exec - Transaction handle, when the insert must roll back with adjacent
  *   work. Defaults to the shared `db`.
  * @returns `created: true` on a fresh insert; `created: false` plus the winning
  *   row when a concurrent caller got there first; `IDENTITY_CONFLICT` when the
- *   identifiers belong to a *different* row; `USER_WRITE_FAILED` otherwise.
+ *   identifiers belong to a different row; `USER_WRITE_FAILED` otherwise.
  *   Never throws for an expected failure.
  */
 export async function insertLocalUser(
@@ -96,9 +76,7 @@ export async function insertLocalUser(
   exec: UserWriteExecutor = db
 ): Promise<LocalUserWriteResult> {
   if (!UUID_RE.test(input.id)) {
-    // Failing loudly beats writing a row whose id cannot be a Keycloak subject:
-    // that user could never log in, and the breakage would surface much later as
-    // orphaned domain data.
+    // A row whose id cannot be a Keycloak subject could never log in.
     log.error(
       { user_id: input.id },
       'user_writer: refusing to insert a user whose id is not a bare UUID',
@@ -140,9 +118,8 @@ export async function insertLocalUser(
 
       if (row) return { ok: true, created: false, id: row.id, existing: row };
 
-      // The violation was on `email` or `phone_number`, not the primary key — a
-      // *different* row already holds these identifiers. Never merge or re-key:
-      // that would repoint domain data, which this design exists to avoid.
+      // The violation was on `email` or `phone_number`: a different row holds
+      // these identifiers. Never merge or re-key; that would repoint domain data.
       return {
         ok: false,
         code: 'IDENTITY_CONFLICT',

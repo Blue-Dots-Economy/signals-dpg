@@ -34,11 +34,9 @@ function showActionError(err: unknown, t: (key: string) => string): void {
     });
     return;
   }
-  // Prefer the API's user-facing message when the failure came back as a
-  // per-item bulk error (e.g. HTTP 409 ACTION_LIMIT_REACHED → "An active
-  // request already exists between these two profiles."). The synthetic
-  // 'Request failed' placeholder isn't user-facing, so fall back to the
-  // generic description for it.
+  // Prefer the API's message for a per-item bulk error (e.g. 409
+  // ACTION_LIMIT_REACHED), but not the synthetic 'Request failed'
+  // placeholder.
   const apiMessage = err instanceof BulkSingleError ? err.response.data.message : undefined;
   toast.error(t('actions.handler_error_title'), {
     description: apiMessage && apiMessage !== 'Request failed' ? apiMessage : t('actions.handler_error_desc'),
@@ -53,17 +51,14 @@ interface ActionHandlerProps {
     formData: Record<string, unknown>,
     targetItemId: string,
     /**
-     * Guardian OTP to resubmit the SAME action with, after a prior call
-     * without it returned a `GUARDIAN_OTP_REQUIRED` per-item error (a minor
-     * ward). Adult ward calls never receive this — it's only set when
-     * `ActionHandler` is retrying from `GuardianOtpDialog`.
+     * Guardian OTP, set only when retrying from `GuardianOtpDialog` after a
+     * `GUARDIAN_OTP_REQUIRED` error (a minor ward).
      */
     guardianOtp?: string
   ) => Promise<void> | void;
   /**
-   * When true (a minor ward on a guardian-gated domain), a confirm step is
-   * shown BEFORE submitting — "an OTP will be sent to your guardian, proceed?"
-   * — so the guardian OTP isn't dispatched until the ward opts in.
+   * A minor ward on a guardian-gated domain: confirm before submitting, so
+   * the guardian OTP is not sent until the ward opts in.
    */
   guardianConfirmRequired?: boolean;
 }
@@ -85,13 +80,12 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     targetItemId: string;
   } | null>(null);
   const [loading, setLoading] = React.useState(false);
-  // Minor-ward guardian OTP: an action that returns GUARDIAN_OTP_REQUIRED is
-  // stashed and replayed with the guardian's code (see useGuardianOtpGate).
+  // An action that returns GUARDIAN_OTP_REQUIRED is stashed and replayed with
+  // the guardian's code.
   const gate = useGuardianOtpGate<GuardianChallenge>(async (c, otp) => {
     await onActionSubmit?.(c.type, c.schema, c.formData, c.targetItemId, otp);
-    // Success toast is owned by the onActionSubmit callback (action-specific).
   });
-  // Deferred submit awaiting the ward's "send OTP to my guardian?" confirmation.
+  // Deferred submit awaiting the ward's guardian-OTP confirmation.
   const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<
     { run: () => void; purpose: GuardianPurpose } | null
   >(null);
@@ -99,7 +93,6 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
   const triggerAction = React.useCallback(
     (type: string, schema: DotActionSchema, targetItemId: string) => {
       if (!schema.requirement_schema) {
-        // No form needed, submit directly
         handleDirectSubmit(type, schema, targetItemId);
         return;
       }
@@ -109,11 +102,9 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
   );
 
   /**
-   * Submits the action. If the (adult) result succeeds normally, returns
-   * true. If it fails with `GUARDIAN_OTP_REQUIRED` (a minor ward), stashes
-   * everything needed to resubmit and opens `GuardianOtpDialog`, returning
-   * false without surfacing an error toast. Any other error rethrows for the
-   * caller's existing catch block.
+   * Returns true on success. On `GUARDIAN_OTP_REQUIRED` stashes the
+   * submission, opens `GuardianOtpDialog` and returns false with no toast.
+   * Other errors rethrow.
    */
   const submitWithGuardianGate = async (
     type: string,
@@ -132,8 +123,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     }
   };
 
-  // Do the actual submit. Success messaging is owned by the onActionSubmit
-  // callback (action-specific toast); we only handle errors + modal close here.
+  // Success toasts belong to `onActionSubmit`; this handles errors only.
   const performSubmit = async (
     type: string,
     schema: DotActionSchema,
@@ -150,11 +140,10 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     }
   };
 
-  // Gate the submit behind the guardian-confirm step for a minor: stash the
-  // deferred submit and show the confirm; otherwise run immediately.
   const purposeForType = (type: string): GuardianPurpose =>
     type === 'connect' ? { kind: 'connect' } : { kind: 'apply' };
 
+  // For a minor, defer the submit behind the guardian-confirm step.
   const gateSubmit = (run: () => void, purpose: GuardianPurpose) => {
     if (guardianConfirmRequired) setPendingGuardianConfirm({ run, purpose });
     else run();

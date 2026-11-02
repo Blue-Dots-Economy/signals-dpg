@@ -8,12 +8,12 @@ import {
 
 /**
  * preHandler for the peer-only *_local routes. Verifies the HMAC instance
- * token (bound to path + body) so only legitimate network peers can reach the
- * raw local item data. Returns a reply, never throws (repo convention).
+ * token (bound to path + body) so only network peers reach raw local item
+ * data. Returns a reply, never throws.
  *
- * PEER_AUTH_MODE=permissive (default): a *missing* token is allowed (for peers
- * not yet upgraded) but a present-but-invalid one is rejected. 'enforced'
- * requires a valid token on every peer call.
+ * PEER_AUTH_MODE=permissive (default) allows a missing token, for peers
+ * without inter-instance auth, but rejects an invalid one. 'enforced' requires
+ * a valid token on every call.
  */
 export async function peer_instance_guard(
   request: FastifyRequest,
@@ -23,16 +23,10 @@ export async function peer_instance_guard(
 }
 
 /**
- * Peer guard that NEVER accepts an unsigned request, whatever `PEER_AUTH_MODE`
- * says.
- *
- * `permissive` exists so peers predating inter-instance auth keep working during
- * rollout on the READ routes. `/network/action/perform` has no such peer: it has
- * never had a legitimate unsigned caller inside this repo, and its body asserts
- * identity (`source_item_owner`, `performed_by_*`) rather than merely selecting
- * rows. Inheriting the rollout affordance there would hand an attacker the
- * allowance that exists for a legacy peer — which is the finding this guard was
- * added to close, left open by configuration.
+ * Peer guard that never accepts an unsigned request, whatever `PEER_AUTH_MODE`
+ * says. Used by `/network/action/perform`, whose body asserts identity
+ * (`source_item_owner`, `performed_by_*`) and which has no legitimate unsigned
+ * caller, so the permissive read-route allowance must not apply.
  */
 export async function peer_instance_guard_strict(
   request: FastifyRequest,
@@ -49,12 +43,10 @@ async function verifyPeerRequest(
   const token = request.headers[INSTANCE_TOKEN_HEADER];
   const timestamp = request.headers[INSTANCE_TIMESTAMP_HEADER];
   const targetPath = request.url.split('?')[0];
-  // Verify against the RAW request bytes (captured by the JSON content-type
-  // parser in app.ts), never a re-serialization of `request.body`. The parsed
-  // body has been through Zod by the time a preHandler runs, so undeclared keys
-  // are gone and defaults have been added — either changes the hash and rejects
-  // a legitimate peer. Falls back to re-serializing only when no raw body was
-  // captured (a non-JSON content type), which the peer routes never use.
+  // Verify the raw request bytes (captured by plugins/raw_body.ts), not a
+  // re-serialization of `request.body`: Zod has already stripped undeclared
+  // keys and added defaults, which would change the hash. The fallback only
+  // applies to non-JSON bodies, which peer routes never send.
   const body =
     (request as { rawBody?: string }).rawBody ?? JSON.stringify(request.body ?? {});
 
@@ -69,10 +61,8 @@ async function verifyPeerRequest(
     return;
   }
 
-  // Permissive rollout: allow a *missing* token (peer not yet upgraded), but
-  // still reject anything that tried to authenticate and failed — including a
-  // half-formed attempt (`incomplete`), which is why that is a distinct reason
-  // from `missing`.
+  // Only a missing token is allowed; a half-formed attempt (`incomplete`) is
+  // still rejected.
   if (opts.allowUnsigned && result.reason === 'missing') {
     request.log.warn(
       { path: targetPath },

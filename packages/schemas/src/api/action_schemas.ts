@@ -32,13 +32,9 @@ export const PerformActionBodySchema = z.object({
   action_type: z.string().min(1),
   source_item: ActionItemRefSchema,
   target_item: ActionTargetItemRefSchema,
-  // Optional at the transport level (defaults to `{}`): an action with no
-  // requirements — e.g. blue_dot seeker→provider — carries an empty snapshot,
-  // and some external callers cannot serialise an empty object, so they omit
-  // the field entirely. The action's OWN requirements are still enforced
-  // downstream against `interaction.requirement_schema` via
-  // `validateAgainstJsonSchema`, so an action that DOES require fields (e.g.
-  // provider→seeker) still fails there if they're missing.
+  // Defaults to `{}` because some external callers cannot serialise an empty
+  // object. The interaction's `requirement_schema` is still enforced
+  // downstream, so an action that requires fields fails there.
   requirements_snapshot: z.record(z.string(), z.unknown()).default({}),
   acting_as_user_id: z.string().min(1).optional(),
   consent: ConsentAckSchema.optional(),
@@ -50,11 +46,8 @@ export const PerformNetworkActionBodySchema = z.object({
   source_item: ActionItemRefWithInstanceSchema,
   target_item: ActionItemRefWithInstanceSchema,
   source_item_owner: z.string().min(1),
-  // Defaults to `{}` for symmetry with PerformActionBodySchema (above). The
-  // /action/perform proxy always forwards a (merged) snapshot, so this default
-  // is a no-op for that path; it only matters if a peer instance omits the
-  // field for a no-requirements action. Per-action requirements are still
-  // enforced here via `validateAgainstJsonSchema`.
+  // Defaults to `{}` for a peer that omits it on a no-requirements action;
+  // per-action requirements are still enforced.
   requirements_snapshot: z.record(z.string(), z.unknown()).default({}),
   performed_by_org_id: z.string().min(1).nullable().optional(),
   performed_by_service_user_id: z.string().min(1).nullable().optional(),
@@ -89,11 +82,8 @@ export const StoreEventBodySchema = z.object({
 export const ActionOwnershipRoleSchema = z.enum(['all', 'initiated', 'received']);
 export const ActionOwnershipTagSchema = z.enum(['initiated', 'received']);
 
-// Normalizes a single value (from a query string with one occurrence of a
-// repeatable param) or an already-repeated array into a plain array, leaving
-// `undefined` (param absent) untouched. Keeps single-value callers (e.g.
-// usePendingActionsCount) working unchanged while allowing multi-value
-// filters (#439).
+// A repeatable query param arrives as a string when sent once; normalise to an
+// array, leaving `undefined` (absent) untouched.
 const toStringArray = (v: string | string[] | undefined) => {
   if (v === undefined) return undefined;
   return Array.isArray(v) ? v : [v];
@@ -101,7 +91,7 @@ const toStringArray = (v: string | string[] | undefined) => {
 
 export const ActionSortKeySchema = z.enum(['recent', 'oldest', 'match_score', 'distance']);
 
-/** Longest `q` accepted by the owned-action list and export (#639 revamp). */
+/** Longest `q` accepted by the owned-action list and export. */
 export const ACTION_SEARCH_MAX = 100;
 /** Most profiles one owned-action query can scope to. */
 export const ACTION_ITEM_IDS_MAX = 50;
@@ -120,7 +110,6 @@ export const ActionFacetSelectionSchema = z.object({
 /** Extra, opt-in parts of the owned-action list response. */
 export const ActionFetchIncludeSchema = z.enum(['counts', 'column_fields']);
 
-// Profiles to scope to: a repeated `item_ids` query param or a single value.
 /** A single value or an array → an array; absent stays absent. */
 function asArray<T>(v: T | T[] | undefined): T[] | undefined {
   if (v === undefined) return undefined;
@@ -166,7 +155,7 @@ export const FetchOwnedActionsQuerySchema = FetchOwnedRecordsQuerySchemaBase.ext
 });
 
 /**
- * Request-shape bounds for `POST /api/v1/action/export` (#770 review #7).
+ * Request-shape bounds for `POST /api/v1/action/export`.
  * `EXPORT_ACTION_IDS_MAX` is the hard ceiling of one export; the configured
  * `EXPORT_MAX_ROWS` (checked by the route, 413) may be set up to it.
  */
@@ -175,10 +164,9 @@ export const EXPORT_FACETS_MAX = 20;
 export const EXPORT_FACET_VALUES_MAX = 100;
 
 /**
- * `POST /api/v1/action/export` body (#770). The filters mirror the owned-action
- * list filters (minus paging/sort) so "what I see" and "what I export" are the
- * same row set; `projection` / `include` / `format` carry the wider cases
- * (field-level export, ranking columns, other formats) without a new API.
+ * `POST /api/v1/action/export` body. The filters mirror the owned-action list
+ * filters (minus paging/sort) so "what I see" and "what I export" are the same
+ * rows.
  */
 export const ExportActionsBodySchema = z
   .object({
@@ -186,8 +174,8 @@ export const ExportActionsBodySchema = z
       .object({
         action_type: z.array(z.string().min(1)).optional(),
         // Omitted = every exportable status. An empty list is refused rather
-        // than read as "all": a view filtered to non-exportable statuses must
-        // never widen into an export of every revealed engagement.
+        // than read as "all", so a view filtered to non-exportable statuses
+        // cannot widen into an export of every revealed engagement.
         action_status: z.array(z.string().min(1)).min(1).optional(),
         ownership_role: ActionOwnershipRoleSchema.default('all'),
         item_id: z.uuid().optional(),
@@ -238,22 +226,16 @@ export const ActionEventSelectSchema = createSelectSchema(action_events);
 
 export const OwnedItemActionSchema = ItemActionSelectSchema.extend({
   ownership_roles: ActionOwnershipTagSchema.array().min(1),
-  // Human-readable names resolved from each item's display_name_field
-  // (falls back to the item_id when the schema declares none or the value
-  // is missing). Lets the UI show "You → Mobility World India" instead of
-  // raw ids.
+  // Names from each item's display_name_field: masked when the field is
+  // private and not revealed on this row, null when no name resolves.
   source_item_name: z.string().nullable().optional(),
   target_item_name: z.string().nullable().optional(),
-  // `match_score` is a real column on item_actions (#439 Task 1) and is
-  // already covered by ItemActionSelectSchema's generated shape; restated
-  // here for clarity/explicitness at the API boundary. `distance_m` is NOT a
-  // column — it's computed at read time from the viewer's/counterparty's
-  // item locations, so it only ever appears on the response row.
+  // `distance_m` is not a column: it is computed at read time from the two
+  // items' locations.
   match_score: z.number().nullable().optional(),
   distance_m: z.number().nullable().optional(),
-  // `include=column_fields` only: which kind of item the counterparty
-  // is, plus the interaction's `column_fields` for it — non-private fields
-  // only, so it carries no personal data at any status.
+  // `include=column_fields` only: the counterparty's item kind and its
+  // interaction `column_fields`, non-private fields only.
   counterparty: z
     .object({
       network: z.string(),
@@ -284,13 +266,11 @@ export const ActionContactDetailsParamsSchema = z.object({
 export const ActionContactDetailsResponseSchema = z.object({
   action_id: z.uuid(),
   action_status: z.string().min(1),
-  // true → `item` carries the revealed contact PII; false → the masked
-  // pre-reveal view (a party's profile is not live, e.g. paused). See #273.
+  // true: `item` carries the revealed contact PII; false: the masked view.
   revealed: z.boolean(),
   // When not revealed, whose profile blocked it: `self` = the viewer's own
-  // profile isn't live; `other` = the counterparty's (e.g. paused); `retired` =
-  // the counterparty permanently removed their profile (#347). Lets the UI show
-  // the right message.
+  // profile is not live; `other` = the counterparty's is not; `retired` = the
+  // counterparty retired theirs.
   reveal_blocked_reason: z.enum(['self', 'other', 'retired']).optional(),
   other_actor: z.object({
     item: ItemResponseSchema,

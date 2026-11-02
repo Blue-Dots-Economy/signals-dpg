@@ -1,14 +1,10 @@
 /**
- * Snapping helpers for the map markers query key (#203 map-serverside-search
- * Task 4). Pure functions only — no React, no fetching — so Task 5's refetch
- * decision (padded-bbox containment + truncated-result rule) can reuse the
- * exact same snapping without importing anything hook-shaped.
+ * Snapping helpers for the map markers query key, plus the pure refetch
+ * decision used by `useMapMarkers`.
  *
- * IMPORTANT: only the CACHE KEY is snapped/banded here. The request actually
- * sent to the server always uses the real, unrounded viewport (see
- * `useMapMarkers` / `fetchNetworkMarkers`) — snapping exists purely so a
- * sub-pixel pan or a same-band zoom reuses the same React Query entry instead
- * of busting the cache on noise.
+ * Only the cache key is snapped/banded. The request sent to the server always
+ * uses the real, unrounded viewport; snapping only lets a sub-pixel pan or a
+ * same-band zoom reuse the same React Query entry.
  */
 
 export interface RawBbox {
@@ -22,32 +18,20 @@ export type ZoomBand = 'clustered' | 'individual';
 
 /**
  * Zoom level at/above which the map disables clustering and shows individual
- * pins (spec: "cluster-disable zoom ~z14"). This module stays pure/env-unaware
- * on purpose — it only owns the cache-key zoom band. `map-caps.ts` (#203
- * map-serverside-search Task 6) reads the env-configurable version of this
- * same threshold (`VITE_MAP_CLUSTER_DISABLE_ZOOM`, defaulting to this exact
- * value) and uses it to pick the actual per-band marker cap (`capForZoom`).
+ * pins. This module only owns the cache-key zoom band and stays env-unaware;
+ * `map-caps.ts` reads the env-configurable threshold
+ * (`VITE_MAP_CLUSTER_DISABLE_ZOOM`, defaulting to this value).
  */
 export const DEFAULT_CLUSTER_DISABLE_ZOOM = 14;
 
-/**
- * Floor for the snap grid cell (degrees), so a very small (very zoomed-in)
- * bbox doesn't collapse to a near-zero cell and re-key on floating-point
- * noise. ~110m at the equator.
- */
+/** Floor for the snap grid cell (degrees, ~110m at the equator) so a tiny bbox does not re-key on floating-point noise. */
 const MIN_SNAP_CELL_DEG = 0.001;
 
 /**
- * Grid cell size for a given bbox span (an eighth of the larger lat/lng
- * side), rounded to the nearest power of two. The power-of-two rounding is
- * what makes `snapBbox` tolerant of a slight zoom-in/out that keeps
- * "essentially the same view": two bboxes whose spans are close (e.g. a
- * contained bbox from a small zoom) but not identical would otherwise derive
- * two subtly different cell sizes, which can round a corner near a cell
- * boundary to two different grid lines even though the corner barely moved —
- * bucketing the cell itself removes that sensitivity. Floored at
- * `MIN_SNAP_CELL_DEG` so a very small (very zoomed-in) bbox doesn't collapse
- * to a near-zero cell.
+ * Grid cell size for a given bbox span: an eighth of the larger side, rounded
+ * down to a power of two and floored at `MIN_SNAP_CELL_DEG`. Bucketing the
+ * cell stops two nearly identical spans from deriving slightly different cells
+ * and rounding the same corner to different grid lines.
  */
 function cellForSpan(spanDeg: number): number {
   const raw = Math.max(spanDeg / 8, MIN_SNAP_CELL_DEG);
@@ -56,12 +40,9 @@ function cellForSpan(spanDeg: number): number {
 }
 
 /**
- * Snap a raw bbox to a coarse grid for use as a cache-key input. The grid
- * cell is derived from the bbox's OWN span (see `cellForSpan`) rather than a
- * fixed size, so a wide low-zoom viewport gets a coarse grid (a city-scale
- * pan reuses the entry) and a small high-zoom viewport gets a fine one (a
- * small pan still busts it) — mirroring the existing radius-relative
- * bucketing in `useMapMarkers`.
+ * Snap a raw bbox to a grid for use as a cache-key input. The cell scales with
+ * the bbox's own span, so a wide low-zoom view gets a coarse grid and a small
+ * high-zoom view a fine one.
  */
 export function snapBbox(bbox: RawBbox): RawBbox {
   const latSpan = Math.abs(bbox.maxLat - bbox.minLat);
@@ -77,10 +58,9 @@ export function snapBbox(bbox: RawBbox): RawBbox {
 }
 
 /**
- * Bands a raw zoom level into `'clustered'` (below the cluster-disable zoom)
- * or `'individual'` (at/above it) — a coarser axis than the raw zoom for the
- * cache key, so zooming within the same band (e.g. 8 → 9) reuses the entry
- * while crossing the band (e.g. 13 → 14) doesn't.
+ * Bands a zoom level into `'clustered'` (below the cluster-disable zoom) or
+ * `'individual'` (at/above it), so zooming within a band reuses the cache
+ * entry while crossing it does not.
  */
 export function zoomBand(
   zoom: number,
@@ -99,13 +79,9 @@ export interface ViewportBboxInput {
 }
 
 /**
- * Builds the snapped-bbox + zoom-band inputs the markers query key snaps on,
- * from a viewport. Returns `null` when the viewport has no bbox (hand-built
- * radius-only viewports — existing tests, callers that predate this Task 4
- * bbox work), so callers fall back to the previous radius-bucket key shape.
- * A missing `zoom` bands as `0` (`'clustered'`) — the safest default given
- * the map never shows individual, unclustered pins before its first zoom
- * report.
+ * Builds the snapped-bbox + zoom-band key inputs from a viewport. Returns
+ * `null` when the viewport has no bbox (radius-only viewports), so callers use
+ * the radius-bucket key instead. A missing `zoom` bands as `'clustered'`.
  */
 export function snapViewportForKey(
   viewport: ViewportBboxInput,
@@ -127,13 +103,9 @@ export function snapViewportForKey(
 }
 
 /**
- * Inflate a bbox by `factor` (default 0.25 = 25%) of its own span on each
- * axis, split evenly between both sides. Used by Task 5's refetch state
- * machine (`use-map-markers.ts`) to build the "padded" bbox that a zoom-in or
- * small pan must stay inside to skip a refetch — generous enough that a
- * genuine zoom-in still reads as "the same view", while a real pan (which
- * moves the bbox rather than just shrinking it) escapes the padding and
- * forces a refetch.
+ * Inflate a bbox by `factor` of its own span on each axis, split evenly
+ * between both sides. `use-map-markers.ts` skips a refetch while the new bbox
+ * stays inside this padded bbox (a zoom-in or small pan); a real pan escapes it.
  */
 export function padBbox(bbox: RawBbox, factor = 0.25): RawBbox {
   const latPad = (Math.abs(bbox.maxLat - bbox.minLat) * factor) / 2;
@@ -166,29 +138,13 @@ export interface RefetchDecisionInput {
 }
 
 /**
- * The refetch decision (#203 map-serverside-search Task 5): refetch when
- * there's no prior fetch to compare against, when the new bbox escapes the
- * last fetch's padded bbox (a real pan, or a zoom-out), or when the last
- * fetch's result was truncated — so zooming into a previously over-dense area
- * (the "20k profiles in Bangalore → zoom into HSR Layout" case) always
- * re-queries the server rather than filtering the held, possibly
- * unrepresentative set. Otherwise (contained + the held set was complete),
- * the caller should skip the fetch and reuse the held markers.
- */
-/**
  * Clamp a viewport bbox to real-world coordinates.
  *
- * Map providers report bounds that run past the poles and, when zoomed out
- * far enough to show more than one copy of the world, past ±180° of
- * longitude — Leaflet and Google both do it. The markers endpoint validates
- * `min_lng`/`max_lng` to [-180, 180] (`item_schemas.ts:90-93`), so those
- * reports were rejected outright with
- * `querystring/max_lng Too big: expected number to be <=180` and the map
- * rendered as if the area were simply empty.
- *
- * A range that wraps the antimeridian (`minLng > maxLng`) or spans a full
- * revolution collapses to the whole world, which is what the user is looking
- * at in that situation anyway.
+ * Map providers (Leaflet and Google) report bounds past the poles and, when
+ * zoomed out far enough, past ±180° longitude. The markers endpoint rejects
+ * longitudes outside [-180, 180], which made the map look empty. A range that
+ * wraps the antimeridian (`minLng > maxLng`) or spans a full revolution
+ * collapses to the whole world.
  */
 export function clampBbox(bbox: RawBbox): RawBbox {
   const minLat = Math.max(-90, Math.min(90, bbox.minLat));
@@ -204,6 +160,13 @@ export function clampBbox(bbox: RawBbox): RawBbox {
       };
 }
 
+/**
+ * Refetch when there is no prior fetch, when the new bbox escapes the last
+ * fetch's padded bbox (a real pan or a zoom-out), or when the last result was
+ * truncated, so zooming into an over-dense area always re-queries the server
+ * instead of filtering an unrepresentative held set. Otherwise the caller
+ * reuses the held markers.
+ */
 export function shouldRefetch({ newBbox, paddedBbox, lastTruncated }: RefetchDecisionInput): boolean {
   if (paddedBbox === null) return true;
   if (lastTruncated) return true;

@@ -10,39 +10,27 @@ import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
 const BROWSE_STALE_TIME_MS = 90 * 1000;
 const BROWSE_CACHE_TTL_SECONDS = 90;
 
-// Which path served the current data (#203 List PR Task 4): 'native' is the
-// plain proximity/recency `/network/item/fetch` browse; the other two mirror
-// the discover BFF's own `meta.source` when q/filters/relevance route through
-// `/network/item/discover` (Task 6 uses this for the degraded-list UX).
+// Which path served the data: 'native' is the plain proximity/recency
+// `/network/item/fetch` browse; the others are the discover BFF's `meta.source`.
 export type BrowseSource = 'native' | DiscoverSource;
 
 interface UseInfiniteBrowseItemsOpts {
   enabled?: boolean;
-  // Free-text search (#203 List PR Task 4). A non-empty (trimmed) `q` routes
-  // to the discover BFF instead of the native paged fetch.
+  // A non-empty (trimmed) `q` routes to the discover BFF.
   q?: string;
-  // Facet selections, same shape the discover BFF's `filters` body field
-  // expects (`resolveAllowedFacetFilters` re-validates server-side regardless
-  // of what's sent). A non-empty array routes to discover.
+  // Facet selections in the discover BFF's `filters` shape (re-validated
+  // server-side). A non-empty array routes to discover.
   filters?: DiscoverFacetFilter[];
-  // Forces discover/relevance mode even with no q/filters (e.g. an explicit
-  // "sort by relevance" toggle). Defaults to false — plain proximity/recency
-  // browse (native) stays the default when nothing else requests discover.
+  // Forces discover/relevance mode with no q/filters.
   relevance?: boolean;
-  // The active profile's item id (#394 Task 2). Forwarded to the discover BFF
-  // as `anchor_item_id` (relevance-to-profile ranking, Task 1) ONLY on the
-  // discover path — plain native browse has no ranking concept, so it's
-  // neither sent nor part of that path's query key (a profile switch during
-  // plain proximity browse must not cause a needless refetch). On the
-  // discover path it IS part of the key: switching the selected profile must
-  // re-rank, so paging resets and the feed refetches (Task 3 wires the real
-  // value in from the page).
+  // The active profile's item id, sent as `anchor_item_id` on the discover path
+  // only. It is in the discover key (a profile switch re-ranks) but not the
+  // native one (native has no ranking, so a switch must not refetch).
   anchorItemId?: string;
-  // #644: the area FILTER. Defaults to `{ mode: 'anywhere' }`, which sends no
-  // coordinates at all — the list is not location-bounded unless the user
-  // explicitly asks. Part of the query key, so changing it resets paging.
+  // The area filter. The default `{ mode: 'anywhere' }` sends no coordinates.
+  // Part of the query key, so changing it resets paging.
   area?: BrowseArea;
-  // #644: explicit ordering. Also part of the query key.
+  // Explicit ordering; part of the query key.
   sort?: BrowseSort;
 }
 
@@ -53,33 +41,25 @@ interface UseInfiniteBrowseItemsResult {
   isLoading: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
-  // True when ANY loaded page's `meta.partial` is true — i.e. a peer instance
-  // didn't answer in time on at least one of the pages fetched so far, so the
-  // accumulated feed is known-incomplete (#203 §6, mirrors the map's
-  // `mapMarkers.partial` from P4). Sticky across pages: once a page comes
-  // back partial the feed stays flagged even if a later page's peers all
-  // answered, since earlier items may still be missing. Native path only —
-  // the discover BFF's response has no per-instance partial concept.
+  // True when any loaded page's `meta.partial` is true (a peer instance did not
+  // answer in time). Sticky: earlier items may still be missing. Native path
+  // only.
   partial: boolean;
-  // See `BrowseSource`. 'native' on the plain browse path; the discover BFF's
-  // `meta.source` ('signals_search' | 'native_fallback') on the discover path.
+  // 'native' on the plain path; the discover BFF's `meta.source` otherwise.
   source: BrowseSource;
   // True when the discover BFF fell back to its native path (signals-search
-  // unavailable/unconfigured/timed out) — q/filters were NOT honored
-  // server-side in that case. Always false on the native browse path.
+  // unavailable or timed out), so results are unranked. Always false on the
+  // native path.
   degraded: boolean;
-  // #394: the discover BFF's `meta.distance_meters` — the effective spatial
-  // radius actually applied (request override > configured env > the
-  // documented default), so the list note above the results can show
-  // "within X km". Undefined on the native browse path (no such concept) and
-  // on discover when no location was sent (a non-geo search has no radius).
+  // The discover BFF's `meta.distance_meters`, the radius actually applied, for
+  // the "within X km" note. Undefined on the native path and when no location
+  // was sent.
   distanceMeters?: number;
-  // #644: the order the SERVER actually applied (`meta.sort_applied`), which
-  // can differ from what was requested — `relevance` with no anchor and no
-  // text degrades to `newest`. The UI must label from THIS, never from the
-  // requested value, or it will claim an order it did not get.
+  // The order the server applied (`meta.sort_applied`); `relevance` with no
+  // anchor and no text degrades to `newest`. Label from this, never from the
+  // requested sort.
   sortApplied?: BrowseSort;
-  /** A response arrived without an order — see the return value's comment. */
+  /** A response arrived without an order; see `isSortUnreported`. */
   sortUnreported: boolean;
 }
 
@@ -98,36 +78,24 @@ interface BrowsePage {
 }
 
 /**
- * Paged browse feed for ONE domain (spec §5.1): server-ordered (nearest-first
- * when a location is supplied), page size VITE_PROFILE_PAGE_SIZE. The list view
- * consumes this; the map keeps its own fetch (decoupled in P4). Items are raw —
- * own-item filtering / enum filtering stay in the page's view layer.
+ * A page has arrived and it carried no order. Not derivable from `sortApplied`
+ * alone, which is also undefined before the first response: before then the UI
+ * shows the requested order, after it an unreported order must not be assumed.
  *
- * #203 List PR Task 4: when `opts.q` is non-empty, `opts.filters` is
- * non-empty, or `opts.relevance` is set, this switches to the discover BFF
- * (`fetchDiscover`) instead of the native paged fetch — the "discover"
- * condition. Discover items are the SAME `Item` shape the native path
- * returns, so the list renders both uniformly without forking the item type.
- */
-/**
- * A page HAS arrived and it carried no order.
- *
- * Deliberately not derivable from `sortApplied` alone: that is also undefined
- * before anything has loaded, and the two must behave differently. Before the
- * first response the UI optimistically shows what it asked for, so nothing
- * flickers; once a response has come back WITHOUT an order, the order is
- * unknown and must not be assumed (see the BFF's `sort_applied`, which is
- * optional precisely so that absence can travel).
- *
- * A module-level function rather than an inline expression so its two terms
- * are budgeted here — `useInfiniteBrowseItems` is at the cognitive-complexity
- * limit and inlining this tipped it over.
+ * A separate function to keep `useInfiniteBrowseItems` under the
+ * cognitive-complexity limit.
  */
 function isSortUnreported(lastPage: { meta: { sortApplied?: BrowseSort } } | undefined): boolean {
   if (lastPage === undefined) return false;
   return lastPage.meta.sortApplied === undefined;
 }
 
+/**
+ * Paged browse feed for one domain, server-ordered, page size
+ * `VITE_PROFILE_PAGE_SIZE`. A non-empty `q`, non-empty `filters` or `relevance`
+ * switches to the discover BFF (`fetchDiscover`); both paths return the same
+ * `Item` shape. Own-item and enum filtering stay in the page's view layer.
+ */
 export function useInfiniteBrowseItems(
   network: DotNetworkSchema | null,
   domain: DotNetworkDomain | null,
@@ -145,14 +113,9 @@ export function useInfiniteBrowseItems(
   const area = opts?.area ?? DEFAULT_BROWSE_AREA;
   const sort = opts?.sort ?? 'relevance';
 
-  // The AREA FILTER's centre — only in radius mode. #644: `anywhere` sends
-  // nothing, so signals-search builds no s_dwithin clause and the candidate
-  // set is the whole network.
-  // Left `undefined` rather than `{}` when inactive: spreading `undefined` into
-  // an object literal is a no-op, so no fallback is needed (Sonar S7744).
-  // Typed as the exact request fields rather than `Record<string, number>`:
-  // the loose form is assignable to anything and let the bbox spread into
-  // `fetchDiscover` unnoticed while that function's allowlist dropped it.
+  // The area filter's centre, in radius mode only. `anywhere` sends nothing, so
+  // signals-search applies no distance clause. Typed as the exact request
+  // fields so a stray field cannot slip into `fetchDiscover` unnoticed.
   let areaFilter:
     | Pick<FetchDiscoverQuery, 'item_latitude' | 'item_longitude' | 'distance_meters'>
     | Pick<FetchDiscoverQuery, 'min_lat' | 'min_lng' | 'max_lat' | 'max_lng'>
@@ -164,8 +127,7 @@ export function useInfiniteBrowseItems(
       distance_meters: area.meters,
     };
   } else if (area.mode === 'viewport') {
-    // The exact rectangle (contract §1.5). All four bounds travel together —
-    // a partial box is rejected by the BFF rather than defaulted.
+    // All four bounds travel together; the BFF rejects a partial box.
     areaFilter = {
       min_lat: area.bounds.minLat,
       min_lng: area.bounds.minLng,
@@ -174,15 +136,10 @@ export function useInfiniteBrowseItems(
     };
   }
 
-  // The ORDERING centre — only for `nearest`.
-  //
-  // A RADIUS area already supplies a centre and signals-search reuses it
-  // (contract §1.3 rule 2), so sending one too would be redundant. A VIEWPORT
-  // does NOT: a bbox has no centre on the wire, and the BFF deliberately will
-  // not derive one from the rectangle's midpoint, because that would let
-  // "search this area" silently change the sort. So nearest-inside-a-viewport
-  // has to send the centre explicitly, and the viewport's own midpoint is the
-  // right one — it is the area the user is asking about.
+  // The ordering centre, for `nearest` only. A radius area already supplies one
+  // that signals-search reuses. A viewport does not, and the BFF will not derive
+  // one (that would let "search this area" change the sort), so send the
+  // viewport's midpoint explicitly.
   const needsExplicitCenter = area.mode !== 'radius';
   const nearestCenter =
     area.mode === 'viewport'
@@ -196,25 +153,16 @@ export function useInfiniteBrowseItems(
       ? { ordering_latitude: nearestCenter.lat, ordering_longitude: nearestCenter.lng }
       : undefined;
 
-  // Location + q/filters/mode are all part of the key so any change resets
-  // paging (spec §5.1; #203 List PR Task 4 extends this to discover inputs) —
-  // useInfiniteQuery starts a fresh query (pageParam back at 0) rather than
-  // appending to the previous feed whenever the key changes. `anchorItemId`
-  // (#394 Task 2) is included ONLY in discover mode: it has no effect on the
-  // native path, so leaving it out of that path's key means a profile switch
-  // during plain proximity browse doesn't trigger a needless refetch, while a
-  // profile switch during discover DOES change the key (re-ranking depends
-  // on the anchor).
+  // Every request input is in the key, so any change starts a fresh feed at
+  // offset 0. `anchorItemId` is keyed in discover mode only.
   const filterKey = {
     limit: PROFILE_PAGE_SIZE,
     mode: useDiscover ? ('discover' as const) : ('native' as const),
     q,
     filters,
-    // Only the coordinates that actually reach the request belong in the key.
-    // #644: on the discover path a resolved location no longer affects a
-    // `relevance` or `newest` request at all, so keying on it would cause a
-    // needless refetch the moment geolocation resolves. The native path still
-    // orders by proximity, so it keeps lat/lng.
+    // Only coordinates that reach the request belong in the key. On the
+    // discover path the user's location affects only `nearest`, and then through
+    // `ordering`, so keying on it would refetch when geolocation resolves; the native path orders by proximity.
     ...(useDiscover
       ? {
           area,
@@ -292,11 +240,9 @@ export function useInfiniteBrowseItems(
     },
     getNextPageParam: (lastPage, allPages) => {
       const loaded = allPages.reduce((n, p) => n + p.items.length, 0);
-      // Stop when the server returned a short page (fewer than a full page) OR
-      // we've loaded at least the reported total. meta.total is a sum of
-      // Redis-cached per-instance counts and can transiently overstate the real
-      // row count (deletes/pauses within the count-cache TTL); the short-page
-      // check prevents an endless "load more" in that case.
+      // Stop on a short page as well as at the reported total: meta.total sums
+      // Redis-cached per-instance counts and can overstate the real row count
+      // within the count-cache TTL, which would otherwise loop "load more".
       if (lastPage.items.length < PROFILE_PAGE_SIZE) return undefined;
       return loaded < lastPage.meta.total ? loaded : undefined;
     },
@@ -307,13 +253,9 @@ export function useInfiniteBrowseItems(
   const lastPage = query.data?.pages[query.data.pages.length - 1];
   const total = lastPage?.meta.total ?? 0;
   const partial = query.data?.pages.some((p) => p.meta.partial === true) ?? false;
-  // `degraded`/`source` are STICKY across pages (like `partial`): once ANY
-  // loaded page fell back to native, later pages that happen to hit a
-  // recovered signals-search must not flip the "basic matches" note off
-  // mid-scroll — the accumulated feed still mixes native (unranked) pages with
-  // ranked ones, so the note stays until a full refetch. (The native fallback
-  // DOES apply search + filters now — #394 list-native-fallback — so this is
-  // about ranking consistency, not "unfiltered shown as filtered".)
+  // `degraded`/`source` are sticky like `partial`: once any page fell back to
+  // native, the feed mixes unranked and ranked pages, so the note stays until a
+  // full refetch.
   const degraded = query.data?.pages.some((p) => p.meta.degraded) ?? false;
   const anyFallback = query.data?.pages.some((p) => p.meta.source === 'native_fallback') ?? false;
   const source: BrowseSource = anyFallback
@@ -332,13 +274,9 @@ export function useInfiniteBrowseItems(
     partial,
     source,
     degraded,
-    // Not sticky like `partial`/`degraded`/`source`: the effective radius is
-    // a static property of the request (location + config), not something
-    // that can meaningfully change page-to-page within the same feed, so the
-    // latest loaded page's value is the correct one to surface.
+    // A property of the request, not of a page, so the latest page's value is
+    // the right one.
     distanceMeters: lastPage?.meta.distanceMeters,
-    // Same reasoning as distanceMeters: a property of the current request, so
-    // the latest loaded page's value is the correct one to surface.
     sortApplied: lastPage?.meta.sortApplied,
     // See `isSortUnreported`.
     sortUnreported: isSortUnreported(lastPage),

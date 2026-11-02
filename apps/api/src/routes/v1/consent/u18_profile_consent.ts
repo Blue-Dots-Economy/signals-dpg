@@ -23,33 +23,25 @@ import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 
 /**
- * After-commit side effects of a guardian promotion (#557). Both the verify and
- * finalize handlers promote a `draft` profile to `live` and must do exactly this
- * afterwards; the self-consent route (`accept_profile_consent.ts`) is the same
- * shape.
+ * After-commit side effects of a guardian promotion (`draft` → `live`), shared
+ * by the verify and finalize handlers; `accept_profile_consent.ts` does the
+ * same.
  *
- * Both steps run AFTER the transaction, never inside it: an item event published
- * pre-commit lets the search worker read the row before the promotion is visible
- * and re-index the stale `draft` — the very race that made U18 profiles
- * permanently invisible (signals-search#122).
- *
- * Best-effort throughout. The consent row and the lifecycle flip are already
- * committed, so neither a Redis outage nor a cache miss may turn a successful
- * promotion into a 500; the reconciliation sweep is the backstop.
+ * Runs after the transaction, never inside it: an event published pre-commit
+ * lets the search worker re-index the stale `draft`. Best-effort: the promotion
+ * is committed, so a Redis or cache failure must not turn it into a 500; the
+ * signals-search reconciliation sweep is the backstop.
  */
 async function afterGuardianPromotion(
   body: { network: string; item_domain: string; item_type: string; item_id: string },
   log: FastifyRequest['log'],
 ): Promise<void> {
-  // Both item read caches now hold a stale `draft`: the 1s local one behind the
-  // owner's "My Profiles" list, and the domain-TTL inter-instance ones that would
-  // otherwise keep the freshly-live profile out of everyone else's browse feed.
+  // Both item read caches (1s local, domain-TTL inter-instance) hold a stale `draft`.
   await invalidateItemFetchCache(body.network, body.item_domain).catch((err) =>
     log.warn({ err }, 'cache invalidation after guardian profile-consent promotion failed'),
   );
-  // item_search is maintained by signals-search off item events, and every read
-  // path there is live-only — an unpublished promotion leaves the profile out of
-  // every ranked feed and every map viewport while its owner's UI shows it Active.
+  // signals-search reads are live-only, so an unpublished promotion keeps the
+  // profile out of search.
   await publishItemEvent(
     {
       item_network: body.network,

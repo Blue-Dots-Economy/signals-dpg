@@ -14,9 +14,8 @@ interface ActionModalHeaderProps {
   className?: string;
 }
 
-// Branded header band for action modals (Connect / Accept / Reject / Cancel / Complete).
-// Shows action icon + title in a colored gradient strip, with a role-flow badge
-// underneath (from domain → to domain, with role icons).
+// Header band for action modals: icon and title, with a from-domain to
+// to-domain badge underneath.
 export function ActionModalHeader({
   actionKey,
   title,

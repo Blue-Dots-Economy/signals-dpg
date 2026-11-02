@@ -47,7 +47,7 @@ export function parseLocationFields(
   const secondary: LocationField[] = [];
   for (const [name, prop] of Object.entries(properties)) {
     if (prop?.location === 'primary') {
-      // Validation guarantees at most one; first wins defensively.
+      // assertSinglePrimaryLocation enforces one at config load; first wins.
       primary ??= { field: name, cardinality: cardinalityOf(prop) };
     } else if (prop?.location === 'secondary') {
       secondary.push({ field: name, cardinality: cardinalityOf(prop) });
@@ -65,8 +65,8 @@ export function getAutocompleteLocationFields(
 }
 
 /**
- * True when the primary location field carries `"private": true`. Used by the
- * geocode paths to coarsen exact coordinates for a PII field.
+ * True when the primary location field carries `"private": true`; its
+ * coordinates are then jittered before storage.
  */
 export function isLocationFieldPrivate(
   itemSchema: Record<string, unknown> | null | undefined
@@ -112,9 +112,8 @@ export function primaryAddressChanged(
   const { primary } = parseLocationFields(itemSchema);
   if (!primary) return false;
   if (!Object.prototype.hasOwnProperty.call(partialState, primary.field)) return false;
-  // Primary location values are a string (single) or string[] (multiple), so
-  // JSON.stringify is a sound deterministic equality check (and array reordering
-  // is intentionally treated as a change). Not safe for object-valued fields.
+  // Values are a string or string[], so JSON.stringify is a sound equality
+  // check; reordering an array counts as a change.
   return JSON.stringify(partialState[primary.field]) !== JSON.stringify(priorState[primary.field]);
 }
 

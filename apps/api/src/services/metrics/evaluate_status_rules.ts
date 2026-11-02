@@ -78,10 +78,9 @@ const evaluate_predicate = (pred: Predicate, input: RuleInput): boolean => {
 };
 
 /**
- * First-match-wins evaluation of a per-domain status_rules array. The
- * final entry must be `{ status: ..., when: 'default' }` — the network-
- * config validator catches violations so this function should never
- * fall off the end. The throw is a defensive guard.
+ * First-match-wins evaluation of a per-domain status_rules array. The config
+ * validator requires a final `when: 'default'` entry, so the throw is only a
+ * defensive guard.
  */
 export const evaluate_status_rules = (
   rules: StatusRule[],

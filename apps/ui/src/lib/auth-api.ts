@@ -30,10 +30,8 @@ export interface User {
   banExpires: string | null;
   createdAt: string;
   updatedAt: string;
-  /**
-   * This browser session is the person's first in the app (from
-   * `/auth/me`). Plays the welcome tours; absent when not known.
-   */
+  /** First browser session in the app (from `/auth/me`); plays the welcome
+   * tours. Absent when not known. */
   firstLogin?: boolean;
 }
 
@@ -53,10 +51,8 @@ export interface SessionResponse {
 }
 
 export function normalizePhoneNumber(phoneNumber: string): string {
-  // Always strip whitespace + dashes + parens first — historical data was
-  // stored as "+91 9876543210" (with a space) so a later lookup against
-  // the cleaner "+919876543210" missed. One canonical shape kills the
-  // duplicate-row class of bugs.
+  // Strip whitespace, dashes and parens first so "+91 9876543210" and
+  // "+919876543210" normalize to one canonical shape (no duplicate rows).
   const cleaned = phoneNumber.replace(/[\s\-()]/g, '');
   const digits = cleaned.replace(/\D/g, '');
   if (cleaned.startsWith('+')) return `+${digits}`;
@@ -65,14 +61,9 @@ export function normalizePhoneNumber(phoneNumber: string): string {
 }
 
 /**
- * Validates a phone number. Accepts:
- *   - Indian shorthand: 10 digits starting with 6-9 (e.g. "9876543210")
- *     and the same with +91 prefix.
- *   - Any other E.164 number: leading "+" followed by 8-15 digits where
- *     the first digit is 1-9 (country code rule).
- *
- * Whitespace, dashes and parens are stripped before the check, matching
- * normalizePhoneNumber's behaviour.
+ * Accepts a 10-digit Indian mobile (first digit 6-9), the same with +91, or any
+ * other E.164 number ("+" and 8-15 digits, first digit 1-9). Whitespace,
+ * dashes and parens are stripped first, as in normalizePhoneNumber.
  */
 export function isValidPhoneNumber(phoneNumber: string): boolean {
   const cleaned = phoneNumber.replace(/[\s\-()]/g, '');
@@ -82,28 +73,23 @@ export function isValidPhoneNumber(phoneNumber: string): boolean {
   if (!cleaned.startsWith('+') && digits.length === 10) {
     return /^[6-9]\d{9}$/.test(digits);
   }
-  // Indian numbers with the country code: exactly "+91" + a 10-digit mobile
-  // (first subscriber digit 6-9). Rejects too-long inputs like
-  // "+919620421129333" that the generic E.164 rule below would otherwise
-  // wave through on length alone.
+  // +91 must be followed by exactly a 10-digit mobile; the generic E.164 rule
+  // would accept a too-long number like "+919620421129333".
   if (cleaned.startsWith('+91')) {
     return /^91[6-9]\d{9}$/.test(digits);
   }
-  // Any other explicit "+" — accept generic E.164. 8-15 digits total; the
-  // leading digit (the country code's first digit) must be 1-9.
+  // Any other "+": generic E.164.
   if (cleaned.startsWith('+')) {
     return /^[1-9]\d{7,14}$/.test(digits);
   }
-  // No "+" and not the 10-digit Indian shape — reject.
   return false;
 }
 
 /**
- * Build the identifier params for the pre-login consent status check. The phone
- * MUST be normalized to the same canonical E.164 form the auth path stores
- * (`normalizePhoneNumber`), or the exact-match lookup in
- * `/consent/status-by-identifier` misses a returning user and the T&C gate
- * re-prompts on every login.
+ * Identifier params for the pre-login consent status check. The phone must be
+ * normalized like the stored value (`normalizePhoneNumber`), or the
+ * exact-match lookup in `/consent/status-by-identifier` misses a returning user
+ * and the gate re-prompts every login.
  */
 export function consentStatusIdentifier(
   identifier: AuthIdentifier,
@@ -137,9 +123,9 @@ export interface U18PrecheckResponse {
 }
 
 /**
- * Public pre-OTP check: does this EXISTING user still need to give their age
- * (they hold a gated-domain profile and `user.age` is unset)? Drives whether the
- * login flow shows the birth-year → guardian steps BEFORE the user's own OTP.
+ * Public pre-OTP check: does this existing user still need to give their age
+ * (they hold a gated-domain profile and `user.age` is unset)? Decides whether
+ * the login flow shows the birth-year and guardian steps before the user's OTP.
  */
 export async function u18Precheck(
   network: string,
@@ -181,7 +167,7 @@ export async function getSession(): Promise<SessionResponse> {
   return response.data;
 }
 
-/** What `GET /api/v1/auth/me` returns — the local `user` mirror's view. */
+/** `GET /api/v1/auth/me`: the local `user` mirror's view. */
 export interface MeResponse {
   id: string;
   email: string;
@@ -192,11 +178,9 @@ export interface MeResponse {
 }
 
 /**
- * "Who am I", for the Keycloak login path. better-auth's `/get-session` does
- * not serve OIDC sessions, so after the redirect the UI resolves its user this
- * way instead. The request also triggers first-login provisioning of the local
- * mirror on the API side, so it is the point at which a brand-new Keycloak
- * subject becomes a signals user.
+ * "Who am I" after the Keycloak redirect. The request also provisions the local
+ * user mirror on a first login, which is when a new Keycloak subject becomes a
+ * signals user.
  */
 export async function fetchMe(): Promise<MeResponse> {
   const response = await apiClient.get<MeResponse>('/api/v1/auth/me');
@@ -216,12 +200,9 @@ export interface AuthConfigResponse {
   selfSignupAllowed: boolean;
   loginChannels: LoginChannel[];
   /**
-   * The instance's identity provider, per server env. The UI reads this to pick
-   * a login screen at runtime rather than having it compiled into the bundle —
-   * see lib/keycloak-config.ts for why.
-   *
-   * Optional on the type so a UI build can talk to an older API that doesn't
-   * send it yet; absent is treated as `betterauth`.
+   * The instance's identity provider, read at runtime to pick the login screen
+   * (see lib/keycloak-config.ts). The API always sends `keycloak`; an absent
+   * value is treated as `betterauth`, the legacy OTP screen.
    */
   authProvider?: 'betterauth' | 'keycloak';
   keycloak?: KeycloakPublicConfig | null;
@@ -234,12 +215,10 @@ export interface SignupResponse {
 }
 
 /**
- * Self-signup for Keycloak instances: creates the Keycloak identity only.
- *
- * The local signals user appears at first successful login, so nothing exists
- * server-side until the person proves they own the identifier via OTP. Needed
- * because the OTP authenticator SPI cannot create users and Keycloak's own
- * registration form is password-based.
+ * Self-signup: creates the Keycloak identity only. The local signals user
+ * appears at the first successful login, once the person has proved they own
+ * the identifier via OTP. Needed because the OTP authenticator SPI cannot
+ * create users and Keycloak's own registration form is password-based.
  */
 export async function signupWithKeycloak(
   body: { name: string; domain?: string; age?: number } & AuthIdentifier

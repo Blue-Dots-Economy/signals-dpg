@@ -28,16 +28,12 @@ interface CardGridProps {
   networkId?: string;
   selectedDomain?: string | null;
   /**
-   * Item ids the active profile already has an OPEN action with (either
-   * direction). Their CTA is disabled — one open action per pair (#370/#422).
+   * Item ids the active profile has an open action with, in either
+   * direction. Their CTA is disabled: one open action per pair.
    */
   openActionItemIds?: Set<string>;
   openActionReason?: string;
-  /**
-   * #646 C1: the sort the SERVER applied. Threaded down so each card's pill
-   * shows the quantity that actually drove its position, rather than a cosine
-   * score badged onto a distance- or date-ordered list.
-   */
+  /** The sort the server applied, so each card's pill shows what ordered it. */
   sortApplied?: BrowseSort;
   relevanceBasis?: 'profile' | 'search' | null;
   /** Selection mode passthrough (browse bulk connect). */
@@ -95,10 +91,8 @@ export function CardGrid({
   return (
     <div ref={gridRef} data-tour="card-grid" className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {items.map((item) => {
-        // Find the full Item object if available
         const fullItem = fullItems.find((i) => i.item_id === item.id);
 
-        // Create a fallback item if full item not available
         const networkItem = fullItem || {
           item_id: item.id,
           item_network: networkId,
@@ -147,9 +141,8 @@ export function CardGrid({
               shareItem={networkItem}
               actionsDisabled={actionsDisabled}
               actionsDisabledReason={openActionReason}
-              // #646 C1: this is the branch a viewer WITHOUT a profile gets.
-              // It still needs the sort, so a distance or an age can render —
-              // neither is a match score, so neither should require an account.
+              // Viewers without a profile still get the sort, so a distance or
+              // age can render.
               networkItem={networkItem}
               localItem={localItem ?? null}
               sortApplied={sortApplied}
@@ -163,9 +156,8 @@ export function CardGrid({
             id={item.id}
             selectMode={selection?.selectMode ?? false}
             selected={selection?.isSelected(item.id) ?? false}
-            // Not selectable in bulk mode if an action is already open for this
-            // pair — same one-open-per-pair rule as the CTA (#370/#422); the card
-            // dims and shows no checkbox.
+            // Not selectable when an action is already open for the pair, like
+            // the CTA.
             selectable={(selection?.canSelect(selectedDomain ?? '') ?? true) && !actionsDisabled}
             onToggle={(id) => selection?.toggle(id, selectedDomain ?? '')}
           >

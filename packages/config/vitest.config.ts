@@ -8,9 +8,8 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       reportsDirectory: './coverage',
-      // See the note in packages/schemas/vitest.config.ts: without an explicit
-      // `include`, untested modules vanish from the denominator instead of
-      // counting as uncovered.
+      // Explicit `include` so untested modules count as uncovered (see
+      // packages/schemas/vitest.config.ts).
       include: ['src/**/*.ts'],
       exclude: ['src/**/__tests__/**', 'src/index.ts'],
     },

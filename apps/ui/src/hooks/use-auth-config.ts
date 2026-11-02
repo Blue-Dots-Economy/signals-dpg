@@ -1,15 +1,8 @@
 /**
  * The instance's auth config (`GET /api/v1/auth/config`), fetched once and
- * shared app-wide via React Query.
- *
- * This is what makes the login provider a runtime decision instead of something
- * compiled into the bundle: the login screen, the OIDC connection details and
- * the self-signup / channel flags all come from the server, so flipping
- * providers needs no rebuild and the UI cannot disagree with the API.
- *
- * The response is treated as effectively static for the session — it only
- * changes when the API is redeployed with different env — so it is cached
- * rather than refetched on every mount or window focus.
+ * shared app-wide. The login screen, OIDC connection details and self-signup /
+ * channel flags come from the server, so the UI cannot disagree with the API.
+ * It changes only on an API redeploy, so it is cached for the session.
  */
 
 import { useQuery } from '@tanstack/react-query';
@@ -31,17 +24,13 @@ export function useAuthConfig(): UseAuthConfigResult {
     queryFn: fetchAuthConfig,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
-    // No retry when another consumer mounts an ERRORED query (staleTime only
-    // protects a query that has data). Without this, the LoginPage wrapper and
-    // the login screen it mounts flap forever on a config failure: the error
-    // mounts the screen, the screen's own useAuthConfig retries on mount and
-    // flips the query back to pending, the wrapper swaps back to the spinner
-    // and unmounts the screen, and the cycle repeats. One settled outcome per
-    // session, success or failure, is the contract here.
+    // No retry when another consumer mounts an errored query (staleTime only
+    // protects a query with data). Otherwise the LoginPage wrapper and the
+    // screen it mounts flap forever on a config failure: each mount retries,
+    // flips the query to pending, and swaps the screen back to the spinner.
     retryOnMount: false,
-    // One retry: if the API is briefly unreachable we fall back to the OTP
-    // screens, which is the safe default — never strand the user on a Keycloak
-    // redirect the server never asked for.
+    // If the config still fails, `isKeycloakLogin` is false and the legacy OTP
+    // screen renders; the API no longer serves its `/api/auth/*` endpoints.
     retry: 1,
   });
 

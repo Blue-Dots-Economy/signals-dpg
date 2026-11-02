@@ -11,21 +11,16 @@ export const TYPE_LABELS: Record<SupportType, string> = {
   support_request: 'Support Request',
 };
 
-// Crockford-style base32 alphabet (no 0/1/O/I ambiguity) for readable refs.
+// 31 characters with no 0/1/I/L/O ambiguity, for readable refs.
 const REFERENCE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 const REFERENCE_LENGTH = 6;
-// The alphabet is 31 characters, not 32 (2-9 plus A-Z less I, L and O), and 256
-// is not a multiple of 31. A plain `byte % 31` therefore wraps bytes 248..255
-// back onto indices 0..7, making '2'..'9' about 12.5% more likely to appear than
-// any other character. Rejecting that tail and redrawing restores a uniform
-// distribution. Acceptance is 248/256, so the redraw is rare.
-// (CodeQL js/biased-cryptographic-random, #550)
+// 256 is not a multiple of 31, so bytes >= 248 are rejected and redrawn to keep
+// `byte % 31` uniform (CodeQL js/biased-cryptographic-random).
 const REFERENCE_BYTE_LIMIT = 256 - (256 % REFERENCE_ALPHABET.length);
 
 /**
- * Generate a support reference of the form `SUP-YYYYMMDD-XXXXXX`, where the
- * date is UTC and the suffix is 6 crypto-random base32 characters. Pure apart
- * from the crypto RNG, so it is directly unit-testable (shape / date).
+ * Generates a support reference `SUP-YYYYMMDD-XXXXXX`: UTC date plus 6
+ * crypto-random characters.
  */
 export function generateSupportReference(now: Date): string {
   const yyyy = now.getUTCFullYear().toString().padStart(4, '0');
@@ -44,9 +39,9 @@ export function generateSupportReference(now: Date): string {
 }
 
 /**
- * Builds the escaped contact-details table for the support email — the
- * `{{detailsTable}}` html token (#529). Pure; all user-controlled strings are
- * HTML-escaped here, which is what licenses inserting the result raw.
+ * Builds the contact-details table for the support email's `{{detailsTable}}`
+ * html token. Every value is HTML-escaped here, which is why the result may be
+ * inserted raw.
  */
 export function buildSupportDetailsTable(input: {
   reference: string;
@@ -54,7 +49,7 @@ export function buildSupportDetailsTable(input: {
   email: string | null;
   phone: string | null;
   submittedAt: string;
-  /** Accepted attachments, for the "Attachments" row (#551). */
+  /** Accepted attachments, for the "Attachments" row. */
   attachments?: Array<{ filename: string; bytes: number }>;
 }): string {
   const rows: Array<[string, string]> = [
@@ -65,9 +60,8 @@ export function buildSupportDetailsTable(input: {
     ['Submitted at', input.submittedAt],
     ['Consent to share contact', 'Yes'],
   ];
-  // Listed in the body as well as carried as MIME parts, so a client that
-  // collapses or hides attachments still tells the agent what was sent — and an
-  // attachment lost in transit is visible as a discrepancy rather than silence.
+  // Also listed in the body so a client that hides attachments, or one lost in
+  // transit, still shows the agent what was sent.
   if (input.attachments?.length) {
     rows.push([
       `Attachments (${input.attachments.length})`,

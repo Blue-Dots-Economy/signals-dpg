@@ -4,14 +4,10 @@ import { consent_record } from '@api/db/postgres/schema';
 import type { DbOrTx } from './item_service';
 
 /**
- * True when the user has accepted BOTH terms and privacy for the network at
- * user level. This is the PREREQUISITE for recording per-profile consent — the
- * `/consent/profile-accept` endpoint enforces it so `profile_creation` can
- * never exist without terms + privacy already accepted. That invariant lets
- * the live gate check the item-level profile consent alone
- * (`hasAcceptedProfileConsent`).
- *
- * Ledger is append-only → presence of a row = accepted (any version).
+ * True when the user has accepted both terms and privacy for the network at
+ * user level, at any version (the ledger is append-only). This is the
+ * prerequisite for recording `profile_creation` consent, which lets the live
+ * gate check `hasAcceptedProfileConsent` alone.
  */
 export async function hasAcceptedTermsAndPrivacy(
   exec: DbOrTx,
@@ -34,21 +30,16 @@ export async function hasAcceptedTermsAndPrivacy(
 }
 
 /**
- * True when `profile_creation` consent has been accepted for this specific
- * item. This is the consent gate for making a profile live (aggregator-dpg#464):
- * a profile goes live only when required fields are complete AND this consent
- * exists. Because `/consent/profile-accept` enforces terms + privacy first,
- * this single item-level check also implies user-level consent.
+ * True when `profile_creation` consent exists for this item: the consent gate
+ * for making a profile live. Because terms and privacy are required first, it
+ * also implies user-level consent.
  *
- * Keyed on `itemId` ALONE — deliberately not on the accepting user — so it
- * matches `promoteItemOnProfileConsent`. Keying it on the item's `created_by`
- * would miss consent recorded under a different accepting user (on-behalf /
- * bulk profiles), promoting the item live on consent but then demoting it on
- * its next edit. `consent_record`'s partial unique index already keeps
- * profile_creation to one row per (user, item).
+ * Keyed on `itemId` alone, as `promoteItemOnProfileConsent` is: keying on the
+ * item's `created_by` would miss consent recorded by another user (on-behalf
+ * or bulk profiles) and demote the item on its next edit.
  *
- * Source of truth is `consent_record`, not the user-table flags (those retire
- * via signals-dpg#270).
+ * Reads `consent_record`, not the `user.terms_accepted`/`privacy_accepted`
+ * flags.
  */
 export async function hasAcceptedProfileConsent(
   exec: DbOrTx,

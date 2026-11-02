@@ -1,5 +1,5 @@
 /**
- * Seed Purple Dot sample records — FAST-PATH FALLBACK.
+ * Seed Purple Dot sample records (fast-path fallback).
  *
  * This script bypasses the Aggregator-DPG handshake and writes directly to
  * Signals' DB. Useful for fast iteration on Signals-internal features.
@@ -690,9 +690,8 @@ async function ensureSeedUser(
     .onConflictDoNothing({ target: userTable.id });
 }
 
-// Mirrors apps/api/src/routes/v1/admin/aggregator/upsert.ts:62 — the
-// aggregator dashboard route reads org.metadata.domains and 400s with
-// NO_DOMAINS_CONFIGURED if absent.
+// Same metadata shape as admin/aggregator/upsert.ts: the aggregator dashboard
+// 400s with NO_DOMAINS_CONFIGURED when org.metadata.domains is absent.
 const AGGREGATOR_METADATA = JSON.stringify({
   external_id: 'purple_dot_aggregator_seed',
   domains: ['seeker', 'provider'],
@@ -732,11 +731,8 @@ async function ensureAggregatorOrg(
     return;
   }
 
-  // Existing row: only overwrite metadata when domains is missing/empty,
-  // so a customized metadata blob (e.g. set via admin upsert, or whatever
-  // the Aggregator wrote at registration time) is preserved. slug, name,
-  // and type are NEVER overwritten — those belong to the Aggregator when
-  // ORG_ID_OVERRIDE is set, and to a prior run otherwise.
+  // Existing row: overwrite metadata only when domains is missing/empty, so a
+  // customised blob is preserved. slug, name and type are never overwritten.
   let needs_patch = !existing.metadata;
   if (existing.metadata) {
     try {
@@ -943,14 +939,9 @@ async function main() {
     return;
   }
 
-  // Defer DB-side imports until we know we will actually touch the DB so the
-  // dry-run path can run without a configured PG connection.
-  //
-  // Build a standalone pg Pool + drizzle instance rather than importing
-  // `../db/postgres/drizzle_config`, which transitively pulls in the API's
-  // full Zod env validation (INSTANCE_NAME, INSTANCE_ENV, etc.). A DB-only
-  // seed shouldn't require app-context env vars — matches db_init.ts and
-  // seed_service_users.ts.
+  // DB imports are deferred so the dry run needs no PG connection. A
+  // standalone pool rather than the API's drizzle_config, which runs the full
+  // Zod env validation a DB-only seed should not need.
   const {
     ensureItemPartition,
     ensureActionPartition,
@@ -970,10 +961,8 @@ async function main() {
   const pool = new Pool({ connectionString: pgUrl, ssl: false });
   const db = drizzle(pool);
 
-  // Org / seed user / member setup runs UNCONDITIONALLY (not gated by the
-  // items short-circuit below) so re-running against an already-seeded DB
-  // still applies the metadata.domains patch on the aggregator org. All
-  // three helpers are idempotent.
+  // Org / seed user / member setup runs even when items already exist, so a
+  // re-run still applies the metadata.domains patch. All three are idempotent.
   await ensureAggregatorOrg(db, organization);
   await ensureSeedUser(db, user);
   await ensureMember(db, member, SEED_USER_ID, AGGREGATOR_ORG_ID, 'service');

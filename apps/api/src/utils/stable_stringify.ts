@@ -1,8 +1,6 @@
 /**
- * Deterministic stringify for cache keys: objects are serialized with keys
- * sorted, so two equal filter objects always produce the same string
- * regardless of property insertion order. Shared by the local and
- * inter-instance item-fetch cache-key builders.
+ * Deterministic stringify for cache keys: object keys are sorted, so equal
+ * filter objects always produce the same string.
  */
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) {

@@ -33,15 +33,11 @@ export function TouristTopBar({
 
   return (
     <header className="sticky top-0 z-40 border-b bg-gradient-to-r from-background to-primary/5 px-3 py-2 sm:px-6 sm:py-0">
-      {/* Mobile (base): an explicit TWO-ROW column — row 1 holds logo + filters
-          + controls, row 2 is the full-width search. Because the search is a
-          separate child of the flex-col (not a flex-wrap sibling), it is ALWAYS
-          on its own row and can never be squeezed onto the first row — which is
-          what previously hid the typed text on some phones.
-          Desktop (sm+): the inner wrapper becomes `display:contents`, so
-          logo/filters/controls join the single 56px flex row and the sm:order-*
-          classes interleave them with the search (logo → search → filters →
-          controls), identical to the previous desktop layout. */}
+      {/* Mobile: two rows; logo, filters and controls, then a full-width
+          search as a separate flex-col child, so it can never be squeezed
+          onto the first row. Desktop (sm+): the inner wrapper is
+          `display:contents`, so everything joins one 56px row ordered by
+          sm:order-* (logo → search → filters → controls). */}
       <div className="flex flex-col gap-2 sm:h-14 sm:flex-row sm:items-center sm:gap-3">
         <div className="flex items-center gap-2 sm:contents">
           {logoSrc && (

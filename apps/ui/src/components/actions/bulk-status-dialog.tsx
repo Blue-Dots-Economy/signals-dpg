@@ -26,11 +26,10 @@ import { Textarea } from '@/components/ui/textarea';
 interface BulkStatusDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The selected actions to update. */
   actions: Action[];
   /** Target status: 'accepted' | 'rejected' | 'cancelled'. */
   targetStatus: string;
-  /** Called after the bulk call settles (so the page can clear selection). */
+  /** Called after the bulk call settles, so the page can clear selection. */
   onSettled: (succeeded: number, total: number, failedIds: string[]) => void;
 }
 
@@ -47,14 +46,13 @@ export function BulkStatusDialog({
   const [remarks, setRemarks] = React.useState('');
   const [consentChecked, setConsentChecked] = React.useState(false);
 
-  // Minor acceptor doing a bulk accept (#393): gated rows come back
-  // GUARDIAN_OTP_REQUIRED after one OTP is sent to the guardian. Stash the
-  // gated payloads to resubmit with the single code — one guardian OTP dialog
-  // for the batch, mirroring the initiator-side bulk flow on the home page.
+  // A minor's bulk accept: gated rows return GUARDIAN_OTP_REQUIRED after one
+  // OTP goes to the guardian. Their payloads are stashed and resubmitted with
+  // that single code, one dialog for the batch.
   const [bulkGuardianChallenge, setBulkGuardianChallenge] = React.useState<{
     payloads: UpdateActionStatusPayload[];
-    // Non-guardian failures from a mixed batch, reselected once the OTP dialog
-    // resolves (they still need a retry).
+    // Non-guardian failures from a mixed batch, reselected for retry once the
+    // OTP dialog resolves.
     otherFailedIds?: string[];
   } | null>(null);
 
@@ -65,8 +63,8 @@ export function BulkStatusDialog({
     }
   }, [open]);
 
-  // Resolve consent text from the first action's network config (the selection
-  // is homogeneous in practice — same action_type within a tab).
+  // Consent text from the first action's network config; a selection shares
+  // one action_type.
   const first = actions[0] ?? null;
   const { data: networkConfig } = useNetworkConfig(first?.target_item_network ?? null);
 
@@ -95,9 +93,8 @@ export function BulkStatusDialog({
   const requiresConsent = revealStatuses.includes(targetStatus);
   const acceptDoc = first ? config?.actions?.[first.action_type]?.accept : undefined;
   const acceptVersion = acceptDoc?.versions.find((v) => v.version === acceptDoc.current_version);
-  // Bulk accept: the accepter shares details with the requester(s). The batch can
-  // span more than one source domain, so name every distinct one (e.g. "seeker /
-  // provider") rather than a single possibly-wrong party.
+  // Bulk accept shares details with the requesters, who may span domains, so
+  // name every distinct source domain.
   const consentText = renderConsentStatementWithNoun(
     acceptVersion?.statement ?? '',
     formatBatchCounterpartyNoun(actions.map((a) => a.source_item_domain)),
@@ -144,10 +141,8 @@ export function BulkStatusDialog({
       const guardianResults = failedResults.filter(
         (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
       );
-      // Any GUARDIAN_OTP_REQUIRED failure means a code was already sent to the
-      // guardian — open ONE dialog for those rows and resubmit the batch with
-      // the code, rather than surfacing the raw error. Non-guardian failures
-      // ride along and are reselected once the dialog resolves.
+      // GUARDIAN_OTP_REQUIRED means a code was already sent: open one dialog
+      // for those rows instead of surfacing the error.
       if (guardianResults.length > 0) {
         const otherFailedIds = failedResults
           .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
@@ -180,8 +175,8 @@ export function BulkStatusDialog({
 
   const confirmDisabled = isPending || (requiresConsent && !consentChecked) || actions.length === 0;
 
-  // One guardian OTP dialog for a MINOR acceptor's BULK accept (#393). The code
-  // resubmits the stashed payloads via updateActionStatusBulk with the OTP.
+  // The guardian code resubmits the stashed payloads via
+  // updateActionStatusBulk.
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
@@ -211,8 +206,8 @@ export function BulkStatusDialog({
           onSettled(env2.summary.succeeded, total, otherFailedIds);
           return;
         }
-        // Still failing (wrong/expired code, throttled …) — throw a classified
-        // error so GuardianOtpDialog shows the inline message and stays open.
+        // Still failing (wrong code, throttled): throw a classified error so
+        // GuardianOtpDialog shows it inline and stays open.
         const firstFail = env2.results.find((r) => r.status === 'error');
         const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
         throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);

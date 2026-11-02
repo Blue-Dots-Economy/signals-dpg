@@ -65,8 +65,8 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
   return networkEnv.split(',').map((n) => n.trim()).filter(Boolean);
 }
 
-// The same localStorage key `NetworkThemeProvider` (theme-provider.tsx)
-// persists whenever a `?network=` param is seen — see the pre-revamp page.
+// The localStorage key `NetworkThemeProvider` (theme-provider.tsx) persists
+// whenever a `?network=` param is seen.
 const ACTIVE_NETWORK_STORAGE_KEY = 'dpg-active-network';
 const COLUMNS_STORAGE_KEY = 'my-actions-columns';
 
@@ -150,11 +150,6 @@ function useMyActionsNetwork(networkFromUrl: string | null) {
 }
 
 /**
- * My Actions (revamp): one table of the caller's sent and received actions
- * across their profiles — search, schema-driven filters, saved views, sort,
- * columns, pagination, bulk respond and export. Filter state lives in the URL.
- */
-/**
  * One export button per counterparty type ("Export seekers (9)") — each
  * downloads its own file. Under "select all" the per-type counts are not
  * known, so those buttons show no number.
@@ -196,6 +191,11 @@ function canSelectRows(input: {
   return input.rows.some((a) => needsResponse(a, input.pendingStatuses));
 }
 
+/**
+ * My Actions: one table of the caller's sent and received actions across
+ * their profiles, with search, schema-driven filters, saved views, sort,
+ * columns, pagination, bulk respond and export. Filter state lives in the URL.
+ */
 export function MyActionsPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -206,7 +206,6 @@ export function MyActionsPage() {
     useMyActionsNetwork(searchParams.get('network'));
   const domains = network?.domains ?? [];
 
-  // ── The caller's profiles ────────────────────────────────────────────────
   const { data: myItems, isLoading: myItemsLoading } = useMyItems(network ?? null);
   const liveItems = React.useMemo(() => myItems.filter((i) => i.lifecycle_status === 'live'), [myItems]);
   const { activeProfileId, setActiveProfile } = useActiveProfile(network ?? null, myItems);
@@ -234,14 +233,12 @@ export function MyActionsPage() {
   );
   const myDomain = liveItems[0]?.item_domain ?? null; // one domain per account
 
-  // ── Filter state (URL) ─────────────────────────────────────────────────────
   const filter = React.useMemo(() => parseFilter(searchParams), [searchParams]);
   const setFilter = React.useCallback(
     (next: MyActionsFilter) => setSearchParams((prev) => writeFilter(prev, next), { replace: true }),
     [setSearchParams],
   );
 
-  // ── Network vocabulary ─────────────────────────────────────────────────────
   const statuses = React.useMemo(() => actionStatuses(network), [network]);
   const types = React.useMemo(() => actionTypes(network), [network]);
   const pending = React.useMemo(() => {
@@ -303,7 +300,6 @@ export function MyActionsPage() {
     [domains],
   );
 
-  // ── Data ───────────────────────────────────────────────────────────────────
   const query = React.useMemo(() => toFetchQuery(filter), [filter]);
   const isBootstrapping = availableNetworkIds === null || !network || myItemsLoading;
   const actionsQuery = useOwnedActionsPage(query, !isBootstrapping && liveItems.length > 0);
@@ -317,7 +313,6 @@ export function MyActionsPage() {
     if (actionsQuery.data && filter.page > pages) setFilter({ ...filter, page: pages });
   }, [total, filter, actionsQuery.data, setFilter]);
 
-  // ── Columns ────────────────────────────────────────────────────────────────
   const [columns, setColumns] = React.useState<Record<ColumnId, boolean>>(loadColumns);
   const toggleColumn = (id: ColumnId) =>
     setColumns((prev) => {
@@ -330,8 +325,7 @@ export function MyActionsPage() {
       return next;
     });
 
-  // ── Selection ──────────────────────────────────────────────────────────────
-  // Ids picked row by row, remembered with their rows across pages; or "all
+  // Selection: ids picked row by row (remembered across pages), or "all
   // matching", which exports by filter instead of by ids.
   const [picked, setPicked] = React.useState<Map<string, Action>>(new Map());
   const [allMatching, setAllMatching] = React.useState(false);
@@ -372,14 +366,12 @@ export function MyActionsPage() {
     });
   };
 
-  // ── Status changes ─────────────────────────────────────────────────────────
   const [statusTarget, setStatusTarget] = React.useState<{ action: Action; status: string } | null>(null);
   const [bulk, setBulk] = React.useState<{ actions: Action[]; status: string } | null>(null);
   const [profileOf, setProfileOf] = React.useState<{ action: Action; counterparty: ProfileCardCounterparty } | null>(
     null,
   );
 
-  // ── Export ─────────────────────────────────────────────────────────────────
   const [exporting, setExporting] = React.useState(false);
   const exportErrorMessage = (err: unknown) => exportErrorText(err, t);
   /** One file per counterparty type (see runExportRequests); then one summary toast. */
@@ -444,7 +436,7 @@ export function MyActionsPage() {
       }));
   };
 
-  // ── Bulk commands (counts reflect what each would act on) ──────────────────
+  // Bulk commands (counts reflect what each would act on).
   const pickedRows = [...picked.values()];
   const respondable = pickedRows.filter((a) => needsResponse(a, pending));
   const { exportable: exportableCount, notExportable } = exportSelectionCounts({
@@ -553,7 +545,7 @@ export function MyActionsPage() {
       }
     : undefined;
 
-  // ── Sidebar (profile switch still sets the shared active profile) ──────────
+  // Sidebar (a profile switch still sets the shared active profile).
   const handleActiveProfileChange = (id: string) => {
     setActiveProfile(id);
     setFilter({ ...filter, profiles: [id], page: 1 });

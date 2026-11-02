@@ -2,16 +2,14 @@ import z from 'zod';
 
 export const U18DobBodySchema = z.object({
   network: z.string().min(1),
-  // Age in years, derived from the birth year on the client (#331) and stored
-  // on user.age. is_minor derives (age <= 18); no date/month is collected.
+  // Age in years, derived from the birth year on the client and stored on
+  // user.age. Minor means age <= 18, since no birth month is collected.
   age: z.coerce.number().int().min(0).max(120),
 });
 export const U18DobResponseSchema = z.object({ isMinor: z.boolean() });
 
 // Read-only U18 status for the authenticated ward, derived from the stored
-// `user.age` snapshot (captured once at login). Lets the UI decide whether to
-// run the guardian flow WITHOUT re-asking the age at profile-creation / action
-// time.
+// `user.age`, so the UI can decide on the guardian flow without re-asking.
 export const U18StatusQuerySchema = z.object({ network: z.string().min(1) });
 export const U18StatusResponseSchema = z.object({
   /** An age is already stored for this user (never ask again). */
@@ -32,9 +30,10 @@ export const U18GuardianBodySchema = z
     // resolves the OTP channel (phone preferred) and stores whatever is given.
     guardianEmail: z.string().min(1).optional(),
     guardianPhone: z.string().min(1).optional(),
-    // Ward's guardian-validity attestation (D12) — must be explicitly true.
+    // Ward's attestation that the guardian is valid.
     guardianDeclarationAccepted: z.literal(true),
-    // Explicit ack when a guardian contact matches the ward's own (warn-and-confirm, not a hard reject).
+    // Ack when a guardian contact matches the ward's own (warn-and-confirm,
+    // not a hard reject).
     sameContactAcknowledged: z.boolean().optional(),
   })
   .refine((v) => Boolean(v.guardianEmail) || Boolean(v.guardianPhone), {
@@ -74,11 +73,9 @@ export const U18ProfileConsentVerifyResponseSchema = z.object({
 export type U18ProfileConsentBody = z.infer<typeof U18ProfileConsentBodySchema>;
 export type U18ProfileConsentVerifyBody = z.infer<typeof U18ProfileConsentVerifyBodySchema>;
 
-// Pre-create guardian consent for profile creation. The OTP is issued and
-// verified BEFORE the item exists (no item_id here), so the ward's profile row
-// isn't written until the guardian has verified — mirroring the self-signup
-// materialize-after-verify flow. Verify sets a short-lived server token that
-// `finalize` (below) consumes once the item is created.
+// Pre-create guardian consent: the OTP is verified before the item exists, so
+// the ward's profile is not written until the guardian has verified. Verify
+// sets a short-lived server token that `finalize` consumes after creation.
 export const U18ProfilePrecreateBodySchema = z.object({
   network: z.string().min(1),
   brand: z.string().min(1).nullish(),
@@ -91,9 +88,8 @@ export const U18ProfilePrecreateVerifyBodySchema = U18ProfilePrecreateBodySchema
 });
 export const U18ProfilePrecreateVerifyResponseSchema = z.object({ verified: z.boolean() });
 
-// Finalize: called immediately after the item is created; consumes the
-// pre-create token to write the guardian profile_creation row and promote the
-// item to live. Same item ref shape as the item-scoped consent body.
+// Called right after the item is created: consumes the pre-create token,
+// writes the guardian profile_creation row and promotes the item to live.
 export const U18ProfileFinalizeBodySchema = U18ProfileConsentBodySchema;
 export const U18ProfileFinalizeResponseSchema = z.object({ promoted: z.boolean() });
 
@@ -101,11 +97,8 @@ export type U18ProfilePrecreateBody = z.infer<typeof U18ProfilePrecreateBodySche
 export type U18ProfilePrecreateVerifyBody = z.infer<typeof U18ProfilePrecreateVerifyBodySchema>;
 export type U18ProfileFinalizeBody = z.infer<typeof U18ProfileFinalizeBodySchema>;
 
-// --- Pre-auth, signup-scoped guardian consent (no session yet) ---
-//
-// The account doesn't exist yet at this point in the flow, so these bodies
-// carry the signup identifier (email OR phoneNumber) directly instead of
-// relying on an authenticated user id. Exactly one identifier must be given.
+// Pre-auth guardian consent during signup: there is no account yet, so these
+// bodies carry exactly one signup identifier (email or phoneNumber).
 
 const EXACTLY_ONE_IDENTIFIER = {
   message: 'Exactly one of email or phoneNumber is required',
@@ -118,17 +111,17 @@ export const SignupGuardianBodySchema = z
     domain: z.string().min(1),
     email: z.string().email().optional(),
     phoneNumber: z.string().min(1).optional(),
-    // Age in years (derived from birth year on the client, #331).
+    // Age in years, derived from the birth year on the client.
     age: z.coerce.number().int().min(0).max(120),
     guardianName: z.string().min(1),
     // Both guardian contacts — at least one required; server resolves the OTP
     // channel (phone preferred) and stores whatever is given.
     guardianEmail: z.string().min(1).optional(),
     guardianPhone: z.string().min(1).optional(),
-    // Ward's guardian-validity attestation (D12) — must be explicitly true.
+    // Ward's attestation that the guardian is valid.
     guardianDeclarationAccepted: z.literal(true),
-    // Explicit ack when a guardian contact matches the signup identifier itself
-    // (warn-and-confirm, not a hard reject).
+    // Ack when a guardian contact matches the signup identifier (warn-and-confirm,
+    // not a hard reject).
     sameContactAcknowledged: z.boolean().optional(),
   })
   .refine((v) => Boolean(v.email) !== Boolean(v.phoneNumber), EXACTLY_ONE_IDENTIFIER)

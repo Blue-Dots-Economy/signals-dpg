@@ -23,8 +23,7 @@ interface RowSearchState {
   open: boolean;
 }
 
-// Per-row abort + debounce refs stored outside component state to avoid
-// re-renders. Keyed by row index; rebuilt when row count changes.
+// Per-row timers and abort controller, by row index, kept out of state.
 interface RowRefs {
   debounce: number | undefined;
   abort: AbortController | null;
@@ -45,7 +44,6 @@ function rowsFromValue(value: string[]): LocationRow[] {
   return value.map((name) => makeRow(name));
 }
 
-/** Derive a stable string from rows for comparison so we don't clobber edits. */
 function rowNames(rows: LocationRow[]): string[] {
   return rows.map((r) => r.name);
 }
@@ -64,12 +62,8 @@ interface RowComboboxProps {
 }
 
 /**
- * One city row's text input and its suggestion list.
- *
- * Extracted from the row loop for one reason: `useSuggestionKeyboard` holds the
- * active-option state, and a hook cannot be called inside `rows.map()`. Each
- * row therefore needs its own component instance — which is also the right
- * shape, since each row's highlight is independent of its siblings'.
+ * One city row's input and suggestion list. A component because
+ * `useSuggestionKeyboard` cannot be called inside `rows.map()`.
  */
 function RowCombobox({
   id,
@@ -122,9 +116,7 @@ function RowCombobox({
           className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md"
         >
           {suggestions.map((s, si) => (
-            // `role="option"` on the item itself rather than a nested <button>:
-            // an option is what `aria-activedescendant` can point at, and a
-            // listbox may only contain options.
+            // `role="option"` on the item; see LocationAutocompleteWidget.
             <li
               key={`${s.lat},${s.lng},${si}`}
               id={optionId(si)}
@@ -134,8 +126,7 @@ function RowCombobox({
                 'cursor-pointer px-3 py-2 text-sm',
                 si === activeIndex ? 'bg-accent' : 'hover:bg-accent',
               )}
-              // onMouseDown so selection fires before the input's blur;
-              // preventDefault keeps focus from flicking away.
+              // onMouseDown so selection runs before the input's blur.
               onMouseDown={(e) => {
                 e.preventDefault();
                 onChoose(s);
@@ -162,12 +153,11 @@ export function MultiLocationAutocompleteWidget({
   registry,
   options,
 }: WidgetProps) {
-  // See LocationAutocompleteWidget: RJSF v6 exposes formContext only on the
-  // registry, never as a widget prop (#506).
+  // RJSF v6 exposes formContext only on the registry.
   const ctx = (registry?.formContext ?? {}) as LocationFormContext;
   const isPrimary = (options as { isPrimaryLocation?: boolean } | undefined)?.isPrimaryLocation === true;
 
-  // Coerce incoming value to string[]. RJSF passes `undefined` on a fresh form.
+  // RJSF passes `undefined` on a fresh form.
   const incoming = React.useMemo<string[]>(() => {
     if (Array.isArray(value)) {
       return (value as unknown[]).filter((v): v is string => typeof v === 'string');
@@ -178,23 +168,17 @@ export function MultiLocationAutocompleteWidget({
   const maxItems: number | undefined =
     typeof schema.maxItems === 'number' ? schema.maxItems : undefined;
 
-  // ---------- row state ----------
   const [rows, setRows] = React.useState<LocationRow[]>(() => rowsFromValue(incoming));
 
-  // Per-row search state (suggestions + open flag). We keep this in a separate
-  // array so editing one row doesn't re-render unrelated rows. Length is always
-  // kept in sync with `rows`.
+  // Per-row suggestions and open flag, kept the same length as `rows`.
   const [searches, setSearches] = React.useState<RowSearchState[]>(() =>
     rows.map(() => ({ suggestions: [], open: false })),
   );
 
-  // Mutable per-row refs (debounce timers, abort controllers, blur timers).
-  // These live in a ref-of-arrays so they are never part of state/rendering.
   const refsArray = React.useRef<RowRefs[]>([]);
 
   const provider = React.useMemo(() => getGeoProvider(), []);
 
-  // Ensure refsArray length matches rows length.
   function ensureRefs(count: number) {
     while (refsArray.current.length < count) {
       refsArray.current.push({ debounce: undefined, abort: null, blur: undefined });
@@ -202,16 +186,13 @@ export function MultiLocationAutocompleteWidget({
   }
   ensureRefs(rows.length);
 
-  // ---------- value-sync effect ----------
-  // When RJSF pushes a new value externally (e.g. edit-mode prefill or a reset),
-  // resync rows — but only if the external list actually differs from what we
-  // already have (to avoid clobbering an in-progress edit).
+  // Resync rows when RJSF pushes a different list (prefill, reset), but not
+  // when it matches, so an in-progress edit is not clobbered.
   React.useEffect(() => {
     setRows((prev) => {
       const prevNames = rowNames(prev).filter(Boolean);
       const nextNames = incoming.filter(Boolean);
 
-      // If lengths and all names match, nothing to do.
       if (
         prevNames.length === nextNames.length &&
         prevNames.every((n, i) => n === nextNames[i])
@@ -223,7 +204,6 @@ export function MultiLocationAutocompleteWidget({
     });
   }, [incoming]);
 
-  // Keep searches array length in sync with rows length.
   React.useEffect(() => {
     ensureRefs(rows.length);
     setSearches((prev) => {
@@ -231,7 +211,7 @@ export function MultiLocationAutocompleteWidget({
       if (prev.length < rows.length) {
         return [...prev, ...Array.from({ length: rows.length - prev.length }, () => ({ suggestions: [], open: false }))];
       }
-      // Shrank — cancel refs for the removed trailing rows.
+      // Shrank: cancel work for the removed rows.
       for (let i = rows.length; i < prev.length; i++) {
         const r = refsArray.current[i];
         if (r) {
@@ -245,7 +225,6 @@ export function MultiLocationAutocompleteWidget({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows.length]);
 
-  // Cancel all pending work on unmount.
   React.useEffect(
     () => () => {
       for (const r of refsArray.current) {
@@ -257,12 +236,8 @@ export function MultiLocationAutocompleteWidget({
     [],
   );
 
-  // ---------- helpers ----------
-
   function emitChanges(nextRows: LocationRow[]) {
-    // Write the string[] back to RJSF (only non-empty names).
     onChange(nextRows.map((r) => r.name).filter(Boolean));
-    // Report resolved coordinates to the page.
     const coords = nextRows
       .filter((r) => r.coord !== null)
       .map((r) => r.coord as { lat: number; lng: number; label?: string });
@@ -305,7 +280,7 @@ export function MultiLocationAutocompleteWidget({
   }
 
   function handleInput(index: number, next: string) {
-    // Update the row name; clear the coord since the typed text is unresolved.
+    // Typed text is unresolved, so clear the coord.
     updateRow(index, { name: next, coord: null });
     runSearch(index, next);
   }
@@ -371,7 +346,7 @@ export function MultiLocationAutocompleteWidget({
               }}
               onChoose={(s) => choose(index, s)}
             />
-            {/* Remove button — always show so all rows can be cleared */}
+            {/* Always shown so every row can be cleared */}
             <button
               type="button"
               aria-label={`Remove city ${row.name || index + 1}`}

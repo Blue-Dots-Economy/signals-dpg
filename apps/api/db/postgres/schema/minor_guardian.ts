@@ -1,13 +1,11 @@
 import { pgTable, text, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
- * U18 guardian-consent record — one row per ward, keyed on the better-auth
- * user_id (U18 spec §4). The ward's age lives on `user.age`
- * (not here); `is_minor` is DERIVED at read time (services/minor.ts), never a
- * column. guardian_name / guardian_contact hold
- * PII and are encrypted at the write path in a later phase (columns stay
- * text). Guardian approvals + the ward attestation live in `consent_record`,
- * not here.
+ * U18 guardian-consent record, one row per ward, keyed on the ward's user_id.
+ * The ward's age lives on `user.age`; `is_minor` is derived at read time
+ * (services/minor.ts). The guardian name/contact columns hold PII encrypted at
+ * the write path (`minor_guardian_repo.ts`). Guardian approvals and the ward
+ * attestation live in `consent_record`.
  */
 export const minor_guardian = pgTable('minor_guardian', {
   userId: text('user_id').primaryKey(),

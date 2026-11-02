@@ -10,15 +10,11 @@ interface UseNetworkConfigResult {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
-  /** Re-run the query. For offering a user-initiated retry after a failure. */
+  /** Re-runs the query, for a user-initiated retry. */
   refetch: () => void;
 }
 
-/**
- * Hook to fetch and cache a specific network configuration
- * @param networkId - The id of the network to fetch
- * @returns Network config data and query state
- */
+/** Fetches and caches one network's config (config tier, 5 minutes). */
 export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: networkId ? queryKeys.networkConfig(networkId) : ['network-config', null],
@@ -27,7 +23,7 @@ export function useNetworkConfig(networkId: string | null): UseNetworkConfigResu
       return fetchNetworkConfig(networkId);
     },
     enabled: !!networkId,
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: 5 * 60 * 1000,
   });
 
   return {
@@ -47,10 +43,7 @@ interface UseNetworkConfigsResult {
   isError: boolean;
 }
 
-/**
- * Hook to fetch and cache the full list of network configs (used to discover
- * which networks a deployment serves). Config tier: 5-minute staleTime.
- */
+/** Fetches the list of network configs this deployment serves (config tier). */
 export function useNetworkConfigs(): UseNetworkConfigsResult {
   const { data, isLoading, isError } = useQuery({
     queryKey: queryKeys.networkConfigs(),
@@ -67,10 +60,8 @@ interface UseResolvedNetworkResult {
 }
 
 /**
- * Hook to fetch a network config and resolve its `$ref`s. Composes
- * `useNetworkConfig` (so the raw config shares the cache with other consumers,
- * e.g. action components) and caches the resolved result under a key that
- * includes the API base URL (so an instance switch re-resolves). Config tier.
+ * Fetches a network config and resolves its `$ref`s. The raw config shares
+ * `useNetworkConfig`'s cache; the resolved one is keyed by API base URL too.
  */
 export function useResolvedNetwork(networkId: string | null): UseResolvedNetworkResult {
   const {

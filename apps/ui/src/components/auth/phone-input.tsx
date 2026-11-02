@@ -26,10 +26,9 @@ export interface PhoneInputProps {
 }
 
 /**
- * Phone field with a fixed "🇮🇳 +91" prefix and a 10-digit national input.
- * The country code is never typed, so it can't be mistyped or duplicated;
- * the parent assembles the E.164 value via `toE164(value)`. Used by both the
- * login form and the guardian form.
+ * Phone field with a fixed "+91" prefix and a 10-digit national input, so the
+ * country code cannot be mistyped. The parent builds the E.164 value with
+ * `toE164(value)`.
  */
 export function PhoneInput({
   id,

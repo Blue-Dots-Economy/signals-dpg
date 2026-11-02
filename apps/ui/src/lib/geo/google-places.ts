@@ -43,12 +43,11 @@ function loadMapsApi(apiKey: string): Promise<void> {
 }
 
 /**
- * `country` (ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to that
- * country (#785). `includedRegionCodes` is a hard filter — "Only include results
- * in the specified regions". `region` would only bias the ranking and
- * `locationRestriction` is a rectangle (India's contains Bangladesh), so neither
- * stops a larger foreign place with the same name being suggested. Each
- * suggestion's own country is also checked, as a backstop.
+ * `country` (ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions via
+ * `includedRegionCodes`, a hard filter. `region` only biases ranking and
+ * `locationRestriction` is a rectangle (India's contains Bangladesh), so
+ * neither would stop a same-named foreign place. Each suggestion's own country
+ * is also checked as a backstop.
  */
 export function createGooglePlacesProvider(apiKey: string, country?: string): GeoProvider {
   return {

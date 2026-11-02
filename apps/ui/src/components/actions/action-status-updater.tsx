@@ -18,7 +18,6 @@ import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 
-// Desktop: Dialog
 import {
   Dialog,
   DialogContent,
@@ -27,7 +26,6 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
-// Mobile: Drawer
 import {
   Drawer,
   DrawerContent,
@@ -62,8 +60,8 @@ export function ActionStatusUpdater({
     cancelled: t('actions.toast_status_cancelled_title'),
   };
 
-  // Minor-ward guardian OTP: an update-status that returns GUARDIAN_OTP_REQUIRED
-  // is stashed and replayed with the guardian's code (see useGuardianOtpGate).
+  // An update that returns GUARDIAN_OTP_REQUIRED is stashed and replayed with
+  // the guardian's code.
   const gate = useGuardianOtpGate<UpdateActionStatusPayload>(async (payload, otp) => {
     await updateActionStatus(payload, otp);
     queryClient.invalidateQueries({ queryKey: actionKeys.all });
@@ -80,7 +78,6 @@ export function ActionStatusUpdater({
     cancelled: t('actions.status_label_cancelled'),
   };
 
-  // Friendly subtitles per resolved status — drives the colored header band.
   const STATUS_SUBTITLES: Record<string, string> = {
     accepted: t('actions.status_subtitle_accepted'),
     rejected: t('actions.status_subtitle_rejected'),
@@ -100,8 +97,7 @@ export function ActionStatusUpdater({
     }
   }, [open]);
 
-  // Resolve the interaction from the network config so consent fields are
-  // always available without prop drilling from the action list.
+  // Resolved from the network config, so consent fields need no prop drilling.
   const { data: networkConfig } = useNetworkConfig(action?.target_item_network ?? null);
 
   const interaction = React.useMemo(() => {
@@ -126,9 +122,9 @@ export function ActionStatusUpdater({
     );
   }, [networkConfig, action]);
 
-  // Reset form state when the resolved interaction changes mid-session
-  // (e.g. networkConfig finishes loading after the modal opened) so a stale
-  // consentChecked from the pre-load render can't bypass a freshly-required gate.
+  // Reset when the resolved interaction changes (e.g. the network config loads
+  // after opening), so a stale consentChecked cannot bypass a newly required
+  // consent.
   React.useEffect(() => {
     setConsentChecked(false);
     setRemarks('');
@@ -139,7 +135,6 @@ export function ActionStatusUpdater({
 
   if (!action) return null;
 
-  // Determine whether consent is required for this status transition.
   const revealStatuses = interaction?.reveals_pii_on_status ?? [];
   const requiresConsent = revealStatuses.includes(targetStatus);
   const acceptDoc = config?.actions?.[action.action_type]?.accept;
@@ -183,13 +178,11 @@ export function ActionStatusUpdater({
         onOpenChange(false);
       },
       onError: (error: Error) => {
-        // A minor ward: the accept/reject/etc. requires guardian confirmation.
-        // Stash the exact payload and open the OTP challenge instead of the
-        // generic error toast — adults never see a GUARDIAN_OTP_* code here.
+        // A minor ward needs guardian confirmation: open the OTP challenge
+        // instead of an error toast.
         if (gate.captureIfGuardianRequired(error, payload)) {
-          // Close the accept/reject dialog in favor of the OTP challenge — the
-          // component stays mounted (`action` is unaffected), so the dialog
-          // (driven by gate.challenge) keeps working after this.
+          // Close this dialog in favour of the OTP dialog, which stays mounted
+          // (it is driven by gate.challenge).
           onOpenChange(false);
           return;
         }
@@ -220,8 +213,7 @@ export function ActionStatusUpdater({
     </div>
   );
 
-  // Drive the header band from the target status — falls back to the action
-  // type when nothing's chosen yet (the typical "first paint").
+  // Header band from the target status, else the action type.
   const headerKey = targetStatus || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
   const actionLabel = statusLabels[targetStatus] ?? display.label;

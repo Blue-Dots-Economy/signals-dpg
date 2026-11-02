@@ -1,30 +1,21 @@
 /**
- * Client-credentials service auth: resolving a Keycloak service-account token
- * to the integrating DPG's existing service `user` row (§5 of
- * docs/superpowers/plans/2026-07-23-keycloak-migration-design.md).
+ * Client-credentials service auth: resolves a Keycloak service-account token
+ * to the integrating DPG's service `user` row. The bearer-token counterpart of
+ * API-key auth (`verifyApiKey`): `request.user` has the same shape and
+ * `x-acting-org-id` is handled downstream the same way.
  *
- * This is the bearer-token replacement for `verifyApiKey`. It changes only how
- * the caller is *identified* — `request.user` comes out the same shape, and
- * `x-acting-org-id` is untouched, because acting-org is orthogonal to
- * authentication. Everything downstream (`acting_org.ts`, the admin routes)
- * cannot tell which credential was used.
+ * Mapping convention: Keycloak client id == `organization.slug`. The service
+ * org, service user and `member` row are local and authoritative
+ * (`scripts/seed_service_users.ts` creates them).
  *
- * **The mapping is by convention: Keycloak client id == `organization.slug`.**
- * The service org, its service user and their `member` row already exist —
- * `scripts/seed_service_users.ts` creates them, and the design keeps them
- * local and authoritative (§6.4). So there is no new table and no new claim
- * mapper; the client id is simply looked up as a slug.
- *
- * The resolution is deliberately strict, and fails closed at every step:
+ * Fails closed at every step:
  *
  *   - the client must be listed in `KEYCLOAK_SERVICE_CLIENT_IDS`;
  *   - the org must exist and be a type allowed to hold a service identity;
  *   - the org must have a member with `role='service'`.
  *
- * That last one matters. Falling back to "any member of the org" would let a
- * client-credentials token bind to a *human* member's identity, and that human
- * may own domain data. An unseeded service org is an operator error worth
- * failing loudly, not something to paper over.
+ * Never fall back to "any member of the org": a client-credentials token must
+ * not bind to a human member's identity, who may own domain data.
  */
 
 import { and, eq } from 'drizzle-orm';
@@ -62,12 +53,9 @@ export type ServiceAccountErrorCode =
 
 export type ServiceAccountResult =
   /**
-   * `client_id` is the resolved Keycloak client (`azp`). It is the ONLY thing
-   * that still tells one integrating DPG from another: since #518 every service
-   * org carries `type='network_service'`, so the org type distinguishes the
-   * service tier from an aggregator but says nothing about which service. Audit
-   * and support triage need that distinction, so it is carried out of here
-   * rather than re-derived from the claims downstream.
+   * `client_id` is the resolved Keycloak client. It is the only thing that
+   * tells one integrating DPG from another (every service org has
+   * `type='network_service'`), so it is returned for audit and support triage.
    */
   | { ok: true; user: ServiceIdentity; client_id: string }
   | { ok: false; code: ServiceAccountErrorCode; message: string };

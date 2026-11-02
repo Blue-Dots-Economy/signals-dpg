@@ -20,22 +20,12 @@ export interface ResolvedUserLocation {
 /**
  * Resolves the location used for "nearby" features.
  *
- * `preferredSource` is the user's explicit choice (default 'profile'):
- *  - 'profile' → the active profile's location, falling back to the browser
- *    location when the profile has none.
- *  - 'browser' → the browser geolocation, falling back to the profile location
- *    when the browser one isn't available (denied / not yet resolved).
+ * `preferredSource` (default 'profile') picks which of the profile location and
+ * browser geolocation wins; each falls back to the other.
  *
- * Two prompt triggers:
- *  1. Auto-prompt (unchanged): when there is NO profile location, the browser
- *     location is auto-requested once so a visitor / location-less profile still
- *     gets nearby results without an explicit action.
- *  2. Explicit prompt: when 'browser' is preferred and the browser status is
- *     idle, request it — this fires from the toggle's user gesture even when a
- *     profile location exists.
- *
- * `profileResolved` gates the auto-prompt so a logged-in user with a profile
- * location isn't prompted during the async profile-load window.
+ * The browser location is requested when there is no profile location (once
+ * `profileResolved`, so a user with one isn't prompted during profile load), or
+ * when 'browser' is preferred, which fires from the toggle's user gesture.
  */
 export function useUserLocation(
   profileLocation: LatLng | null,

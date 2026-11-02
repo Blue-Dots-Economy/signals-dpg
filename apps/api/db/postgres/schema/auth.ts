@@ -30,7 +30,7 @@ export const user = pgTable('user', {
   banExpires: timestamp('ban_expires'),
   phoneNumber: text('phone_number').unique(),
   phoneNumberVerified: boolean('phone_number_verified'),
-  // Age (years) captured at registration for U18 gating (#331). Snapshot, not
+  // Age (years) captured at registration for U18 gating. Snapshot, not
   // a birthdate — a minor is age <= 18 (the boundary year is treated as u18,
   // no month). Optional. `location` is an optional free-text account location.
   age: integer('age'),
@@ -42,16 +42,15 @@ export const user = pgTable('user', {
   domains: text('domains').array(),
   termsAccepted: boolean('terms_accepted').default(false),
   privacyAccepted: boolean('privacy_accepted').default(false),
-  // Plan 2: participant attribution. Set by POST /api/v1/admin/onboard_participant
-  // (which acts on behalf of an aggregator or voice org via acting_org). Null
-  // for users created by other paths (better-auth signUp from a UI etc.).
+  // The owning aggregator. Set by POST /api/v1/admin/participant (the acting
+  // aggregator, or the default aggregator for a network_service caller) and by
+  // default-aggregator tagging (`tagUserWithDefaultAggregator`). Null when no
+  // aggregator owns the user. Grants PII-decrypt rights.
   onboardedByOrgId: text('onboarded_by_org_id').references(() => organization.id),
-  // SS-3 (#640): true when `onboarded_by_org_id` was filled from the
-  // instance's DEFAULT aggregator rather than from a real onboarding act.
-  // Server-only and deliberately NOT derived from `onboarded_via` — that
-  // column is written from the request's `channel` field, so a caller could
-  // set it, and this flag is what the later re-assignment job scopes on (it
-  // decides who is handed PII-decrypt rights over whom).
+  // True when `onboarded_by_org_id` came from the default aggregator rather
+  // than a real onboarding act. Server-only, never derived from
+  // `onboarded_via` (which comes from the caller's `channel` field), because
+  // the re-assignment job scopes on it to hand out PII-decrypt rights.
   onboardedByDefault: boolean('onboarded_by_default').notNull().default(false),
   onboardedVia: text('onboarded_via'),
   onboardedSourceId: text('onboarded_source_id'),
@@ -80,7 +79,7 @@ export const organization = pgTable('organization', {
   createdAt: timestamp('created_at').notNull(),
   metadata: text('metadata'),
   type: text('type'),
-  // SS-3 (#640): served-domain bindings ("<network>/<domain>", e.g.
+  // Served-domain bindings ("<network>/<domain>", e.g.
   // 'blue_dot/seeker') for which this org is the DEFAULT aggregator — the one
   // that inherits users arriving with no aggregator of their own.
   //
@@ -90,59 +89,33 @@ export const organization = pgTable('organization', {
   // `organization_default_binding_exclusive` trigger (migration 0014), which
   // rejects a nomination for a binding another org already holds.
   //
-  // Deliberately NOT indexed for lookup: `organization` holds tens to hundreds
-  // of rows, where a sequential scan beats GIN and GIN would tax every upsert.
+  // Not indexed: `organization` holds tens to hundreds of rows, where a
+  // sequential scan beats GIN and GIN would tax every upsert.
   defaultForBindings: text('default_for_bindings').array(),
 }, (table) => [
   // The flag grants PII-decrypt rights over the users it captures, so it must
-  // never land on a `network_service` org — whose "unverified queue" nobody
-  // would ever open. Approval state itself lives in aggregator-dpg and is not
-  // visible here, so this constraint is the only enforceable half.
+  // never land on a `network_service` org. Approval state lives in
+  // aggregator-dpg, so this constraint is the only half enforceable here.
   check(
     'organization_default_requires_aggregator',
     sql`${table.defaultForBindings} IS NULL OR ${table.type} = 'aggregator'`,
   ),
-  // #518: `type` is plain text, so narrowing the TypeScript union stopped the
-  // app ACCEPTING a retired value without stopping the database STORING one.
-  // Without this, a row inserted by hand or by a script written against the old
-  // docs is only discovered as a `403 ACTING_ORG_TYPE_NOT_ALLOWED` at request
-  // time, far from whoever caused it. The constraint moves that failure to the
-  // INSERT.
-  //
-  // NULL stays permitted: the column is nullable and pre-existing rows rely on
-  // it (the acting-org preHandler refuses a null type on its own).
-  //
-  // Adding a value here is a migration, deliberately — an org type is an
-  // authorization tier, and `_resolve_acting_actor.ts` must be taught what
-  // reach it has in the same change.
+  // `type` is plain text, so this constraint moves an invalid value's failure
+  // to the INSERT instead of a later `403 ACTING_ORG_TYPE_NOT_ALLOWED`. NULL
+  // stays permitted for pre-existing rows (the acting-org preHandler refuses
+  // it). Adding a value is a migration on purpose: an org type is an
+  // authorization tier, and `_resolve_acting_actor.ts` must learn its reach in
+  // the same change.
   check(
     'organization_type_allowed',
     sql`${table.type} IS NULL OR ${table.type} IN ('aggregator', 'network_service')`,
   ),
-  // NO global "one default per instance" index any more.
-  //
-  // There used to be a unique index on a constant expression here, allowing a
-  // single default-holding org instance-wide. It was a stand-in for a rule the
-  // write paths did not yet enforce: `user.onboarded_by_org_id` (which grants
-  // PII-decrypt rights) is per ACCOUNT, while profiles are per DOMAIN, and
-  // `participant_decrypt` scopes on the tag with no domain condition. A user
-  // holding profiles in two domains therefore had one owner covering both, so a
-  // second per-domain default could decrypt a participant it did not own.
-  //
-  // That ambiguity is now impossible at the source: `assertSingleDomain`
-  // (`services/item_service.ts`) locks every account to one domain on its first
-  // item create, at the shared choke point every path goes through — including
-  // `admin/participant` and admin api-key callers, both of which skipped the
-  // old route-level check. Migration 0015 backfills the historical rows the old
-  // check never recorded. With one domain per account the tag is unambiguous,
-  // so separate default aggregators per domain are safe and the index is gone
-  // (migration 0016).
-  //
-  // Per-binding exclusivity — "no two orgs are the default for the SAME
-  // binding" — is unaffected and still enforced, by the
-  // `organization_default_binding_exclusive` trigger in migration 0014.
-  // Postgres cannot unique-index an array element, which is why that one is a
-  // trigger and not an index.
+  // Several orgs may hold defaults, one per binding. That is safe because the
+  // single-domain lock (`claimDomain`, `services/items/single_domain_lock.ts`)
+  // keeps each account, whose `onboarded_by_org_id` grants PII-decrypt rights,
+  // to one domain. Per-binding exclusivity is enforced by the
+  // `organization_default_binding_exclusive` trigger (migration 0014), since
+  // Postgres cannot unique-index an array element.
 ]);
 
 export const member = pgTable('member', {
@@ -158,26 +131,17 @@ export const member = pgTable('member', {
   createdAt: timestamp('created_at').notNull(),
 });
 
-// `account`, `verification`, `invitation`, `team` and `team_member` lived here
-// until #517. All five were better-auth's own bookkeeping, all five were empty,
-// and nothing referenced them — see the DROP migration alongside this change.
-// What is left (`user`, `organization`, `member`, `apikey`) outlived the library
-// because it is domain data, not auth plumbing.
 export const apikey = pgTable('apikey', {
   id: text('id').primaryKey(),
   configId: text('config_id').notNull().default('default'),
   name: text('name'),
-  // First N raw-key chars (better-auth defaults to 6) — for UI display only.
-  // The raw key itself is NEVER stored.
+  // First raw-key chars, for display only. The raw key is never stored.
   start: text('start'),
   referenceId: text('reference_id').notNull(),
   prefix: text('prefix'),
-  // Stores SHA-256(raw_key) base64url-encoded WITHOUT padding (43 chars).
-  // Matches @better-auth/api-key's `defaultKeyHasher`. Mint via
-  // `authInstance.api.createApiKey(...)` or, for standalone scripts,
-  // hash with `createHash('sha256').update(raw).digest('base64url')`
-  // before inserting — never store the raw key. See
-  // apps/api/scripts/seed_service_users.ts for the reference pattern.
+  // SHA-256(raw_key) base64url-encoded without padding (43 chars), as
+  // `hashApiKey` in plugins/auth/verify_api_key.ts computes it. Never store the
+  // raw key; see apps/api/scripts/seed_service_users.ts for minting.
   key: text('key').notNull(),
   userId: text('user_id').references(() => user.id, { onDelete: 'cascade' }),
   refillInterval: integer('refill_interval'),

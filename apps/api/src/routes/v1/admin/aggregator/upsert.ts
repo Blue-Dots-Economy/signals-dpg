@@ -11,13 +11,12 @@ import z, {
 /**
  * POST /api/v1/admin/aggregator/upsert
  *
- * Plan 1 Task 8. Lets the network-service caller (aggregator-dpg's service
- * apikey) mirror an aggregator org into Signals' organization table.
+ * Lets a network-service caller (aggregator-dpg's service identity) mirror an
+ * aggregator org into Signals' organization table.
  *
- * Auth + acting_org resolution happens upstream in admin_routes' preHandler
- * chain (Tasks 3-5). This handler additionally narrows the permitted
- * acting_org.org_type to 'network_service' — only the network-service caller
- * is allowed to write aggregator org rows.
+ * Auth + acting_org resolution happen in admin_routes' preHandler chain. This
+ * handler additionally requires acting_org.org_type 'network_service': only a
+ * network-service caller may write aggregator org rows.
  *
  * Lookup key is `slug`. `external_id` is opaque to Signals and is stored
  * inside organization.metadata (avoids a schema change on the organization

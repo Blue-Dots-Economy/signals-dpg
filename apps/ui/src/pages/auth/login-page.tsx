@@ -54,26 +54,10 @@ function domainLabel(domain: DotNetworkDomain): string {
 
 
 /**
- * Route entry for /auth/login. Picks the login experience for this deployment.
- *
- * Split as a wrapper rather than a branch inside `OtpLoginPage` so the OTP
- * screen below is byte-for-byte unchanged, and so the choice happens before
- * either component's hooks run.
- *
- * The choice comes from the API (`GET /api/v1/auth/config`), not from a
- * build-time env var — see lib/keycloak-config.ts. That costs one render with
- * no screen while the config loads; showing the OTP form first and then
- * swapping it for a redirect button would be worse.
- */
-/**
- * Explain a sign-in that failed before a session existed — cancelled at
- * Keycloak, an expired 5-minute flow, or a refused code exchange. The API can
- * only signal it as `?auth_error=1` on the redirect, so this is the one place
- * that can say what happened.
- *
- * Lives on the WRAPPER, not on either panel: under Keycloak the OTP page never
- * mounts, so an effect placed there would silently never run — which is exactly
- * how this was missed the first time.
+ * Explains a sign-in that failed before a session existed (cancelled at
+ * Keycloak, an expired flow, or a refused code exchange). The API can only
+ * signal it as `?auth_error=1` on the redirect. Lives on the wrapper so it runs
+ * whichever panel mounts.
  */
 function useFailedSignInNotice(): void {
   const [searchParams] = useSearchParams();
@@ -96,6 +80,13 @@ function useFailedSignInNotice(): void {
   }, [searchParams, t]);
 }
 
+/**
+ * Route entry for /auth/login. The choice comes from `GET /api/v1/auth/config`
+ * (see lib/keycloak-config.ts), made before either panel's hooks run. The API
+ * only reports `keycloak`; the OTP screen is the legacy better-auth login,
+ * reached only through the `VITE_AUTH_PROVIDER=betterauth` override or a
+ * missing Keycloak config, and its `/api/auth/*` endpoints no longer exist.
+ */
 export function LoginPage() {
   const { isKeycloakLogin, isLoading } = useAuthConfig();
   useFailedSignInNotice();
@@ -123,8 +114,7 @@ function OtpLoginPage() {
   useEffect(() => {
     const wrongPortalDomain = (location.state as { wrongPortalDomain?: string } | null)?.wrongPortalDomain;
     if (wrongPortalDomain) {
-      // Stable id so the toast is de-duped if this effect runs more than once
-      // (e.g. React StrictMode double-invokes it in dev) — one visible toast.
+      // Stable id de-dupes the toast across StrictMode's double-invoke.
       toast.error(t('auth.wrong_portal', { domain: wrongPortalDomain }), {
         id: 'wrong-portal-block',
       });
@@ -141,36 +131,34 @@ function OtpLoginPage() {
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
-  // Shared with the LoginPage wrapper above via React Query, so the instance's
-  // auth config is fetched once per session rather than once per component.
-  // The fail-safe default (gated + both channels) keeps the API authoritative
-  // if the request fails — see use-auth-config.ts.
+  // Shared with the wrapper via React Query. The fail-safe default (gated,
+  // both channels) keeps the API authoritative if the request fails.
   const { config: fetchedAuthCfg } = useAuthConfig();
   const authCfg: AuthConfigResponse | null =
     fetchedAuthCfg ?? { selfSignupAllowed: false, loginChannels: ['phone', 'email'] };
   const [signupBlocked, setSignupBlocked] = useState(false);
   const [networkDomains, setNetworkDomains] = useState<DotNetworkDomain[]>([]);
-  // Capture the checked identifier at the time of submission so the consent
-  // accept and OTP request use the same normalized values.
+  // The identifier captured at submission, so the consent accept and the OTP
+  // request use the same normalized values.
   const [pendingIdentifier, setPendingIdentifier] = useState<AuthIdentifier | null>(null);
   const [pendingUserExists, setPendingUserExists] = useState<boolean>(false);
   const [pendingName, setPendingName] = useState<string>('');
   const [pendingSignupExtras, setPendingSignupExtras] = useState<SignupExtras | null>(null);
-  // Set only for a brand-new MINOR signup in a guardian-gated domain — renders
-  // the pre-auth SignupGuardianFlow and defers the ward's own OTP until the
-  // guardian is verified (U18 option A). null for every other path.
+  // Set only for a new minor signup in a guardian-gated domain: renders the
+  // pre-auth guardian flow and defers the ward's own OTP until the guardian is
+  // verified.
   const [signupGuardianGate, setSignupGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
     age: number;
     resolvedName: string;
     resolvedSignupExtras: SignupExtras;
-    /** true = an EXISTING user backfilling age before login (not a new signup). */
+    /** True for an existing user backfilling age before login. */
     exists: boolean;
   } | null>(null);
-  // Set for a guardian-gated (u18-enabled) domain — renders the DOB step. For a
-  // brand-new signup it's AFTER the name/domain form; for an existing user
-  // missing DOB it's after the phone check, BEFORE the login OTP.
+  // Set for a guardian-gated domain to render the DOB step: after the
+  // name/domain form for a new signup, or after the phone check (before the
+  // login OTP) for an existing user missing DOB.
   const [signupDobGate, setSignupDobGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
@@ -180,27 +168,21 @@ function OtpLoginPage() {
   const redirectTo = searchParams.get('redirect') ?? '/';
   const servedScope = useMemo(() => getServedScope(), []);
 
-  // Domain options for the signup form's domain select. Fetched from the
-  // served network's own schema (network.domains) — not user input — so the
-  // domain a signup submits is always one the network actually defines.
+  // Domain options come from the served network's schema, so a signup can only
+  // submit a domain the network defines.
   useEffect(() => {
     fetchNetworkConfig(themeId)
       .then((cfg) => setNetworkDomains(cfg.domains ?? []))
       .catch(() => setNetworkDomains([]));
   }, [themeId]);
 
-  // Restrict to the served set when this deployment is bound to a subset of
-  // domains (single- or multi-domain portal) — mirrors profile-form-page's
-  // own domain-picker scoping so a signup can't pick a domain this portal
-  // doesn't serve.
+  // Restrict to the served domains when this deployment is bound to a subset.
   const domainOptions = servedScope
     ? networkDomains.filter((d) => servedScope.domains.includes(d.id))
     : networkDomains;
 
-  // Single-domain / split portal: exactly one served domain means there is no
-  // choice to make. Auto-select it (so the signup still carries a domain and
-  // the guardian/DOB gating below still runs) and hide the picker in the JSX —
-  // a one-option toggle is meaningless and would force a pointless click.
+  // Exactly one served domain: auto-select it (so the signup carries a domain
+  // and the DOB/guardian gating runs) and hide the picker.
   useEffect(() => {
     if (domainOptions.length === 1 && !domain) {
       setDomain(domainOptions[0].id);
@@ -221,8 +203,7 @@ function OtpLoginPage() {
   const fullPhone = toE164(phoneNumber);
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
-  // Gate the CTA: in phone mode the full 10-digit national number must be in;
-  // in email mode a non-empty value. Keeps "Continue" disabled until then.
+  // Phone mode needs the full 10-digit national number before "Continue".
   const contactComplete = mode === 'email' ? email.trim().length > 0 : phoneNumber.length === 10;
   const contactLabel = mode === 'email'
     ? t('auth.contact_label_email')
@@ -249,8 +230,8 @@ function OtpLoginPage() {
         name: resolvedName,
         redirectTo,
         pendingConsent: pendingConsent ?? null,
-        // Set for a new signup (domain + age) and for an existing minor who
-        // picked their year of birth pre-OTP (age only). otp-page persists it.
+        // A new signup's domain + age, or an existing minor's pre-OTP age.
+        // otp-page persists it.
         signupExtras: resolvedSignupExtras,
       },
     });
@@ -258,8 +239,7 @@ function OtpLoginPage() {
 
   const handleConsentAccept = async () => {
     if (!consentGate || !pendingIdentifier) return;
-    // Capture locals and close the modal immediately to prevent re-entry
-    // from a double-click before the async OTP request completes.
+    // Close the modal first so a double-click cannot re-enter.
     const gate = consentGate;
     const ident = pendingIdentifier;
     const userEx = pendingUserExists;
@@ -276,10 +256,9 @@ function OtpLoginPage() {
   };
 
   // Evaluate consent, then send the OTP (or hold for the consent modal).
-  // Best-effort: on any pre-check failure we proceed without gating — the user
-  // is re-prompted post-verify on their next login (spec §1.1). Adults reach
-  // this from the signup form (ungated) or after the DOB step (gated-adult);
-  // minors never do (the guardian flow records their consent instead).
+  // Fails open: on a pre-check error the OTP is sent and the user is
+  // re-prompted on their next login. Minors never reach this; the guardian
+  // flow records their consent.
   const runConsentThenOtp = async (
     ident: AuthIdentifier,
     exists: boolean,
@@ -287,9 +266,7 @@ function OtpLoginPage() {
     resolvedSignupExtras: SignupExtras | null,
   ) => {
     try {
-      // Normalize the phone to the canonical E.164 form auth stores; otherwise
-      // the exact-match lookup in status-by-identifier misses a returning user
-      // and the T&C gate re-prompts every login (see consentStatusIdentifier).
+      // Canonical E.164, or the exact-match lookup misses a returning user.
       const identifierParam = consentStatusIdentifier(ident);
 
       const [consentStatus, configEntries] = await Promise.all([
@@ -311,8 +288,8 @@ function OtpLoginPage() {
           source: exists ? 'login' : 'signup',
           accepted: consentStatus.statuses,
           // No variant: `status-by-identifier` is unauthenticated and does not
-          // report one, so this gate is always the adult set. A minor gets the
-          // U18 documents post-auth from the guardian flow (#453/#626).
+          // report one, so this is always the adult set. A minor gets the U18
+          // documents post-auth from the guardian flow.
         });
 
         if (outstanding) {
@@ -321,42 +298,36 @@ function OtpLoginPage() {
           setPendingName(resolvedName);
           setPendingSignupExtras(resolvedSignupExtras);
           setConsentGate(outstanding);
-          // Do NOT send OTP yet — wait for accept.
+          // Wait for accept before sending the OTP.
           setIsLoading(false);
           return;
         }
       }
     } catch {
-      // Consent pre-check failed — fail-open, proceed to OTP without gating.
-      // The user will be re-prompted post-verify on their next login.
+      // Fail open.
     }
 
     await proceedToOtp(ident, exists, resolvedName, resolvedSignupExtras);
   };
 
-  // Resolve the birth-year step: minor -> guardian flow (before their own OTP);
-  // adult -> ordinary consent + OTP. Age rides along in signupExtras so
-  // otp-page persists it post-verify.
+  // Birth-year step: a minor goes to the guardian flow, an adult to consent +
+  // OTP. Age rides in signupExtras for otp-page to persist.
   const handleSignupDob = async (age: number) => {
     const gate = signupDobGate;
     if (!gate) return;
     const extras: SignupExtras = { domain: gate.domain, age };
     setSignupDobGate(null);
 
-    // A minor never sees the adult terms/privacy consent checkbox — the guardian
-    // flow records their consent instead.
+    // A minor never sees the adult terms/privacy consent.
     if (isMinorFromAge(age)) {
       if (!gate.exists) {
-        // NEW minor: the guardian flow is the very next screen, so the toast
-        // matches what they see next.
+        // New minor: the guardian flow is the next screen.
         toast.info(t('auth.minor_toast_title', "You're under 18"), {
           description: t(
             'auth.minor_toast_desc',
             'A guardian needs to confirm your account before you can continue.',
           ),
         });
-        // Guardian pre-auth is safe (account materializes on creation, same
-        // session owns the new identifier).
         setSignupGuardianGate({
           identifier: gate.identifier,
           domain: gate.domain,
@@ -367,12 +338,9 @@ function OtpLoginPage() {
         });
         return;
       }
-      // EXISTING minor: the guardian APIs are session-scoped, so the guardian
-      // step must run AFTER the login OTP. Skip the adult consent and send the
-      // OTP; the post-login authed guardian flow (otp-page) records their u18
-      // consent. Age rides in signupExtras and is persisted post-verify. Set the
-      // two-step expectation here so the OTP page (not the guardian step) coming
-      // next doesn't read as a mismatch.
+      // Existing minor: the guardian APIs are session-scoped, so the guardian
+      // step runs after the login OTP (in otp-page). Skip the adult consent
+      // and send the OTP.
       toast.info(t('auth.minor_toast_title', "You're under 18"), {
         description: t(
           'auth.minor_verify_then_guardian_desc',
@@ -404,11 +372,10 @@ function OtpLoginPage() {
     }
   };
 
-  // Guards extracted from handleSubmit to keep its cognitive complexity within
-  // bounds (SonarCloud S3776) — each is a self-contained, side-effecting step.
-  // handleSubmit's `finally` owns `setIsLoading(false)`, so these never repeat it.
+  // Guards split out of handleSubmit for complexity (Sonar S3776).
+  // handleSubmit's `finally` owns `setIsLoading(false)`.
 
-  /** Contact-format guard. Toasts + returns false when the number/email is malformed. */
+  /** Toasts and returns false when the number/email is malformed. */
   const validateContact = (): boolean => {
     if (mode === 'phone' && !isValidPhoneNumber(fullPhone)) {
       toast.error(t('auth.toast_invalid_phone'), {
@@ -425,7 +392,7 @@ function OtpLoginPage() {
     return true;
   };
 
-  /** Signup-only pre-flight guards (self-signup gate, name, domain). Halt = true. */
+  /** Signup-only guards (self-signup gate, name, domain). True = halt. */
   const signupPreflightHalts = (exists: boolean): boolean => {
     if (!exists && authCfg && !authCfg.selfSignupAllowed) {
       toast.error(t('auth.toast_signup_disabled'), {
@@ -452,9 +419,9 @@ function OtpLoginPage() {
   };
 
   /**
-   * Existing-user U18 pre-check: opens the DOB step and returns true (halt
-   * before OTP) when a year-of-birth is required. Fail-open on precheck error —
-   * the post-login gate still catches a minor.
+   * Existing-user U18 pre-check: opens the DOB step and returns true when a
+   * year of birth is required. Fails open; the post-login gate still catches a
+   * minor.
    */
   const resolveExistingDobGate = async (): Promise<boolean> => {
     try {
@@ -464,15 +431,14 @@ function OtpLoginPage() {
         return true;
       }
     } catch {
-      // Fail-open: precheck failure must not block login.
     }
     return false;
   };
 
   /**
-   * Whether a brand-new signup's domain goes live on completeness alone
-   * (`go_live_required` without `consent_required`) — then the Terms/Privacy
-   * pre-check is skipped. Absent config ⇒ require consent (safe default).
+   * Whether a new signup's domain goes live without `consent_required`, in
+   * which case the terms/privacy pre-check is skipped. Absent config requires
+   * consent.
    */
   const domainSkipsConsent = (): boolean => {
     const domGates = networkDomains.find((d) => d.id === domain)?.go_live_required;
@@ -483,8 +449,7 @@ function OtpLoginPage() {
     e.preventDefault();
     if (!contactValue.trim()) return;
 
-    // Client-side validation — server won't crash on a malformed number
-    // but the OTP send will fail silently. Surface a clean inline error.
+    // The OTP send fails silently on a malformed number, so check here.
     if (!validateContact()) return;
 
     setIsLoading(true);
@@ -494,47 +459,35 @@ function OtpLoginPage() {
       setUserExists(exists);
       setSignupBlocked(false);
 
-      // Signup-only pre-flight guards (self-signup gate, name, domain). DOB is
-      // NOT asked here — it's a separate step for guardian-gated domains (below).
+      // DOB is a separate step for guardian-gated domains (below).
       if (signupPreflightHalts(exists)) return;
 
       const resolvedName = exists ? '' : name;
 
-      // A brand-new signup in a guardian-gated (u18-enabled) domain collects
-      // DOB in a SEPARATE next step. Ungated domains (e.g. provider) skip DOB
-      // entirely and go straight to consent + OTP. The server stays
-      // authoritative on minor + gated + served.
+      // A new signup in a guardian-gated domain collects DOB in a separate
+      // step. The server stays authoritative on minor + gated + served.
       const gatedDomain =
         !exists && (networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false);
       if (gatedDomain) {
         setSignupDobGate({ identifier, domain, resolvedName, exists: false });
         setIsLoading(false);
-        return; // DOB step renders next; no OTP yet.
+        return;
       }
 
-      // EXISTING user missing a DOB on a gated domain: collect the year of birth
-      // BEFORE the OTP (UI-only capture — no API call, no session yet). The
-      // branch happens here: an adult continues to consent + OTP; a minor is
-      // sent to the OTP first (ownership) and then, POST-login, the AUTHENTICATED
-      // guardian flow runs — the guardian APIs are session-scoped and must never
-      // be public for an existing account, so the guardian step can't precede
-      // the OTP. Age is persisted post-verify (otp-page) via signupExtras.
-      if (exists && (await resolveExistingDobGate())) return; // DOB step renders next; no OTP yet.
+      // Existing user missing DOB on a gated domain: collect the year before
+      // the OTP. A minor then logs in first, because the guardian APIs are
+      // session-scoped and must not be public for an existing account.
+      if (exists && (await resolveExistingDobGate())) return;
 
       const resolvedSignupExtras: SignupExtras | null = exists ? null : { domain };
 
-      // The Terms/Privacy gate is tied to the domain's `consent_required`
-      // go-live gate. A brand-new signup on a domain that does NOT require
-      // consent (e.g. a provider configured `go_live_required: ["schema_required"]`)
-      // skips the consent pre-check and goes straight to OTP. Absent config ⇒
-      // require consent (safe default). Returning users keep the pre-check.
+      // A new signup on a domain without `consent_required` skips the consent
+      // pre-check. Returning users keep it.
       if (!exists && domainSkipsConsent()) {
         await proceedToOtp(identifier, exists, resolvedName, resolvedSignupExtras);
         return;
       }
 
-      // Non-gated / returning user: runConsentThenOtp runs the same terms/privacy
-      // pre-check (getConsentStatusByIdentifier) before sending the OTP.
       await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
     } catch {
       toast.error(t('auth.toast_send_code_error'), {
@@ -545,20 +498,16 @@ function OtpLoginPage() {
     }
   };
 
-  // While the DOB step or the guardian flow is active, the signup form is
-  // hidden so the step reads as its own page (auth background only) rather
-  // than stacking over the half-filled form.
+  // Hide the signup form while the DOB step or guardian flow is active.
   const showSignupForm = !signupDobGate && !signupGuardianGate;
 
-  // Guardian verified — send the ward's own OTP. No pendingConsent: the
-  // minor's terms/privacy are recorded guardian-sourced on account creation
-  // (materializeSignupGuardian), not via the adult gate.
+  // Guardian verified: send the ward's own OTP. No pendingConsent; the minor's
+  // terms/privacy are recorded guardian-sourced at account creation.
   const handleGuardianComplete = () => {
     const gate = signupGuardianGate;
     if (!gate) return;
     setSignupGuardianGate(null);
-    // The guardian step and the ward's own verification are separate — make the
-    // hand-off explicit so the jump to the user OTP screen isn't a surprise.
+    // Explain the hand-off to the ward's own OTP.
     toast.success(t('auth.guardian_confirmed_title', 'Guardian confirmed'), {
       description: t(
         'auth.guardian_confirmed_desc',
@@ -601,8 +550,7 @@ function OtpLoginPage() {
             age={signupGuardianGate.age}
             onComplete={handleGuardianComplete}
             onBack={() => {
-              // Return to the birth-year step: rebuild its gate from the
-              // guardian gate, then clear the guardian gate.
+              // Back to the birth-year step.
               const g = signupGuardianGate;
               if (!g) return;
               setSignupGuardianGate(null);
@@ -626,8 +574,7 @@ function OtpLoginPage() {
           {t('auth.back')}
         </button>
 
-        {/* Shared with the Keycloak panel — see session-expired-notice.tsx for
-            why it is not inline here any more. */}
+        {/* Shared with the Keycloak panel. */}
         <SessionExpiredNotice />
 
         {/* Heading */}
@@ -670,20 +617,14 @@ function OtpLoginPage() {
             </div>
           )}
 
-          {/* Domain — grouped directly under the channel toggle above so the
-              two selectors read as one unit. Shown only when
-              creating an account AND there's a real choice (>1 served domain);
-              a single-domain portal auto-selects it and hides this. DOB is NOT
-              asked here — it's a separate step for guardian-gated domains. */}
+          {/* Shown only for a new account with more than one served domain. */}
           {userExists === false && !signupBlocked && domainOptions.length > 1 && (
             <div className="space-y-1.5">
               <Label className="text-sm font-medium">
                 {t('auth.label_domain', 'Your Domain')}
               </Label>
-              {/* Distinct outlined buttons (not a segmented pill) — nothing is
-                  pre-selected on a multi-domain portal, so each option must
-                  clearly read as a clickable button on its own; the chosen one
-                  fills with the brand colour. */}
+              {/* Outlined buttons: nothing is pre-selected, so each option
+                  must read as a button on its own. */}
               <div className="flex flex-wrap gap-2 text-sm">
                 {domainOptions.map((d) => (
                   <button
@@ -764,9 +705,8 @@ function OtpLoginPage() {
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            {/* "Send OTP" only for a returning user, where submit truly sends
-                the code. A new signup submit leads to more steps (DOB /
-                guardian / consent) before any OTP, so it reads "Continue". */}
+            {/* A new signup has more steps before any OTP, so it reads
+                "Continue". */}
             {userExists === true ? t('auth.cta_send_otp') : t('auth.cta_continue')}
           </button>
         </form>

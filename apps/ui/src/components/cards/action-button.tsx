@@ -12,15 +12,11 @@ interface ActionButtonProps {
   actionType: string;
   actionSchema: DotActionSchema;
   onAction: (type: string, schema: DotActionSchema) => void;
-  /** Disable the CTA (e.g. an action is already open for this pair, #370/#422). */
+  /** Disable the CTA (e.g. an action is already open for this pair). */
   disabled?: boolean;
   /** Shown on hover when disabled, so the user knows why. */
   disabledReason?: string;
-  /**
-   * Button visual variant. Defaults to `'outline'` so every existing card call
-   * site is unchanged; the public profile page passes `'default'` for a filled,
-   * theme-coloured Apply/Connect CTA.
-   */
+  /** Button variant; the public profile page uses `'default'` for a filled CTA. */
   variant?: NonNullable<React.ComponentProps<typeof Button>['variant']>;
 }
 
@@ -59,9 +55,8 @@ export function ActionButton({
     </Button>
   );
 
-  // A native `disabled` button suppresses hover/title events, so wrap it in a
-  // span the tooltip can hook onto — that's how the user learns why it's off
-  // (an action is already open for this pair). No reason → plain button.
+  // A disabled button fires no hover events, so a span carries the tooltip
+  // explaining why.
   if (!disabled || !disabledReason) return button;
 
   return (

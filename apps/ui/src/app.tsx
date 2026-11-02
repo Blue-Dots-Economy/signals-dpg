@@ -28,8 +28,8 @@ export function App() {
             toastOptions={{ duration: 5000 }}
           />
           {/* Reports a domain-gate bounce that survived the Keycloak logout
-              redirect. Mounted here, outside <Routes>, because that redirect
-              lands on the site root rather than the login page. */}
+              redirect. Mounted outside <Routes> so it does not depend on the
+              post-logout landing route. */}
           <WrongPortalToast />
           <Routes>
             <Route path="/" element={<HomePage />} />
@@ -37,15 +37,11 @@ export function App() {
             <Route path="/profile/:id/edit" element={<RequireAuth><ProfileFormPage /></RequireAuth>} />
             <Route path="/auth/login" element={<LoginPage />} />
             <Route path="/auth/otp" element={<OtpPage />} />
-            {/* Keycloak redirect target. Registered unconditionally so the
-                route exists the moment VITE_AUTH_PROVIDER is flipped, without
-                a rebuild — the page is inert if nobody redirects here. */}
+            {/* Keycloak redirect target. */}
             <Route path="/auth/callback" element={<OidcCallbackPage />} />
             <Route path="/legal" element={<LegalPage />} />
-            {/* Both documents live on one page now. These two paths are what
-                operators have already shared over SMS and email (see #637), so
-                they keep working — as redirects that carry the reader to the
-                right section of it. */}
+            {/* Links already shared over SMS and email; they redirect to the
+                matching section of /legal. */}
             <Route path="/privacy" element={<Navigate to="/legal#privacy" replace />} />
             <Route path="/terms" element={<Navigate to="/legal#terms" replace />} />
             <Route path="/public/:network/:domain/:itemType/:itemId" element={<PublicProfilePage />} />

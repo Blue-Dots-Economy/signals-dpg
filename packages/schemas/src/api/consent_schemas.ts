@@ -12,10 +12,9 @@ const ConsentStatusVersionsSchema = z.object({
 /**
  * The UNAUTHENTICATED pre-login status, keyed on a phone/email.
  *
- * Kept separate from `ConsentStatusResponseSchema` on purpose (#626): it must
- * never carry `variant`, because that would disclose to anyone holding a phone
- * number that it belongs to a minor. Sharing one schema across both routes is
- * how that would get re-added by accident.
+ * Kept separate from `ConsentStatusResponseSchema` because it must never carry
+ * `variant`: that would tell anyone holding a phone number that it belongs to
+ * a minor.
  */
 export const ConsentStatusByIdentifierResponseSchema = z.object({
   statuses: ConsentStatusVersionsSchema,
@@ -24,13 +23,10 @@ export const ConsentStatusByIdentifierResponseSchema = z.object({
 export const ConsentStatusResponseSchema = z.object({
   statuses: ConsentStatusVersionsSchema,
   /**
-   * Which document set applies to this user (#626). Resolved server-side from
-   * the recorded age — never client-supplied, since a client that chose its
-   * own variant would be choosing which terms it is bound by.
-   *
-   * The gate compares `statuses` against the CURRENT version of this set, so
-   * it is also what makes a `u18_documents`-only version bump re-prompt a
-   * minor. Optional so an older client keeps working; absent means `adult`.
+   * Which document set applies to this user, resolved server-side from the
+   * recorded age; never client-supplied, or a client could choose its own
+   * terms. `statuses` are compared against the current version of this set,
+   * so a `u18_documents` version bump re-prompts a minor. Absent means `adult`.
    */
   variant: z.enum(['adult', 'u18']).optional(),
 });

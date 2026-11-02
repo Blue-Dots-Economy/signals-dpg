@@ -1,12 +1,11 @@
 /**
- * The API's one CSV encoder, shared by every CSV download (engagement export
- * #770, aggregator dashboard export): RFC-4180 quoting, `|`-joined primitive
- * arrays (the network's array-cell convention), and spreadsheet
- * formula-injection neutralisation.
+ * The API's CSV encoder (used by the aggregator export): RFC 4180 quoting,
+ * `|`-joined primitive arrays (the network's array-cell convention), and
+ * spreadsheet formula-injection neutralisation.
  */
 
 // A cell a spreadsheet would evaluate as a formula. Only strings are
-// neutralised — a typed number such as -5 is data.
+// neutralised; a typed number such as -5 is data.
 const FORMULA_LEAD = /^[=+\-@\t\r]/;
 const NEEDS_QUOTES = /[",\r\n]/;
 

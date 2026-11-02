@@ -2,7 +2,8 @@ name: CI
 
 on:
   pull_request:
-    branches: [develop, main, feature]
+    # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+    branches: [develop, main, feature, 'release/**']
   # main: required for SonarCloud. The organization's plan analyses the MAIN
   # branch only (branch/PR analysis is a paid feature), so without a push
   # trigger here the default branch is never scanned and the dashboard reports
@@ -13,7 +14,8 @@ on:
   # commit, and this workflow no longer publishes anything, so the second
   # post-merge run duplicated the PR run without gating a release.
   push:
-    branches: [develop, main]
+    # release/**: hotfix tags are CI-gated on the release branch commit, and hotfix PRs target it.
+    branches: [develop, main, 'release/**']
   workflow_dispatch:
 
 concurrency:
@@ -33,10 +35,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter api exec tsc --noEmit
 
@@ -49,10 +51,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter ui exec tsc --noEmit
 
@@ -68,10 +70,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r test
 
@@ -131,10 +133,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
 
       # --- (1) unit coverage across every workspace ----------------------
@@ -247,11 +249,11 @@ jobs:
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: hashFiles('.dependency-cruiser.cjs') != ''
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         if: hashFiles('.dependency-cruiser.cjs') != ''
       - run: pnpm dep-check
@@ -306,10 +308,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
 
       - name: Regenerate schema bundle (must be a no-op if already fresh)
@@ -403,10 +405,10 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.1.2
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
-          cache: pnpm
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - name: OpenAPI spec drift check
         run: |

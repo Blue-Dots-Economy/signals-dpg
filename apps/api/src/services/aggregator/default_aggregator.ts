@@ -4,52 +4,12 @@ import type { DbOrTx } from '@/services/db_types';
 import { resolveServedNetworkForDomain } from '@/utils/served_domain_guard';
 
 /**
- * Default-aggregator resolution (#640, SS-3).
+ * Default-aggregator resolution and tagging. A user arriving through an
+ * uncontrolled path (portal self-signup, a cold voice call) is tagged with the
+ * aggregator an operator nominated for their (network, domain) binding, so
+ * someone owns, verifies and can decrypt them.
  *
- * A user arriving through an uncontrolled inbound path — portal self-signup, or
- * a cold call to the network-hosted voice agent — has no aggregator of their
- * own. `user.onboarded_by_org_id` is the tenancy key for participant reads,
- * action authorisation and **PII decryption**, so leaving it null means nobody
- * is responsible for verifying that person and nobody can decrypt them.
- *
- * The default aggregator is a real, already-approved aggregator org that the
- * network admin nominates by a direct backend/support request — a hand-written
- * UPDATE of `organization.default_for_bindings` (#640's answer; there is no API
- * for it, and the database enforces the rules: a CHECK for `type='aggregator'`,
- * a trigger for per-binding exclusivity, a trigger rejecting a binding whose
- * domain the org does not declare, and an audit trigger so the change is
- * traceable).
- *
- * It is deliberately never system-generated: an org minted by the system has no
- * enabled Keycloak user, so the "unverified queue" it owns would be a queue
- * nobody can open. Note the database can only prove `type = 'aggregator'` —
- * `organization` has no approval/status column, so "already-approved" is a
- * process guarantee the runbook has to carry, not an enforced one.
- *
- * ## Resolution is per binding, and several defaults may coexist
- *
- * `organization.default_for_bindings` is per (network, domain) — product asked
- * for a per-domain default (#640 Q3) — and lookups are per binding. So one
- * aggregator may hold `['blue_dot/seeker','blue_dot/provider']`, AND two
- * different aggregators may hold one binding each.
- *
- * The second shape used to be blocked by `organization_single_default_idx`,
- * because the tag (`user.onboarded_by_org_id`) is per ACCOUNT and write-once
- * while items are per DOMAIN: an account spanning two domains had one owner
- * covering both, so the other domain's default could decrypt a participant it
- * did not own. That index is gone (migration 0016), because the ambiguity is
- * now removed at the source — `assertSingleDomain` in
- * `services/item_service.ts` keeps every account to a single domain at the one
- * choke point every create path shares, and `POST /api/v1/user/domains` is
- * write-once so a user cannot grant themselves a second one.
- *
- * `participant_decrypt` additionally filters on the acting org's declared
- * domains, so a leak would need both invariants to fail rather than one.
- *
- * What remains enforced is per-binding exclusivity — no two orgs are the
- * default for the SAME binding — by the
- * `organization_default_binding_exclusive` trigger (migration 0014). Postgres
- * cannot unique-index an array element, which is why that one is a trigger.
+ * Design: docs/architecture/api-aggregator-default-aggregator.md
  */
 
 export interface DefaultAggregatorResolution {
@@ -61,9 +21,7 @@ export interface DefaultAggregatorResolution {
 export const bindingKey = (network: string, domain: string): string => `${network}/${domain}`;
 
 /**
- * THE lookup for a binding's default aggregator.
- *
- * `LIMIT 1` is safe because `organization_default_binding_exclusive` guarantees
+ * The lookup for a binding's default aggregator. `LIMIT 1` is safe because `organization_default_binding_exclusive` guarantees
  * at most one org holds any given binding.
  */
 export const defaultAggregatorQuery = (binding: string): SQL =>
@@ -73,11 +31,8 @@ export const defaultAggregatorQuery = (binding: string): SQL =>
        LIMIT 1`;
 
 /**
- * The default aggregator for a served-domain binding.
- *
- * Not cached. It runs at most once per user, inside a transaction that is
- * already writing an item — and the value is changed by an operator, so a cache
- * would introduce a stale window with nothing to invalidate it.
+ * The default aggregator for a served-domain binding. Not cached: an operator
+ * changes the value by hand, so a cache would have nothing to invalidate it.
  */
 export async function resolveDefaultAggregator(
   exec: DbOrTx,
@@ -92,24 +47,18 @@ export async function resolveDefaultAggregator(
 }
 
 /**
- * Fill `user.onboarded_by_org_id` from the default aggregator, but only if it
- * is still unset.
+ * Fill `user.onboarded_by_org_id` from the default aggregator, only if unset.
  *
- * `IS NULL` in the WHERE makes the write **write-once at the database level**:
- * a later profile create or edit can never re-point an existing tag, so moving
- * someone between aggregators stays an explicit, audited operation rather than
- * something that can happen by accident.
+ * `IS NULL` makes the tag write-once at the database level, so moving someone
+ * between aggregators stays an explicit operation.
  *
- * `onboarded_by_default` is what marks these users as *defaulted* rather than
- * genuinely onboarded. It is a server-only column on purpose — `onboarded_via`
- * is written from the request's `channel` field, so a caller could set it, and
- * this flag is the key the re-assignment job scopes on.
+ * `onboarded_by_default` marks the user as defaulted rather than genuinely
+ * onboarded. It is server-only because `onboarded_via` comes from the request's
+ * `channel` and so is caller-controlled.
  *
- * `onboarded_at` is filled with `coalesce` so a participant who was onboarded
- * months ago (voice/account-only creates already write a real `onboarded_at`
- * with a null org) does not have their genuine join date overwritten with the
- * tagging time — `item_metrics.age_days` and `profile_status` are derived from
- * it, and a dormant participant must not resurface as brand new.
+ * `onboarded_at` uses `coalesce` so an earlier real join date (voice or
+ * account-only creates write one with a null org) is kept: `item_metrics.age_days`
+ * and `profile_status` derive from it.
  *
  * @returns whether this call actually wrote the tag.
  */
@@ -121,13 +70,9 @@ export async function tagUserWithDefaultAggregator(
 ): Promise<{ tagged: boolean }> {
   const binding = bindingKey(network, domain);
 
-  // One statement, and the guard short-circuits the lookup. For a user who
-  // already has an owner the WHERE fails, so the subqueries never execute —
-  // no `organization` scan. That is what makes this cheap enough to run on
-  // every profile create rather than only on a user's first one.
-  //
-  // The EXISTS matters: without it, a create on an instance with no default
-  // nominated would write NULL over NULL and burn a row version.
+  // For an already-owned user the WHERE fails before the subqueries run, so
+  // this is cheap enough for every profile create. The EXISTS avoids writing
+  // NULL over NULL (a wasted row version) when no default is nominated.
   const updated = (await exec.execute(sql`
     UPDATE "user"
        SET onboarded_by_org_id = (
@@ -176,9 +121,7 @@ export async function resolveOwnerGateContext(
   const resolution = await resolveDefaultAggregator(exec, network, domain);
 
   return {
-    // A missing user row counts as "no owner" — fail closed. It should not
-    // happen (items FK to `user`), and treating it as owned would be the
-    // wrong direction on a gate that exists to guarantee an owner.
+    // A missing user row counts as "no owner" (fail closed).
     has_owner: Boolean(owner?.onboardedByOrgId),
     default_configured: Boolean(resolution.org_id),
   };
@@ -186,25 +129,13 @@ export async function resolveOwnerGateContext(
 
 /**
  * Tag a user from the default aggregator for the domain they just joined.
- *
- * THE user-level entry point (#640). Called wherever `user.domains` is first
- * established — the three places that decide which domain a user belongs to:
- *
- *   1. `applySignupExtras` (provisioning) — portal signup, from the stash
- *   2. `POST /api/v1/user/domains`        — explicit pick (write-once)
- *
- * A third caller used to live in `create_item`'s first-create bootstrap; that
- * bootstrap moved into `assertSingleDomain`, and `create_item` now calls
+ * Called where `user.domains` is established: `applySignupExtras`
+ * (provisioning) and `POST /api/v1/user/domains`. `create_item` calls
  * `tagUserWithDefaultAggregator` directly with the request's concrete network.
  *
- * Tagging belongs here rather than on every item write: ownership is a property
- * of the ACCOUNT, decided once when its domain is decided. Running it per item
- * write meant re-resolving the default on edits by users who were already
- * owned, which is work whose result is always discarded.
- *
- * Derives the network from the instance's served bindings, since `user.domains`
- * stores a bare domain. A domain that is unserved or ambiguous leaves the user
- * untagged (see `resolveServedNetworkForDomain`).
+ * Derives the network from the instance's served bindings because
+ * `user.domains` stores a bare domain; an unserved or ambiguous domain leaves
+ * the user untagged (see `resolveServedNetworkForDomain`).
  *
  * @returns whether the tag was written.
  */

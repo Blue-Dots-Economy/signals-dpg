@@ -1,6 +1,6 @@
 /**
- * Per-item error thrown by a processOne callback. The runner converts it into
- * an error entry in the results array (does NOT abort the batch).
+ * Per-item error thrown by a processOne callback; recorded as that item's
+ * error result without aborting the batch.
  */
 export class BulkItemFailure extends Error {
   constructor(
@@ -31,8 +31,8 @@ export interface BulkOutcome<T> {
 }
 
 /**
- * Run `processOne` over each element best-effort. Sequential by design (v1):
- * keeps DB partition creation and cross-instance fan-out predictable.
+ * Runs `processOne` over each element, best-effort and sequentially, which
+ * keeps partition creation and cross-instance fan-out predictable.
  */
 export async function runBulk<T extends object>(
   elements: unknown[],

@@ -6,11 +6,8 @@ import { UserPlus } from 'lucide-react';
 
 interface ContentHeaderProps {
   /**
-   * Optional since #645. The browse page omits it: the toolbar's domain
-   * control (or its "Showing <domain>" label when only one is selectable)
-   * already names what is on screen, and this heading was BOTH a duplicate of
-   * that and wrong on the map, where it showed a single domain while several
-   * were selected.
+   * Optional. The browse page omits it because the toolbar's domain control
+   * already names what is on screen.
    */
   title?: string;
   description?: string;
@@ -29,10 +26,7 @@ export function ContentHeader({
 }: Readonly<ContentHeaderProps>) {
   const { t } = useTranslation();
 
-  // Render NOTHING when there is nothing to show. Since #645 stripped the
-  // title, description and count out of this header, a signed-in viewer who
-  // already has a profile left every slot empty — and the wrapper's `mb-6`
-  // then drew a dead band between the filter bar and the results.
+  // Render nothing when empty, or the wrapper's `mb-6` leaves a dead band.
   const hasContent =
     Boolean(title) ||
     count !== undefined ||

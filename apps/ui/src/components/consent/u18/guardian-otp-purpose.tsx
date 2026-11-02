@@ -2,10 +2,8 @@ import { useTranslation } from 'react-i18next';
 import { ShieldCheck } from 'lucide-react';
 
 /**
- * What a guardian OTP is being collected for. Rendered as a highlighted panel
- * at the top of every guardian OTP form so the ward + guardian see exactly what
- * the code authorises (profile creation, applying to a provider, etc.) rather
- * than a generic "confirm with your guardian".
+ * What a guardian OTP authorises, shown as a panel at the top of every
+ * guardian OTP form.
  */
 export type GuardianPurpose =
   | { kind: 'account' }

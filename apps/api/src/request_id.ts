@@ -1,11 +1,8 @@
 /**
- * Correlation-id (`x-request-id`) plumbing for the API.
- *
- * Shared so the Fastify bootstrap and its unit test build the request-id
- * behaviour from one definition. The id lets a single request be traced across
- * the platform (Kong → aggregator → Signals → search): an inbound
- * `x-request-id` is honoured (length-capped), one is minted when absent, it is
- * logged as `reqId`, and it is echoed back on the response.
+ * Correlation-id (`x-request-id`) plumbing, so one request can be traced
+ * across Kong, aggregator, Signals and search. An inbound id is honoured
+ * (length-capped), one is minted when absent, logged as `reqId`, and echoed
+ * on the response.
  *
  * @module @api/request_id
  */
@@ -16,11 +13,9 @@ import type { FastifyInstance, FastifyServerOptions } from 'fastify';
 export const REQUEST_ID_HEADER = 'x-request-id';
 
 /**
- * Fastify server options that make the id come from `x-request-id`.
- *
- * `requestIdHeader: false` forces `genReqId` to run on every request (Fastify
- * would otherwise use the header value verbatim, uncapped), so we can both read
- * the inbound header and bound its length before it lands in every log line.
+ * Fastify server options that take the id from `x-request-id`.
+ * `requestIdHeader: false` forces `genReqId` on every request; otherwise
+ * Fastify would use the header verbatim, with no length cap.
  */
 export const requestIdOptions: Pick<
   FastifyServerOptions,
@@ -38,10 +33,7 @@ export const requestIdOptions: Pick<
 };
 
 /**
- * Registers an `onRequest` hook that echoes the resolved correlation id back on
- * the response, so Kong and upstream callers can stitch the trace.
- *
- * @param app - The Fastify instance to attach the hook to.
+ * Registers an `onRequest` hook that echoes the correlation id on the response.
  */
 export function registerRequestIdEcho(app: FastifyInstance): void {
   app.addHook('onRequest', async (req, reply) => {

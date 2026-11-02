@@ -13,16 +13,14 @@ export const ItemSelectSchema = createSelectSchema(items);
 export const ItemResponseSchema = ItemSelectSchema.omit({
   item_private_state: true,
 }).extend({
-  // Kept optional deliberately: response paths that do not project this column
-  // (e.g. browse/fetch without lifecycle filter) must not cause a serialization 500.
+  // Optional so a response path that does not project this column cannot
+  // cause a serialization 500.
   lifecycle_status: z.enum(['draft', 'live', 'paused', 'retired']).optional(),
   item_locations: ItemLocationsArray,
 });
 export const ItemInsertSchema = createInsertSchema(items);
-// ItemSnapshotSchema is the contract sent to the external match-score scorer.
-// The scorer knows nothing about item_locations — it expects flat scalar coords
-// (item_latitude / item_longitude). The UI derives these from item_locations[0]
-// before calling the API (see apps/ui/src/lib/match-score-api.ts itemToSnapshot).
+// Item shape in a match-score request. Coordinates are flat scalars that the UI
+// derives from item_locations[0] (apps/ui/src/lib/match-score-api.ts).
 export const ItemSnapshotSchema = ItemResponseSchema.omit({
   created_by: true,
   created_at: true,
@@ -43,9 +41,8 @@ export const CreateItemBodySchema = ItemInsertSchema.omit({
   updated_at: true,
   lifecycle_status: true,
 }).extend({
-  // Optional override used by admin / service callers to author items on
-  // behalf of another user. Non-admin callers cannot supply this — see
-  // create_item.ts.
+  // Required from an admin api-key caller (the user the item is authored for)
+  // and refused from any other caller; see create_item.ts.
   created_by: z.string().min(1).optional(),
   item_locations: ItemLocationsArray.optional(),
   consent: z
@@ -67,26 +64,16 @@ const FetchItemsSchemaBase = z.object({
 
   item_schema_url: z.url().nullable().optional(),
 
-  // Facet filter. Each entry's value may be a scalar or a `string[]` —
-  // item_fetch_runtime's buildWhereClause normalizes a scalar `v` to `[v]`
-  // and applies EVERY entry (scalar or array) the same guarded way:
-  // `item_state ->> field = ANY(...)`, gated by the declared/non-private
-  // facet guard (see `resolveAllowedFacetFields`; #394 dropped the additional
-  // `filterable` marker that guard used to also require, and separately
-  // closed a hole where a scalar value bypassed the guard entirely via an
-  // unguarded `item_state @> jsonb` containment check — there is no such
-  // unguarded branch any more). Left as `z.unknown()` rather than a narrower
-  // union deliberately: this field is shared by every fetch/count/markers
-  // schema below.
+  // Facet filter; each value is a scalar or a `string[]`. buildWhereClause
+  // applies every entry as `item_state ->> field = ANY(...)`, restricted to
+  // declared, non-private fields (`resolveAllowedFacetFields`).
   item_state: z.record(z.string(), z.unknown()).optional(),
   item_latitude: z.coerce.number().optional(),
   item_longitude: z.coerce.number().optional(),
   radius_meters: z.coerce.number().positive().optional(),
 
-  // Bounding-box viewport search (#203 Task 2). All four or none; mutually
-  // exclusive with the radius-center params above (item_latitude/
-  // item_longitude/radius_meters) — see withGeoSearchRefinement. The SQL that
-  // consumes these lands in Task 3; this is schema + passthrough only.
+  // Bounding-box viewport. All four or none; mutually exclusive with a radius
+  // centre (see withGeoSearchRefinement).
   min_lat: z.coerce.number().min(-90).max(90).optional(),
   min_lng: z.coerce.number().min(-180).max(180).optional(),
   max_lat: z.coerce.number().min(-90).max(90).optional(),
@@ -96,16 +83,13 @@ const FetchItemsSchemaBase = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   cache_ttl_seconds: z.coerce.number().int().positive().optional(),
 
-  // Owner "My Profiles" reads exclude retired (permanently-removed) profiles by
-  // default. The first-time-login redirect check opts INTO retired so a
-  // retired-only user is recognized as "already set up" and stays on the map
-  // rather than being sent to the create page (#376). Absent → retired excluded.
+  // Retired profiles are excluded unless requested. The first-login redirect
+  // check opts in so a retired-only user counts as already set up.
   include_retired: z.enum(['true', 'false']).transform((v) => v === 'true').optional().default(false),
 });
 
 type FetchItemsSchemaShape = z.infer<typeof FetchItemsSchemaBase>;
 
-// `z.ZodType` rather than the deprecated `z.ZodTypeAny` (zod 4).
 function withGeoSearchRefinement<T extends z.ZodType>(schema: T) {
   return schema.refine(
     (rawData) => {
@@ -164,22 +148,12 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
   offset: z.number().int().min(0),
   cache_ttl_seconds: z.number().int().positive().optional(),
   /**
-   * Which order the caller wants — forwarded peer-to-peer (#644).
-   *
-   * Load-bearing for TWO reasons. First, `buildDistanceOrderBy` keys off this
-   * rather than inferring from the presence of coordinates, so without it a
-   * peer serving `sort: 'newest'` alongside a radius returns
-   * DISTANCE-ordered rows — and because each peer over-fetches only its top N,
-   * genuinely-newest items can be missing from the page rather than merely
-   * misordered.
-   *
-   * Second, `fetchRemotePage` signs the serialized `ItemFetchFilters` and the
-   * receiver re-hashes what this schema parsed. A field the schema does not
-   * name is stripped before that re-hash, so an unlisted `order_by` breaks
-   * peer auth outright.
-   *
-   * Absent means "infer", preserving the behaviour of every caller that
-   * predates the explicit sort.
+   * The order the caller wants, forwarded peer-to-peer. `buildDistanceOrderBy`
+   * keys off it, so a peer serving `newest` with a radius does not return
+   * distance-ordered rows (each peer returns only its top N, so newest items
+   * would go missing, not just misordered). It must be declared here because
+   * Zod strips undeclared keys before the handler reads them.
+   * Absent means infer from the presence of coordinates.
    */
   order_by: z.enum(['distance', 'created_at']).optional(),
 }));
@@ -188,17 +162,9 @@ const MarkersSchemaBase = FetchItemsSchemaBase.extend({
   // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
   limit: z.coerce.number().int().min(1).max(25000).default(200),
 
-  // Free-text value-match search (#394 map native text search). Matched
-  // server-side against the PUBLIC (non-private) item_state field values
-  // only — see `resolveAllowedFacetFields` (facet_guard.ts) and
-  // `buildWhereClause`'s `text_search` branch (item_fetch_runtime.ts) — and
-  // is AND-ed with whatever bbox/radius viewport the rest of this request
-  // already carries, so it's inherently scoped to the visible map area. Kept
-  // on this schema (not the shared FetchItemsSchemaBase) because the map
-  // stays native; list/discover text search goes through signals-search
-  // instead. On `MarkersBodySchema` (forwarded peer-to-peer), only the raw
-  // `q` travels — never a resolved field allowlist — each instance resolves
-  // its own non-private fields from its own network config.
+  // Free-text match against non-private item_state values
+  // (`resolveAllowedFacetFields`), AND-ed with the request's viewport. Only the
+  // raw `q` is forwarded to peers; each resolves its own allowed fields.
   q: z.string().trim().min(1).optional(),
 });
 

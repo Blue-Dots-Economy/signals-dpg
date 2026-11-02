@@ -17,14 +17,14 @@ import { resolveAllowedFacetFilters } from '@/utils/facet_guard';
 import { resolveProfileColumns, valueAtPath, type ProfileColumn } from './columns';
 
 /**
- * Pure core of `POST /api/v1/action/export` (#770): turns the caller's action
- * rows plus the items they touch into one table of COUNTERPARTY profiles.
+ * Pure core of `POST /api/v1/action/export`: turns the caller's action rows
+ * plus the items they touch into one table of counterparty profiles.
  *
- * It owns every rule of the export — eligibility (`export.requester_domains`),
- * counterparty resolution, the per-row PII reveal gate (mirrors
- * `get_action_contact_details`), skips, one counterparty type per file, and
- * the columns — and does no I/O: the route supplies rows, items, configs and
- * the decrypt function, so the rules are unit-testable without a database.
+ * It owns every export rule (eligibility via `export.requester_domains`,
+ * counterparty resolution, the per-row PII reveal gate mirroring
+ * `get_action_contact_details`, skips, one counterparty type per file, and the
+ * columns) and does no I/O: the route supplies rows, items, configs and the
+ * decrypt function.
  */
 
 /** Columns every export starts with, before profile fields. */
@@ -40,10 +40,7 @@ export const FIXED_COLUMNS = [
   'updated_at',
 ] as const;
 
-/**
- * Headings of the fixed columns in the file — plain words, the way the My
- * Actions page names them, never the snake_case keys.
- */
+/** Headings of the fixed columns, as the My Actions page names them. */
 export const COLUMN_LABELS: Record<(typeof FIXED_COLUMNS)[number] | 'match_score', string> = {
   action_id: 'Action ID',
   action_type: 'Action',
@@ -109,8 +106,8 @@ export interface BuildExportInput {
   };
   /**
    * The item's name as the caller may see it, or null when it stays masked.
-   * Required for `filters.q`; `revealed` is this row's reveal gate for the
-   * counterparty (always false for the caller's own item's private name).
+   * Required for `filters.q`; `revealed` says whether this row shows the
+   * item's private name.
    */
   visibleName?: (item: ExportItem, revealed: boolean) => string | null;
   projection: { fields: '*' | readonly string[] };
@@ -245,8 +242,8 @@ function sidesOf(row: ExportActionRow, userId: string) {
 }
 
 /**
- * Step 1: eligibility, counterparty resolution and skips. Mutates `counts`
- * with every skip, so no row silently disappears.
+ * Eligibility, counterparty resolution and skips. Records every skip in
+ * `counts`, so no row silently disappears.
  */
 function collectCandidates(
   input: BuildExportInput,
@@ -266,9 +263,8 @@ function collectCandidates(
     const rules = interactionRules(input, row);
     if (!rules.ok) return { candidates: [], eligible: 0, configUnavailable: true };
     const { requesters, revealStatuses } = rules;
-    // Enforced here, not only in the UI: the requester's domain must be
-    // allowed on this interaction, and only a status the network reveals on
-    // is exportable at all — never a masked created / rejected row.
+    // Enforced server-side: the requester's domain must be allowed on this
+    // interaction, and only a PII-revealing status is exportable.
     if (!requesters.includes(ownDomain) || !revealStatuses.includes(row.action_status)) {
       counts.skipped_not_enabled++;
       continue;
@@ -317,14 +313,11 @@ function passesFacets(input: BuildExportInput, c: Candidate): boolean {
 }
 
 /**
- * The counterparty reveal gate — the same condition `buildRecord` applies.
- *
- * The status leg is a backstop, not the gate: `collectCandidates` already
- * skips any row whose status is not in ITS OWN interaction's
- * `reveals_pii_on_status`, so no candidate reaches here on a non-revealing
- * status. That per-row check is what keeps a requester's stricter network
- * from inheriting a laxer network's statuses (the route admits the union) —
- * see "reveal statuses differ across the requester's networks" in the tests.
+ * The counterparty reveal gate: status reveals and both profiles live (a
+ * non-local own item counts as live). The status leg is a backstop:
+ * `collectCandidates` already skips rows whose status is not in their own
+ * interaction's reveal statuses, which keeps a stricter network from
+ * inheriting a laxer network's statuses (the route admits the union).
  */
 function revealGate(c: Candidate): boolean {
   return (
@@ -336,15 +329,14 @@ function revealGate(c: Candidate): boolean {
 
 /**
  * Search on names the caller already sees in the list; a masked name never
- * matches. The name rule is the list's (fetch_actions `visibleName`): a
- * private name counts once this row's status reveals it and THAT profile is
- * live — for either side — so a search selects the same rows here as on the
- * page. What the file then reveals is still `revealGate`, which is stricter.
+ * matches. Uses the list's name rule (`privateNameShown`), so a search selects
+ * the same rows here as on the page. What the file reveals is still
+ * `revealGate`, which is stricter.
  */
 function passesSearch(input: BuildExportInput, c: Candidate): boolean {
   const q = input.filters.q;
   if (!q) return true;
-  if (!input.visibleName) return false; // fail closed: no name rule, no match
+  if (!input.visibleName) return false; // fail closed
   const nameShown = (item: ExportItem) =>
     privateNameShown(c.revealStatuses, c.row.action_status, item.lifecycle_status);
   return matchesActionSearch(q, [
@@ -353,7 +345,7 @@ function passesSearch(input: BuildExportInput, c: Candidate): boolean {
   ]);
 }
 
-/** Step 2: facets, search, plus the requested counterparty network / domain / item type. */
+/** Facets, search, and the requested counterparty network / domain / item type. */
 function selectCandidates(input: BuildExportInput, candidates: Candidate[]): Candidate[] {
   const {
     counterparty_network: network,
@@ -380,11 +372,7 @@ function counterpartyTypes(selected: Candidate[]): CounterpartyType[] {
   return [...types.values()].sort((a, b) => typeKey(a).localeCompare(typeKey(b)));
 }
 
-/**
- * Step 5: one export record, with the reveal gate applied. Mirrors
- * contact-details: status reveals AND both profiles live (a non-local own
- * item counts as live). A failed decrypt exports the row masked.
- */
+/** One export record, with the reveal gate applied. A failed decrypt exports the row masked. */
 function buildRecord(
   input: BuildExportInput,
   c: Candidate,

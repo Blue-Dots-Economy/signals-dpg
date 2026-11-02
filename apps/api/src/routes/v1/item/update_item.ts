@@ -78,7 +78,7 @@ export const update_item_handler = async (
       (err) => request.log.warn({ err }, 'cache invalidation after update failed'),
     );
 
-    // Owner-facing update email (#531/#534). Fire-and-forget after commit.
+    // Owner-facing update email. Fire-and-forget after commit.
     // Lazy-imported to keep the notification chain out of the static graph.
     void import('@/notifications/notify_item_lifecycle')
       .then(({ dispatchItemLifecycleNotification }) =>

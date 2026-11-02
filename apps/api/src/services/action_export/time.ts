@@ -1,12 +1,12 @@
 /**
- * Timestamps for the engagement export (#771) in the deployment's configured
+ * Timestamps for the engagement export in the deployment's configured
  * zone (`EXPORT_TIMEZONE`). The filename and the generated-at header carry
  * their offset (`Z` or `±HH:MM`); the file's date cells are wall-clock times
  * in the zone, which their heading names (`zoneHeading`). Uses Intl — no date
  * library — and follows daylight saving.
  */
 
-// One check for config (EXPORT_TIMEZONE) and here.
+// Same validator as the EXPORT_TIMEZONE config check.
 export { isValidTimeZone } from '@dpg/config';
 
 interface ZonedParts {

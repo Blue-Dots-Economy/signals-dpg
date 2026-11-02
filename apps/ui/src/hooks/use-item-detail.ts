@@ -3,10 +3,9 @@ import { fetchNetworkItems } from '@/lib/network-api';
 import type { Item } from '@/lib/item-api';
 import { queryKeys } from '@/lib/query-keys';
 
-// Per-id detail tier (spec §10): a marker click-through fetches one full item
-// by id. This is config-ish rather than a browse feed — the same item id
-// resolves to the same server row for a session, so a longer staleTime than
-// the browse/map 90s tier is appropriate.
+// One item by id, for a marker click-through. The same id resolves to the same
+// row for a session, so this uses the 5-minute tier rather than the 90s browse
+// tier.
 const ITEM_DETAIL_STALE_TIME_MS = 5 * 60 * 1000;
 
 export interface ItemDetailRef {
@@ -23,11 +22,9 @@ interface UseItemDetailResult {
 }
 
 /**
- * Lazily fetch one item's full detail by id (e.g. a map marker popup opening
- * up into the full profile). Routed via `item_instance_url` when known so the
- * fetch can go straight to the owning instance. `opts.enabled` lets the caller
- * gate the fetch on the popup actually being open, on top of the `networkId`
- * / `item` null-guards.
+ * Lazily fetches one item's full detail by id. Routed via `item_instance_url`
+ * when known, so the fetch goes to the owning instance. `opts.enabled` gates it
+ * on, e.g., the popup being open.
  */
 export function useItemDetail(
   networkId: string | null,

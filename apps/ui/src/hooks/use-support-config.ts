@@ -3,9 +3,9 @@ import { fetchSupportConfig, type SupportConfig } from '@/lib/support-api';
 import { queryKeys } from '@/lib/query-keys';
 
 /**
- * Fallback used while the config request is in flight or if it fails (#551).
- * It mirrors the API's own defaults, so the picker is usable rather than blocked
- * — an over-limit file is still refused server-side with a specific error.
+ * Used while the config request is in flight or after it fails. Mirrors the
+ * API's defaults so the picker stays usable; the server still refuses an
+ * over-limit file with a specific error.
  */
 export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
   enabled: true,
@@ -16,9 +16,8 @@ export const SUPPORT_CONFIG_FALLBACK: SupportConfig = {
 };
 
 /**
- * Attachment limits + whether support is configured on this instance.
- * Config-like data: 5 min staleTime, per `apps/ui/CLAUDE.md`'s caching tiers.
- * Only fetched while the dialog is open (`enabled`).
+ * Attachment limits and whether support is configured on this instance.
+ * Config tier (5 min); fetched only while the dialog is open (`enabled`).
  */
 export function useSupportConfig(enabled = true): { config: SupportConfig; isLoading: boolean } {
   const { data, isLoading } = useQuery({

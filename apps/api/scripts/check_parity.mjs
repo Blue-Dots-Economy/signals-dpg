@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * check_parity — verify the live DB's declarative tables match the committed
- * Drizzle model before baselining (#180). Exit 0 = safe; exit 1 = divergence.
+ * Drizzle model before baselining. Exit 0 = safe; exit 1 = divergence.
  * Comparison logic lives in parity.mjs (shared with migrate.mjs's guard).
  *   node apps/api/scripts/check_parity.mjs
  */

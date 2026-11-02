@@ -29,10 +29,8 @@ export const delete_item: FastifyPluginAsyncZod = async function (fastify) {
 };
 
 /**
- * Owner-only hard delete. Caller must be the user that authored the item
- * (`items.created_by = session.user.id`); admins do not get a bypass here
- * — that's an aggregator-side concern, not part of the user-owned
- * profile management flow.
+ * Owner-only hard delete (`items.created_by = request.user.id`); admins get
+ * no bypass here.
  *
  * Returns 204 No Content on success, 404 when the row does not exist or
  * belongs to another user (same envelope so the endpoint never leaks the
@@ -84,10 +82,9 @@ export const delete_item_handler = async (
       request.log,
     );
 
-    // Cache invalidation: the inter-instance read path caches `item-count`
-    // and `item-page` for up to `minimum_cache_ttl_seconds` (5 min by
-    // default for blue_dot/seeker). Without this sweep the deleted row
-    // keeps showing up on /network/item/fetch until the TTL expires.
+    // The inter-instance read path caches `item-count` and `item-page` for up
+    // to the domain's `minimum_cache_ttl_seconds`; without this sweep the
+    // deleted row keeps showing on /network/item/fetch until the TTL expires.
     await invalidateItemFetchCache(result[0].item_network, result[0].item_domain).catch(
       (err) => request.log.warn({ err }, 'cache invalidation after delete failed'),
     );

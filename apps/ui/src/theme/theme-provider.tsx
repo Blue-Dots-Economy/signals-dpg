@@ -25,10 +25,8 @@ export function useNetworkTheme(): NetworkThemeContextValue {
 function getInitialNetworkId(): string {
   const url = new URLSearchParams(window.location.search).get('network');
   if (url) return url;
-  // Runtime config (window.__DPG_UI_CONFIG__) is injected by the chart at
-  // deploy time via /config.js (loaded in index.html before the bundle).
-  // It wins over the Vite build-time default, so a single image can be
-  // re-used across networks — the chart decides which brand renders.
+  // Runtime config (window.__DPG_UI_CONFIG__, from the chart's /config.js) wins
+  // over the build-time default, so one image serves any network.
   const runtimeNet =
     typeof window !== 'undefined'
       ? (window as Window).__DPG_UI_CONFIG__?.VITE_NETWORK_NAME
@@ -55,19 +53,16 @@ function applyFavicon(id: string, brand: string, meta: BrandMeta): void {
   link.dataset.network = id;
 
   if (meta.faviconType === 'png') {
-    // Designer-shipped square mark — path is brand-slug aware:
-    //   non-standard brand: /brand/<network>/<brand>/favicon.png
-    //   standard brand:     /brand/<network>/favicon.png
+    // Designer-shipped square mark: /brand/<network>/<brand>/favicon.png for a
+    // non-standard brand, else /brand/<network>/favicon.png.
     link.type = 'image/png';
     link.href =
       brand && brand !== 'standard'
         ? `/brand/${kebab(id)}/${brand}/favicon.png`
         : `/brand/${kebab(id)}/favicon.png`;
   } else {
-    // brand.json logos are wide wordmarks ("purple dots AI") — useless when
-    // downscaled to the tab's 16×16 favicon slot. Generate a square dot-mark
-    // SVG from the active network's --brand-cta CSS var so the tab actually
-    // shows colour-matched branding for any number of networks.
+    // brand.json logos are wide wordmarks, useless at 16×16, so generate a
+    // square dot-mark SVG from the network's --brand-cta colour.
     const cssVar = getComputedStyle(document.documentElement)
       .getPropertyValue('--brand-cta')
       .trim();
@@ -86,12 +81,9 @@ function applyFavicon(id: string, brand: string, meta: BrandMeta): void {
 }
 
 function applyDocumentTitle(theme: NetworkTheme, brandCopy: Record<string, string>): void {
-  // Network brand + "Signal Stack" platform name. When the deployment serves a
-  // single domain (VITE_SERVED_BINDINGS with one entry) the domain is woven in
-  // so each per-domain UI gets a distinct tab title (e.g. "Purple Dot ·
-  // Provider · Signal Stack"). Multiple served domains, or unset, → the plain
-  // network title. Generic for any network/domain.
-  // Brand copy wins over network defaults when a title key is present.
+  // Network brand + "Signal Stack". With exactly one served domain the domain
+  // is included (e.g. "Purple Dot · Provider · Signal Stack"); otherwise the
+  // plain network title. Brand copy wins when it sets a title.
   const networkName = brandCopy['title'] ?? theme.name;
   const scope = getServedScope();
   const domainLabel =
@@ -104,23 +96,19 @@ function applyDocumentTitle(theme: NetworkTheme, brandCopy: Record<string, strin
 }
 
 /**
- * Apply the active network + brand to `<html>` (`data-network`/`data-brand`)
- * and install the brand-aware favicon. Returns the resolved brand meta.
- *
- * Exported so non-router entry points (the tourist app) can apply branding
- * after boot: the inline HTML `<script>` only sets first-paint *fallback*
- * values because Vite `define` does NOT replace tokens (`__DEFAULT_BRAND__`,
- * `__BRAND_REGISTRY__`) inside classic inline scripts — only inside JS
- * modules. The signals app re-applies via NetworkThemeProvider; the tourist
- * app calls this directly.
+ * Applies the active network + brand to `<html>` (`data-network`/`data-brand`)
+ * and installs the brand-aware favicon. Returns the resolved brand meta.
+ * Exported for the tourist entry point: the inline HTML script only sets
+ * first-paint fallbacks, because Vite `define` does not replace tokens
+ * (`__DEFAULT_BRAND__`, `__BRAND_REGISTRY__`) inside classic inline scripts.
  */
 export function applyNetworkBrand(id: string, brand: string): BrandMeta {
   const el = document.documentElement;
   el.dataset.network = id;
   el.dataset.brand = brand;
-  // Tokens come from the brand-theme Vite plugin's static <style> block
-  // selected by [data-network=<id>][data-brand=<brand>]. Force the browser to
-  // apply the selector before applyFavicon reads --brand-cta.
+  // Tokens come from the brand-theme Vite plugin's <style> block selected by
+  // [data-network][data-brand]. Force the selector to apply before
+  // applyFavicon reads --brand-cta.
   void el.offsetWidth;
   const meta = resolveBrandMeta(id, brand);
   applyFavicon(id, brand, meta);
@@ -139,13 +127,12 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
   const networkFromUrl = searchParams.get('network');
 
   const themeId = React.useMemo(() => {
-    // URL wins. Otherwise reuse the last network the user was on (routes like
-    // /my-actions carry no ?network=, and falling back to the build default
-    // would flip the theme to the wrong brand mid-session).
+    // URL wins. Otherwise reuse the last network the user was on: routes like
+    // /my-actions carry no ?network=, and the build default would flip the
+    // theme mid-session.
     if (networkFromUrl) return networkFromUrl;
-    // Runtime config (window.__DPG_UI_CONFIG__.VITE_NETWORK_NAME) — written
-    // by the chart at deploy time. Must win over localStorage so a fresh
-    // visitor lands on the chart-configured brand even without ?network=.
+    // Runtime config wins over localStorage, so a fresh visitor lands on the
+    // chart-configured brand.
     const runtimeNet =
       typeof window !== 'undefined'
         ? (window as Window).__DPG_UI_CONFIG__?.VITE_NETWORK_NAME
@@ -157,10 +144,8 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     } catch {
       /* localStorage unavailable */
     }
-    // Only honor a stored network that this build is actually configured to
-    // serve. Otherwise a stale value from a previously-run network (e.g. after
-    // switching VITE_NETWORK_ID in local dev) would pin the theme to a brand
-    // this build no longer serves. Discard it so the build default wins.
+    // Honour a stored network only if this build serves it; a stale value
+    // (e.g. after changing VITE_NETWORK_ID in local dev) is discarded.
     const configuredNetworks = (import.meta.env.VITE_NETWORK_ID ?? '')
       .split(',')
       .map((id) => id.trim())
@@ -180,8 +165,7 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
     return fromEnv || 'blue_dot';
   }, [networkFromUrl]);
 
-  // Persist the network whenever it's explicitly chosen via the URL so other
-  // routes inherit the same brand theme.
+  // Persist a network chosen via the URL so other routes keep its theme.
   React.useEffect(() => {
     if (!networkFromUrl) return;
     try {
@@ -210,9 +194,9 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
   }, [themeId, activeBrand]);
 
   React.useEffect(() => {
-    // Only a network switch (via URL) triggers this at runtime; activeBrand is
-    // computed once and doesn't change. Correctness relies on schema resolution
-    // being async so this sync clear lands before any post-await cache read.
+    // Only a network switch (via URL) triggers this at runtime. Relies on
+    // schema resolution being async, so this sync clear lands before any
+    // post-await cache read.
     clearSchemaCache();
   }, [themeId, activeBrand]);
 
@@ -226,6 +210,5 @@ export function NetworkThemeProvider({ children }: { children: React.ReactNode }
   );
 }
 
-// Standalone bootstrap — called by the pre-React inline script via a module
-// import (for type safety in tests). The inline script calls the same logic.
+// Exported for tests; index.html's inline script duplicates this precedence.
 export { getInitialNetworkId };

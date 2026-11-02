@@ -54,9 +54,8 @@ export const accept_consent_handler = async (
     });
   }
 
-  // Which document set this acceptance is against (#626). Derived here, not
-  // read from the body, for the same reason the version is: a client that
-  // chose its own variant would be choosing which terms it is bound by.
+  // Which document set this acceptance is against. Derived server-side like the
+  // version: a client choosing its variant would choose which terms bind it.
   const variant = await resolveUserConsentVariant(userId);
 
   const acceptedAt = new Date();
@@ -80,10 +79,8 @@ export const accept_consent_handler = async (
       category: item.category,
       variant,
     });
-    // Most networks ship no `u18_documents` at all. Without this fall-back a
-    // minor on one of them resolves to null and is refused below — locking
-    // them out of login entirely, which is a far worse outcome than recording
-    // against the adult set the deployment actually publishes.
+    // Most networks ship no `u18_documents`. Without this fall-back a minor
+    // there would resolve to null and be locked out of login entirely.
     let effectiveVariant = variant;
     if (version === null && variant === 'u18') {
       version = await resolveConsentVersion({
@@ -109,10 +106,9 @@ export const accept_consent_handler = async (
       documentVersion: version,
       source: body.source,
       acceptedAt,
-      // Recorded so the ledger says WHICH set the version belongs to. The two
-      // sets are in lockstep today, so the integer alone cannot distinguish
-      // them — and `effectiveVariant` reflects the fall-back above, not the
-      // intent, so an audit sees what was actually served.
+      // Records which set the version belongs to (the integer alone cannot
+      // tell them apart). `effectiveVariant` reflects the fall-back, so an
+      // audit sees what was actually served.
       metadata: { variant: effectiveVariant },
     });
   }

@@ -62,23 +62,15 @@ export class fetchSchema {
   }
 
   /**
-   * Starts the fetch/resolve on first access and memoises it, so the load runs
-   * exactly once per instance and every caller shares one promise.
+   * Starts the fetch on first access and memoises the promise, so the load
+   * runs once per instance. Not started in the constructor, where a failing
+   * fetch would become an unhandled rejection for a caller that only
+   * constructed the registry.
    *
-   * Deliberately NOT kicked off in the constructor: a constructor cannot hand
-   * its promise to anyone before `new` returns, so a failing fetch would become
-   * an unhandled rejection for a caller that merely constructed the registry.
-   * Starting here means the promise always has an owner — whoever touched
-   * `.ready` / `getSchema()` — and a fetch failure surfaces to them.
-   *
-   * The flip side of starting on access: `new fetchSchema(url)` does no I/O at
-   * all. Constructing a batch of registries and awaiting them in a later loop
-   * runs the fetches one after another. Construct and await in the same
-   * expression — `await new fetchSchema(url).getSchema()`, as every call site
-   * does — so a `Promise.all` over them stays genuinely parallel.
-   *
-   * A failed load is memoised as well: the rejection replays to every later
-   * caller and is never retried. Retry by constructing a new instance.
+   * Because construction does no I/O, call
+   * `await new fetchSchema(url).getSchema()` inside each `Promise.all` entry to
+   * keep fetches parallel. A failed load is memoised too and never retried;
+   * construct a new instance to retry.
    */
   public get ready(): Promise<unknown> {
     this.pendingLoad ??= this.load();
@@ -86,9 +78,7 @@ export class fetchSchema {
   }
 
   /**
-   * The resolved schema document. Calling this is what starts the load, if
-   * nothing has touched `.ready` yet — see `ready` for the parallelism and
-   * retry notes.
+   * The resolved schema document; starts the load if `.ready` has not.
    */
   public async getSchema(): Promise<JsonValue | unknown> {
     await this.ready;

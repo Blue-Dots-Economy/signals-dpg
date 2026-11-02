@@ -1,8 +1,7 @@
 /**
- * Minimal Java-properties-style parser for the email messages file (#529).
- * Deliberately tiny: `key=value` per line, `#`/`!` comments, split at the
- * first `=`, no escape sequences, no line continuation. Values are HTML
- * fragments and may contain further `=` characters.
+ * Minimal Java-properties-style parser: `key=value` per line, `#`/`!`
+ * comments, split at the first `=` (values are HTML and may contain `=`), no
+ * escapes, no line continuation.
  */
 export interface ParsedProperties {
   entries: Map<string, string>;

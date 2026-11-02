@@ -162,11 +162,9 @@ const fetch_local_markers_handler = async (
   }
 
   try {
-    // The peer body carries only the raw `q` (#394) — never a resolved field
-    // allowlist (see MarkersSchemaBase's doc comment). This instance resolves
-    // its OWN non-private field set from its OWN network config rather than
-    // trusting anything the requesting peer computed, mirroring every other
-    // item_state guard in this file/module.
+    // The peer body carries only the raw `q`, never a field allowlist; this
+    // instance resolves its own non-private field set from its own network
+    // config rather than trusting the requesting peer.
     let textSearchFields: string[] = [];
     if (body.q) {
       const networkConfig = await getNetworkConfigById(body.item_network);

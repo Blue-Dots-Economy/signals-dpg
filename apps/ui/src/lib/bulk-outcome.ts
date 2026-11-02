@@ -2,17 +2,8 @@ import { bulkFailureIndices, firstBulkError, type BulkEnvelope } from './bulk';
 import { guardianOtpErrorOf, type PerformActionPayload } from './action-api';
 
 /**
- * What a completed bulk action means, as one value.
- *
- * Lives here rather than inside `HomePage`'s submit handler because the
- * decision is three-way and was expressed as nested `if`/`else` inside a `try`
- * inside a callback — the densest thing in that file, and enough on its own to
- * push it over the cognitive-complexity limit. Being pure, it is also worth
- * testing directly instead of only through a rendered page.
- *
- * Its own module rather than `bulk.ts`: it needs `guardianOtpErrorOf` from
- * `action-api`, and `action-api` already imports `bulk` — putting it there
- * would close an import cycle.
+ * The meaning of a completed bulk action, as one value. Kept out of `bulk.ts`
+ * because it needs `action-api`, which already imports `bulk`.
  */
 export type BulkOutcome =
   | { kind: 'all'; succeeded: number }
@@ -27,13 +18,11 @@ export type BulkOutcome =
 
 /**
  * `targets` and `payloads` must be index-aligned with the batch that produced
- * `env` — the envelope identifies each result only by its `index`.
+ * `env`; results are identified only by `index`.
  *
- * The `guardian` case takes priority over `partial` on purpose: ANY
- * `GUARDIAN_OTP_REQUIRED` failure means a code has already been sent to the
- * guardian, so a MIXED batch must still open the OTP dialog rather than fall
- * through to the generic error toast and waste it. The non-guardian failures
- * ride along in `otherFailedIds` and are reselected once that dialog resolves.
+ * `guardian` wins over `partial`: any `GUARDIAN_OTP_REQUIRED` means a code was
+ * already sent to the guardian, so a mixed batch must still open the OTP
+ * dialog. The other failures go in `otherFailedIds` and are reselected after it.
  */
 export function resolveBulkOutcome<T>(
   env: BulkEnvelope<T>,

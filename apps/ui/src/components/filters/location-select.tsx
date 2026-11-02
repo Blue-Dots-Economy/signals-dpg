@@ -9,7 +9,7 @@ import type { BrowseArea, BrowseSort } from '@/lib/browse-discover';
 import type { PreferredLocationSource } from '@/hooks/use-user-location';
 import { cn } from '@/lib/utils';
 
-/** Whole numbers only, in a range a real search could mean (#644 QA). */
+/** Whole kilometres only. */
 export const MIN_RADIUS_KM = 1;
 export const MAX_RADIUS_KM = 500;
 /** Prefilled when the distance row is engaged with no value yet. */
@@ -18,8 +18,8 @@ export const DEFAULT_RADIUS_KM = 5;
 export interface LocationSelectProps {
   value: BrowseArea;
   /**
-   * The sort in force. Read ONLY to decide whether the "measured from" section
-   * is doing anything — `nearest` needs a centre even with no radius set.
+   * The sort in force. Read only to decide whether to show "measured from":
+   * `nearest` needs a centre even with no radius set.
    */
   sort: BrowseSort;
   /** Which of the two sources is in force. Also the `nearest` ordering centre. */
@@ -34,26 +34,14 @@ export interface LocationSelectProps {
 }
 
 /**
- * The ONE control that mentions where the viewer is (#644 QA redesign).
+ * The one control that sets where the viewer is: the distance and the point
+ * it is measured from, read as one sentence ("within 5 km of me, measured
+ * from my profile").
  *
- * It replaces two controls that between them asked the same question twice:
- * the old `AreaSelect` (scope + distance) and the standalone "Search near"
- * toggle (which source). Users read that as "choosing location somewhere and
- * adding a radius somewhere else", and they were right — the distance and the
- * point it is measured from are one thought, so they belong in one menu, read
- * as one sentence: *within 5 km of me, measured from my profile*.
+ * Sort and location stay independent: `nearest` never auto-selects a radius,
+ * because choosing an order must not delete results.
  *
- * `Sort` deliberately says nothing about location; it only shows a read-only
- * hint naming the centre `nearest` will use.
- *
- * WHY SORT AND LOCATION STAY INDEPENDENT. It is tempting to have `nearest`
- * auto-select a radius, so that "nearest + anywhere" cannot happen. That
- * would make choosing an ORDER silently delete results, which is precisely
- * the #644 bug: the pre-#644 code fed one resolved location into the spatial
- * clause and every signed-in viewer got a hard ~30 km bound nobody asked for.
- * `nearest + anywhere` is the headline feature — "all of them, closest first".
- * So: Sort decides the order, this control decides which items exist, and
- * neither implies the other.
+ * Design: docs/architecture/ui-components-browse-controls.md
  */
 export function LocationSelect({
   value,
@@ -69,12 +57,9 @@ export function LocationSelect({
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<string | null>(null);
   /**
-   * The user has engaged the distance row but not committed a value yet.
-   *
-   * Without this, the row stayed unselected and "Measured from" stayed hidden
-   * until a distance was actually applied — so clicking the row appeared to do
-   * nothing, and the source question only turned up on the NEXT opening of
-   * the menu. Intent is enough to show both.
+   * The user has engaged the distance row but not committed a value. Shows
+   * the row as selected and reveals "Measured from" immediately, so clicking
+   * the row visibly does something.
    */
   const [pendingRadius, setPendingRadius] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement | null>(null);
@@ -85,11 +70,7 @@ export function LocationSelect({
     source === 'browser' ? 'browse.location_from_browser' : 'browse.location_from_profile',
   );
 
-  /**
-   * Is a centre actually being used right now? The "measured from" section is
-   * shown only when the answer is yes — asking which point to measure from
-   * while nothing measures is the noise this redesign removes.
-   */
+  /** Whether a centre is in use; "measured from" shows only then. */
   const usesCenter = value.mode === 'radius' || pendingRadius || sort === 'nearest';
   /** The row reads as chosen once engaged, not only once committed. */
   const radiusSelected = value.mode === 'radius' || pendingRadius;
@@ -109,10 +90,8 @@ export function LocationSelect({
   const shown = draft ?? currentKm;
   const parsed = shown === '' ? null : Number(shown);
   const valid = parsed !== null && parsed >= MIN_RADIUS_KM && parsed <= MAX_RADIUS_KM;
-  // A distance needs a point to measure from. `browserAvailable` only means the
-  // browser *supports* geolocation — permission can still be denied, leaving no
-  // resolved centre. Without this the tick looked enabled and silently did
-  // nothing, which is worse than being visibly unavailable.
+  // A distance needs a resolved centre. `browserAvailable` only means the
+  // browser supports geolocation; permission can still be denied.
   const canApply = valid && center !== null;
 
   const commit = () => {
@@ -123,10 +102,7 @@ export function LocationSelect({
     setOpen(false);
   };
 
-  /**
-   * Select the distance row. Prefills a usable value when there is none, so
-   * the tick is immediately live rather than disabled on an empty field.
-   */
+  /** Selects the distance row, prefilling a value so the tick is live. */
   const engageRadius = () => {
     setPendingRadius(true);
     if (draft === null && value.mode !== 'radius') setDraft(String(DEFAULT_RADIUS_KM));
@@ -140,8 +116,7 @@ export function LocationSelect({
   const rowClass =
     'flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs pointer-coarse:min-h-11 hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-  // Which consumers the source feeds, for the explanatory line. Naming them is
-  // the point: it answers "why am I being asked this?".
+  // Which consumers the source feeds, named in the explanatory line.
   const usedBy = [
     value.mode === 'radius' ? t('browse.location_used_by_distance') : null,
     sort === 'nearest' ? t('browse.location_used_by_nearest') : null,
@@ -162,8 +137,7 @@ export function LocationSelect({
       <PopoverTrigger asChild>
         <button
           type="button"
-          // Icon-only below `sm` — see OptionSelect's `icon` prop for why. The
-          // label carries the value, since the text is hidden there.
+          // Icon-only below `sm`, so the label carries the value.
           aria-label={`${t('browse.location_label')}: ${displayLabel}`}
           className={cn(
             'inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-xs',
@@ -175,8 +149,8 @@ export function LocationSelect({
           <MapPin
             className={cn(
               'h-4 w-4 shrink-0 sm:hidden',
-              // A radius IS applied — say so, since the "Anywhere"/"Within N km"
-              // text is not visible at this width.
+              // Highlights an applied area, since the text is hidden at this
+              // width.
               value.mode !== 'anywhere' && 'text-primary',
             )}
           />
@@ -216,9 +190,8 @@ export function LocationSelect({
             </span>
           </button>
 
-          {/* Present ONLY while active. A viewport arrives from the map's
-              "Search this area" — it is not something to choose from a list
-              view, where there is no map on screen to refer to. */}
+          {/* Shown only while active. A viewport comes from the map's "Search
+              this area"; it cannot be chosen from the list. */}
           {value.mode === 'viewport' && (
             <div
               className={cn(rowClass, 'cursor-default hover:bg-transparent')}
@@ -237,13 +210,9 @@ export function LocationSelect({
 
           {anySource ? (
             <>
-              {/* Scope and distance on one line, reading as a sentence.
-                  A <div role="option"> rather than a <button>, because it
-                  CONTAINS the field and its two controls and nested buttons
-                  are invalid. It still behaves like the other rows — hover,
-                  click and keyboard all land on it — which they did not when
-                  it was inert: only the input itself responded, so the row
-                  read as unselectable. */}
+              {/* A <div role="option"> rather than a <button>, because it
+                  contains the field and two buttons, and nested buttons are
+                  invalid. It handles click and keyboard like the other rows. */}
               <div
                 className={cn(rowClass, 'cursor-pointer', radiusSelected && 'bg-accent/50')}
                 role="option"
@@ -276,15 +245,13 @@ export function LocationSelect({
                         max: MAX_RADIUS_KM,
                       })}
                       value={shown}
-                      // An EXAMPLE, not the minimum. Showing "1" read as a
-                      // prefilled value rather than a hint, and it is not the
-                      // number the row prefills on engage either.
+                      // An example value, not the minimum, so it does not read
+                      // as prefilled.
                       placeholder={t('browse.area_km_placeholder', { km: DEFAULT_RADIUS_KM })}
                       onFocus={() => setPendingRadius(true)}
                       onChange={(e) =>
-                        // Digits only. Decimals are BLOCKED, not rounded:
-                        // rounding 12.5 to 13 would leave the field and the
-                        // request disagreeing mid-edit.
+                        // Digits only. Decimals are blocked, not rounded, so the
+                        // field and the request never disagree.
                         setDraft(e.target.value.replace(/\D/g, '').slice(0, 3))
                       }
                       onKeyDown={(e) => {
@@ -296,13 +263,9 @@ export function LocationSelect({
                       className="h-7 w-10 bg-transparent text-xs outline-none"
                     />
                     <span className="text-muted-foreground">{t('browse.area_km_unit')}</span>
-                    {/* Both icon buttons enlarge on a coarse pointer (18px →
-                        30px). Not the full 44px: two 44px targets will not fit
-                        this inline row inside a ~300px popover without
-                        restructuring it. They stay reachable without precise
-                        aiming because the WHOLE row focuses the input, Enter
-                        commits the value, and the field can be cleared from the
-                        keyboard — so these are shortcuts, not the only path. */}
+                    {/* On a coarse pointer these grow to 30px, not 44px: two 44px
+                        targets do not fit this row. They are shortcuts; the row
+                        focuses the input and Enter commits. */}
                     <button
                       type="button"
                       aria-label={t('browse.area_custom_clear')}
@@ -336,8 +299,7 @@ export function LocationSelect({
                 </p>
               )}
 
-              {/* The source question — asked ONCE, here, and only when
-                  something uses it. */}
+              {/* The source question, shown only when something uses it. */}
               {usesCenter && (
                 <>
                   <div className="my-1 h-px bg-border" role="none" />
@@ -385,8 +347,7 @@ export function LocationSelect({
             </>
           ) : (
             // No profile and no browser location: one line saying why, rather
-            // than rows that cannot do anything (spec D7a's hide-don't-disable
-            // reasoning, applied here).
+            // than rows that cannot do anything.
             <p className="px-2 pb-2 pt-1 text-[11px] text-muted-foreground">
               {t('browse.location_none_available')}
             </p>

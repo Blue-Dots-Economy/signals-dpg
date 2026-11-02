@@ -10,8 +10,7 @@ import {
 import { ageFromBirthYear } from '@/lib/guardian-consent';
 
 export interface BirthYearSelectProps {
-  /** Emits the derived age (currentYear - birthYear), or undefined until a
-   *  year is picked. The birth day/month are never collected (#331). */
+  /** Emits `currentYear - birthYear`, or undefined until a year is picked. */
   onChange: (age: number | undefined) => void;
   disabled?: boolean;
   idPrefix?: string;
@@ -19,20 +18,15 @@ export interface BirthYearSelectProps {
 
 const NOW = new Date();
 const CURRENT_YEAR = NOW.getFullYear();
-// Current year back 120y (covers minors too — a guardian may onboard a young
-// ward). The server re-validates the allowed range.
+// Current year back 120 years; the server re-validates the range.
 const YEARS = Array.from({ length: 121 }, (_, i) => CURRENT_YEAR - i);
 
 /**
- * Minimal birth-year capture for U18 gating (#331): pick a YEAR, we derive an
- * age snapshot (`currentYear - birthYear`) and hand it to the parent. No month
- * or day is collected — a boundary-year person (e.g. 2008 in 2026 → age 18) is
- * treated as u18, which is fail-closed.
+ * Birth-year capture for U18 gating. Month and day are never collected, so a
+ * boundary-year person (age 18) counts as a minor, which is fail-closed.
  *
- * Uses the app's own Select rather than a native `<select>`: the list is 121
- * options long, and a native select popup is sized by the browser — it opened
- * as a full-height column running off the top and bottom of the window, with
- * no usable scrollbar. This one is bounded and scrolls inside its own popup.
+ * The app Select rather than a native `<select>`, whose 121-option popup the
+ * browser sizes to the full window height.
  */
 export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }: BirthYearSelectProps) {
   const { t } = useTranslation();
@@ -54,12 +48,8 @@ export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }:
       >
         <SelectValue placeholder={t('auth.dob_year_placeholder', 'Year')} />
       </SelectTrigger>
-      {/* `position="popper"` is load-bearing, not decoration: SelectContent
-          defaults to Radix's "item-aligned" mode, which centres the selected
-          item over the trigger and so grows to fill the window — with 121
-          years that renders as a full-height column of dates. Popper anchors
-          the panel under the trigger instead, so `max-h-56` actually bounds it
-          (~8 rows) and the list scrolls inside its own box. */}
+      {/* `position="popper"` so `max-h-56` bounds the list; Radix's default
+          item-aligned mode grows to fill the window. */}
       <SelectContent position="popper" className="max-h-56">
         {YEARS.map((y) => (
           <SelectItem key={y} value={String(y)}>

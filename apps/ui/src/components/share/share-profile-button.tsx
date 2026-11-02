@@ -5,28 +5,21 @@ import type { Item } from '@/lib/item-api';
 import { ShareProfileDialog } from '@/components/share/share-profile-dialog';
 
 export interface ShareProfileButtonProps {
-  /** The profile to share. The button renders only when this is a LIVE item. */
+  /** The profile to share. The button renders only for a live item. */
   item:
     | Pick<Item, 'item_network' | 'item_domain' | 'item_type' | 'item_id' | 'lifecycle_status'>
     | null
     | undefined;
   /** Optional button styling override (e.g. white on a coloured card header). */
   className?: string;
-  /**
-   * Optional visible text next to the icon. Icon-only (the card/row default)
-   * when omitted; the public profile page passes a label because its share
-   * affordance is a labelled pill in the app bar.
-   */
+  /** Visible text next to the icon; icon-only when omitted. */
   label?: React.ReactNode;
 }
 
 /**
- * Share affordance shown ONLY on live profiles. Opens `ShareProfileDialog`,
- * which offers the profile's public link as a scannable QR plus "Copy link"
- * and "Download QR". Renders null for a missing or non-live item, so call
- * sites can drop it in unconditionally — a paused/retired/draft profile gets
- * no share and no QR, matching the public page, which only serves live items
- * (the item endpoint filters `live_only` server-side).
+ * Opens `ShareProfileDialog` for a live profile. Renders null otherwise, since
+ * the public page only serves live items, so call sites can use it
+ * unconditionally.
  */
 export function ShareProfileButton({ item, className, label }: Readonly<ShareProfileButtonProps>) {
   const { t } = useTranslation();

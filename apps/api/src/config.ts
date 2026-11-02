@@ -22,10 +22,10 @@ export const {
   signalsSearch,
 } = loadEnv();
 
-// Startup guard (D7): fail hard in prod, warn in dev, if CREATE_TEST_OTP is on.
+// Fails hard in production, warns elsewhere, if CREATE_TEST_OTP is on.
 assertCreateTestOtpSafe(instance.INSTANCE_ENV, auth.CREATE_TEST_OTP);
 
-// Startup guard: don't boot into a Keycloak mode we aren't configured for.
+// Refuses to boot without the required Keycloak settings.
 assertKeycloakConfigured(auth.AUTH_PROVIDER, keycloak);
 
 export const apiConfig = {
@@ -70,17 +70,12 @@ export const authConfig = {
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
-  // Identity provider. Read this — never re-parse process.env.
+  // Identity provider. Read this; never re-parse process.env.
   provider: auth.AUTH_PROVIDER,
-  /**
-   * Kept as a constant `true` rather than deleted outright: it reads as intent
-   * at ~20 call sites, and removing it would turn this change into a sprawling
-   * rename across files that have nothing else to do with #517. Its companion
-   * `betterauth_enabled` is gone with the provider it named.
-   */
+  /** Always `true`: Keycloak is the only provider. Kept because call sites read it. */
   keycloak_enabled: true,
   /**
-   * Acting-org authorisation source (§5.1). The header is sent in every mode;
+   * Acting-org authorisation source. The header selects the org in every mode;
    * this only decides whether it must fall inside the token's grant.
    */
   acting_org_source: auth.ACTING_ORG_SOURCE,
@@ -91,17 +86,14 @@ export const authConfig = {
 };
 
 /**
- * Keycloak connection settings, with the two derived URLs the rest of the code
- * actually wants:
+ * Keycloak connection settings and the two derived URLs:
  *
  * - `issuer` is browser-facing and must equal the `iss` claim byte-for-byte.
- * - `internal_base_url` is what *this process* dials for JWKS / Admin REST; in
- *   containerised setups that is a service name, not the public hostname.
+ * - `internal_base_url` is what this process dials for JWKS / Admin REST; in
+ *   containers that is a service name, not the public hostname.
  *
- * Never empty in practice: `assertKeycloakConfigured` above has already
- * rejected a missing URL at boot, and Keycloak is the only provider (#517).
- * The `?? ''` fallbacks are there to satisfy the optional schema types, not
- * because a running instance can reach them.
+ * The `?? ''` fallbacks only satisfy the optional schema types:
+ * `assertKeycloakConfigured` rejects a missing URL at boot.
  */
 const keycloakBaseUrl = (keycloak.KEYCLOAK_BASE_URL ?? '').replace(/\/$/, '');
 const keycloakInternalBaseUrl = (
@@ -172,12 +164,10 @@ export const supportConfig = {
   fromEmail: notification.NOTIFICATION_FROM_EMAIL,
   // "Sub-domain link" surfaced in the support subject line.
   linkBaseUrl: notification.FRONTEND_BASE_URL,
-  // Display name for the "Team <name>" sign-off. No brand short-name is
-  // available synchronously in config (ServedDomainBinding carries only
-  // network/domain/key), so we use the instance name — no new env (#283).
+  // "Team <name>" sign-off. Uses the instance name because no brand short
+  // name is available synchronously in config.
   teamName: instance.INSTANCE_NAME,
-  // Attachment budget (#551). Also served to the UI so the form's own
-  // validation matches the server's.
+  // Attachment budget, also served to the UI so its validation matches.
   attachmentMaxTotalBytes: notification.SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES,
   attachmentMaxFiles: notification.SUPPORT_ATTACHMENT_MAX_FILES,
 };
@@ -205,25 +195,21 @@ export const matchScoreConfig = {
 };
 
 /**
- * Discover BFF -> signals-search (#203). Both fields optional and undefined
- * when unset — no consumer yet (Task 2); the eventual BFF falls back to the
- * native search path whenever either is missing, so absence must not crash
- * boot.
+ * Discover BFF -> signals-search. Both fields are optional: when either is
+ * unset the BFF uses the native item fetch, so absence must not crash boot.
  */
 export const signalsSearchConfig = {
   url: signalsSearch.SIGNALS_SEARCH_URL,
   api_key: signalsSearch.SIGNALS_SEARCH_API_KEY,
-  // Optional configured spatial radius (meters, #394). Undefined -> the
-  // discover BFF sends no distance_meters to signals-search (its own default
-  // applies) but still reports DEFAULT_SEARCH_DISTANCE_METERS.
+  // Optional spatial radius in metres. When unset the discover BFF sends none
+  // (signals-search's default applies) but reports DEFAULT_SEARCH_DISTANCE_METERS.
   distanceMeters: signalsSearch.SIGNALS_SEARCH_DISTANCE_METERS,
 };
 
 /**
- * Serve the OpenAPI spec + Scalar reference UI at /api/reference. Secure by
- * default: force-disabled when INSTANCE_ENV=production unless
- * API_REFERENCE_FORCE opts back in. The always-available reference is the
- * bluedots-docs site.
+ * Serve the OpenAPI spec and Scalar reference UI at /api/reference. Disabled
+ * when INSTANCE_ENV=production unless API_REFERENCE_FORCE is set; the
+ * published reference is the bluedots-docs site.
  */
 export const apiReferenceEnabled: boolean =
   api.API_REFERENCE_ENABLED &&

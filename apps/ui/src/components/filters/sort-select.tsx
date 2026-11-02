@@ -7,60 +7,44 @@ export interface SortSelectProps {
   /** What the user asked for. */
   value: BrowseSort;
   /**
-   * What the server ACTUALLY applied (`meta.sort_applied`). The trigger label
-   * renders from this, not from `value`: a `relevance` request with neither an
-   * anchor nor typed text degrades to `newest` server-side, and labelling from
-   * the request would claim an order we did not get (#644 §3.2).
+   * What the server applied (`meta.sort_applied`). The trigger labels from
+   * this, not `value`: a `relevance` request with no anchor and no typed text
+   * degrades to `newest` server-side.
    */
   applied?: BrowseSort;
   /**
-   * A response arrived and reported NO order (`meta.sort_applied` absent),
-   * which means the search service predates the explicit sort and ignored what
-   * we asked for. The order is therefore unknowable from here, so the trigger
-   * names none — showing the requested value would be the exact claim this
-   * control exists to avoid, and merge order is not deploy order, so the two
-   * halves can genuinely run at different ages.
-   *
-   * The choice itself stays discoverable: the popover still ticks it.
+   * A response reported no order (`meta.sort_applied` absent, from a search
+   * service without explicit sort). The order is unknown, so the trigger names
+   * none; the popover still ticks the requested choice.
    */
   appliedUnreported?: boolean;
   /** False when no viewer location resolves — `nearest` then has no centre. */
   nearestAvailable: boolean;
   /**
-   * Which quantity `relevance` means here: 'profile' when an anchor is sent
-   * (the score is profile↔item cosine, spec D14), 'search' when there is no
-   * anchor and the typed text is the query vector, or null when neither
-   * applies.
+   * What `relevance` means here: 'profile' when an anchor is sent (profile to
+   * item cosine), 'search' when the typed text is the query vector, or null.
    */
   basis: 'profile' | 'search' | null;
   /**
-   * False when the server cannot rank by relevance for this request — no
-   * anchor and no typed text, or signals-search is unreachable and the BFF
-   * degraded to the native path (`meta.source: 'native_fallback'`). The option
-   * is then OMITTED rather than offered: picking it produced a menu that
-   * ticked "Relevance to your profile" while the trigger read "Newest",
-   * because the server reported `sort_applied: newest` (Q2).
+   * False when the server cannot rank by relevance for this request: no anchor
+   * and no typed text, or signals-search is unreachable and the BFF fell back
+   * to the native path (`meta.source: 'native_fallback'`). The option is then
+   * omitted.
    */
   relevanceAvailable?: boolean;
   /**
-   * Which centre `nearest` would measure from, already localized. Shown as a
-   * READ-ONLY hint: Sort deliberately says nothing selectable about location,
-   * because the source is chosen in exactly one place — the Location control
-   * (#644 QA redesign).
+   * Which centre `nearest` measures from, already localized. A read-only hint:
+   * the source is chosen only in the Location control.
    */
   nearestFromLabel?: string;
   onChange: (next: BrowseSort) => void;
 }
 
 /**
- * The sort selector (#644/#645 §4.5). List view only — it is ABSENT on the
- * map (spec D26), because ordering is meaningless for a marker layer and a
- * disabled control would invite the question rather than answer it.
+ * The sort selector, list view only. It states the ranking basis once in the
+ * pinned toolbar, which is why the card match pill can stay icon-only.
  *
- * This control is also what makes the card pill able to stay icon-only
- * (spec D22/D23): it states the ranking basis once, and the toolbar it sits in
- * is sticky, so that statement is on screen at every scroll position instead
- * of being repeated on all twenty cards.
+ * Design: docs/architecture/ui-components-browse-controls.md
  */
 export function SortSelect({
   value,
@@ -90,32 +74,19 @@ export function SortSelect({
     }
   };
 
-  // Label from what happened, falling back to the request only before the
-  // first response has arrived.
-  // `undefined` when the server reported nothing — the trigger then shows its
-  // name with no value rather than echoing the request back as fact.
+  // Label from what the server applied, falling back to the request before the
+  // first response. `undefined` when the server reported no order.
   const effective = appliedUnreported ? undefined : (applied ?? value);
 
   /**
-   * The server asked for relevance and got something else.
-   *
-   * `relevanceAvailable` above is a CLIENT-SIDE PREDICTION — "is there a query
-   * vector at all", i.e. an anchor is being sent or text was typed. It cannot
-   * see whether signals-search could actually USE that anchor. On the test
-   * cluster it could not (the profile was not indexed yet), so the BFF retried
-   * anchor-less and honestly reported `sort_applied: 'newest'` with
-   * `degraded: false` — the prediction said available, the response said
-   * newest, and nothing reconciled the two.
-   *
-   * Two visible bugs followed. The trigger labelled from `applied` while the
-   * menu ticked `value`, so the control claimed "Newest" and "Relevance" at
-   * once; and because `sort` state ALREADY held 'relevance' (its default),
-   * choosing relevance again was a no-op that fired no refetch, so the option
-   * looked broken.
+   * Relevance was requested but the server applied something else.
+   * `relevanceAvailable` is only a client-side prediction and cannot see
+   * whether signals-search could use the anchor (e.g. an unindexed profile).
+   * Without this, the trigger and tick would disagree, and re-picking
+   * relevance would be a no-op because `sort` already holds it.
    */
   const relevanceRefused =
-    // Unreported counts as refused: we cannot claim relevance was applied, and
-    // this is the "listed, with a reason" state that already exists for it.
+    // Unreported counts as refused: we cannot claim relevance was applied.
     appliedUnreported ||
     (value === 'relevance' && applied !== undefined && applied !== 'relevance');
 
@@ -124,17 +95,13 @@ export function SortSelect({
       name={t('browse.sort_label')}
       displayLabel={effective ? labelFor(effective) : ''}
       icon={ArrowDownUp}
-      // The APPLIED order, not the requested one — otherwise the trigger and
-      // the tick can disagree, which is exactly the bug above. When the server
-      // reported nothing, fall back to the request for the TICK only: the
-      // popover should still show what was chosen, while the trigger above
-      // stays silent about what was actually applied.
+      // Tick the applied order so trigger and tick agree. When the server
+      // reported no order, tick the request; the trigger stays blank.
       value={effective ?? value}
       onChange={onChange}
       options={[
-        // Listed-with-a-reason rather than omitted when the server refuses it:
-        // omitting would silently drop a row the viewer had already chosen,
-        // and the same idiom already carries `nearest`'s explanation below.
+        // Listed with a reason, not omitted, when the server refuses it, so a
+        // row the viewer already chose does not silently vanish.
         ...(relevanceAvailable
           ? [
               {
@@ -147,8 +114,8 @@ export function SortSelect({
               },
             ]
           : []),
-        // Names its basis (`items.created_at`) so a card's "6 days ago" is not
-        // ambiguous between posting date and last-edit date (Q3).
+        // The hint names the basis (posting date, `items.created_at`), not the
+        // last-edit date.
         {
           value: 'newest' as const,
           label: t('browse.sort_newest'),

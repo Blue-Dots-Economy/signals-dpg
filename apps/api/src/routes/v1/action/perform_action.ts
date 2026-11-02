@@ -40,7 +40,7 @@ import { buildPeerHeaders } from '@/utils/instance_token';
 const BulkPerformActionBodySchema = z.array(z.unknown());
 
 export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
-  // Single-object body — Raya/Litwiz voice tools can only send a JSON object (#293).
+  // Single-object body: voice tools (Raya/Litwiz) can only send a JSON object.
   fastify.route({
     url: '/perform',
     method: 'POST',
@@ -57,7 +57,7 @@ export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
       runPerformActions([request.body], request, reply),
   });
 
-  // Array body — genuine batch (today's behavior verbatim).
+  // Array body: a genuine batch.
   fastify.route({
     url: '/perform/bulk',
     method: 'POST',
@@ -77,12 +77,10 @@ export const perform_action: FastifyPluginAsyncZod = async function (fastify) {
   });
 };
 
-// Pre-pass for the bulk route (#393): resolve each item's ward + target enough
-// to gate the U18-gated subset with ONE guardian OTP + ONE email, returning a
-// GateResult per item index. Items that fail to parse / resolve are simply not
-// batched — the per-item handler still gates them individually and reports
-// their own errors. The batch OTP is read from the first item that carries
-// `guardian_otp` (the client puts the single code on the resubmitted batch).
+// Pre-pass for the bulk route: gate the U18-gated subset with one guardian OTP
+// + one email, returning a GateResult per item index. Items that fail to parse
+// or resolve are not batched; the per-item handler gates them and reports
+// their errors. The OTP is read from the first item carrying `guardian_otp`.
 async function buildBulkGuardianGate(
   items: unknown[],
   request: FastifyRequest,
@@ -123,16 +121,14 @@ async function runPerformActions(
   const sourceInstanceUrl = getCurrentApiBaseUrl();
 
   // Only a genuine batch (>1 item) within the bulk limit uses the one-OTP-per-
-  // batch gate; single /perform keeps the per-action gate untouched, and an
-  // over-limit batch is left for runBulk to reject with BULK_LIMIT_EXCEEDED
-  // before any gating work. Fail-safe: if the pre-pass errors, fall back to the
-  // per-item gate (still fail-closed) rather than failing the whole request.
+  // batch gate; an over-limit batch is left for runBulk to reject with
+  // BULK_LIMIT_EXCEEDED. If the pre-pass errors, the per-item gate (still
+  // fail-closed) takes over.
   //
-  // Skipped entirely on an external / on-behalf channel (`request.acting_org`,
-  // #450): the batch gate has no external-channel awareness, so running it there
-  // would hand a minor a guardian-OTP path that #450 deliberately withholds off
-  // the app. Skipping lets those items fall through to the per-action gate,
-  // which returns `external_minor_blocked` (MINOR_ACTION_CHANNEL_BLOCKED).
+  // Skipped on an external / on-behalf channel (`request.acting_org`): the
+  // batch gate has no channel awareness and would offer a minor the guardian-OTP
+  // path that is withheld off the app. The per-action gate returns
+  // `external_minor_blocked` (MINOR_ACTION_CHANNEL_BLOCKED) instead.
   let batchGate: Map<number, GateResult> | undefined;
   if (items.length > 1 && items.length <= apiConfig.bulk_max_items && !request.acting_org) {
     try {
@@ -191,14 +187,12 @@ async function runPerformActions(
         throw new BulkItemFailure('PROFILE_NOT_LIVE', 'source_item is not live; cannot perform actions');
       }
 
-      // U18 guardian gate (Phase 5b): no-op for adults / ungated domains
-      // (`not_required`) — the rest of this handler runs byte-for-byte
-      // unchanged for them. For a gated minor, this issues/verifies a guardian
-      // OTP scoped to this action; the guardian consent row is written below
-      // only after the action write succeeds. In a bulk submit (#393) the batch
-      // pre-pass already produced this item's result (one OTP for the whole
-      // batch); fall back to the per-action gate otherwise. `channel` (#450)
-      // blocks U18 actions initiated on an external (aggregator) channel.
+      // U18 guardian gate: `not_required` for adults and ungated domains. For
+      // a gated minor it issues/verifies a guardian OTP scoped to this action;
+      // the guardian consent row is written only after the action write
+      // succeeds. In a bulk submit the pre-pass already produced this item's
+      // result. `channel` blocks U18 actions initiated on an external
+      // (aggregator) channel.
       const guardianGate =
         batchGate?.get(index) ??
         (await guardianActionGate({
@@ -304,13 +298,11 @@ async function runPerformActions(
       let responseOk: boolean;
       let responseBody: Record<string, unknown>;
       try {
-        // Identity is asserted in this body — `source_item_owner` and the
-        // `performed_by_*` audit fields say who the action belongs to, and the
-        // receiver has no other way to know. Sign it (AUTH-VULN-05): the peer
-        // guard on the receiving side rejects an unsigned or tampered request,
-        // so those fields can no longer be forged by anyone who can reach the
-        // host. The signature covers path + these exact bytes, so the body must
-        // be built once and both hashed and sent — never re-stringified.
+        // This body asserts identity (`source_item_owner`, `performed_by_*`),
+        // so it is signed (AUTH-VULN-05) and the receiver's strict peer guard
+        // rejects an unsigned or tampered request. The signature covers path +
+        // these exact bytes: build the body once, hash and send it, never
+        // re-stringify.
         const target = new URL(
           '/api/v1/network/action/perform',
           targetItem.item_instance_url
@@ -369,12 +361,11 @@ async function runPerformActions(
         target_item_id: string;
       };
 
-      // Guardian action consent (Phase 5b): only reached when the gate
-      // verified a fresh guardian OTP for this exact action above. Mirrors
-      // the adult initiate-consent row shape (see
-      // network/action/perform_action.ts), with `source:'guardian'` and the
-      // u18 metadata tag. Action statements were not variant-split in Phase 2,
-      // so the version comes from the same (non-variant) action resolver.
+      // Guardian action consent, only after a verified guardian OTP for this
+      // action. Same shape as the adult initiate-consent row (see
+      // network/action/perform_action.ts), with `source:'guardian'` and the u18
+      // metadata tag. Action statements have no u18 variant, so the version
+      // comes from the same resolver.
       if (guardianGate.status === 'verified') {
         const guardianVersion = await resolveConsentVersion({
           network: body.source_item.item_network,
@@ -383,12 +374,9 @@ async function runPerformActions(
           stage: 'initiate',
         });
         if (guardianVersion === null) {
-          // Fail-closed: a verified guardian OTP with no configured consent
-          // version must not be silently treated as success (the minor's
-          // action already reached the target instance above, but the
-          // guardian consent row — the whole point of this gate — would
-          // otherwise never be recorded). Surface it as a per-item failure
-          // rather than logging and returning the write as if it succeeded.
+          // Fail-closed: the action already reached the target instance, but
+          // with no consent version the guardian row cannot be recorded, so
+          // this item is reported as failed rather than as a success.
           throw new BulkItemFailure(
             'CONSENT_VERSION_UNCONFIGURED',
             'u18 action consent version not configured',
@@ -406,10 +394,8 @@ async function runPerformActions(
             documentVersion: guardianVersion,
           }));
         } catch (err) {
-          // The action already committed at the target instance above; throwing
-          // here would report the item as failed and a client retry would
-          // double-submit. Log loudly (keyed to the action id) for
-          // reconciliation instead — the guardian consent row is missing.
+          // The action already committed at the target instance; throwing would
+          // invite a double-submitting retry. Logged for reconciliation instead.
           request.log.error(
             { err, action_id: result.action_id, ward_user_id: actor.effective_user_id },
             'guardian action consent row write FAILED after the action committed — reconcile',

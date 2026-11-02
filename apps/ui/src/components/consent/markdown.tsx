@@ -1,11 +1,8 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-// Descendant selectors (`[&_x]`), NOT child (`[&>x]`): markdown nests links
-// inside paragraphs/list-items/table-cells and cells inside table/thead/tbody,
-// so child-only selectors left them unstyled (uncoloured links, borderless
-// tables). Link colour is the network theme's `--primary` (blue on blue_dot),
-// so it's themeable per network rather than a hardcoded blue.
+// Descendant selectors (`[&_x]`), not child (`[&>x]`), because markdown nests
+// links and table cells. Link colour is the network theme's `--primary`.
 const PROSE = [
   'text-sm leading-relaxed space-y-3',
   '[&_h1]:text-xl [&_h1]:font-semibold [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:text-base [&_h3]:font-semibold',

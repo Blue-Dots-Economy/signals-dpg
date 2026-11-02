@@ -29,9 +29,10 @@ function toMatchScoreItem(s: ItemSnapshotLike): MatchScoreItem {
 }
 
 /**
- * Computes the item-to-item relevance score for an action at create time.
- * Returns the numeric score, or null when a snapshot is missing (e.g.
- * cross-instance source) or the relevance service errors — never throws.
+ * Computes the item-to-item relevance score for an action at create time, on
+ * a 0-10 scale. Returns null when a snapshot is missing (e.g. cross-instance
+ * source), no match-score client is configured, or the service errors. Never
+ * throws.
  */
 export async function computeActionMatchScore(
   source: ItemSnapshotLike | null,
@@ -46,16 +47,9 @@ export async function computeActionMatchScore(
       itemA: toMatchScoreItem(source),
       itemB: toMatchScoreItem(target),
     });
-    // #646 §5.2 converts the DISPLAY path to a single 0-100 scale, so the
-    // provider now returns 0-100. `item_actions.match_score` is a different
-    // artifact: a persisted REAL column, documented 0-10, already holding
-    // rows on that scale and sortable in SQL (fetch_actions.ts orders by it).
-    //
-    // Converting here keeps that column's meaning stable and needs no
-    // backfill. Writing 0-100 into it instead would leave the table holding
-    // BOTH scales with nothing in a row to say which — every pre-existing My
-    // Actions score would then render 10x too small. One conversion at a
-    // storage boundary is the cheaper correct answer than a migration.
+    // The provider returns 0-100, but `item_actions.match_score` is stored
+    // 0-10 and existing rows use that scale; converting here keeps one scale
+    // in the column without a backfill.
     return typeof result.score === 'number' ? result.score / 10 : null;
   } catch (err) {
     log.warn({ err }, 'action match-score compute failed — storing null');

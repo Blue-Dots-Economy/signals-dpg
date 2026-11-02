@@ -58,8 +58,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     guardianEmail: body.guardianEmail,
     guardianPhone: body.guardianPhone,
   });
-  // Hard block: a ward may not be their own guardian. (Allowing it with an ack
-  // is a possible FUTURE use case — deliberately disabled for now.)
+  // Hard block: a ward may not be their own guardian.
   if (matchesWard) {
     return reply.code(409).send({
       error: 'SAME_CONTACT_NOT_ALLOWED',
@@ -76,7 +75,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     });
   }
 
-  // Record the ward's guardian-validity attestation (D12): source='self', u18.
+  // Record the ward's guardian-validity attestation: source='self', u18.
   const declVersion = await resolveConsentVersion({
     network: body.network, brand: body.brand, category: 'guardian_declaration', variant: 'u18',
   });

@@ -26,31 +26,17 @@ export interface AppliedFilterChipsProps {
 const KIND_STYLES: Record<ChipKind, string> = {
   domain: 'bg-primary text-primary-foreground border-primary',
   facet: 'bg-accent text-accent-foreground border-border',
-  // Dashed: this chip's EDITOR is the app-bar search box (spec D24/D25), not
-  // this bar. The dashed border signals "remove here, edit above".
+  // Dashed: this chip is edited in the app-bar search box, only removed here.
   search: 'bg-accent text-accent-foreground border-border border-dashed',
   sort: 'bg-muted text-muted-foreground border-border',
   area: 'bg-accent text-accent-foreground border-border',
 };
 
 /**
- * The applied-filter read-out (#645 §4.1).
+ * The applied-filter read-out. It formats nothing, owns no filter state, and
+ * reports removals to the caller. Clear-all lives in the toolbar, not here.
  *
- * Before this there was no single place answering "what is currently filtering
- * this list?" — domain lived in the sidebar, a second domain picker lived in
- * the facet panel, search lived in the app bar, and one rule hid whole domains
- * silently. This is that place.
- *
- * Chips are the READ-OUT; the facet panel and the app-bar search box remain
- * the EDITORS (spec §7.1). So this component formats nothing, owns no filter
- * state, and reports removals back to the caller rather than acting on them.
- *
- * It carries chips ONLY for constraints whose editor is elsewhere — search
- * text and facets. `sort` and `area` have their own controls sitting inches
- * away in the same row, and a chip repeating their value read as a duplicate
- * on screen ("Area Within 25 km | Within 25 km ×"). Clear-all lives in the
- * toolbar rather than here, because it must be reachable when sort or area is
- * non-default even though neither produces a chip.
+ * Design: docs/architecture/ui-components-browse-controls.md
  */
 export function AppliedFilterChips({
   chips,
@@ -60,13 +46,9 @@ export function AppliedFilterChips({
   const groupRef = React.useRef<HTMLFieldSetElement>(null);
   const pendingFocus = React.useRef(false);
 
-  // Focus returns to the group after a removal (spec §4.6). The button the
-  // user activated unmounts along with its chip, so without this focus falls
-  // to <body> and a keyboard user loses their place in the bar entirely.
-  //
-  // Gated on `pendingFocus` rather than firing on every `chips` change, so an
-  // unrelated re-render (a new array with the same contents) does not yank
-  // focus away from whatever the user is actually on.
+  // Focus returns to the group after a removal: the activated button unmounts
+  // with its chip, so focus would otherwise fall to <body>. Gated on
+  // `pendingFocus` so an unrelated `chips` change does not steal focus.
   React.useEffect(() => {
     if (!pendingFocus.current) return;
     pendingFocus.current = false;
@@ -76,8 +58,7 @@ export function AppliedFilterChips({
   if (chips.length === 0) return null;
 
   return (
-    // <fieldset> rather than <div role="group"> — implicit group role, native
-    // element, identical to assistive tech (Sonar S6819). UA chrome reset.
+    // <fieldset> for the native implicit group role (Sonar S6819).
     <fieldset
       ref={groupRef}
       tabIndex={-1}

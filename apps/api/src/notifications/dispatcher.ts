@@ -9,7 +9,7 @@ import {
 import { actionCaseId } from './email/email_cases';
 
 export interface DispatcherDeps {
-  /** Sends one rendered email (the central email sender, #529). */
+  /** Sends one email via the central email sender. */
   sendEmail: (args: DispatchEmailArgs) => Promise<{ ok: boolean }>;
   /** Resolves a local owner's email by user id; null when unknown/phone-only. */
   resolveEmail: (userId: string) => Promise<string | null>;
@@ -21,10 +21,7 @@ export interface DispatcherDeps {
   brand: {
     brandName: string;
   };
-  /**
-   * The login URL for a recipient in `domain`. Per-recipient, not per-process:
-   * on a split deployment each domain has its own portal host (#569).
-   */
+  /** Login URL for a recipient in `domain`; split deployments host each domain separately. */
   resolveCtaUrl: (domain: string) => string | undefined;
   log: (message: string, meta?: Record<string, unknown>) => void;
   /** Visibility hook for skipped (dark) recipients. */
@@ -36,10 +33,8 @@ export interface DirectDispatcher {
 }
 
 /**
- * Resolves recipients and hands each plan to the central email sender.
- * Fire-and-forget by contract: a failure for any plan is logged and never
- * propagates, so it can never fail or slow the action route. The Phase-2
- * transport (Kafka/registry) swaps in behind this same interface.
+ * Resolves recipients and hands each plan to the central email sender. A
+ * failure for any plan is logged and never propagates.
  */
 export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
   async function dispatchPlan(plan: NotificationPlan): Promise<void> {
@@ -62,15 +57,8 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
       return;
     }
 
-    // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
-    // unresolved URL ships an `<a href="">` whose button does nothing. That is
-    // now reachable: the gate below accepts a map-only config, so a domain
-    // missing from UI_HOST_BINDINGS with no FRONTEND_BASE_URL set has no
-    // answer. Send nothing rather than a mail whose only CTA is broken — the
-    // boot-time unknown-domain warning is the operator-facing signal.
-    //
-    // The RECIPIENT's own domain, never the counterparty's — keying off
-    // `counterpartyDomain` here would send each party to the other's portal.
+    // Without a URL the CTA would be `<a href="">`, so skip the send. Use the
+    // recipient's domain, not the counterparty's, or each party gets the other's portal.
     const ctaUrl = deps.resolveCtaUrl(plan.recipientDomain);
     if (!ctaUrl) {
       deps.onSkip('no_cta_url');

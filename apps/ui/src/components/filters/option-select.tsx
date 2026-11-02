@@ -11,9 +11,8 @@ export interface SelectOption<T extends string> {
   /** Required when `available` is false — already localized. */
   reason?: string;
   /**
-   * Sub-label for a CHOOSABLE option, explaining what it sorts/filters on
-   * (e.g. "By date posted"). Distinct from `reason`, which explains why an
-   * option cannot be picked; an option never shows both.
+   * Sub-label for a choosable option (e.g. "By when it was posted"). An
+   * option shows either `hint` or `reason`, never both.
    */
   hint?: string;
 }
@@ -21,62 +20,38 @@ export interface SelectOption<T extends string> {
 export interface OptionSelectProps<T extends string> {
   /** Short prefix shown before the current value, e.g. "Sort". */
   name: string;
-  /** The value to DISPLAY. May differ from the requested one — see SortSelect. */
+  /** The value to display. May differ from the requested one; see SortSelect. */
   displayLabel: string;
   /**
-   * Icon shown INSTEAD of the text below `sm`.
-   *
-   * On a phone the prefix plus the value is far too wide — "Sort Relevance to
-   * your profile" alone consumed a whole row, pushing Location, Filters and the
-   * count onto rows of their own. The value is not lost: the note directly
-   * under the toolbar states the ranking basis and the applied radius in
-   * words, and the popover ticks the current choice.
+   * Icon shown instead of the text below `sm`, where prefix plus value is too
+   * wide for the toolbar row. The popover still ticks the current choice.
    */
   icon: React.ComponentType<{ className?: string }>;
   options: SelectOption<T>[];
   value: T;
   onChange: (next: T) => void;
   /**
-   * Lift the portalled list above the maximized map.
-   *
-   * `PopoverContent` portals to `document.body`, so it is a SIBLING of the
-   * maximized map wrapper (`fixed inset-0 z-[2000]`, `map-container.tsx`) and
-   * its base `z-50` paints underneath that opaque layer while Radix moves
-   * focus into it — invisible and unclickable, WCAG 2.4.11. Opt-in rather
-   * than a blanket bump so the list row's own selects are untouched; the
-   * same 2100 as every other occupant of that overlay
-   * (`browse-filters-panel.tsx`, `map-count-pill.tsx`).
+   * Lift the portalled list above the maximized map (`fixed inset-0
+   * z-[2000]`, `map-container.tsx`). `PopoverContent` portals to
+   * `document.body`, so its base `z-50` would paint under that layer while
+   * holding focus (WCAG 2.4.11). Uses the same 2100 as the other overlay
+   * occupants.
    */
   aboveMaximizedMap?: boolean;
   /**
-   * Optional caption above the list, for when `name` alone is too terse to
-   * say what picking an option DOES. The map's location-source select needs
-   * it: its trigger reads "Location — My profile", which on a map could be
-   * misread as a filter, so the list is headed "Centre the map on".
-   *
-   * When present it labels the listbox instead of `name`, since it is the
-   * more specific of the two.
-   *
-   * The caption carries `aria-hidden` because it is a VISUAL duplicate of a
-   * string already copied into `aria-label` — not because hiding it affects
-   * the accessible name, which it cannot: `aria-label` is a string, not a
-   * reference. (An `aria-labelledby` reference would have been safe too —
-   * accname includes a directly referenced node even when it is hidden.)
+   * Optional caption above the list, for when `name` does not say what
+   * picking an option does. When present it labels the listbox instead of
+   * `name`. The visible caption is `aria-hidden` because the same string is
+   * already the listbox `aria-label`.
    */
   heading?: string;
 }
 
 /**
- * Single-choice dropdown shared by the sort and area selectors.
- *
- * Extracted rather than duplicated because both need the same three things
- * that a plain `<select>` does not give: an option that is listed but
- * unavailable *with a reason* (a `<select>` can disable an option but cannot
- * explain it), a trigger label that may differ from the selected value, and
- * the coarse-pointer touch targets used across this app.
- *
- * Follows the Popover + option-list shape of `MultiSelectGroup` and
- * `BrowseFiltersPanel` so keyboard behaviour matches the rest of the filters.
+ * Single-choice dropdown shared by `SortSelect` and `LocationSourceSelect`.
+ * Unlike a native `<select>` it can list an unavailable option with a reason,
+ * label the trigger differently from the selected value, and use the app's
+ * coarse-pointer touch targets.
  */
 export function OptionSelect<T extends string>({
   name,
@@ -95,8 +70,7 @@ export function OptionSelect<T extends string>({
       <PopoverTrigger asChild>
         <button
           type="button"
-          // Carries the value too, because below `sm` the text is hidden and
-          // this is the only name a screen reader or a long-press gets.
+          // Carries the value too, because below `sm` the text is hidden.
           aria-label={`${name}: ${displayLabel}`}
           className={cn(
             'inline-flex items-center gap-1.5 rounded-lg border border-border bg-background text-xs font-semibold text-foreground',
@@ -136,9 +110,8 @@ export function OptionSelect<T extends string>({
                   type="button"
                   role="option"
                   aria-selected={o.value === value}
-                  // aria-disabled rather than `disabled`: a disabled button is
-                  // removed from the a11y tree, which would hide the very
-                  // reason we are trying to surface.
+                  // aria-disabled rather than `disabled`, so the option and its
+                  // reason stay reachable by assistive tech.
                   aria-disabled={unavailable}
                   aria-describedby={reasonId}
                   onClick={() => {

@@ -4,7 +4,7 @@ const apiClient = createApiClient();
 
 export type SupportType = 'complaint' | 'support_request';
 
-/** One attachment, base64-encoded for the JSON body (#551). */
+/** One attachment, base64-encoded for the JSON body. */
 export interface SupportAttachment {
   filename: string;
   contentType: string;
@@ -23,9 +23,8 @@ export interface SupportSubmission {
 }
 
 /**
- * What this instance's support form may submit. The limits come from the server
- * rather than a build-time constant so a deployment can raise them without a UI
- * rebuild — and so the form's validation can never disagree with the API's.
+ * What this instance's support form may submit. Served by the API so limits
+ * change without a UI rebuild and the form cannot disagree with the server.
  */
 export interface SupportConfig {
   enabled: boolean;
@@ -33,9 +32,8 @@ export interface SupportConfig {
   maxFiles: number;
   allowedTypes: string[];
   /**
-   * Extensions for the picker's `accept`, served alongside the MIME list
-   * because macOS won't match `.m4a` against `audio/mp4` and greys it out.
-   * Optional so a UI build still works against an older API.
+   * Extensions for the picker's `accept`, because macOS will not match `.m4a`
+   * against `audio/mp4`. Optional so the UI tolerates an API that omits it.
    */
   allowedExtensions?: string[];
 }

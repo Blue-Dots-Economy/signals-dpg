@@ -8,13 +8,11 @@ export interface FormLayout {
   twoColumn: string[];
 }
 
-// Form layout config keyed by `${networkId}:${domainId}` (network-aware) or a
-// bare `domainId` (back-compat). Domain ids like `seeker`/`provider` collide
-// across networks (blue_dot AND purple_dot both expose them), so network-scoped
-// keys are required to stop one network inheriting another's field lists — see
-// `resolveFormLayout`. Fields listed in `twoColumn` render side-by-side within
-// their section. Anything not resolved here falls back to the default
-// single-column RJSF render.
+// Form layout config keyed by `${networkId}:${domainId}` or a bare `domainId`.
+// Domain ids like `seeker`/`provider` collide across networks, so
+// network-scoped keys stop one network inheriting another's field lists (see
+// `resolveFormLayout`). Fields in `twoColumn` render side-by-side within their
+// section; anything unresolved renders as the default single-column form.
 export const formLayouts: Record<string, FormLayout> = {
   student: {
     sections: [
@@ -56,18 +54,15 @@ export const formLayouts: Record<string, FormLayout> = {
     twoColumn: ['Phone Number', 'Email Address', 'Coverage Radius (km)', 'Service Offered'],
   },
 
-  // NOTE: blue_dot AND purple_dot layouts are NOT here — they live in their
-  // examples/schemas/<network>/network.json as `x-form-layout` on each item
-  // schema (schema-driven, single source of truth). The code-side map above is
-  // the fallback for networks not yet migrated (yellow_dot student/tutor).
+  // blue_dot and purple_dot layouts live in their network.json as
+  // `x-form-layout` on each item schema. This map is the fallback for networks
+  // without one (yellow_dot student/tutor).
 };
 
 /**
- * Resolve the form layout for a (network, domain) pair. Prefers the
- * network-scoped key `${networkId}:${domainId}` and falls back to a bare
- * `domainId` for networks/domains that don't collide (e.g. yellow_dot
- * `student`). Returns undefined when nothing matches — the caller then renders
- * the default single-column form.
+ * Resolves the form layout for a (network, domain) pair: the network-scoped
+ * key first, then the bare `domainId`. Undefined means the default
+ * single-column form.
  */
 export function resolveFormLayout(
   networkId: string | undefined,

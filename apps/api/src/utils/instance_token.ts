@@ -21,9 +21,8 @@ function hashBody(body: string): string {
   return createHash('sha256').update(body).digest('hex');
 }
 
-// The token binds timestamp + path + a hash of the exact request body, so a
-// captured token cannot be replayed against a different path OR a different
-// body (REVIEW.md M2). Body is the exact wire string on both sides.
+// Binds timestamp + path + a hash of the exact request body, so a captured
+// token cannot be replayed against another path or body.
 function computeToken(
   secret: string,
   timestamp: number,
@@ -76,12 +75,8 @@ export function verifyInstanceToken(input: {
   const windowSeconds = input.windowSeconds ?? peerConfig.token_window_seconds;
   const now = input.nowSeconds ?? Math.floor(Date.now() / 1000);
 
-  // `missing` means NEITHER header was sent — an unsigned caller. It is the one
-  // reason `PEER_AUTH_MODE=permissive` forgives, so it must not cover a request
-  // that tried to authenticate and got it wrong: a token with no timestamp (or
-  // the reverse) is a half-formed attempt, and treating it as "unsigned" let it
-  // through under permissive while the guard's own comment promised that a
-  // present-but-invalid token is always rejected.
+  // `missing` (neither header) is the only reason permissive mode forgives, so
+  // a half-formed attempt (one header only) must be `incomplete` instead.
   if (!input.token && input.timestamp === undefined) {
     return { ok: false, reason: 'missing' };
   }
@@ -94,7 +89,7 @@ export function verifyInstanceToken(input: {
     return { ok: false, reason: 'malformed_timestamp' };
   }
 
-  // Reject stale AND future-dated tokens (replay + clock-skew guard).
+  // Reject stale and future-dated tokens (replay + clock-skew guard).
   if (Math.abs(now - ts) > windowSeconds) {
     return { ok: false, reason: 'expired' };
   }
@@ -102,8 +97,7 @@ export function verifyInstanceToken(input: {
   const expected = computeToken(secret, ts, input.targetPath, input.body);
   const provided = input.token;
 
-  // Length check first (length is not secret); timingSafeEqual throws on
-  // mismatched lengths. Both are 64-char sha256 hex when well-formed.
+  // timingSafeEqual throws on unequal lengths; length is not secret.
   if (provided.length !== expected.length) {
     return { ok: false, reason: 'bad_signature' };
   }

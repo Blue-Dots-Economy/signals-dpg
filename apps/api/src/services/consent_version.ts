@@ -1,14 +1,11 @@
 /**
- * Server-side resolver for the CURRENT consent document version.
+ * Server-side resolver for the current consent document version.
  *
- * Consent version integers are never trusted from the client. Every ledger
- * write derives the version here from the loaded consent config for the
- * `(network, brand, category[, actionType, stage])` tuple, so the recorded
- * version always matches what the config actually served — a client cannot
- * record acceptance of a version the user never saw. Reads the already-cached
- * `consent_config` entries (no per-request disk/network I/O).
- *
- * Belongs to `@dpg/api`.
+ * Version integers are never trusted from the client: every ledger write
+ * derives the version here from the consent config for the
+ * `(network, brand, category[, actionType, stage])` tuple, so a client cannot
+ * record acceptance of a version the user never saw. Reads `consent_config`
+ * entries from the network schema cache.
  *
  * @module apps/api/services/consent_version
  */
@@ -49,13 +46,11 @@ export interface ResolveConsentVersionInput {
 }
 
 /**
- * Resolves the current version for a consent document, applying the brand
- * override (when present) over the network default — mirroring how the UI
- * merges the two.
+ * Resolves the current version for a consent document, with the brand override
+ * (when present) over the network default, as the UI merges them.
  *
- * @param input - Network, optional brand, category, and (for actions) type/stage.
  * @returns The `current_version` integer, or `null` when the tuple is not
- *   configured (caller decides whether that is a hard error).
+ *   configured (the caller decides whether that is an error).
  */
 export async function resolveConsentVersion(
   input: ResolveConsentVersionInput,

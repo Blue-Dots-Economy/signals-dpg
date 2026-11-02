@@ -29,49 +29,33 @@ const ACTION_TYPE_OPTIONS: Array<{ value: ActionTypeFilter; labelKey: string; de
 ];
 
 export interface ActionFiltersSheetProps {
-  /** Whether the slide-over is open. */
   open: boolean;
   /**
-   * The counterparty domain(s) whose item schemas drive the facet groups
-   * (via `getEnumFilterFieldsForDomains`, which already excludes
-   * `private: true` fields — see #394's defense-in-depth rule).
+   * Counterparty domains whose item schemas drive the facet groups, via
+   * `getEnumFilterFieldsForDomains`, which excludes `private: true` fields.
    */
   domains: DotNetworkDomain[];
   /**
-   * Selected schema-derived facet values, keyed by `EnumFilterField.key`.
-   * Deliberately does NOT include action type — the `/action/fetch` API
-   * sends `action_type` as its own query param, distinct from the `facets`
-   * array these keys map to (see `action-api.ts`'s `FetchMyActionsQuery`),
-   * so keeping them as separate props avoids overloading one map with two
-   * different wire shapes (and avoids a collision if a network schema ever
-   * declares its own `action_type` enum field).
+   * Selected facet values by `EnumFilterField.key`. Excludes action type,
+   * which `/action/fetch` takes as its own `action_type` param, so a schema
+   * field named `action_type` cannot collide.
    */
   selected: Record<string, string[]>;
-  /** Called with the next `selected` map whenever a facet checkbox is toggled. */
   onChange: (next: Record<string, string[]>) => void;
   /** Selected status filter (single-select: All / Pending / Accepted / Rejected). */
   status: ActionStatusFilter;
-  /** Called with the next status when a status option is chosen. */
   onStatusChange: (next: ActionStatusFilter) => void;
   /** Selected action types (Connect / Apply). */
   actionTypes: ActionTypeFilter[];
-  /** Called with the next `actionTypes` array whenever an action-type checkbox is toggled. */
   onActionTypesChange: (next: ActionTypeFilter[]) => void;
   /** Called when the sheet should close (X button, overlay click, or Done). */
   onClose: () => void;
 }
 
 /**
- * Schema-driven filters slide-over for the My Actions page (#439 Task 11).
- * Renders an Action type group (Connect/Apply — fixed, not schema-derived)
- * plus one checkbox group per non-private enum field declared on the
- * counterparty domain(s)' item schemas. Presentational only: all state is
- * owned by the caller (Task 13 wires this to the page's URL-backed filter
- * state) and every change is reported via `onChange`/`onActionTypesChange`.
- *
- * Deliberately excludes a distance control (sort-only, not a filter) and any
- * PII field (`getEnumFilterFieldsForDomains` already drops `private: true`
- * fields — PII is never offered as a filter, per #394).
+ * My Actions filters: status, action type (Connect/Apply) and one group per
+ * non-private enum field of the counterparty domains' item schemas.
+ * Presentational; the caller owns all state. PII fields are never offered.
  */
 export function ActionFiltersSheet({
   open,
@@ -119,13 +103,10 @@ export function ActionFiltersSheet({
     </Button>
   );
 
-  // Shared filter content (status + action type + facets), rendered inside a
-  // right Sheet on desktop and a bottom Drawer on mobile.
+  // Rendered in a right Sheet on desktop and a bottom Drawer on mobile.
   const filterBody = (
     <>
-          {/* Status — single-select (All / Pending / Accepted / Rejected). Lives
-              here (My Actions only) rather than in the map/list filter panel,
-              since status is an action concept. */}
+          {/* Status, single-select. */}
           <section className="space-y-2" aria-labelledby="action-filters-status-heading">
             <h3
               id="action-filters-status-heading"
@@ -151,7 +132,7 @@ export function ActionFiltersSheet({
             </div>
           </section>
 
-          {/* Action type — fixed Connect/Apply, not schema-derived */}
+          {/* Action type: fixed, not schema-derived */}
           <section className="space-y-2" aria-labelledby="action-filters-type-heading">
             <h3
               id="action-filters-type-heading"
@@ -179,11 +160,8 @@ export function ActionFiltersSheet({
             </div>
           </section>
 
-          {/* One group per schema-derived, non-private enum field. Fields with
-              many options render as a compact searchable dropdown (shared with
-              the map/list filters) so the sheet stays short; small fields stay
-              as an inline checkbox list. Schema-provided labels are not
-              translated, per the repo's rule that schema content isn't localized. */}
+          {/* Large fields use the searchable dropdown, small ones a checkbox
+              list. Schema labels are not translated. */}
           {enumFilterFields.map((field) => {
             const fieldSelected = selected[field.key] ?? [];
 
@@ -228,8 +206,7 @@ export function ActionFiltersSheet({
     </>
   );
 
-  // Mobile: a bottom-sheet Drawer (ResponsiveDialog) — matches the map/list
-  // filters' mobile shape and avoids the full-screen right panel.
+  // Mobile: a bottom Drawer, like the browse filters.
   if (isMobile) {
     return (
       <ResponsiveDialog
@@ -250,7 +227,6 @@ export function ActionFiltersSheet({
     );
   }
 
-  // Desktop: right slide-over Sheet.
   return (
     <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <SheetContent side="right" className="flex h-full w-full flex-col sm:max-w-sm">

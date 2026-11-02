@@ -1,7 +1,6 @@
 /**
- * Thrown by startup configuration guards when an unsafe combination of
- * environment variables is detected in production. Boot must fail non-zero
- * (visible crashloop) rather than start with an insecure configuration.
+ * Thrown by startup configuration guards on an unsafe or incomplete
+ * configuration, so boot fails visibly rather than starting misconfigured.
  */
 export class ConfigError extends Error {
   constructor(message: string) {

@@ -7,12 +7,10 @@ import type { DbOrTx } from '@/services/item_service';
 type WarnLogger = { warn: (obj: unknown, msg?: string) => void };
 
 /**
- * The counterparty side of a connection cancelled by retire — the item that is
- * NOT the retired one. Returned so the caller can notify them (#418) after the
- * retire transaction commits. `ownerUserId` is null for owner-less items and
- * for counterparties hosted on another instance (their user isn't local), which
- * is how the v1 "local counterparties only" rule falls out — those are simply
- * un-emailable and skipped downstream.
+ * The counterparty side of a connection cancelled by retire, returned so the
+ * caller can notify them after the retire transaction commits. `ownerUserId` is
+ * null for owner-less items and for counterparties on another instance; those
+ * are skipped downstream, so only local counterparties are notified.
  */
 export interface RetireCancelledCounterparty {
   actionId: string;
@@ -23,47 +21,35 @@ export interface RetireCancelledCounterparty {
   network: string;
 }
 
-/**
- * Fallback cancel status for interactions the network does not track
- * (`metric_categories` null / no `cancel` bucket). Matches the conventional
- * `cancel` value used by tracked interactions.
- */
+/** Cancel status for interactions with no `cancel` bucket in `metric_categories`. */
 const DEFAULT_CANCEL_STATUS = 'cancelled';
 
 /**
- * System remark stamped on a connection cancelled by retire, so the counterparty
- * sees why it ended (their explicit reject/cancel would carry the user's own
- * remark). Neutral — doesn't announce that the owner retired. Only set when the
- * action has no existing remark.
+ * Remark stamped on a connection cancelled by retire, only when the action has
+ * none, so the counterparty sees why it ended. Worded neutrally.
  */
 const RETIRE_CANCEL_REMARK = 'This profile is retired and no longer available.';
 
 /**
- * Cancel every still-open connection referencing an item being retired (#347,
- * R9.3). "Open" = any action (as source OR target) whose status is not already
- * terminal (not in the interaction's `reject` ∪ `cancel` categories). Each such
- * action is flipped to the interaction's first `cancel` status.
+ * Cancel every still-open connection (as source or target) referencing an item
+ * being retired. "Open" means the status is not in the interaction's `reject`
+ * or `cancel` categories (nor `cancelled`/`rejected`). Each is moved to the
+ * interaction's first `cancel` status, or `cancelled` when the interaction
+ * defines none or cannot be resolved.
  *
- * The action ROWS are kept (only the status changes) so the counterparty
- * retains their history with the bare id (Q11). Untracked interactions (no
- * `metric_categories`, or no `cancel` status defined) are skipped — there is no
- * defined cancel status to move them to.
- *
- * Runs inside the retire transaction (`tx`). Returns the counterparty side of
- * each cancelled connection so the caller can notify them AFTER commit (#418);
- * `.length` is the cancelled count for logging/telemetry.
+ * The action rows are kept (only the status changes) so the counterparty keeps
+ * their history. Runs inside the retire transaction; returns the counterparty
+ * of each cancelled connection so the caller can notify them after commit.
  */
 export async function cancelItemConnections(
   tx: DbOrTx,
   item: { item_id: string; item_network: string; item_domain: string; item_type: string },
   logger?: WarnLogger,
 ): Promise<RetireCancelledCounterparty[]> {
-  // Match on the full item ref on each side so the query can use the
-  // source/target composite indexes (which lead with the item network) instead
-  // of scanning by id alone. NOTE: this does NOT prune partitions — item_actions
-  // is partitioned by `partition_network`, which isn't filtered here (a source-
-  // side action can live in a different network's partition), so this is an
-  // all-partition index scan, not a single-partition read. Correctness is fine.
+  // The full item ref on each side lets the source/target composite indexes
+  // serve the query. It does not prune partitions: `partition_network` is not
+  // filtered because a source-side action can live in another network's
+  // partition.
   const asSource = and(
     eq(item_actions.source_item_network, item.item_network),
     eq(item_actions.source_item_domain, item.item_domain),
@@ -99,9 +85,7 @@ export async function cancelItemConnections(
 
   const counterparties: RetireCancelledCounterparty[] = [];
   for (const a of actions) {
-    // Resolve the interaction to read its cancel/terminal buckets. If it's no
-    // longer defined in config, fall through with no categories — retire still
-    // cancels via the fallback below rather than leaving the action dangling.
+    // An interaction missing from config still gets cancelled via the fallback.
     let interaction: ReturnType<typeof getActionInteraction> | null = null;
     try {
       const networkConfig = await getNetworkConfigById(a.target_item_network);
@@ -118,16 +102,12 @@ export async function cancelItemConnections(
       logger?.warn({ err, action_id: a.action_id }, 'retire: interaction unresolved — cancelling with fallback status');
     }
 
-    // Retire must end EVERY still-open connection, so we always resolve a cancel
-    // status: the interaction's own `cancel` bucket when defined, else a literal
-    // 'cancelled' fallback for interactions the network doesn't track
-    // (metric_categories null) — otherwise those actions dangle as Pending
+    // Always resolve a cancel status, or untracked actions would stay pending
     // forever against a profile that no longer exists.
     const cats = interaction?.metric_categories;
     const cancelStatus = cats?.cancel?.[0] ?? DEFAULT_CANCEL_STATUS;
 
-    // Skip anything already terminal. Include the universal fallbacks so an
-    // untracked action that's already cancelled/rejected isn't touched again.
+    // The literal fallbacks keep an untracked, already-ended action untouched.
     const terminal = new Set([
       ...(cats?.reject ?? []),
       ...(cats?.cancel ?? []),
@@ -151,9 +131,8 @@ export async function cancelItemConnections(
         ),
       );
 
-    // The counterparty is the side that is NOT the retired item. A self-domain
-    // interaction (both sides the same item) has no external counterparty →
-    // skip so we never email the retiring owner about their own retire.
+    // An action with the retired item on both sides has no counterparty, so the
+    // retiring owner is never emailed about their own retire.
     const retiredIsSource = a.source_item_id === item.item_id;
     const cp = retiredIsSource
       ? {

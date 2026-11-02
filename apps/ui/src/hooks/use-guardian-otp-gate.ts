@@ -2,16 +2,15 @@ import * as React from 'react';
 import { guardianOtpErrorFromThrown } from '@/lib/action-api';
 
 /**
- * The minor-ward guardian-OTP challenge/response loop shared by the action
- * components: an action submit that comes back `GUARDIAN_OTP_REQUIRED` stashes
- * the exact thing to resubmit, opens the OTP dialog, and — once the code is
- * entered — resubmits it with the OTP and clears. `T` is whatever the caller
- * needs to replay the call (action context, or an update payload).
+ * The minor's guardian-OTP loop shared by the action components: a submit that
+ * fails with `GUARDIAN_OTP_REQUIRED` stashes what to resubmit and opens the OTP
+ * dialog; the entered code resubmits it and clears. `T` is whatever the caller
+ * needs to replay the call.
  */
 export function useGuardianOtpGate<T>(resubmit: (challenge: T, otp: string) => Promise<void>): {
   challenge: T | null;
   setChallenge: React.Dispatch<React.SetStateAction<T | null>>;
-  /** Returns true (and stashes) when `err` is GUARDIAN_OTP_REQUIRED; else false — caller rethrows/handles. */
+  /** True (and stashes `challenge`) when `err` is GUARDIAN_OTP_REQUIRED; otherwise the caller handles `err`. */
   captureIfGuardianRequired: (err: unknown, challenge: T) => boolean;
   submitOtp: (otp: string) => Promise<void>;
 } {

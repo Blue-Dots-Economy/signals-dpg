@@ -26,10 +26,8 @@ export interface ProfileRowActionsProps {
 }
 
 /**
- * Icon-only per-profile lifecycle actions shown on each "My Profiles" row
- * (#346 pause / #347 retire): Edit · Pause/Resume · Retire. Pause + retire are
- * confirmed first (retire is terminal + irreversible); resume is applied
- * directly. Lives here — the row — not inside the edit form.
+ * Icon-only lifecycle actions on each "My Profiles" row: Edit, Pause/Resume,
+ * Retire. Pause, resume and retire each confirm first; retire is terminal.
  */
 export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: ProfileRowActionsProps) {
   const { t } = useTranslation();
@@ -39,8 +37,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
   const [retireConfirm, setRetireConfirm] = React.useState(false);
 
   const status = profile.lifecycle_status;
-  // Pause offered only on a live profile when the network allows it; resume on a
-  // paused one (always allowed, so a paused profile can be recovered).
+  // Resume is always allowed, so a paused profile can be recovered.
   const showPause = status === 'live' && pauseEnabled;
   const showResume = status === 'paused';
 
@@ -197,7 +194,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
         </DialogContent>
       </Dialog>
 
-      {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
+      {/* Confirm before retiring: terminal, irreversible, wipes PII. */}
       <Dialog open={retireConfirm} onOpenChange={setRetireConfirm}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>

@@ -1,35 +1,27 @@
 import { renderSmsPreview, type SmsTemplateIndex } from './sms_templates';
 
 /**
- * Central SMS sender (#532/#535) — the mirror of the #529 email sender, but
- * provider-agnostic: it posts `{ channel: 'sms', template_id, variables }` to
- * the notification service, which owns the provider (MSG91 today). Nothing
- * here is provider-specific.
+ * Central SMS sender. Posts `{ channel: 'sms', template_id, variables }` to
+ * notification-service, which owns the SMS provider.
  *
- * signalstack owns the id map (option B): `template_id` is the per-brand,
- * DLT-approved flow id from the SMS template index; the notification service
- * passes it through (`allowRawTemplateId`) and renders from the DLT template.
- * When a case has no `template_id` (not yet approved) the send is skipped.
+ * `template_id` is the DLT-approved id from the SMS template index, which
+ * notification-service passes through to the provider. A case with no
+ * `template_id` (not yet approved) is skipped.
  *
- * Best-effort: never throws, never blocks the triggering action.
+ * Best-effort: never throws.
  */
 
 export type SmsPriority = 'realtime' | 'other';
 
-/**
- * Mask a phone to its last 4 digits for the dev preview log. The preview is
- * non-prod only, but no raw phone (PII) is ever placed into a log-bound string
- * — a mis-wired previewLog must not be able to leak a full number.
- */
+/** Masks a phone to its last 4 digits. Never put a raw phone in a log-bound string. */
 function maskPhone(to: string): string {
   const tail = to.replace(/\D/g, '').slice(-4);
   return tail ? `****${tail}` : '****';
 }
 
 /**
- * Project the caller's variables onto the template's declared `vars`: keep only
- * declared keys (drop undeclared extras) and report any declared key the caller
- * omitted. When a template declares no vars, forward the caller's map as-is.
+ * Keeps only the template's declared `vars` and reports declared keys the
+ * caller omitted. A template with no declared vars forwards everything.
  */
 function selectDeclaredVars(
   declared: string[],
@@ -88,21 +80,18 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
         const entry = index.get(args.caseId);
 
         if (!entry?.templateId) {
-          // Not configured / not yet DLT-approved — a no-op, not an error.
+          // Not configured or not yet DLT-approved: a skip, not an error.
           deps.log('sms template not configured', { caseId: args.caseId, network });
           return { ok: false, skipped: true };
         }
 
-        // Enforce the declared variable contract: forward ONLY the vars the
-        // DLT template expects (dropping undeclared extras keeps stray PII off
-        // the wire), and surface any declared var the caller failed to supply
-        // — it would otherwise render blank in the delivered SMS.
+        // Dropping undeclared vars keeps stray PII off the wire; a missing
+        // declared var would render blank, so it is logged.
         const variables = selectDeclaredVars(entry.vars, args.variables ?? {}, (missing) =>
           deps.log('sms missing declared variables', { caseId: args.caseId, missing }),
         );
 
-        // Dev preview only — the real text is rendered provider-side from the
-        // DLT template; this shows what that will say. Never in prod.
+        // Dev preview of the text the provider renders from the DLT template.
         deps.previewLog?.(
           `[sms:${args.caseId}] to=${maskPhone(args.to)} template_id=${entry.templateId}  ${renderSmsPreview(entry.body, variables)}`,
         );
@@ -116,8 +105,7 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
         });
         return { ok: true };
       } catch (err) {
-        // Log the message only — never the raw error object, which can
-        // serialize the provider request/response (phone, variables = PII).
+        // Log the message only: the raw error can carry the phone and variables (PII).
         deps.log('sms dispatch failed', {
           caseId: args.caseId,
           error: err instanceof Error ? err.message : String(err),

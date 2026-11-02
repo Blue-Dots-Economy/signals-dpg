@@ -3,18 +3,11 @@ import { geocodingConfig } from '@/config';
 import type { Coordinates } from './geo_resolver';
 
 /**
- * Country-boundary check for CALLER-SUPPLIED coordinates (#789).
- *
- * Restricting the geocoders (#787/#788) does not cover a point the caller
- * resolved itself — an aggregator bulk `geo_location` cell, an autocomplete
- * pick, a partner integration — because those skip geocoding and are stored
- * as-is (#506). This holds them to the configured country instead.
- *
- * The boundary is a GeoJSON file delivered by ConfigMap
- * (`GEOCODING_BOUNDARY_PATH`), not bundled, so a deployment chooses its source
- * map (Natural Earth's India point-of-view file by default; the Survey of India
- * outline if required) without an image rebuild. A bounding box is deliberately
- * NOT used: India's contains Bangladesh, the case this exists to catch.
+ * Country-boundary check for caller-supplied coordinates, which skip the
+ * country-restricted geocoders. The boundary is a GeoJSON file from a
+ * ConfigMap (`GEOCODING_BOUNDARY_PATH`); a bounding box is not used because
+ * India's contains Bangladesh.
+ * Design: docs/architecture/api-geo-country-boundary.md.
  */
 
 /** `[lng, lat]`, GeoJSON order. */
@@ -24,18 +17,10 @@ type Polygon = Position[][];
 export type BoundaryPolygons = Polygon[];
 
 /**
- * How far outside the drawn border a point may sit and still count as inside.
- * The default boundary is Natural Earth 1:10m, whose own positional error is
- * several km along the Bangladesh border: Petrapole (WB) sits 6.25 km outside
- * the drawn line, Jogbani (Bihar) 3.5 km, Moreh (Manipur) 2.3 km. A real border
- * address must not fail its write over that.
- *
- * 15 km clears those with over 2x margin and still rejects the nearest foreign
- * cities (Lahore 21 km, Jessore 26 km, Sylhet 31 km, Khulna 61 km, Dhaka 74 km,
- * Kathmandu 84 km outside). Don't raise it past ~20 km: Lahore gets in. What it
- * admits is the strip on the far side of the border that a 1:10m outline cannot
- * resolve anyway (Benapole, Birgunj, Rajshahi). A sharper source (Survey of
- * India) would justify a tighter value.
+ * How far outside the drawn border a point may sit and still count as inside,
+ * covering the default 1:10m outline's several-km error at real border towns.
+ * Do not raise it past ~20 km: Lahore (21 km outside) would pass.
+ * Design: docs/architecture/api-geo-country-boundary.md.
  */
 export const BOUNDARY_TOLERANCE_METERS = 15_000;
 
@@ -145,12 +130,10 @@ export function isPointInBoundary(
 let boundaryPromise: Promise<BoundaryPolygons | null> | null = null;
 
 /**
- * The configured boundary, read once and memoised. Resolves `null` — the check
- * is skipped — when no country is set, no path is set, or the file can't be
- * read or parsed. That is fail-open on purpose: a missing ConfigMap is a config
- * gap, and blocking every location write over it would take registrations down
- * with it. It warns, and `app.ts` loads this at boot so the warning lands in
- * deploy logs rather than on the first write.
+ * The configured boundary, read once and memoised. Resolves `null` (check
+ * skipped) when no country is set, or, with a warning, when no path is set or
+ * the file can't be read or parsed. Fail-open because blocking every location write over a
+ * missing ConfigMap would take registrations down. `app.ts` loads this at boot.
  */
 export function loadCountryBoundary(): Promise<BoundaryPolygons | null> {
   if (boundaryPromise) return boundaryPromise;

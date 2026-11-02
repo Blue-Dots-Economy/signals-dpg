@@ -63,10 +63,8 @@ export const item_actions = pgTable(
       table.target_item_owner,
       table.updated_at
     ),
-    // Per-pair action cap (#370/#422): the open-action recount matches the
-    // unordered {source, target} pair from either direction. Both orderings are
-    // indexed so `(source=A AND target=B) OR (source=B AND target=A)` is
-    // index-served either way. Created by drizzle/0010_action_pair_open_indexes.sql.
+    // The per-pair action cap matches the unordered {source, target} pair, so
+    // both orderings are indexed. Created by drizzle/0010_action_pair_open_indexes.sql.
     index('item_actions_pair_src_tgt_idx').on(
       table.partition_network,
       table.source_item_id,
@@ -77,9 +75,8 @@ export const item_actions = pgTable(
       table.target_item_id,
       table.source_item_id
     ),
-    // #439: My-Actions per-profile filter/sort needs to page an owner's
-    // actions by status and recency from either side of the relation.
-    // Created by drizzle/0011_action_owner_status_indexes.sql.
+    // My Actions pages an owner's actions by status and recency from either
+    // side. Created by drizzle/0011_action_owner_status_indexes.sql.
     index('item_actions_target_owner_status_idx').on(
       table.target_item_owner,
       table.action_status,

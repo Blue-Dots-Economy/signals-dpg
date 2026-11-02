@@ -83,15 +83,13 @@ interface ActionsTableProps extends Labels {
   selectionNoteDetail?: string;
   onCommand: (action: Action, command: RowCommand) => void;
   /**
-   * What to say when there are no rows. Defaults to the "no match — loosen
-   * the filters" copy; the page passes a first-use message when nothing is
-   * filtered and the caller simply has no actions yet.
+   * No-rows message. Defaults to "no match, loosen the filters"; the page
+   * passes a first-use message when nothing is filtered.
    */
   emptyState?: EmptyStateCopy;
   /**
    * Whether rows can be selected. False when no bulk command could ever apply
-   * to this caller (e.g. a seeker who cannot export and has nothing to answer):
-   * checkboxes that lead nowhere are hidden. Default true.
+   * to this caller, so checkboxes that lead nowhere are hidden.
    */
   selectable?: boolean;
 }
@@ -123,8 +121,7 @@ function EmptyMessage({ copy }: Readonly<{ copy: EmptyStateCopy | undefined }>) 
 
 type Translate = (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 
-// Name is the one flexible column (it takes whatever width is left); every
-// other column is sized to its content so it never hoards spare space.
+// Name takes the remaining width; every other column is sized to content.
 const COLUMN_WIDTH: Record<ColumnId, number | undefined> = {
   action: 170,
   direction: 105,
@@ -264,7 +261,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
     updated: t('my_actions.col_updated', 'Updated'),
   };
   const visible = (Object.keys(COLUMN_WIDTH) as ColumnId[]).filter((c) => columns[c]);
-  const colCount = visible.length + 3; // select + name + columns + menu
+  const colCount = visible.length + 3; // select + name + menu
   const isMobile = useIsMobile();
 
   if (isMobile) {
@@ -342,8 +339,7 @@ export function ActionsTable(props: Readonly<ActionsTableProps>) {
 function SelectionBar(props: Readonly<ActionsTableProps>) {
   const { t } = useTranslation();
   const { selected, total } = props;
-  // Only what applies to this selection — a button with nothing to act on is
-  // left out rather than shown disabled.
+  // Only commands that apply to this selection; none are shown disabled.
   const commands = props.bulkCommands.filter((b) => b.count > 0);
   return (
     <section
@@ -527,7 +523,7 @@ function Pagination(props: Readonly<ActionsTableProps>) {
   );
 }
 
-// ─── Phone layout: one card per action ──────────────────────────────────────
+// Phone layout: one card per action.
 
 function CardList(props: Readonly<ActionsTableProps>) {
   const { t } = useTranslation();
@@ -635,7 +631,6 @@ function ActionCard({
   );
 }
 
-// ─── One action ─────────────────────────────────────────────────────────────
 
 interface ActionRowProps {
   action: Action;

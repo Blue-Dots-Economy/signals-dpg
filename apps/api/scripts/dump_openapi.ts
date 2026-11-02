@@ -20,4 +20,4 @@ await writeFile(
 );
 await app.close();
 console.log(`openapi.json written (${Object.keys((spec as { paths: object }).paths).length} paths)`);
-process.exit(0); // ioredis/better-auth may hold live handles — exit explicitly
+process.exit(0); // ioredis may hold live handles — exit explicitly

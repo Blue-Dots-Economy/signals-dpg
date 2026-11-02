@@ -5,11 +5,9 @@ import type { DotNetworkSchema } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
 
 /**
- * The current user's profile-creation-consent status for a network, as a
- * `Set<string>` of consented item ids. Config tier (5 min); the consent-accept
- * mutation invalidates/updates this query. Disabled when there is no network or
- * no authenticated user. Fail-open: on error `data` is undefined and the
- * consumer treats it as an empty set (so the gate still prompts).
+ * The current user's consented profile item ids for a network. Config tier
+ * (5 min); the consent-accept flow updates this query. On error `data` is
+ * undefined and consumers treat it as an empty set, so the gate still prompts.
  */
 export function useProfileConsentStatus(network: DotNetworkSchema | null) {
   const { user } = useAuth();

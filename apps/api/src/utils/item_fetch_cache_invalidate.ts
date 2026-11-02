@@ -1,19 +1,10 @@
 import { redis } from '@api/db/secondary/redis';
 
 /**
- * Cache-invalidation companion for the item read paths.
- *
- * Two caches sit in front of the items table:
- *   - `local-item-fetch:*`  → 1 s TTL, set by item_fetch_cache.ts
- *   - `item-count:*` / `item-page:*` → minimum_cache_ttl_seconds from the
- *      network config (defaults to 300 s for blue_dot/seeker), set by
- *      inter_instance_fetch.ts
- *
- * The longer-lived inter-instance caches are the ones operators notice
- * after a create / update / delete — the local cache is sub-second and
- * effectively self-heals. After any item mutation we sweep both cache
- * families for the affected (network, domain) so the next read sees
- * fresh data.
+ * Sweeps the item read caches for one (network, domain) after a mutation:
+ * `local-item-fetch:*` (1 s TTL, item_fetch_cache.ts) and `item-count:*` /
+ * `item-page:*` (network-config TTL, inter_instance_fetch.ts). The
+ * inter-instance entries are the long-lived ones a user would notice.
  */
 export async function invalidateItemFetchCache(
   network: string,
@@ -35,7 +26,7 @@ async function deleteByPattern(pattern: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     stream.on('data', (keys: string[]) => {
       if (keys.length === 0) return;
-      // UNLINK if available (non-blocking delete in newer Redis), else DEL.
+      // UNLINK (non-blocking) where available, else DEL.
       pending.push(redis.unlink(...keys).catch(() => redis.del(...keys)));
     });
     stream.on('end', () => resolve());

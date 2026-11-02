@@ -21,10 +21,10 @@ export interface MatchScoreCardProps {
   localItem: Item | null;
   networkItem: Item;
   selectionMode?: boolean;
-  /** Disable the action CTA — an open action already exists for this pair (#370/#422). */
+  /** Disable the action CTA: an open action already exists for this pair. */
   actionsDisabled?: boolean;
   actionsDisabledReason?: string;
-  /** #646 C1: decides which quantity the card's pill shows. */
+  /** Decides which quantity the card's pill shows. */
   sortApplied?: BrowseSort;
   relevanceBasis?: 'profile' | 'search' | null;
 }
@@ -62,11 +62,8 @@ export function MatchScoreCard({
   });
 
   const handleCalculate = React.useCallback(() => {
-    // Open the details modal on the same click that starts the calculation, so
-    // the list matches the map's one-click flow: the modal shows its loading
-    // state, then the full score + factors. Closing it collapses back to the
-    // score badge (rendered by MatchScoreButton once a score exists), which
-    // reopens the modal via handleViewDetails.
+    // Opens the modal on the same click that starts the calculation, like the
+    // map's one-click flow; it shows loading, then the score.
     calculate();
     setIsModalOpen(true);
   }, [calculate]);
@@ -85,15 +82,12 @@ export function MatchScoreCard({
 
   const handleProceed = React.useCallback(() => {
     setIsModalOpen(false);
-    // Blocked while an open action exists for the pair (#370/#422).
     if (actionsDisabled) return;
-    // Trigger the first action if available
     if (actions.length > 0 && onAction) {
       onAction(actions[0].action_type, actions[0]);
     }
   }, [actions, onAction, actionsDisabled]);
 
-  // Get title for items
   const titleKey = findTitleField(schema);
   const localItemName = localItem 
     ? (localItem.item_state[titleKey ?? 'name'] as string) ?? 'Your Profile'

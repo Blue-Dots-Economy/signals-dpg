@@ -45,9 +45,8 @@ const FetchOwnedActionsResponseSchema = z.object({
     total: z.number(),
     limit: z.number(),
     offset: z.number(),
-    // Echoes back the filters/sort/facets actually applied to this page, so
-    // the UI can render active-filter chips without re-deriving them from
-    // the request it sent (#439).
+    // Echoes the filters/sort/facets applied to this page, so the UI can
+    // render active-filter chips without re-deriving them.
     applied: z.object({
       sort: ActionSortKeySchema,
       statuses: z.string().array(),
@@ -109,10 +108,9 @@ const fetch_actions_handler = async (
   const scopedIds = scopedItemIds({ item_id, item_ids });
   const includes: readonly string[] = include ?? [];
 
-  // Note: no partition pruning here (deliberate). This is an owner-scoped
-  // fetch across the caller's own actions, not a single-network browse — there
-  // is no one network to prune on, so we rely on the owner+status indexes
-  // instead of inventing a network param.
+  // No partition pruning: an owner-scoped fetch across the caller's own
+  // actions has no single network to prune on, so it relies on the
+  // owner+status indexes.
   const whereClause = buildOwnedActionsWhere(userId, {
     action_id,
     action_type,
@@ -121,11 +119,9 @@ const fetch_actions_handler = async (
     ownership_role,
   });
 
-  // Sort fast path (#439 Task 6). 'distance' has no SQL-orderable column
-  // here — distance is computed at read time from item locations in the
-  // Task 7 enrichment stage, which re-sorts the page after fetch — so it
-  // falls through to the 'recent' ordering below rather than getting its own
-  // branch.
+  // 'distance' has no SQL-orderable column: it is computed from item locations
+  // in the enrichment stage, which re-sorts, so here it falls through to
+  // 'recent'.
   const nonOldestOrderBy =
     sort === 'match_score'
       ? [sql`${item_actions.match_score} DESC NULLS LAST`, desc(item_actions.updated_at)]
@@ -136,16 +132,11 @@ const fetch_actions_handler = async (
       : nonOldestOrderBy;
 
   try {
-    // Ownership guard (#439 Task 6, defense-in-depth): the owner filter below
-    // already fails closed to an empty page for a foreign item_id, but that's
-    // silent — a caller probing with someone else's item_id deserves a loud,
-    // explicit rejection instead of an empty-but-200 response. A missing
-    // item_id and a foreign one return the identical 403 body — no existence
-    // leak. Mirrors the ownership check in perform_action.ts
-    // (`sourceItemSnapshot.created_by === actor.effective_user_id`). Runs
-    // inside this try (not before it) so a DB error from this query hits the
-    // same structured-500 + logged catch as the count/rows queries below,
-    // rather than rejecting unhandled (routes-never-throw).
+    // Ownership guard (defence in depth): the owner filter below already
+    // yields an empty page for a foreign item_id, but a probe gets an explicit
+    // 403 instead. Missing and foreign item_ids get the identical body, so
+    // existence does not leak. Inside the try so a DB error gets the same
+    // logged 500 as the queries below.
     if (scopedIds.length > 0) {
       const owned = await db
         .select({ item_id: items.item_id, created_by: items.created_by })
@@ -162,16 +153,13 @@ const fetch_actions_handler = async (
       }
     }
 
-    // #439 Task 7: two read paths over the same owner+status/type WHERE.
-    // - Fast path (no facets, sort !== 'distance'): unchanged Task 6
-    //   SQL LIMIT/OFFSET + count(*) — cheapest, and the common case.
-    // - Enriched path (facets?.length or sort === 'distance'): facets are
-    //   non-PII item_state fields and distance is derived from item
-    //   locations — neither is a SQL-orderable/filterable column on
-    //   item_actions, so this loads every row matching the WHERE (bounded —
-    //   one profile's actions, no cross-profile scan), filters/sorts in
-    //   memory, and slices the page itself. `total` becomes the *filtered*
-    //   count, not the raw SQL match count.
+    // Two read paths over the same owner+status/type WHERE:
+    // - Fast path (no facets, sort !== 'distance'): SQL LIMIT/OFFSET +
+    //   count(*).
+    // - Enriched path (facets or sort === 'distance'): neither is a SQL
+    //   column on item_actions, so every matching row is loaded (bounded to
+    //   one caller's actions), filtered/sorted in memory, and paged here.
+    //   `total` is then the filtered count.
     const facetsList: Array<FacetSelection & { domain?: string }> = facets ?? [];
     const useEnrichedPath = facetsList.length > 0 || sort === 'distance' || Boolean(q);
 
@@ -192,9 +180,7 @@ const fetch_actions_handler = async (
         .offset(offset);
       total = Number(count);
     } else {
-      // No SQL LIMIT/OFFSET here: facets and 'distance' sort are applied
-      // in-memory below, so the count/pagination has to happen after that,
-      // not before it.
+      // No SQL LIMIT/OFFSET: paging happens after the in-memory filter/sort.
       matchingRows = await db
         .select()
         .from(item_actions)
@@ -203,27 +189,20 @@ const fetch_actions_handler = async (
       total = 0; // set below, once filtered.
     }
 
-    // Resolve a name + facet/geo metadata for every source + target item
-    // touched by matchingRows (the page in the fast path; every matching row
-    // in the enriched path — still bounded to this caller's own actions):
-    // - Public display_name_field (e.g. provider organisation_name) → returned
-    //   as-is, never masked.
-    // - Private name (e.g. seeker beneficiary_name) → the schema-aware mask
-    //   already lives in item_state (written via maskPrivateState at item
-    //   create time, e.g. "M***"). Per-action consent gating happens below:
-    //   reveal the real value only when action_status is in the network's
-    //   schema-declared reveals_pii_on_status for this interaction; otherwise
-    //   the already-masked value is used.
-    // - `meta` (item_state + item_locations) is the non-PII facet/geo
-    //   projection Task 7 filters and sorts on — never the masked name.
+    // Resolve a name + facet/geo metadata for every source + target item in
+    // matchingRows:
+    // - Public display_name_field (e.g. provider organisation_name): returned
+    //   as-is.
+    // - Private name (e.g. seeker beneficiary_name): item_state already holds
+    //   the mask (e.g. "M***"); the real value is revealed only when
+    //   action_status is in the interaction's reveals_pii_on_status.
+    // - `meta` (item_state + item_locations): the non-PII facet/geo projection
+    //   the enriched path filters and sorts on.
     const { names: resolvedNames, meta: itemMeta } = await resolveItemNames(matchingRows, request.log);
 
-    // Pre-resolve reveals_pii_on_status per action row. Mirrors the gate used
-    // by /api/v1/action/:id/contact-details so the list view never reveals a
-    // status the contact-detail reveal would refuse. Resolution failures fall
-    // back to an empty set (mask), matching the contact-details fail-closed
-    // posture. Shared with the Task 7 facet-schema lookup below — both key off
-    // network id.
+    // Pre-resolve reveals_pii_on_status per action row, mirroring the
+    // contact-details gate so the list never reveals what that would refuse.
+    // A resolution failure falls back to an empty set (mask).
     const getNetworkConfigCached = memoizeNetworkConfigs((err, network) =>
       request.log.warn({ err, network }, 'network config unavailable in fetch_actions — masking'),
     );
@@ -241,9 +220,8 @@ const fetch_actions_handler = async (
         itemMeta.get(counterpartyId(row))?.item_locations,
       );
 
-    // facet_guard: the allowed (declared, non-private) field set depends only
-    // on the counterparty item's network/domain/item_type — cache it per
-    // triple rather than re-resolving the schema for every row.
+    // The allowed (declared, non-private) facet fields depend only on the
+    // counterparty's network/domain/item_type, so they are cached per triple.
     const facetAllowedCache = new Map<string, ReturnType<typeof resolveAllowedFacetFilters>>();
     const allowedFacetsFor = async (cMeta: ItemMeta | undefined) => {
       if (!cMeta || facetsList.length === 0) return [];
@@ -271,12 +249,11 @@ const fetch_actions_handler = async (
       return allowed;
     };
 
-    // A row passes when, for every ALLOWED selection (private/undeclared
-    // fields are dropped by allowedFacetsFor — never filtered on, never
-    // enumerable), the counterparty's item_state[field] intersects the
-    // selected values. No counterparty metadata (e.g. item since deleted) →
-    // nothing to filter on → passes (fail-open on the filter, not on PII:
-    // there is no state to leak either way).
+    // A row passes when, for every allowed selection (private/undeclared
+    // fields are dropped by allowedFacetsFor), the counterparty's
+    // item_state[field] intersects the selected values. No counterparty
+    // metadata (e.g. item deleted) passes: fail-open on the filter only, with
+    // no state to leak.
     const passesFacets = async (row: OwnedRowIds): Promise<boolean> => {
       if (facetsList.length === 0) return true;
       const cMeta = itemMeta.get(counterpartyId(row));
@@ -313,9 +290,7 @@ const fetch_actions_handler = async (
     }
     };
 
-    // Memoise decrypts per item — the same item can appear on multiple rows
-    // (source on one action, target on another) and we only want to pay the
-    // crypto cost once per page.
+    // Memoise decrypts per item: the same item can appear on several rows.
     const unmaskedCache = new Map<string, string | null>();
     const unmask = (id: string): string | null => {
       if (unmaskedCache.has(id)) return unmaskedCache.get(id) ?? null;
@@ -363,11 +338,9 @@ const fetch_actions_handler = async (
       const entry = resolvedNames.get(id);
       if (!entry) return null;
       if (entry.kind === 'public') return entry.value;
-      // Private field: schema-aware mask sits in item_state already; reveal
-      // the real value only when this action's status is in the network's
-      // schema-declared reveals_pii_on_status AND the named profile is live.
-      // A paused/draft profile keeps its name masked even on an accepted
-      // action — mirrors the contact-details reveal gate (#273).
+      // Private field: reveal only when this action's status is in
+      // reveals_pii_on_status and the named profile is live (as the
+      // contact-details gate does); a paused/draft profile stays masked.
       if (privateNameShown(revealStatusesByAction.get(actionId) ?? [], status, entry.lifecycle_status)) {
         return unmask(id) ?? entry.masked;
       }
@@ -394,9 +367,7 @@ const fetch_actions_handler = async (
       );
       let enriched = withComputed.filter((e) => e.pass && passesSearch(e.row));
       if (sort === 'distance') {
-        // Stable sort: distance asc, nulls last, ties keep the SQL-supplied
-        // recency order (Array.prototype.sort is stable in the Node engines
-        // this runs on).
+        // Stable sort: distance asc, nulls last, ties keep the SQL recency order.
         enriched = enriched
           .map((e, i) => ({ e, i }))
           .sort((a, b) => {
@@ -513,8 +484,7 @@ const fetch_actions_handler = async (
           ...(row.source_item_owner === userId ? (['initiated'] as const) : []),
           ...(row.target_item_owner === userId ? (['received'] as const) : []),
         ],
-        // distance_m is computed at read time (#439 Task 7) from item
-        // locations — null when either side has none.
+        // Computed from item locations; null when either side has none.
         distance_m: distanceByActionId.get(row.action_id) ?? null,
         ...(counterparties ? { counterparty: counterparties.get(row.action_id) ?? null } : {}),
       })),
@@ -539,9 +509,8 @@ type ActionRow = {
   target_item_type: string;
 };
 
-// The subset of an item_actions row Task 7's counterparty/distance/facet
-// helpers need — every real row (the full drizzle select) is a superset of
-// this, so callers pass rows straight through with no mapping.
+// The subset of an item_actions row the counterparty/distance/facet helpers
+// need; a full row is a superset, so callers pass rows straight through.
 type OwnedRowIds = {
   action_id: string;
   source_item_id: string;
@@ -550,12 +519,9 @@ type OwnedRowIds = {
   target_item_owner: string | null;
 };
 
-// Non-PII, facet/geo projection of an item — the counterpart to `ResolvedName`
-// (which carries the display name, masked or not). `item_state` here is
-// always the public projection already used for masking (never the
-// encrypted private blob), and is only ever read through `facet_guard`'s
-// declared-non-private allowlist, so it can't leak an undeclared/private
-// field even though the whole object is held in memory.
+// Non-PII facet/geo projection of an item. `item_state` is the public
+// (masked) projection, never the private blob, and is only read through
+// `facet_guard`'s declared-non-private allowlist.
 type ItemMeta = {
   item_state: Record<string, unknown>;
   item_locations: Array<{ lat: number; lng: number; label?: string }>;
@@ -572,22 +538,18 @@ type ResolvedName =
       fieldName: string;
       encrypted: string;
       publicState: Record<string, unknown>;
-      // Reveal the real name only when this item is live. A paused/draft
-      // profile keeps its name masked even on an accepted action (#273).
+      // Reveal the real name only when this item is live.
       lifecycle_status: string;
     };
 
 
 /**
- * Batch-resolves a display name AND a non-PII facet/geo projection for every
- * source + target item on the page in one `items` query. `names` is either a
- * public name (rendered as-is) or a private-name reference carrying the
- * masked value + the encrypted blob, so the handler can lazily decrypt only
- * the rows whose action_status warrants a reveal. Items with no resolvable
- * name are absent from `names`; UI then renders the role-based fallback.
- * `meta` (#439 Task 7) carries `item_state`/`item_locations` for EVERY
- * resolved item regardless of name outcome — it's what the facet filter and
- * distance sort/display read, never the masked name.
+ * Batch-resolves a display name and a non-PII facet/geo projection for every
+ * source + target item in one `items` query. `names` holds either a public
+ * name or a private-name reference (masked value + encrypted blob) so the
+ * handler decrypts only rows whose action_status warrants a reveal; items with
+ * no resolvable name are absent and the UI shows a role-based fallback. `meta`
+ * is populated for every resolved item.
  */
 async function resolveItemNames(
   rows: ActionRow[],
@@ -630,8 +592,7 @@ async function resolveItemNames(
       | undefined;
     const publicState = (item.item_state ?? {}) as Record<string, unknown>;
 
-    // #439 Task 7: non-PII facet/geo projection, populated for every item
-    // regardless of how (or whether) its name resolves below.
+    // Populated for every item, whether or not its name resolves below.
     meta.set(item.item_id, {
       item_state: publicState,
       item_locations: Array.isArray(item.item_locations)
@@ -653,9 +614,8 @@ async function resolveItemNames(
       continue;
     }
 
-    // 2. Private name — pulled from item_state, where maskPrivateState has
-    //    already pre-masked private fields (e.g. "M***"). Keep a reference to
-    //    the encrypted blob so the handler can reveal post-accept.
+    // 2. Private name: item_state holds the mask (e.g. "M***"); keep the
+    //    encrypted blob so the handler can reveal post-accept.
     let masked: string | null = null;
     let fieldName: string | null = null;
     for (const f of PRIVATE_NAME_FIELDS) {

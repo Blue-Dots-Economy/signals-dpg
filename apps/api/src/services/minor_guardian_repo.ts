@@ -9,10 +9,8 @@ import type { DbOrTx } from './item_service';
 type GuardianContactType = 'phone' | 'email';
 
 /**
- * How many OTHER wards are already linked to this guardian contact (matched by
- * the deterministic guardian ref). Excludes `excludeUserId` (the ward being
- * (re)linked) so re-submitting the same guardian for the same ward doesn't
- * count against the cap.
+ * How many other wards are linked to this guardian ref. `excludeUserId` (the
+ * ward being re-linked) is not counted.
  */
 export async function countWardsForGuardian(
   ref: string,
@@ -35,15 +33,10 @@ export class WardLimitError extends Error {
 }
 
 /**
- * Enforce `MAX_WARDS_PER_GUARDIAN` atomically INSIDE `tx`, closing the
- * check-then-write race. `isGuardianWardLimitReached` (a bare `SELECT count()`)
- * followed by a separate insert lets two concurrent registrations of the SAME
- * guardian both pass the check and both insert — the `guardian_ref` index is
- * non-unique, so nothing stops the overflow. Here a transaction-scoped advisory
- * lock keyed on the ref serializes those registrations: the recount + insert
- * happen while the lock is held, so the second waiter sees the first's row and
- * is rejected. Must be called before the guardian row is written in the same tx.
- * `excludeUserId` skips the ward being (re)linked so a re-submit isn't counted.
+ * Enforces `MAX_WARDS_PER_GUARDIAN` inside `tx`. A transaction-scoped advisory
+ * lock on the ref serializes concurrent links of one guardian (the
+ * `guardian_ref` index is not unique), so call it before writing the guardian
+ * row in the same tx. Throws WardLimitError.
  */
 export async function assertWardLimitWithLock(
   tx: DbOrTx,
@@ -58,11 +51,9 @@ export async function assertWardLimitWithLock(
 }
 
 /**
- * Whether linking another ward to this guardian contact would hit the cap
- * (`MAX_WARDS_PER_GUARDIAN`). `excludeUserId` is the ward being re-linked (so
- * updating an existing ward's guardian doesn't count them twice), or null at
- * signup where no ward id exists yet. Wraps the guardianRef + count + threshold
- * so both the route and the pre-auth signup flow apply the same rule.
+ * Unlocked pre-check: whether linking another ward to this contact would hit
+ * `MAX_WARDS_PER_GUARDIAN`. `excludeUserId` is null at signup, where no ward id
+ * exists yet.
  */
 export async function isGuardianWardLimitReached(
   contact: string,
@@ -73,9 +64,8 @@ export async function isGuardianWardLimitReached(
 }
 
 /**
- * Warn-and-ack guard: whether a guardian email/phone equals the ward's own
- * contact. Email compared case-insensitively, phone trimmed — matching how both
- * call sites normalized before this was centralized.
+ * Whether a guardian email/phone equals the ward's own contact. Email is
+ * compared case-insensitively, phone after trimming.
  */
 export function guardianContactMatchesWard(args: {
   wardEmail?: string | null;
@@ -106,9 +96,8 @@ export async function setWardAge(userId: string, age: number, exec: DbOrTx = db)
 }
 
 /**
- * The age-present + under-18 gate shared by the consent handlers. Returns the
- * age on success, or a typed reason (DOB_REQUIRED / NOT_A_MINOR) callers map to
- * 409 — so the pair isn't re-inlined per handler.
+ * The age-present and under-18 gate shared by the consent handlers. Callers map
+ * the failure codes to 409.
  */
 export type MinorWardCheck =
   | { ok: true; age: number }
@@ -140,9 +129,8 @@ export async function getMinorGuardian(userId: string): Promise<{
 }
 
 /**
- * Resolve the single OTP channel from the two guardian contacts — phone is
- * preferred when both are given (per the U18 spec's channel order). Throws if
- * neither is present (callers validate at least one upstream).
+ * Resolves the OTP channel from the guardian contacts; phone is preferred when
+ * both are given. Throws if neither is present.
  */
 export function resolveOtpChannel(input: {
   guardianEmail?: string | null;
@@ -154,10 +142,9 @@ export function resolveOtpChannel(input: {
 }
 
 /**
- * Store guardian details, name + contacts encrypted at rest. Resets verified.
- * Persists BOTH contacts the guardian supplied; `guardian_contact`/`_type`
- * mirror the resolved OTP channel (phone preferred) so the OTP + resend path
- * has a single target to read back.
+ * Stores guardian details with name and contacts encrypted at rest, and resets
+ * verified. Both contacts are kept; `guardian_contact`/`_type` hold the OTP
+ * channel so the OTP and resend paths have a single target.
  */
 export async function upsertGuardianDetails(
   userId: string,
@@ -165,8 +152,7 @@ export async function upsertGuardianDetails(
 ): Promise<void> {
   const channel = resolveOtpChannel(input);
   const ref = guardianRef(channel.contact);
-  // Upsert: DOB no longer creates a minor_guardian row (it lives on user now),
-  // so this may be the first write of the ward's row.
+  // Upsert: this may be the first write of the ward's row.
   const fields = {
     guardianName: encryptGuardianField(input.guardianName),
     guardianContact: encryptGuardianField(channel.contact),
@@ -176,9 +162,6 @@ export async function upsertGuardianDetails(
     guardianRef: ref,
     guardianVerified: false,
   };
-  // Cap enforced atomically with the write (advisory lock on the ref) so
-  // concurrent links to the same guardian can't race past the limit; throws
-  // WardLimitError, which the route maps to 409.
   await db.transaction(async (tx) => {
     await assertWardLimitWithLock(tx, ref, userId);
     await tx
@@ -228,14 +211,9 @@ export async function setGuardianVerified(userId: string): Promise<void> {
 }
 
 /**
- * Write an ALREADY-ENCRYPTED guardian name/contact blob directly — no
- * re-encryption. Used by the pre-auth signup-guardian flow (services/
- * signup_guardian.ts): the guardian PII is encrypted before the ward's
- * account exists (keyed on the signup identifier in Redis) and is
- * materialized onto the new user id verbatim once the account is created.
- * Marks `guardian_verified` true — the pre-auth flow only calls this after
- * its own OTP verify has already flipped the pending record's `verified`
- * flag, so re-verification here would be redundant.
+ * Writes already-encrypted guardian blobs without re-encrypting them, for the
+ * pre-auth signup flow (`signup_guardian.ts`). Sets `guardian_verified` true:
+ * its only caller has already verified the guardian OTP.
  */
 export async function writeEncryptedGuardian(
   userId: string,

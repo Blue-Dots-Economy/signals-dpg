@@ -35,8 +35,7 @@ interface AppSidebarProps {
   onActiveProfileChange?: (profileId: string) => void;
   onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
-  /** Hide the Browse (domain selector) group — used on the create/edit form
-   * page, where browsing has no meaning. */
+  /** Hide the Browse (domain selector) group. */
   hideBrowse?: boolean;
 }
 
@@ -63,26 +62,18 @@ function PendingActionsBadge() {
 }
 
 /**
- * Which domain's `my_items_label` (network.json) should title the "My items"
- * group — e.g. blue_dot provider → "My Jobs".
- *
- * The viewer's own profiles decide it when they are all in one domain. Before
- * sign-in there are none, and the group used to fall back to the generic
- * "My Profile(s)" — but a per-domain portal already knows its domain from
- * VITE_SERVED_BINDINGS (the same signal the login form uses to auto-select the
- * domain when only one is served), so a seeker portal can say "My Profiles"
- * and a provider portal "My Jobs" to a signed-out visitor too.
- *
- * Own profiles win over the portal binding: a viewer holding items is the
- * stronger signal, and the two can disagree while a mis-routed user is being
- * bounced to the right portal.
+ * Which domain's `my_items_label` (network.json) titles the "My items" group,
+ * e.g. "My Jobs". The viewer's own profiles decide when they share one domain;
+ * otherwise a portal serving a single domain (VITE_SERVED_BINDINGS) decides,
+ * so signed-out visitors get it too. Own profiles win, since the two can
+ * disagree while a mis-routed user is bounced to the right portal.
  */
 export function resolveMyItemsDomainId(
   profileDomainIds: string[],
   servedDomainIds: string[] | null,
 ): string | null {
   if (profileDomainIds.length === 1) return profileDomainIds[0];
-  if (profileDomainIds.length > 1) return null; // mixed — the generic label covers it
+  if (profileDomainIds.length > 1) return null; // mixed: the generic label
   return servedDomainIds && servedDomainIds.length === 1 ? servedDomainIds[0] : null;
 }
 
@@ -103,7 +94,6 @@ export function AppSidebar({
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  // Group profiles by domain
   const profilesByDomain = myItems.reduce<Record<string, Item[]>>((acc, item) => {
     const key = item.item_domain;
     if (!acc[key]) acc[key] = [];
@@ -113,26 +103,20 @@ export function AppSidebar({
 
   const domainKeys = Object.keys(profilesByDomain);
 
-  // "My items" group label is domain-aware: a network can override the generic
-  // "My Profile(s)" heading per domain via `my_items_label` in network.json
-  // (e.g. blue_dot provider → "My Jobs"). Only applied when the group holds a
-  // single domain; otherwise the generic label covers the mix. Falls back to the
-  // generic label when the domain sets no override.
   const labelDomainId = resolveMyItemsDomainId(domainKeys, getServedScope()?.domains ?? null);
   const myItemsGroupLabel =
     domains.find((d) => d.id === labelDomainId)?.my_items_label ??
     t('nav.my_profiles_group');
 
-  // Find which domain the active profile belongs to
   const activeDomain = myItems.find((i) => i.item_id === activeProfileId)?.item_domain ?? null;
 
-  // Expanded state: default open the domain of the active profile (or all if none)
+  // Opens the active profile's domain, or all when there is none.
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => {
     if (activeDomain) return new Set([activeDomain]);
     return new Set(domainKeys);
   });
 
-  // When active profile changes, ensure its domain is expanded
+  // Expand the active profile's domain when it changes.
   useEffect(() => {
     if (activeDomain) {
       setExpandedDomains((prev) => {
@@ -184,12 +168,8 @@ export function AppSidebar({
           </SidebarGroup>
         )}
         {showNetworkSelector && <SidebarSeparator />}
-        {/* The Browse domain selector only appears when there is MORE THAN ONE
-            browseable domain (i.e. >1 distinct interaction `to_domain`). With a
-            single target domain there is no choice to make — a lone tab (and an
-            "All") is redundant — so the whole selector and its separator are
-            hidden, and that domain's listings render directly in the main view.
-            Driven by the network's interactions; not network-specific. */}
+        {/* Shown only with more than one browsable domain; with one there is
+            no choice to make. */}
         {!hideBrowse && domains.length > 1 && (
           <>
             <SidebarGroup>
@@ -245,17 +225,14 @@ export function AppSidebar({
                   const profiles = profilesByDomain[domainId];
                   const Icon = getDomainIcon(domainId, selectedNetwork);
                   const label = formatDomainLabel(domainId, domains);
-                  // A single domain group (always the case in a domain-bound
-                  // portal) needs no accordion header — show its profiles
-                  // directly, always expanded.
+                  // A single domain group needs no accordion header.
                   const singleGroup = domainKeys.length === 1;
                   const isExpanded = singleGroup || expandedDomains.has(domainId);
                   const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
 
                   return (
                     <div key={domainId}>
-                      {/* Accordion header — only when there's more than one
-                          domain group; a single group is shown flat. */}
+                      {/* Accordion header, only with several groups. */}
                       {!singleGroup && (
                         <button
                           onClick={() => toggleDomain(domainId)}
@@ -311,9 +288,8 @@ export function AppSidebar({
                                     ].join(' ')}
                                   >
                                     <span className="truncate" title={title}>{title}</span>
-                                    {/* Lifecycle chip lives INSIDE the button pill
-                                        (Active / Paused / Draft) so it reads as part
-                                        of the profile, not floating on the row. */}
+                                    {/* Lifecycle chip inside the pill, so it reads
+                                        as part of the profile. */}
                                     {profile.lifecycle_status && (
                                       <span
                                         data-tour="profile-status"
@@ -335,8 +311,7 @@ export function AppSidebar({
                                       </span>
                                     )}
                                   </SidebarMenuButton>
-                                  {/* Per-profile actions (Edit · Pause/Resume ·
-                                      Retire), icon-only, always visible. */}
+                                  {/* Per-profile actions, always visible. */}
                                   <ProfileRowActions
                                     profile={profile}
                                     pauseEnabled={

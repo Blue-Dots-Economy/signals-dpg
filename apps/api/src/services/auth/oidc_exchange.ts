@@ -5,22 +5,16 @@ import { keycloakConfig } from '@/config';
  * Server-side half of the OIDC authorization-code flow.
  *
  * The browser never sees a token: it is redirected to Keycloak, comes back with
- * a `code`, and this module exchanges that code for tokens which are then kept
- * in Redis (`browser_session.ts`). The SPA previously did this exchange itself
- * and stored the result in `localStorage` — the finding this replaces.
+ * a `code`, and this module exchanges the code for tokens kept in Redis
+ * (`browser_session.ts`).
  *
- * PKCE is used with the public `signals-ui` client rather than a confidential
- * one, because the code verifier never leaves the server here: it is minted in
- * `buildAuthorizeUrl`, held in Redis against the `state`, and read back in the
- * callback. That keeps the flow within the client Keycloak already registers
- * (`__PUBLIC_BASE_URL__/*`), so no realm change is needed — the API's callback
- * is same-origin with the UI in every deployment.
+ * PKCE is used with the public `signals-ui` client because the code verifier
+ * never leaves the server: it is minted at login, held in Redis against the
+ * `state`, and read back in the callback. The API callback is same-origin with
+ * the UI, so it fits the redirect URIs that client already registers.
  *
- * Requests go to `internal_base_url` (cluster-internal) while the URL the
- * BROWSER is sent to uses `base_url` (public issuer). Conflating them is the
- * classic way this breaks in a cluster: the browser cannot resolve an internal
- * service name, and a token minted against one issuer fails validation for the
- * other.
+ * Token requests go to `internal_base_url` (cluster-internal); browser URLs use
+ * `base_url` (public issuer). The browser cannot resolve the internal name.
  */
 
 export interface OidcTokens {
@@ -52,7 +46,7 @@ function realmUrl(base: string): string {
   return `${base}/realms/${keycloakConfig.realm}/protocol/openid-connect`;
 }
 
-/** Where the BROWSER is sent. Uses the public issuer, never the internal host. */
+/** Where the browser is sent. Uses the public issuer, never the internal host. */
 export function buildAuthorizeUrl(input: {
   redirectUri: string;
   state: string;
@@ -71,7 +65,7 @@ export function buildAuthorizeUrl(input: {
   return url.toString();
 }
 
-/** Where the BROWSER is sent to end the Keycloak session. */
+/** Where the browser is sent to end the Keycloak session. */
 export function buildEndSessionUrl(input: {
   idToken?: string;
   postLogoutRedirectUri: string;
@@ -86,22 +80,11 @@ export function buildEndSessionUrl(input: {
 /**
  * Why Keycloak refused a grant, as `"<error> — <error_description>"`.
  *
- * Only the two named OAuth error fields are read, never the whole body: on the
- * SUCCESS path that body carries the tokens themselves, which is why nothing
- * here used to be surfaced at all. `error` and `error_description` are
- * different — they exist to explain a refusal and never contain the code or
- * the refresh token.
+ * Only the two OAuth error fields are read, never the whole body, because a
+ * token-endpoint body can carry tokens. They distinguish a spent grant, an
+ * issuer/host mismatch and a misconfigured client, which all return 400.
  *
- * Without them every failure presents as a bare `token endpoint returned 400`,
- * which reads identically whether the grant is genuinely spent, the request
- * reached Keycloak on a host that disagrees with the token's `iss`, or the
- * client is misconfigured — three faults with three different fixes. Keycloak
- * names which one it is (e.g. `invalid_grant — Invalid token issuer. Expected
- * '<host>'`, which also names the host it wanted); throwing that away turns a
- * one-line diagnosis into an inference problem.
- *
- * Returns '' when the body is absent or not the OAuth error shape, so the
- * caller's message degrades to the status alone rather than failing.
+ * Returns '' when the body is absent or not the OAuth error shape.
  */
 async function oauthErrorDetail(response: Response): Promise<string> {
   try {
@@ -153,29 +136,17 @@ async function postToken(body: URLSearchParams): Promise<OidcTokens> {
     idToken: json.id_token,
     accessTokenExp: now + (json.expires_in ?? 300) * 1000,
     // `||`, not `??`: Keycloak sends `refresh_expires_in: 0` when the refresh
-    // token does not expire. `??` keeps the 0, which makes `refreshTokenExp`
-    // equal to now, which floors the session's Redis TTL at one second — it
-    // presents as "login does nothing". Treat 0 as "unspecified".
+    // token does not expire; keeping the 0 would floor the session's Redis TTL
+    // at one second. Treat 0 as unspecified.
     refreshTokenExp: now + (json.refresh_expires_in || 1800) * 1000,
   };
 }
 
 /**
- * A token-endpoint call that did not succeed.
- *
- * `status` is carried because the CALLER's response differs by kind: a 400
- * (`invalid_grant` — the refresh token is spent or revoked) means the session
- * is genuinely over, while a 5xx or a timeout means Keycloak is unwell and the
- * session must survive. Collapsing the two logs users out for an outage.
- * `status` is undefined for a transport failure (DNS, connect, timeout), which
- * is likewise transient.
- */
-/**
  * The `nonce` claim carried by an id token, or null when there is none.
  *
- * The token comes straight from Keycloak's token endpoint over TLS, so the
- * transport already authenticates it — this reads the claim rather than
- * re-verifying a signature the channel has established.
+ * The token comes straight from Keycloak's token endpoint over TLS, so this
+ * reads the claim without re-verifying the signature.
  */
 export function idTokenNonce(idToken: string | undefined): string | null {
   if (!idToken) return null;
@@ -191,6 +162,11 @@ export function idTokenNonce(idToken: string | undefined): string | null {
   }
 }
 
+/**
+ * A token-endpoint call that did not succeed. `status` lets the caller tell a
+ * rejected grant (400/401: the session is over) from a 5xx or transport
+ * failure (`status` undefined), where the session must survive the outage.
+ */
 export class OidcExchangeError extends Error {
   readonly status?: number;
 

@@ -14,41 +14,25 @@ const AuthConfigResponse = z.object({
   selfSignupAllowed: z.boolean(),
   loginChannels: z.array(z.enum(['email', 'phone'])),
   /**
-   * The instance's identity provider, so the UI can pick a login screen at
-   * RUNTIME instead of having it compiled into the bundle. See the note below.
-   *
-   * Single-valued since #517 retired better-auth. Kept as an enum rather than
-   * dropped, because it is the field the UI switches on and a published
-   * contract that still *permitted* `betterauth` was what kept the UI's
-   * `betterauth` branch formally reachable — nobody can delete a branch as dead
-   * while the API says the value is possible.
+   * The instance's identity provider, so the UI picks its login screen at
+   * runtime rather than at build time. Keycloak is the only provider.
    */
   authProvider: z.enum(['keycloak']),
   /**
-   * OIDC connection details, or null when this instance isn't running Keycloak.
-   * All three values are public by nature for a public OIDC client (the realm's
-   * own `/.well-known/openid-configuration` is unauthenticated too).
+   * OIDC connection details, or null when Keycloak is not configured. All three
+   * values are public for a public OIDC client.
    */
   keycloak: KeycloakPublicConfig.nullable(),
 });
 
 /**
  * Public, unauthenticated. Surfaces the instance's auth-flow configuration to
- * the UI. Server env remains the single source of truth (see
- * apps/api/src/config.ts) — the UI reads this, it never decides for itself.
+ * the UI. Server env remains the single source of truth (apps/api/src/config.ts);
+ * the UI never decides for itself.
  *
- * **Why `authProvider` and `keycloak` are served from here rather than baked
- * into the UI build.** They were originally `VITE_*` build args, which meant
- * the login screen was compiled into the image: flipping providers required a
- * rebuild, and — worse — the UI could silently disagree with the API. A bundle
- * built with `keycloak` while the API ran `betterauth` sent every user to an
- * OIDC redirect the API knew nothing about, and the OTP endpoints were never
- * called. Serving both from the API makes that mismatch impossible by
- * construction and removes the rebuild.
- *
- * Serving the Keycloak URL/realm from here has a second benefit: the issuer the
- * UI redirects to is derived from the same config the API validates `iss`
- * against, so the two cannot drift apart.
+ * Served at runtime rather than baked into the UI build so the UI cannot
+ * disagree with the API, and so the issuer the UI uses comes from the same
+ * config the API validates `iss` against.
  */
 export const auth_config: FastifyPluginAsyncZod = async function (fastify) {
   fastify.route({
@@ -63,8 +47,7 @@ export const auth_config: FastifyPluginAsyncZod = async function (fastify) {
         selfSignupAllowed: authConfig.allow_self_signup,
         loginChannels: authConfig.login_channels,
         authProvider: authConfig.provider,
-        // Only advertise Keycloak once this instance is actually configured for
-        // it; a half-configured instance must not send the UI somewhere broken.
+        // A half-configured instance must not send the UI somewhere broken.
         keycloak:
           authConfig.keycloak_enabled && keycloakConfig.base_url
             ? {

@@ -1,18 +1,13 @@
 import type { MatchScoreResult } from '@/lib/match-score-api';
 
 /**
- * v2 (#646 §5.2): the wire scale became 0-100 end to end, matching what
- * /v1/relevance already emitted, and both conversion points were deleted.
- *
- * The bump is MANDATORY, not hygiene. A user who viewed a score in the 24
- * hours before the deploy has a 0-10 value cached; read by the new 0-100
- * formatter, a 62% match prints as "6%" — silently, with no error. Migrating
- * the values is impossible: nothing in the stored payload identifies which
- * scale a number is on, so the version prefix IS the marker.
+ * The version prefix marks the score scale (v2 = 0-100). Bump it whenever the
+ * stored scale changes: a stored payload does not record its scale, so an old
+ * entry read with the new formatter would print a wrong percentage silently.
  */
 const CACHE_KEY_PREFIX = 'dpg:matchScore:v2';
 const LEGACY_CACHE_KEY_PREFIXES = ['dpg:matchScore:v1'];
-const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface CachedMatchScore {
   score: MatchScoreResult;
@@ -38,7 +33,6 @@ export function getCachedMatchScore(
     const parsed: CachedMatchScore = JSON.parse(cached);
     const age = Date.now() - parsed.timestamp;
     
-    // Check if cache is expired
     if (age > DEFAULT_CACHE_TTL_MS) {
       localStorage.removeItem(cacheKey);
       return null;
@@ -65,7 +59,7 @@ export function setCachedMatchScore(
     };
     localStorage.setItem(cacheKey, JSON.stringify(cached));
   } catch {
-    // Silently fail if localStorage is full or unavailable
+    // localStorage full or unavailable.
   }
 }
 
@@ -75,11 +69,9 @@ export function clearMatchScoreCache(
 ): void {
   try {
     if (localItemId && networkItemId) {
-      // Clear specific entry
       const cacheKey = generateCacheKey(localItemId, networkItemId);
       localStorage.removeItem(cacheKey);
     } else if (localItemId) {
-      // Clear all entries for a local item
       const prefix = `${CACHE_KEY_PREFIX}:${localItemId}:`;
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -88,7 +80,6 @@ export function clearMatchScoreCache(
         }
       }
     } else {
-      // Clear all match score cache
       const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -99,21 +90,14 @@ export function clearMatchScoreCache(
       keysToRemove.forEach((key) => localStorage.removeItem(key));
     }
   } catch {
-    // Silently fail
+    // localStorage unavailable.
   }
 }
 
 /**
- * One-time cleanup of pre-v2 (0-10 scale) cached scores.
- *
- * Required because localStorage has no expiry of its own — the 24-hour TTL is
- * enforced in code, on read, and nothing will ever read a v1 key again.
- * `clearMatchScoreCache` only sweeps the CURRENT prefix, so without this the
- * old entries would sit in every user's browser forever; and
- * `setCachedMatchScore` already fails silently when storage is full, so
- * leaking quota is not free.
- *
- * Call once at app startup. Idempotent.
+ * Removes cached scores under legacy key prefixes. The 24-hour TTL is enforced
+ * only on read, and nothing reads old prefixes, so without this they would stay
+ * in localStorage and use quota. Called once at startup; idempotent.
  */
 export function sweepLegacyMatchScoreCache(): void {
   try {
@@ -131,11 +115,9 @@ export function sweepLegacyMatchScoreCache(): void {
 }
 
 /**
- * Scores are 0-100 on the wire and in the cache (#646 §5.2), so format
- * directly. The Excellent/Good/Moderate/Low bands that used to live here are
- * gone: their 0.85/0.70/0.50 thresholds implied a calibration BGE-M3
- * similarities do not have — profile-to-profile scores cluster in a narrow
- * range, so the band read as near-constant across a result set.
+ * Scores are 0-100 on the wire and in the cache. There are no quality bands:
+ * BGE-M3 profile-to-profile similarities cluster in a narrow range, so fixed
+ * thresholds would read as near-constant.
  */
 export function formatScorePercentage(score: number): string {
   return `${Math.round(score)}%`;

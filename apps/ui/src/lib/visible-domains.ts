@@ -1,23 +1,15 @@
 import type { DotNetworkDomain, DotNetworkSchema } from '@/engine/types';
 
 /**
- * Browseable domains for a given viewer.
+ * Browseable domains for a viewer, derived from the network's interaction
+ * edges: a viewer sees domain Y iff an interaction goes from their own domain
+ * to Y (you browse what you can initiate toward).
  *
- * Visibility derives from the network's interaction edges
- * (actions.*.interactions[], each a from_domain -> to_domain pair): a viewer
- * sees domain Y iff an interaction exists where from = the viewer's own domain
- * and to = Y — i.e. you browse exactly what you can initiate toward.
- *
- * - viewerDomain null: no domain identity, so every browseable domain (every
- *   distinct to_domain) is returned — today's legacy behavior.
- * - Cross-network edges (from_network other than this network) are ignored.
- * - Directory networks: a network that defines NO interaction edges at all
- *   (e.g. orange_dot — a single `practitioner` domain, no connect/apply flows)
- *   has no to_domains to derive from, which would leave the portal with nothing
- *   to browse (visibleDomains=[] → the browse fetch is skipped entirely). Such a
- *   network is a flat directory, so every one of its own domains is browsable.
- *   This only triggers when there are zero edges network-wide; a viewer that
- *   merely has no outgoing edge in an interaction network still sees nothing.
+ * - viewerDomain null: every distinct `to_domain` is returned.
+ * - Cross-network edges (another `from_network`) are ignored.
+ * - A network with no interaction edges at all (a flat directory such as
+ *   orange_dot) browses every one of its domains; otherwise nothing would be
+ *   browsable. A viewer who merely lacks an outgoing edge still sees nothing.
  */
 export function computeVisibleDomains(
   network: DotNetworkSchema,
@@ -28,7 +20,7 @@ export function computeVisibleDomains(
     (action) => (action.interactions ?? []).length > 0,
   );
 
-  // Directory network (no interaction edges) → browse every domain.
+  // Directory network (no interaction edges): browse every domain.
   if (!hasAnyInteraction) {
     return network.domains;
   }

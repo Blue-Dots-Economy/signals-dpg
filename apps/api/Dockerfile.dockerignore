@@ -12,10 +12,12 @@ dist
 coverage
 .cache
 
-# Local environment files
-.env
-.env.*
-!.env.example
+# Local environment files. `**/` because .dockerignore patterns are anchored
+# to the context root: a bare `.env` misses apps/api/.env and would copy its
+# secrets into the image.
+**/.env
+**/.env.*
+!**/.env.example
 .DS_Store
 
 # Editor / tooling

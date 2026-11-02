@@ -1,43 +1,41 @@
 /**
  * Bulk-migrate signals `user` rows into Keycloak, preserving UUIDs.
  *
- * Rollout step R4 of docs/superpowers/plans/2026-07-23-keycloak-migration-design.md.
- * Merging this script changes nothing — it only does something when run.
+ * Design: docs/superpowers/plans/2026-07-23-keycloak-migration-design.md.
  *
- * Because login is passwordless OTP there are no credentials to migrate: the
- * job is to create an identity *shell* per user with the right id, attributes
- * and verified flags (§6.2). The one invariant that matters is
+ * Login is passwordless OTP, so there are no credentials to migrate: the job
+ * is an identity shell per user with the right id, attributes and verified
+ * flags. The invariant is
  *
  *     keycloak user.id == sub == signals user.id
  *
- * which is what keeps `items.created_by` and every `*_owner` text column
- * pointing at the right identity without touching a single partition (§2.3).
+ * which keeps `items.created_by` and every `*_owner` column pointing at the
+ * right identity without touching a partition.
  *
- * This file is the **thin CLI shell**: env + args + a pg pool + the SQL
- * data-access object. Every migration *decision* lives in the injected,
- * unit-tested core (`src/services/auth/migrate_core.ts`).
+ * This file is the thin CLI shell (env, args, pg pool, SQL data access); every
+ * migration decision lives in the unit-tested core
+ * (`src/services/auth/migrate_core.ts`).
  *
- * ── Modes ──────────────────────────────────────────────────────────────────
- *   --probe             Answer the §6.3 spike-1 question against THIS Keycloak:
- *                       does POST /users honour a client-supplied id? Creates
+ * Modes:
+ *   --probe             Check against THIS Keycloak whether POST /users
+ *                       honours a client-supplied id. Creates
  *                       and deletes one throwaway user. Run this first.
  *   (default)           Dry run: report what would happen. Writes nothing.
  *   --apply             Actually create the users.
  *   --reconcile         Verify every local user has a Keycloak match by id.
  *
- * ── Options ────────────────────────────────────────────────────────────────
+ * Options:
  *   --strategy=create|import   Transport. `create` is POST /users; `import` is
  *                              partialImport, the fallback when create will not
  *                              honour the id. Default: create.
  *   --batch=<n>                partialImport batch size (default 100).
  *   --limit=<n>                Process at most n users (for a canary run).
  *   --env-path=<path>          Read this .env instead of searching. Relative to
- *                              the current directory. Deliberately NOT
- *                              `--env-file`: that is a Node flag (>=20.6) which
- *                              tsx hoists to node, so it never reaches this
- *                              script — node just fails on a missing path.
+ *                              the current directory. Not `--env-file`:
+ *                              tsx hoists that Node flag to node, so it never
+ *                              reaches this script.
  *
- * ── Run ────────────────────────────────────────────────────────────────────
+ * Run:
  *   cd apps/api
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts --probe
  *   pnpm tsx scripts/migrate_users_to_keycloak.ts               # dry run
@@ -57,13 +55,13 @@ import dotenv from 'dotenv';
 
 /**
  * Environment resolution, in priority order:
- *   1. the real process environment — ALWAYS wins
+ *   1. the real process environment (always wins)
  *   2. `--env-path=<path>`, if given
  *   3. the first of the repo's known .env locations that exists
  *
- * `override: false` (the default) is stated explicitly because getting it wrong
- * would silently prefer a stale local file over the deployment's own secrets.
- * Paths resolve from the SCRIPT's location, not `process.cwd()`.
+ * `override: false` is explicit: getting it wrong would silently prefer a stale
+ * local file over the deployment's own secrets. Paths resolve from the script's
+ * location, not `process.cwd()`.
  */
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '../../..');
@@ -94,9 +92,8 @@ function loadEnvFile(): void {
 
 loadEnvFile();
 
-// Own pg pool + drizzle handle rather than importing the API's drizzle_config,
-// which transitively runs the API's full Zod env validation. A standalone
-// script should not require app-context env vars.
+// Own pg pool + drizzle rather than the API's drizzle_config, which runs the
+// full Zod env validation a standalone script should not need.
 const pgUrl =
   process.env.POSTGRES_URL ??
   `postgres://${process.env.POSTGRES_USER}:${process.env.POSTGRES_PASSWORD}@${process.env.POSTGRES_HOST ?? '127.0.0.1'}:${process.env.POSTGRES_PORT ?? process.env.DATABASE_PORT ?? '5432'}/${process.env.POSTGRES_DB}`;
@@ -118,7 +115,6 @@ import {
   type MigrationOptions,
 } from '../src/services/auth/migrate_core.js';
 
-// ── args ───────────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 const has = (flag: string) => argv.includes(flag);
@@ -139,7 +135,6 @@ const OPTS: MigrationOptions = {
   limit: value('limit') ? Number(value('limit')) : undefined,
 };
 
-// ── config ─────────────────────────────────────────────────────────────────
 
 function loadKeycloakConfig(): KeycloakAdminConfig {
   const baseUrl = (
@@ -161,14 +156,12 @@ function loadKeycloakConfig(): KeycloakAdminConfig {
   return { baseUrl, realm, clientId, clientSecret };
 }
 
-// ── data access (the SQL the core depends on) ────────────────────────────────
 
 const data: MigrationData = {
   /**
-   * Every human. **Service users are excluded** — each integrating DPG's machine
-   * identity becomes a Keycloak *client* (§5, §6.4), not a user; a shell for one
-   * would collide with the client-credentials service account. Recognised by
-   * their `member.role='service'` row.
+   * Every human. Service users (a `member.role='service'` row) are excluded:
+   * each integrating DPG's identity is a Keycloak client, and a user shell
+   * would collide with its client-credentials service account.
    */
   async fetchHumanUsers(limit?: number): Promise<SignalsUserRow[]> {
     const serviceUserIds = db
@@ -205,7 +198,6 @@ const data: MigrationData = {
 
 };
 
-// ── main ───────────────────────────────────────────────────────────────────
 
 const main = async (): Promise<number> => {
   const client = new KeycloakAdminClient(loadKeycloakConfig());

@@ -22,23 +22,17 @@ export interface RelevanceExplanationProps {
 }
 
 /**
- * "Why this result, in this position" (#646 C4).
+ * "Why this result, in this position".
  *
- * HONESTY CONSTRAINT — the hard rule of this component. The cosine score is
- * computed over a SINGLE POOLED EMBEDDING of the serialized `vectorize` fields
- * (`serializeItemText` repeats each line `vector_weight` times), so it
- * **cannot be decomposed into per-field contributions**. That number does not
- * exist.
+ * The cosine score comes from one pooled embedding of the serialized
+ * `vectorize` fields (`serializeItemText` repeats each line `vector_weight`
+ * times), so it cannot be split into per-field contributions. This panel may
+ * show which fields feed relevance, their weights, and both sides' values,
+ * with the overlap labelled illustrative. Never render a per-field percentage
+ * or contribution bar; that number does not exist.
  *
- * So this panel may show WHICH fields feed relevance, their weights, and the
- * viewer's values beside the item's — but the overlap is computed by comparing
- * attributes, NOT derived from the score, and is labelled illustrative. Never
- * render a per-field percentage or a contribution bar: inventing one would
- * fabricate a number users would reasonably trust.
- *
- * Constraints that shaped the SET (domain, facets, area) are shown separately,
- * because they decide membership rather than position — conflating the two is
- * most of what made the old badge feel arbitrary.
+ * Constraints that shaped the set (domain, facets, area) are shown separately,
+ * since they decide membership, not position.
  */
 export function RelevanceExplanation({
   metric,
@@ -51,9 +45,7 @@ export function RelevanceExplanation({
 }: Readonly<RelevanceExplanationProps>) {
   const { t } = useTranslation();
 
-  // One label per metric kind. Written as a switch rather than a ternary chain
-  // because the relevance arm itself branches on the basis, and nesting that
-  // made the whole thing unreadable (Sonar S3358).
+  // A switch, since the relevance arm branches again (Sonar S3358).
   const sortLabel = ((): string | null => {
     switch (metric?.kind) {
       case 'relevance':
@@ -69,9 +61,8 @@ export function RelevanceExplanation({
     }
   })();
 
-  // The vectorized-field table explains a COSINE score. Under `nearest` or
-  // `newest` nothing about those fields determined the position, so showing
-  // them would imply a relevance basis the list did not use.
+  // The vectorized-field table explains a cosine score, so it is shown only
+  // when relevance decided the position.
   const showFields = metric?.kind === 'relevance' && vectorizeFields.length > 0;
 
   return (
@@ -112,7 +103,7 @@ export function RelevanceExplanation({
             ))}
           </div>
 
-          {/* Load-bearing, not boilerplate: see the honesty constraint above. */}
+          {/* Required: see the component doc on per-field contributions. */}
           <p
             data-testid="illustrative-note"
             className="mt-3 flex gap-2 rounded-md bg-muted p-2 text-xs text-muted-foreground"

@@ -12,7 +12,7 @@ import {
 import { sql } from 'drizzle-orm';
 
 /**
- * Append-only consent ledger (spec 2026-06-30 minimal v1). One row per consent
+ * Append-only consent ledger. One row per consent
  * event. Latest event per (subject, type) wins by `seq`, never by timestamp.
  *
  * Levels: `user` (terms/privacy — keyed on user_id) and `item`
@@ -52,10 +52,8 @@ export const consent_record = pgTable(
     index('consent_record_action_idx').on(table.actionId),
     // Item-level profile_creation: at most one acceptance per (user, item,
     // source). `source` is in the key so a ward's self-consent ('profile') and
-    // their guardian's ('guardian') co-exist as distinct ledger events instead
-    // of one overwriting the other (append-only audit — U18). Still blocks a
-    // double-submit of the SAME source (the accept-profile-consent 23505
-    // fallback). Terms/privacy/action stay append-only, so this index is partial.
+    // their guardian's ('guardian') co-exist; a double-submit of the same
+    // source hits 23505. Partial, because terms/privacy/action stay append-only.
     uniqueIndex('consent_record_profile_creation_unique')
       .on(table.userId, table.itemId, table.source)
       .where(sql`level = 'item' AND consent_category = 'profile_creation'`),

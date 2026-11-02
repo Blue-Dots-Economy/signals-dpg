@@ -14,8 +14,7 @@ import {
 } from '@/services/items/single_domain_lock';
 
 // `.max(1)`: the column is an array for a future multi-role case, but one
-// account may declare exactly ONE domain. Two in a single call would mint the
-// multi-domain account `assertSingleDomain` exists to prevent, in one request.
+// account may declare exactly one domain (the single-domain lock).
 const SetDomainsBody = z.object({ domains: z.array(z.string().min(1)).min(1).max(1) });
 const DomainsResponse = z.object({ domains: z.array(z.string()) });
 type SetReq = FastifyRequest<{ Body: z.infer<typeof SetDomainsBody> }>;
@@ -24,28 +23,19 @@ type SetReq = FastifyRequest<{ Body: z.infer<typeof SetDomainsBody> }>;
  * The domain role the current user may create profiles in. Persisted at
  * signup. The profile form uses it to narrow its domain picker.
  *
- * This IS an authorization boundary, unlike when it was written. `user.domains`
- * is what `assertSingleDomain` (`services/item_service.ts`) reads to keep an
- * account to a single domain, and that single-domain invariant is what allows a
- * DIFFERENT default aggregator per domain — `user.onboarded_by_org_id` grants
- * PII-decrypt rights and is per ACCOUNT, so an account spanning two domains
- * would let one domain's default decrypt the other's participant.
+ * This is an authorization boundary. `user.domains` is the single-domain lock
+ * (`services/items/single_domain_lock.ts`), and that invariant is what allows a
+ * different default aggregator per domain: `user.onboarded_by_org_id` grants
+ * PII-decrypt rights per account, so an account spanning two domains would let
+ * one domain's default decrypt the other's participant.
  *
- * So POST is write-once, matching the create path: set it when unset, accept a
- * no-op repeat, and refuse a different domain with the same `DOMAIN_LOCKED`
- * body `create_item` returns, via the shared primitives in
- * `services/items/single_domain_lock.ts`.
+ * So POST is write-once, through the same primitives as the create path: set
+ * when unset, accept a no-op repeat, and refuse a different domain with the
+ * same `DOMAIN_LOCKED` body `create_item` returns.
  *
- * Two bugs lived here, both letting a user grant themselves a second domain and
- * walk past the lock: it UNIONed the submitted domains onto the existing ones,
- * and then — once that was fixed with a local copy of the create path's claim —
- * that copy was missing the `NOT EXISTS items` guard, so an account with an
- * empty column but existing items was still handed a second domain. Hence one
- * shared implementation rather than a third copy.
- *
- * Deliberately no reset path: clearing a domain is a support operation
- * (`UPDATE "user" SET domains='{}' WHERE id=…`), the same shape as nominating a
- * default aggregator. Deleting your last profile does NOT release the lock.
+ * No reset path: clearing a domain is a support operation
+ * (`UPDATE "user" SET domains='{}' WHERE id=…`). Deleting your last profile
+ * does not release the lock.
  *
  * Null column → empty array.
  */
@@ -88,14 +78,9 @@ const set_domains_handler = async (request: SetReq, reply: FastifyReply) => {
 
   const requested = request.body.domains[0] as string;
 
-  // Write-once, through the SAME primitives the create path uses
-  // (`services/items/single_domain_lock.ts`). This handler used to carry its own
-  // copy of the claim UPDATE, missing that module's `NOT EXISTS items` guard —
-  // so an account with an empty column but existing items (every aggregator- and
-  // voice-onboarded participant until migration 0015 runs, and every account the
-  // documented `SET domains='{}'` support reset touches) could be granted a
-  // second domain here and then create in it, because the create path saw a
-  // non-empty column and trusted it.
+  // Write-once, through the same primitives as the create path. Do not inline a
+  // copy of the claim: its `NOT EXISTS items` guard is what stops an account
+  // with an empty column but existing items from gaining a second domain.
   let effective = [requested];
   if (!(await claimDomain(db, userId, requested))) {
     const held = await readLockedDomains(db, userId);
@@ -111,10 +96,9 @@ const set_domains_handler = async (request: SetReq, reply: FastifyReply) => {
     effective = held.length > 0 ? held : [requested];
   }
 
-  // SS-3 (#640): the user's domain is now decided, so this is where the default
-  // aggregator can own them. No-op when they already have an owner or no
-  // default is nominated. Best-effort: a tagging failure must not fail the
-  // domain write the client is waiting on.
+  // The user's domain is now decided, so the default aggregator can own them.
+  // No-op when they already have an owner or no default is nominated.
+  // Best-effort: a tagging failure must not fail the domain write.
   for (const domain of effective) {
     try {
       await tagUserForDomain(db, userId, domain);

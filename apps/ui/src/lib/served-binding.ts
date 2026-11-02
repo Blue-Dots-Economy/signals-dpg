@@ -6,10 +6,9 @@ export interface ServedBinding {
 }
 
 /**
- * The set of domains a UI deployment serves, all within one network. Parsed
- * from a comma-separated VITE_SERVED_BINDINGS list. A single entry yields a
- * one-domain scope (the single-domain portal); multiple entries yield a
- * whitelisted multi-domain UI; unset yields null (serve all domains).
+ * The domains a UI deployment serves, all within one network, from the
+ * comma-separated `VITE_SERVED_BINDINGS`. One entry is a single-domain portal,
+ * several a multi-domain portal; unset means serve all domains.
  */
 export interface ServedScope {
   network: string;
@@ -17,9 +16,8 @@ export interface ServedScope {
 }
 
 /**
- * Parses a "<network>/<domain>" binding string (e.g. "purple_dot/provider").
- * Returns null for unset / blank / malformed input (missing half, extra slash).
- * Pure — exported separately so it can be unit-tested without runtime config.
+ * Parses a "<network>/<domain>" binding (e.g. "purple_dot/provider"). Returns
+ * null for unset, blank or malformed input.
  */
 export function parseServedBinding(raw: string | null | undefined): ServedBinding | null {
   if (typeof raw !== 'string') return null;
@@ -33,11 +31,9 @@ export function parseServedBinding(raw: string | null | undefined): ServedBindin
 }
 
 /**
- * Parses a comma-separated list of "<network>/<domain>" bindings into a single
- * served scope. All entries must share the same network. Returns null when
- * unset / blank / any entry malformed / entries span multiple networks — in
- * which case the UI serves all domains (combined mode).
- * Pure — exported separately for unit testing without runtime config.
+ * Parses a comma-separated list of "<network>/<domain>" bindings into one
+ * served scope. Returns null (serve all domains) when unset, blank, any entry
+ * is malformed, or entries span more than one network.
  */
 export function parseServedScope(raw: string | null | undefined): ServedScope | null {
   if (typeof raw !== 'string') return null;
@@ -52,11 +48,7 @@ export function parseServedScope(raw: string | null | undefined): ServedScope | 
   return { network, domains };
 }
 
-/**
- * The network/domain set this UI instance is scoped to, from the runtime
- * config key VITE_SERVED_BINDINGS. Null when unset/malformed — the UI then
- * runs in its combined multi-domain mode (serves all domains).
- */
+/** The runtime-configured served scope; null means serve all domains. */
 export function getServedScope(): ServedScope | null {
   return parseServedScope(getRuntimeEnv('VITE_SERVED_BINDINGS'));
 }

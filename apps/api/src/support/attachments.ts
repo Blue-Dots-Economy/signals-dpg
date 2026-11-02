@@ -1,10 +1,7 @@
 /**
- * Support-form attachment policy (#551): what may be attached to a
- * complaint/support submission, and how big it may be.
- *
- * Pure — no Fastify, no Redis, limits passed in — so every rejection path is
- * directly unit-testable. The route owns turning a rejection into its HTTP
- * reply.
+ * Support-form attachment policy: allowed types, encoding and size limits.
+ * Pure (limits are passed in); the route maps a rejection to its HTTP reply.
+ * Operations: docs/operations/support-attachments.md.
  */
 
 /** One attachment as it arrives on the wire. */
@@ -31,28 +28,14 @@ export type SupportAttachmentResult =
   | { ok: false; error: SupportAttachmentErrorCode; message: string };
 
 /**
- * Content types the support form accepts.
+ * Content types the support form accepts. `contentType` is client-declared and
+ * never checked against the bytes, so this is a UX filter only; the support
+ * mailbox must scan attachments (docs/operations/support-attachments.md).
  *
- * Scope, so nobody mistakes this for more than it is: `contentType` is declared
- * by the client and never checked against the bytes, so this rejects an honest
- * mistake (a PDF, a zip) but not a renamed executable sent with
- * `contentType: image/png`. It is a UX filter, and the support mailbox must
- * still scan what it receives — see docs/operations/support-attachments.md.
- *
- * Kept in code rather than in env because the list is a product decision about
- * what the form is for, not a per-deployment knob; adding a legitimate format is
- * a one-line change here that the UI picks up automatically (it reads this list
- * from `GET /support/config`).
- *
- * The phone-produced formats are deliberate, not incidental: iPhones hand out
- * HEIC photos and `.m4a` voice memos, and Android cameras/voice recorders
- * produce 3GPP and AMR. Leaving them out would reject the most likely real
- * submissions.
- *
- * Note the `x-` variants. A browser picks the type from its own extension table,
- * not from the file: Chrome reports `audio/x-m4a` for a `.m4a` (an iPhone voice
- * memo, the commonest voice attachment there is) even though the container is
- * MPEG-4 audio. Listing only the canonical `audio/mp4` rejected those.
+ * A product decision, not an env knob; the UI reads it from `GET /support/config`.
+ * Phone formats (HEIC, `.m4a`, 3GPP, AMR) are the most likely real submissions.
+ * The `x-` variants exist because browsers derive the type from the extension:
+ * Chrome reports `audio/x-m4a` for an iPhone voice memo.
  */
 export const SUPPORT_ALLOWED_CONTENT_TYPES: readonly string[] = [
   'image/jpeg',
@@ -79,13 +62,9 @@ export const SUPPORT_ALLOWED_CONTENT_TYPES: readonly string[] = [
 ];
 
 /**
- * Extensions for the file picker's `accept` attribute, alongside the MIME list.
- *
- * MIME types alone are not enough: macOS maps `accept="audio/mp4"` through its
- * own UTI table, which does not claim `.m4a`, so a voice memo shows up greyed
- * out in the picker even though the API would accept it. Extensions are matched
- * literally by the browser and close that gap. They are a picker hint only —
- * validation stays MIME-based on both sides.
+ * Extensions for the file picker's `accept` attribute. Needed because macOS
+ * does not map `accept="audio/mp4"` to `.m4a`, greying out voice memos.
+ * Picker hint only; validation stays MIME-based.
  */
 export const SUPPORT_ALLOWED_EXTENSIONS: readonly string[] = [
   '.jpg',
@@ -112,32 +91,17 @@ export const SUPPORT_ALLOWED_EXTENSIONS: readonly string[] = [
 const MAX_FILENAME_LENGTH = 120;
 
 /**
- * Base64 alphabet plus optional padding. Deliberately a single character class
- * with no grouped quantifier: the obvious RFC-4648 pattern
- * (`^(?:[A-Za-z0-9+/]{4})*(?:..[AEIMQUYcgkosw048]=|...)?$`) has to backtrack over
- * every 4-char group when the tail fails to match, and on a max-legal 5 MB
- * attachment that overflowed V8's regex stack — a valid submission became a 500.
- * This form is linear in the input, so a 7 MB string costs the same whether it
- * passes or fails.
- *
- * `length % 4` carries the rest of the rule (the grouped pattern got that from
- * its `{4}` repetition). Together they accept exactly what the notification
- * service's `z.base64()` accepts — verified by differential comparison — so this
- * side can never wave through a payload the relay will reject.
+ * Base64 alphabet plus padding, as one character class: a grouped RFC-4648
+ * pattern backtracks and overflowed V8's regex stack on a 5 MB attachment.
+ * Combined with the `length % 4` check it matches what notification-service's
+ * `z.base64()` accepts.
  */
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
- * Strips whitespace and checks the result really is base64.
- *
- * Worth doing rather than trusting the decoder: `Buffer.from(x, 'base64')`
- * silently ignores anything outside the alphabet, so a `data:` URL prefix, a
- * truncated upload or binary noise decodes to garbage and is mailed as a corrupt
- * file with no error raised anywhere. Wrapped base64 (newlines every 76 chars)
- * is legitimate, so it is compacted rather than rejected.
- *
- * @param data - Raw `data` value as submitted.
- * @returns The compacted base64, or null when it is not base64 at all.
+ * Strips whitespace and returns the compacted base64, or null when it is not
+ * base64. `Buffer.from(x, 'base64')` silently ignores invalid characters, so
+ * without this check a bad payload is mailed as a corrupt file.
  */
 export function normaliseBase64(data: string): string | null {
   const compact = data.replace(/\s/g, '');
@@ -145,17 +109,13 @@ export function normaliseBase64(data: string): string | null {
   return compact;
 }
 
-/**
- * Decoded byte length of a base64 string without decoding it, so an oversized
- * payload never costs a Buffer allocation. Whitespace is not counted.
- */
+/** Decoded byte length of a base64 string without allocating a Buffer. Ignores whitespace. */
 export function decodedBase64Length(data: string): number {
   const compact = data.replace(/\s/g, '');
   if (compact.length === 0) return 0;
   return Math.floor((compact.length * 3) / 4) - base64Padding(compact);
 }
 
-/** Number of `=` padding characters at the end of a base64 string (0, 1 or 2). */
 function base64Padding(compact: string): number {
   if (compact.endsWith('==')) return 2;
   if (compact.endsWith('=')) return 1;
@@ -163,11 +123,9 @@ function base64Padding(compact: string): number {
 }
 
 /**
- * Make a client-supplied filename safe to put in a MIME header and in front of
- * a support agent: drop any directory component, strip control characters and
- * quotes (both let a filename break out of the `filename="..."` parameter it
- * ends up in), collapse whitespace, cap the length. Never returns an empty
- * string — an unusable name degrades to `attachment`.
+ * Makes a client-supplied filename safe for a MIME header: drops directories,
+ * strips control characters and quotes (they can break out of `filename="..."`),
+ * collapses whitespace, caps the length. An unusable name becomes `attachment`.
  */
 export function sanitizeFilename(filename: string): string {
   const base = filename.split(/[\\/]/).pop() ?? '';
@@ -179,7 +137,6 @@ export function sanitizeFilename(filename: string): string {
   return cleaned.slice(0, MAX_FILENAME_LENGTH);
 }
 
-/** Human-readable size for the email's attachment listing. */
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -187,11 +144,9 @@ export function formatBytes(bytes: number): string {
 }
 
 /**
- * Validate a submitted attachment list against the instance's configured
- * limits. Returns the accepted attachments (filenames sanitised, sizes
- * resolved) or the single rejection to reply with — count first, then type,
- * then total size, so the message names the first thing actually wrong rather
- * than a consequence of it.
+ * Validates attachments against the configured limits. Returns the accepted
+ * attachments (sanitised names, decoded sizes) or the first rejection, checked
+ * in order: count, then per-file type and encoding, then total size.
  */
 export function validateSupportAttachments(
   attachments: SupportAttachmentInput[] | undefined,
@@ -220,10 +175,8 @@ export function validateSupportAttachments(
         message: `${sanitizeFilename(item.filename)} is not an accepted file type. Attach an image, video or audio file.`,
       };
     }
-    // Checked, not assumed: the decoder ignores anything outside the base64
-    // alphabet, so an unvalidated payload is mailed as a corrupt file with no
-    // error raised. The compacted form is what gets forwarded, so the
-    // notification service's strict base64 check never trips on wrapped input.
+    // Forward the compacted form so notification-service's strict base64 check
+    // accepts wrapped input.
     const data = normaliseBase64(item.data);
     if (!data) {
       return {
@@ -257,10 +210,9 @@ export function validateSupportAttachments(
 const ENVELOPE_HEADROOM_BYTES = 256 * 1024;
 
 /**
- * Fastify body limit for the submit route, derived from the attachment budget
- * rather than hardcoded: base64 inflates the payload by 4/3 and the JSON
- * envelope carries the rest of the form on top. Deriving it means raising
- * `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` can never turn into a silent 413.
+ * Fastify body limit for the submit route: base64 inflation (4/3) plus envelope
+ * headroom, derived so raising `SUPPORT_ATTACHMENT_MAX_TOTAL_BYTES` never
+ * causes a 413.
  */
 export function supportBodyLimitBytes(maxTotalBytes: number): number {
   return Math.ceil((maxTotalBytes * 4) / 3) + ENVELOPE_HEADROOM_BYTES;

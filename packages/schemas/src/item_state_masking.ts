@@ -25,9 +25,8 @@ const MASKING_RULES: MaskingRule[] = [
     },
   },
   {
-    // phone / tel — first 3 chars + ***. Fires on either format=phone/tel
-    // or on key-name heuristics (mobile, phone, contact_phone, whatsapp, etc.)
-    // so schemas don't have to opt in via a custom `format`.
+    // phone / tel: first 3 chars + ***. Matches format=phone/tel or phone-like
+    // key names, so schemas need no custom `format`.
     test: (k, p) =>
       format(p) === 'phone' ||
       format(p) === 'tel' ||
@@ -68,17 +67,16 @@ const MASKING_RULES: MaskingRule[] = [
     },
   },
   {
-    // address-like keys: fully redacted. Addresses are too variable in shape
-    // for a partial reveal to be predictable; *** signals "intentionally hidden".
+    // address-like keys: fully redacted; addresses vary too much for a
+    // predictable partial reveal.
     test: (k) =>
       /(^|_)(address|street|line1|line2|address_line)(_|$)/i.test(k) ||
       /^official_address$/i.test(k),
     apply: () => '***',
   },
   {
-    // age / gender: fully redacted. The first-char fallback leaks the value
-    // outright — gender is a short enum (M***/F***) and age's first digit
-    // gives away its decade.
+    // age / gender: fully redacted, since a first-char mask leaks gender and
+    // age's decade.
     test: (k) => /^(age|gender)$/i.test(k),
     apply: () => '***',
   },
@@ -90,9 +88,7 @@ function maskLeaf(key: string, propSchema: JsonRecord, value: unknown): unknown 
   for (const rule of MASKING_RULES) {
     if (rule.test(key, propSchema)) return rule.apply(str);
   }
-  // Fallback: first char + *** — same shape as name/phone masking so every
-  // unmatched private field (e.g. location, free-text) reveals nothing about
-  // its length and stays visually consistent with the dedicated rules above.
+  // Fallback: first char + ***, which hides the value's length.
   return str.length === 0 ? '' : `${str.charAt(0)}***`;
 }
 

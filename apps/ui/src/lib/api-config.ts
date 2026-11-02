@@ -11,8 +11,7 @@ interface RuntimeConfig {
   VITE_NETWORK_NAME?: string;
   VITE_BRAND_NAME?: string;
   VITE_SHOW_INSTANCE_SELECTOR?: string;
-  // GA4 measurement ID. When set by a deployment's config.js, public/analytics.js
-  // loads gtag.js for that deployment; empty/unset = analytics off.
+  // GA4 measurement ID; when set, public/analytics.js loads gtag.js. Unset = analytics off.
   VITE_ANALYTICS_GA_ID?: string;
 }
 
@@ -35,15 +34,11 @@ class ApiConfig {
     const runtime: RuntimeConfig =
       (typeof window !== 'undefined' && window.__DPG_UI_CONFIG__) || {};
     const urlsJson = runtime.VITE_API_URLS || import.meta.env.VITE_API_URLS;
-    // Runtime config wins. Empty string in runtime config means "relative to
-    // current origin" — axios baseURL='' → browser resolves to current host.
-    //
-    // No-runtime-config fallback hierarchy:
-    //   1. compile-time VITE_DEFAULT_API_URL / VITE_API_URL (if baked at build)
-    //   2. in DEV (vite dev server), localhost:2742 so `pnpm dev:ui` works
-    //   3. in PROD, empty string → same-origin; nginx in the UI image
-    //      reverse-proxies /api/* to dpg-api. This way a missing /config.js
-    //      script tag won't strand the browser on localhost:2742.
+    // Runtime config wins; '' means same-origin (axios baseURL '').
+    // Without runtime config: the build-time VITE_DEFAULT_API_URL / VITE_API_URL,
+    // else localhost:2742 in dev, else '' in production, where the UI image's
+    // nginx proxies /api/* to the API, so a missing /config.js cannot strand
+    // the browser on localhost.
     const runtimeProvided =
       'VITE_DEFAULT_API_URL' in runtime || 'VITE_API_URL' in runtime;
     const compileTime =
@@ -69,7 +64,7 @@ class ApiConfig {
           });
         }
       } catch {
-        // Invalid JSON, skip additional URLs
+        // Invalid JSON: skip the extra URLs.
       }
     }
   }

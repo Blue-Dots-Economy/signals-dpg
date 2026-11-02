@@ -4,9 +4,9 @@ import type { TFunction } from 'i18next';
 import type { DotNetworkSchema } from '@/engine/types';
 
 /**
- * Whether a served domain routes minors through the U18 guardian consent flow
- * (Phase 6). Mirrors the server-side check in apps/api/src/services/minor.ts —
- * the server remains authoritative; this only decides which UI to render.
+ * Whether a domain routes minors through the U18 guardian consent flow.
+ * Mirrors apps/api/src/services/minor.ts; the server is authoritative and this
+ * only decides which UI to render.
  */
 export function isGuardianConsentRequiredDomain(
   network: DotNetworkSchema,
@@ -16,31 +16,26 @@ export function isGuardianConsentRequiredDomain(
 }
 
 /**
- * Age (years) from a birth year (#331). The UI only ever collects the birth
- * YEAR, never a month or day, so age is a plain `currentYear - birthYear`
- * snapshot — the same rule the server applies at storage.
+ * Age from a birth year. The UI collects only the year, so age is
+ * `currentYear - birthYear`, the same rule the server applies.
  */
 export function ageFromBirthYear(year: number, now: Date = new Date()): number {
   return now.getFullYear() - year;
 }
 
 /**
- * Derived under-18 check — mirrors the server's `isMinor`
- * (apps/api/src/services/minor.ts): a minor is `age <= 18`. With no birth month
- * the whole boundary year is treated as u18 (fail-closed). Used ONLY to decide
- * whether to render the pre-auth guardian step at signup; the server remains
- * authoritative (the /u18/signup/guardian route re-checks and rejects an adult
- * with NOT_A_MINOR).
+ * Mirrors the server's `isMinor` (apps/api/src/services/minor.ts): `age <= 18`,
+ * so the whole boundary year counts as U18 (fail-closed, no birth month). Only
+ * decides whether to render the pre-auth guardian step; the
+ * /u18/signup/guardian route rejects an adult with NOT_A_MINOR.
  */
 export function isMinorFromAge(age: number): boolean {
   return age <= 18;
 }
 
 /**
- * Toast the standard guardian OTP-send failure: rate-limited (429) and
- * confirmation-unavailable (503) map to shared copy; anything else falls back
- * to the caller-supplied message. Shared by the guardian form + OTP step so the
- * 429/503 branches aren't copied per site.
+ * Toasts a guardian OTP-send failure: 429 and 503 get shared copy, anything
+ * else the caller's fallback message.
  */
 export function toastGuardianSendError(
   err: unknown,

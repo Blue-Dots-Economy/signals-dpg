@@ -9,34 +9,21 @@ export interface ResponsiveDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
-  // forwarded to DialogContent on desktop; ignored by the Drawer body
+  // Desktop DialogContent only.
   contentClassName?: string;
-  // Accessible name for the MOBILE Drawer only. vaul bundles its own
-  // @radix-ui/react-dialog instance, so a child DialogTitle (from this repo's
-  // `dialog.tsx`, a DIFFERENT module instance) registers with the wrong React
-  // context and never satisfies vaul's own DrawerContent's aria-labelledby —
-  // the sheet ends up with no accessible name at all on mobile, even though a
-  // visible title renders fine (it's an a11y-wiring gap, not a visual one).
-  // Rendered as a sr-only DrawerTitle (vaul's own Title, correct context) so
-  // it doesn't duplicate the visible title already inside `children`. Omit
-  // only if the dialog would visually have no title either (none here do).
+  // Accessible name for the mobile Drawer, rendered as a sr-only DrawerTitle.
+  // vaul bundles its own @radix-ui/react-dialog, so a DialogTitle in
+  // `children` registers with the wrong context and leaves the sheet unnamed.
   title?: React.ReactNode;
-  // Whether an X close affordance renders — honored on BOTH shapes (previously
-  // silently dropped on the mobile Drawer, which also hid it in `view` mode).
+  // Whether an X close button renders, on both shapes.
   showCloseButton?: boolean;
-  // Whether outside-click/swipe/Esc/backdrop can dismiss — honored on BOTH
-  // shapes. Explicit rather than inferred from the guard callbacks below, so a
-  // consumer that just wants the guard callbacks as passive hooks (without
-  // blocking dismissal) doesn't accidentally trap a mobile Drawer. Defaults to
-  // true (matches the prior un-guarded default for every consumer that never
-  // set this).
+  // Whether outside click, swipe, Esc or backdrop can dismiss, on both
+  // shapes. Explicit rather than inferred from the guard callbacks, so passive
+  // guards cannot trap a Drawer. Default true.
   dismissible?: boolean;
-  // Guard callbacks forwarded to both shapes' underlying radix Dialog.Content
-  // (vaul spreads DrawerContent's extra props onto it). Passing `dismissible`
-  // is what actually blocks swipe/backdrop/Esc dismissal on the Drawer; these
-  // callbacks alone do NOT block it there (unlike desktop, where
-  // `preventDefault()` inside them is sufficient) — set `dismissible={false}`
-  // too when full non-dismissal is required.
+  // Forwarded to both shapes' Radix Dialog.Content. On the Drawer,
+  // `preventDefault()` here does not block dismissal; set
+  // `dismissible={false}` too.
   onInteractOutside?: (e: Event) => void;
   onEscapeKeyDown?: (e: Event) => void;
 }

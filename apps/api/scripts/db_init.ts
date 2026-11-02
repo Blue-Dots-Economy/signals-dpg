@@ -1,14 +1,13 @@
 /**
  * Apply the idempotent SQL bootstrap files that aren't managed by Drizzle.
  *
- * Why this exists: better-auth's tables (user, account, organization, etc.)
- * live in apps/api/db/postgres/schema/ and are pushed by drizzle-kit via
- * `pnpm db:push:api`. The `items`, `item_actions`, and `action_events`
- * tables (partitioned, with extensions + GIN/GiST indexes) live as raw
- * idempotent SQL under packages/database/src/utils/sql_scripts/ — there's
- * no code path that applies them. Without this script, a fresh clone hits
- * `PARTITION_SETUP_FAILED` the first time anyone calls POST /api/v1/item/create
- * because the parent `items` table does not exist.
+ * The auth tables (user, account, organization, etc.) live in
+ * apps/api/db/postgres/schema/ and are pushed by drizzle-kit
+ * (`pnpm db:push:api`). The partitioned `items`, `item_actions` and
+ * `action_events` tables (with extensions + GIN/GiST indexes) are raw
+ * idempotent SQL under packages/database/src/utils/sql_scripts/, applied only
+ * by this script; without it a fresh clone hits `PARTITION_SETUP_FAILED` on
+ * the first item create.
  *
  * Run from repo root: pnpm db:init:api
  * Run inside apps/api: pnpm db:init
@@ -36,10 +35,9 @@ const sqlDir = resolve(
 // Order matters: items must exist before any code-side ensureItemPartition()
 // call hits it; same for actions/events.
 //
-// The better-auth / item_metrics / pii_reveal_audit / consent_record tables are
-// owned by Drizzle — created locally by `pnpm db:push:api` and in deploy by the
-// drizzle migrations (apps/api/drizzle/) via the deploy runner
-// (scripts/migrate.mjs). They are intentionally NOT in this list.
+// The auth / item_metrics / pii_reveal_audit / consent_record tables are owned
+// by Drizzle (`pnpm db:push:api` locally, apps/api/drizzle/ migrations via
+// scripts/migrate.mjs in deploy), so they are not in this list.
 const FILES = [
   'extensions/extensions.sql',
   'core/create_items.sql',

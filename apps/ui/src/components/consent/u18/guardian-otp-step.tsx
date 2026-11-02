@@ -17,9 +17,8 @@ export interface GuardianOtpStepProps {
   /** Re-sends the OTP by re-submitting the guardian details already on file. */
   onResend: () => Promise<void>;
   /**
-   * Verify handler. Defaults to the authenticated `verifyGuardian`
-   * (POST /u18/guardian/verify). The pre-auth signup flow injects a handler
-   * that verifies via POST /u18/signup/guardian/verify (no session yet).
+   * Defaults to the authenticated `verifyGuardian` (POST /u18/guardian/verify).
+   * The pre-auth signup flow passes one for POST /u18/signup/guardian/verify.
    */
   verify?: (otp: string) => Promise<VerifyGuardianResponse>;
   /** What this OTP authorises — renders the "Guardian approval for" panel. */
@@ -77,7 +76,6 @@ export function GuardianOtpStep({
           description: t('u18.otp_error_invalid_desc', 'That code is invalid or expired. Please try again.'),
         });
       }
-      // Reset the input so the ward can retry cleanly.
       setOtpKey((k) => k + 1);
     } finally {
       setIsVerifying(false);

@@ -1,22 +1,12 @@
 /**
- * Keycloak / OIDC configuration for the UI login flow (Build 2 of
- * docs/superpowers/plans/2026-07-23-keycloak-migration-design.md).
+ * Keycloak / OIDC configuration for the UI login flow.
  *
- * **The server decides which login screen to show.** These values come from
- * `GET /api/v1/auth/config` at runtime, not from `VITE_*` build args.
- *
- * They used to be build args, and that was a footgun: the login screen was
- * compiled into the image, so flipping providers needed a rebuild — and a
- * bundle built with `keycloak` against an API running `betterauth` sent every
- * user into an OIDC redirect the API knew nothing about, while the OTP
- * endpoints were never called at all. Reading the API's own config makes that
- * disagreement impossible and removes the rebuild.
- *
- * `VITE_AUTH_PROVIDER` survives only as a deliberate **override** for a UI-side
- * canary (rollout step R5), where the API runs `dual` and you want a subset of
- * traffic on the new screen. It is read through `getRuntimeEnv`, so it can be
- * set per-deployment in `window.__DPG_UI_CONFIG__` without a rebuild either.
- * Unset — the normal case — the server wins.
+ * The server decides which login screen to show: these values come from
+ * `GET /api/v1/auth/config` at runtime, not from `VITE_*` build args, so the
+ * bundle can never disagree with the API's provider. The API only advertises
+ * `keycloak`. `VITE_AUTH_PROVIDER` (read through `getRuntimeEnv`) is an
+ * override; set to `betterauth` it forces the legacy OTP screen, whose
+ * `/api/auth/*` endpoints the API no longer serves.
  */
 
 import { getRuntimeEnv } from './runtime-env';
@@ -36,8 +26,7 @@ export interface KeycloakUiConfig {
   baseUrl: string;
   realm: string;
   clientId: string;
-  /** OIDC issuer — matches the API's expected issuer, since both derive from
-   *  the same server config. */
+  /** OIDC issuer; matches the API's expected issuer since both derive from the same config. */
   authority: string;
   redirectUri: string;
   postLogoutRedirectUri: string;
@@ -48,10 +37,7 @@ export interface KeycloakUiConfig {
 /** Path the Keycloak redirect lands on. Must be registered on the client. */
 export const OIDC_CALLBACK_PATH = '/auth/callback';
 
-/**
- * Explicit UI-side override, if a deployment set one. Returns undefined in the
- * normal case, meaning "follow the server".
- */
+/** Explicit UI-side override, or undefined to follow the server. */
 export function getAuthProviderOverride(): UiAuthProvider | undefined {
   const raw = readEnv('VITE_AUTH_PROVIDER');
   if (raw === 'keycloak') return 'keycloak';
@@ -60,13 +46,8 @@ export function getAuthProviderOverride(): UiAuthProvider | undefined {
 }
 
 /**
- * Which login screen to render, given the server's auth config.
- *
- * `dual` maps to the OTP screen deliberately: it means the API accepts Keycloak
- * tokens *alongside* better-auth sessions, which is the transition state where
- * existing users must keep logging in the old way. Only `keycloak` — the
- * terminal state — switches the screen. A canary can force it sooner with the
- * override above.
+ * Which login screen to render. Anything other than `keycloak` from the server
+ * (or an absent config) maps to the legacy OTP screen; the override wins.
  */
 export function resolveUiAuthProvider(
   config: AuthConfigResponse | null | undefined
@@ -77,11 +58,9 @@ export function resolveUiAuthProvider(
 }
 
 /**
- * Build the OIDC client config from the server's advertised Keycloak details.
- *
- * Returns null when the server isn't advertising Keycloak — a deployment that
- * has not configured it must keep the working OTP login rather than render a
- * button that redirects nowhere. `VITE_KEYCLOAK_*` still override individual
+ * Builds the OIDC client config from the server's advertised Keycloak details.
+ * Returns null when the server advertises none, in which case the login page
+ * falls back to the legacy OTP screen. `VITE_KEYCLOAK_*` override individual
  * values for local experiments.
  */
 export function getKeycloakConfig(
@@ -94,8 +73,7 @@ export function getKeycloakConfig(
   const clientId =
     readEnv('VITE_KEYCLOAK_CLIENT_ID') ?? config?.keycloak?.clientId ?? 'signals-ui';
 
-  // window is always present in the app, but this module is imported by tests
-  // and by the tourist entry point, so don't assume it.
+  // This module is also imported by tests and the tourist entry, so `window` may be absent.
   const origin = typeof window === 'undefined' ? '' : window.location.origin;
 
   return {
@@ -109,10 +87,7 @@ export function getKeycloakConfig(
   };
 }
 
-/**
- * True only when the resolved provider is Keycloak AND there is a usable OIDC
- * config to redirect to. A half-configured deployment keeps the OTP login.
- */
+/** True only when the resolved provider is Keycloak and an OIDC config exists. */
 export function isKeycloakLoginEnabled(
   config: AuthConfigResponse | null | undefined
 ): boolean {

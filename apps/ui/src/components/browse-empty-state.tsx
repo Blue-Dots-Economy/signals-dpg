@@ -22,17 +22,12 @@ export interface BrowseEmptyStateProps {
 }
 
 /**
- * "Nothing to show" for the browse list, in the one variant that is true.
+ * "Nothing to show" for the browse list, in the one variant that is true. A
+ * component of its own to keep `HomePage` under Sonar's cognitive-complexity
+ * limit (S3776).
  *
- * Lives in its own component rather than as a nested `buildEmptyState` inside
- * `HomePage` because five mutually exclusive branches at one nesting level cost
- * roughly nine points of cognitive complexity on the enclosing function
- * (Sonar S3776) — HomePage was over the limit on that alone. The branches
- * belong together, so the fix is to move them out as a unit, not to flatten
- * them in place.
- *
- * Order is load-bearing: most specific cause first, so the message names the
- * thing the viewer can actually act on.
+ * Order matters: most specific cause first, so the message names what the
+ * viewer can act on.
  */
 export function BrowseEmptyState({
   search,
@@ -65,10 +60,8 @@ export function BrowseEmptyState({
     );
   }
 
-  // Location-bounded discover returned nothing: the network may well have
-  // listings — just none within the (hard) radius. Say THAT, not "none in
-  // this network" (false) or nothing at all. Mirrors the map's area-scoped
-  // empty message; the Location control makes trying elsewhere actionable.
+  // A location-bounded list is empty within the radius, not network-wide, so
+  // say that.
   if (hasLocation && distanceMeters !== undefined) {
     return (
       <EmptyState

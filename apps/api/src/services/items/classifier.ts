@@ -6,11 +6,10 @@ export type LifecycleStatus = 'draft' | 'live' | 'paused' | 'retired';
 export type { GoLiveGate };
 
 /**
- * Default gate set when a domain does not declare `go_live_required`:
- * `schema_required` only. `consent_required` is opt-in per domain — a
- * guardian-gated domain has it force-added by `resolveGoLiveGates` so the U18
- * age control can never be dropped by omitting config. The gate vocabulary and
- * per-gate logic live in `go_live_gates.ts` (the registry), not here.
+ * Default gate set when a domain does not declare `go_live_required`.
+ * `consent_required` is opt-in per domain, except that `resolveGoLiveGates`
+ * force-adds it for a guardian-gated domain. Per-gate logic lives in
+ * `go_live_gates.ts`.
  */
 export const DEFAULT_GO_LIVE_GATES: readonly GoLiveGate[] = ['schema_required'];
 
@@ -18,32 +17,27 @@ export interface ClassifierInput {
   schema: JSONSchemaLike | null | undefined;
   merged_state: Record<string, unknown> | null | undefined;
   /**
-   * Stored lifecycle_status BEFORE this write. `paused` and `retired` are
-   * sticky — the classifier never flips out of them (`retired` is terminal).
-   * For brand-new items pass `'draft'`.
+   * Stored lifecycle_status before this write; pass `'draft'` for a new item.
+   * The classifier never moves out of `paused` or `retired`.
    */
   current_status: LifecycleStatus;
   /**
    * Whether the item owner has accepted `profile_creation` consent by the
-   * correct signer (from the consent ledger, not the user-table flags). Only
-   * consulted when the `consent_required` gate is active. For a guardian-gated
-   * minor the caller must fold the guardian check into this value.
+   * correct signer, from the consent ledger. Only consulted when the
+   * `consent_required` gate is active. For a guardian-gated minor the caller
+   * must fold the guardian check into this value.
    */
   consent_accepted: boolean;
-  /**
-   * Which gates must pass for `live`. Defaults to `DEFAULT_GO_LIVE_GATES`.
-   * Resolved from the domain's `go_live_required` config by the caller.
-   */
+  /** Gates that must pass for `live`. Defaults to `DEFAULT_GO_LIVE_GATES`. */
   gates?: readonly GoLiveGate[];
   /**
-   * `owner_required` only (SS-3, #640). Resolve with
-   * `applyDefaultOwnerAndResolveGate` (`item_service.ts`) and pass it whenever
-   * `gates` includes `owner_required`.
+   * For `owner_required` only. Resolve with `resolveOwnerGateContext`
+   * (`services/aggregator/default_aggregator.ts`) and pass it whenever `gates`
+   * includes `owner_required`.
    *
-   * Omitted → FAILS CLOSED (treated as "a default exists and the owner has
-   * none"): a call site that configures the gate but forgets the context
-   * leaves profiles in `draft`, which is visible and recoverable, where the
-   * opposite default would silently publish unowned profiles.
+   * Omitted fails closed ("a default exists and the owner has none"): a
+   * forgotten context leaves profiles in `draft`, which is visible and
+   * recoverable, rather than silently publishing unowned profiles.
    */
   owner_context?: { has_owner: boolean; default_configured: boolean };
 }
@@ -53,24 +47,15 @@ export interface ClassifierResult {
 }
 
 /**
- * Pure synchronous classifier. Runs inside the item-write transaction over
- * the merged post-write state. See
- * docs/superpowers/specs/2026-06-03-participant-onboarding-lifecycle-design.md §5.
+ * Pure synchronous classifier over the merged post-write state.
  *
- * `retired` is terminal and `paused` is sticky; otherwise `live` requires
- * EVERY configured gate to pass, else `draft`. The gate set is config-driven
- * per domain (`go_live_required`), defaulting to `schema_required`.
- *
- * ⚠️ One documented exception to "EVERY configured gate must pass":
- * `owner_required` (SS-3, #640) can let an already-`live` profile through when
- * it does not satisfy the gate. Both guards are load-bearing — read
- * `GO_LIVE_GATE_CHECKS.owner_required` before changing this function.
- * (Completion % is not produced here — the single completion metric is
- * `item_metrics.profile_completion_pct`, computed required-only via
- * `profile_completion_pct`, and is intentionally independent of the gate set.)
+ * `retired` is terminal and `paused` is sticky; otherwise `live` requires every
+ * configured gate to pass, else `draft`. Exception: `owner_required` lets an
+ * already-`live` profile through; read `GO_LIVE_GATE_CHECKS.owner_required`
+ * before changing this function. Profile completion % is computed separately
+ * and is independent of the gate set.
  */
 export const classify_item = (input: ClassifierInput): ClassifierResult => {
-  // Terminal: a retired item is permanently removed — never recompute out of it.
   if (input.current_status === 'retired') {
     return { lifecycle_status: 'retired' };
   }

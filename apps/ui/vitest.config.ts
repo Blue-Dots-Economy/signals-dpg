@@ -34,24 +34,20 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],
-      // Still emit the lcov report when some tests fail, matching apps/api.
-      // Vitest defaults this to false, so one failing ui test wrote NO
-      // lcov at all — SonarCloud then scored every changed ui line as
-      // uncovered (a PR's new_coverage fell to 2% and failed the gate) while
-      // the coverage step itself passed, because CI runs it continue-on-error.
+      // Emit lcov even when some tests fail (as apps/api does); otherwise
+      // SonarCloud scores every changed ui line as uncovered while CI's
+      // continue-on-error coverage step passes.
       reportOnFailure: true,
       reportsDirectory: './coverage',
       include: ['src/**/*.{ts,tsx}'],
       exclude: [
         'src/**/*.test.{ts,tsx}',
         'src/test/**',
-        // Generated shadcn component kit — installed boilerplate, not app
-        // logic. Already in sonar.coverage.exclusions; mirrored here so the
-        // local number and the SonarCloud number agree.
+        // Generated shadcn kit; also in sonar.coverage.exclusions, so local and
+        // SonarCloud numbers agree.
         'src/components/ui/**',
-        // Vite entry points: the two bootstrap files (default + tourist app).
-        // Equivalent to apps/api/src/server.ts — nothing meaningfully
-        // unit-testable, exercised by actually starting the app.
+        // Vite entry points (default and tourist): exercised by starting the
+        // app, not unit tests.
         'src/main.tsx',
         'src/tourist/main.tourist.tsx',
       ],

@@ -20,12 +20,8 @@ export default defineConfig({
     globals: false,
     setupFiles: ['./vitest.setup.ts'],
     // Every integration suite boots a real Fastify app on API_PORT (default
-    // 2742) and asserts against it. Parallel suite execution makes them race
-    // for the same port, so exactly one wins per run and the others fail at
-    // beforeAll with EADDRINUSE. Serialising keeps each suite's listen() call
-    // exclusive without changing per-suite port logic (the suites are also
-    // coupled to apiConfig.served_domains' instance_url, which hard-codes
-    // localhost:2742 via the bundled network configs).
+    // 2742), which the bundled network configs' instance_url also hard-codes.
+    // Run in parallel they race for the port (EADDRINUSE), so run serially.
     fileParallelism: false,
   },
   resolve: {
@@ -38,10 +34,8 @@ export default defineConfig({
         .pathname,
       '@dpg/database': new URL('../../packages/database/src', import.meta.url)
         .pathname,
-      // Integration tests boot the real Fastify app, so the full
-      // workspace alias surface needs to resolve. The unit config
-      // gets away without these because unit tests stub the auth /
-      // notification / match_score modules out at the boundary.
+      // The real app needs the full workspace alias surface; unit tests stub
+      // these modules at the boundary.
       '@dpg/auth': new URL('../../packages/auth/src', import.meta.url)
         .pathname,
       '@dpg/notification': new URL(

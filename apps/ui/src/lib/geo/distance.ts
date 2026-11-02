@@ -1,24 +1,11 @@
-/**
- * Geo distance utilities: haversine formula and nearest-location finder.
- * Pure utility functions for proximity-based item sorting.
- */
-
 import type { LatLng } from './types';
 
 /** Earth's mean radius in metres (WGS84). */
 const EARTH_RADIUS_METRES = 6_371_000;
 
-/** Convert degrees to radians. */
 const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
 
-/**
- * Great-circle distance between two points using the haversine formula.
- * Both points are specified in decimal degrees (WGS84).
- *
- * @param a - First point {lat, lng} in degrees.
- * @param b - Second point {lat, lng} in degrees.
- * @returns Distance in metres.
- */
+/** Great-circle (haversine) distance in metres between two WGS84 points in degrees. */
 export function haversineMeters(a: LatLng, b: LatLng): number {
   const lat1 = toRadians(a.lat);
   const lat2 = toRadians(b.lat);
@@ -38,13 +25,8 @@ export function haversineMeters(a: LatLng, b: LatLng): number {
 }
 
 /**
- * Distance in metres from `from` to the nearest of an item's locations.
- * Returns Infinity when `locations` is empty or undefined, so items without
- * a location sort last when used as a sort key.
- *
- * @param from - User's location {lat, lng}.
- * @param locations - Array of item locations (each with lat, lng, and optional label).
- * @returns Distance in metres to the nearest location, or Infinity if no locations.
+ * Distance in metres from `from` to the nearest of an item's locations, or
+ * Infinity when there are none so such items sort last.
  */
 export function nearestDistanceMeters(
   from: LatLng,

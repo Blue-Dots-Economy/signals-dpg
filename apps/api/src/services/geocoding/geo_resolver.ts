@@ -27,18 +27,17 @@ interface PhotonFeature {
 }
 
 /**
- * Photon feature types too coarse to stand in for an address (#788) — the same
- * rule as Google's: a country- or state-level answer is a not-found, not a pin.
+ * Photon feature types too coarse to stand in for an address: a country- or
+ * state-level answer is a not-found, not a pin.
  */
 const COARSE_PHOTON_TYPES = new Set(['country', 'state']);
 
 /**
  * Pure: the first usable Photon feature → coords. Exported for testing.
  *
- * With no `country` this is exactly `parsePhotonFeatures`. With a country it is
- * the first feature inside that country and finer than state level. The
- * country check is mandatory, not a nicety: an older Photon server ignores the
- * `countrycode` request param and answers worldwide.
+ * With no `country` this is `parsePhotonFeatures`. With a country it is the
+ * first feature inside that country and finer than state level. The country
+ * check is required because older Photon servers ignore `countrycode`.
  */
 export function pickPhotonFeature(json: unknown, country?: string): Coordinates | null {
   if (!country) return parsePhotonFeatures(json);
@@ -84,12 +83,10 @@ interface GoogleGeocodeResult {
 }
 
 /**
- * Result types too coarse to stand in for a participant's address (#785). With
- * `components=country:XX`, Google never answers ZERO_RESULTS for an unknown
- * place — "Component filtering returns a ZERO_RESULTS response only if you
- * provide filters that exclude each other" — it falls back to the country or
- * state centroid instead. Storing that would pin the participant hundreds of km
- * away, so a result that is ONLY one of these is treated as not found.
+ * Result types too coarse to stand in for a participant's address. With
+ * `components=country:XX`, Google answers an unknown place with the country or
+ * state centroid instead of ZERO_RESULTS, so a result that is only one of
+ * these types is treated as not found.
  */
 const COARSE_GOOGLE_TYPES = new Set(['country', 'administrative_area_level_1', 'political']);
 
@@ -107,10 +104,9 @@ function googleResultCountry(r: GoogleGeocodeResult): string | undefined {
 /**
  * Pure: the first usable Google result → coords. Exported for testing.
  *
- * With no `country` this is exactly `parseGoogleGeocode` — the first result,
- * whatever it is. With a country it is the first result that is both inside
- * that country and finer than state level. The country check backs up the
- * `components` filter on the request rather than trusting it alone.
+ * With no `country` this is `parseGoogleGeocode`. With a country it is the
+ * first result inside that country and finer than state level, backing up the
+ * request's `components` filter.
  */
 export function pickGoogleResult(json: unknown, country?: string): Coordinates | null {
   if (!country) return parseGoogleGeocode(json);
@@ -127,9 +123,8 @@ export function pickGoogleResult(json: unknown, country?: string): Coordinates |
 }
 
 /**
- * Pure: the Geocoding API request URL. Exported for testing. `components`
- * RESTRICTS results to the country; `region` would only bias them, which is
- * not enough to stop a larger foreign place with the same name winning.
+ * Pure: the Geocoding API request URL. Exported for testing. Uses `components`
+ * because it restricts results to the country; `region` only biases them.
  */
 export function buildGoogleGeocodeUrl(query: string, apiKey: string, country?: string): URL {
   const url = new URL('https://maps.googleapis.com/maps/api/geocode/json');
@@ -166,8 +161,8 @@ async function resolveWithPhoton(
 }
 
 /** Dispatch to the configured provider. Returns null only on a definitive
- *  not-found; THROWS on transient/HTTP/network errors so the cache layer does
- *  not persist a negative for a place that merely failed to resolve this time. */
+ *  not-found; throws on transient/HTTP/network errors so the cache layer does
+ *  not persist a negative for a temporary failure. */
 async function resolveFromProvider(q: string): Promise<Coordinates | null> {
   if (geocodingConfig.google_api_key) {
     return resolveWithGoogle(q, geocodingConfig.google_api_key, geocodingConfig.country);
@@ -179,27 +174,18 @@ const delay = (ms: number): Promise<void> =>
   ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 
 /**
- * One-shot (configurable) retry around a provider resolve. A provider THROWS
- * only on a TRANSIENT failure — an HTTP/network error or a soft rate-limit
- * status like OVER_QUERY_LIMIT — while a definitive not-found returns null.
- * Retrying only on a thrown error therefore targets exactly the transient
- * failures (e.g. the 429 burst a large bulk upload can trigger) and never
- * re-sends an address that genuinely does not resolve.
+ * Retries a provider resolve (`retry_attempts` tries) only when it throws, i.e.
+ * on transient failures such as a bulk upload's 429 burst; a definitive
+ * not-found (null) is never re-sent.
  *
- * This is best-effort, NOT durable recovery: an item whose geocode fails every
- * attempt is created without coordinates and — since #398 removed the client
- * fallback — will not appear on the map until it is edited/re-saved. Because a
- * bulk upload's retries land within the same rate-limit window, a sustained 429
- * can still leave a row coordinate-less. Durable spaced-retry / backfill is
- * intentionally deferred; see the PR description.
+ * Best-effort only: an item whose geocode fails every attempt is created
+ * without coordinates and stays off the map until it is re-saved. Retries land
+ * in the same rate-limit window, so a sustained 429 can still cause this.
  */
 async function resolveFromProviderWithRetry(q: string): Promise<Coordinates | null> {
   const attempts = Math.max(1, geocodingConfig.retry_attempts);
-  // One try per call, recursing after the backoff: tries are inherently
-  // sequential (each waits on the previous failure), so this is a chain, not a
-  // loop of awaits. After the last try the error propagates, so the cache layer
-  // treats it as best-effort (returns null, caches nothing → a later save
-  // retries live).
+  // After the last try the error propagates; the cache layer then returns
+  // null and caches nothing, so a later save retries live.
   const attempt = async (n: number): Promise<Coordinates | null> => {
     try {
       return await resolveFromProvider(q);
@@ -213,9 +199,9 @@ async function resolveFromProviderWithRetry(q: string): Promise<Coordinates | nu
 }
 
 /**
- * Server-side resolve of a composite address string to coordinates, cached in
- * Redis (#196). Google Geocoding when a key is configured, else Photon.
- * Returns null on any failure — callers must treat geocoding as best-effort.
+ * Resolves a composite address string to coordinates, cached in Redis. Uses
+ * Google Geocoding when a key is configured, else Photon. Returns null on any
+ * failure; callers must treat geocoding as best-effort.
  */
 export async function resolveCoordinates(query: string): Promise<Coordinates | null> {
   const q = query.trim();

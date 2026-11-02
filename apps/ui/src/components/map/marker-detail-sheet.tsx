@@ -13,15 +13,11 @@ interface MarkerDetailSheetProps {
 }
 
 /**
- * The phone map's marker details (#745): tapping a pin opens the item from the
- * bottom, the same way My Actions' "View profile" does (`ProfileCardModal`) —
- * a titled sheet with the "public profile" line over the full-size card —
- * instead of the provider's small popup bubble over the map.
- *
- * Built on `ResponsiveDialog`, so it is the vaul bottom Drawer on a phone.
- * The body is a scrolling BLOCK, not a flex column, for the reason spelled
- * out in `ProfileCardModal` (#507): a flex item with `overflow-hidden` (the
- * card's root) shrinks below its content and clips its own "View more details".
+ * The phone map's marker details: a titled bottom sheet (`ResponsiveDialog`)
+ * over the full-size card, like `ProfileCardModal`, instead of the provider's
+ * popup bubble. The body is a scrolling block, not a flex column, because a
+ * flex item with `overflow-hidden` (the card's root) shrinks and clips its own
+ * "View more details".
  */
 export function MarkerDetailSheet({ open, onOpenChange, title, children }: Readonly<MarkerDetailSheetProps>) {
   const { t } = useTranslation();

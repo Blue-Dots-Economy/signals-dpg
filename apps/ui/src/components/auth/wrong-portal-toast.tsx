@@ -4,17 +4,13 @@ import { toast } from 'sonner';
 import { takePendingWrongPortal } from '@/lib/pending-wrong-portal';
 
 /**
- * Surfaces the `auth.wrong_portal` explanation after a domain-gate bounce that
- * crossed a full page load.
+ * Shows the `auth.wrong_portal` message after a domain-gate bounce that
+ * crossed a full page load. Mounted app-wide because the Keycloak logout
+ * redirect returns to the site root (`postLogoutRedirectUri`), not the login
+ * page; see `lib/pending-wrong-portal.ts`.
  *
- * Mounted app-wide rather than on `/auth/login`, because the Keycloak logout
- * redirect returns the browser to `postLogoutRedirectUri` — the site root —
- * not to the login page. See `lib/pending-wrong-portal.ts` for why router
- * state cannot carry this on the Keycloak path.
- *
- * Shares the `wrong-portal-block` toast id with `login-page`'s router-state
- * path, so on the better-auth flow (where both could fire) sonner shows one
- * toast rather than two.
+ * Uses the shared `wrong-portal-block` toast id so sonner never shows the
+ * message twice.
  */
 export function WrongPortalToast() {
   const { t } = useTranslation();
@@ -23,9 +19,8 @@ export function WrongPortalToast() {
     const domain = takePendingWrongPortal();
     if (!domain) return;
     toast.error(t('auth.wrong_portal', { domain }), { id: 'wrong-portal-block' });
-    // `t` is deliberately absent from the deps: the read is one-shot, so a
-    // language change re-running this effect would find nothing and silently
-    // swallow the message the user has not read yet.
+    // `t` is not a dependency: the read is one-shot, so a re-run on language
+    // change would find nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,22 +1,12 @@
 /**
- * Keycloak access-token validation (JWKS-backed) for the better-auth →
- * Keycloak migration. See docs/superpowers/plans/2026-07-23-keycloak-migration-design.md.
+ * Keycloak access-token validation against the realm JWKS.
  *
- * Build 0 (foundation): this module is complete but nothing calls it yet. The
- * auth middleware starts using it in Build 1, gated on AUTH_PROVIDER.
+ * The client check is a real control: signals shares one realm with
+ * aggregator, so an aggregator token has the same keys and `iss`. Every token
+ * must also name a client in `accepted_client_ids`.
  *
- * Two things here are load-bearing and easy to get wrong:
- *
- * 1. **Audience/azp is a real check, not a formality.** signals shares one
- *    `bluedots` realm with aggregator (§3.1), so an aggregator-issued token is
- *    signed by the same keys and carries the same `iss`. Signature + issuer
- *    alone would accept it as a signals session. Every token must also name a
- *    client signals actually serves — that is `accepted_client_ids` (R9).
- *
- * 2. **Nothing here throws.** Routes and middleware in this repo return
- *    `reply.code(N).send({ error, message })`; a verification failure is a
- *    value, not an exception. `verifyKeycloakToken` returns a discriminated
- *    result and the caller maps it to a status code.
+ * Nothing here throws; failures are returned as values for the caller to map
+ * to a status code.
  */
 
 import { createRemoteJWKSet, decodeJwt, errors as joseErrors, jwtVerify } from 'jose';
@@ -24,13 +14,12 @@ import type { JWTPayload } from 'jose';
 import { keycloakConfig } from '@/config';
 
 /**
- * The subset of Keycloak's access-token claims signals reads. Keycloak emits
- * plenty more; this is what the provisioning path (Build 1) maps onto the local
- * `user` mirror, plus the routing claims used to tell a human session from a
- * client-credentials service call.
+ * The subset of Keycloak access-token claims signals reads: what provisioning
+ * maps onto the local `user` mirror, plus the claims that tell a human session
+ * from a client-credentials service call.
  */
 export interface KeycloakClaims {
-  /** Realm-unique subject. By design this equals the signals `user.id` (§6.1). */
+  /** Realm-unique subject; equals the signals `user.id`. */
   sub: string;
   iss: string;
   aud: string[];
@@ -49,10 +38,7 @@ export interface KeycloakClaims {
   family_name?: string;
   realm_access?: { roles?: string[] };
   resource_access?: Record<string, { roles?: string[] }>;
-  /**
-   * Present on client-credentials tokens (service accounts). Its presence is
-   * what distinguishes an integrating DPG's token from a human's.
-   */
+  /** Present on client-credentials (service-account) tokens. */
   client_id?: string;
   [claim: string]: unknown;
 }
@@ -62,11 +48,11 @@ export type KeycloakTokenErrorCode =
   | 'TOKEN_INVALID'
   /** Well-formed and correctly signed, but past `exp` (or before `nbf`). */
   | 'TOKEN_EXPIRED'
-  /** Valid realm token, but issued to a client signals does not serve (R9). */
+  /** Valid realm token, but issued to a client signals does not serve. */
   | 'TOKEN_CLIENT_REJECTED'
   /** JWKS could not be fetched — Keycloak down or unreachable. Retryable. */
   | 'KEYCLOAK_UNAVAILABLE'
-  /** AUTH_PROVIDER is a Keycloak mode but no issuer is configured. */
+  /** No Keycloak issuer/JWKS URI is configured. */
   | 'KEYCLOAK_NOT_CONFIGURED';
 
 export type KeycloakTokenResult =
@@ -74,9 +60,8 @@ export type KeycloakTokenResult =
   | { ok: false; code: KeycloakTokenErrorCode; message: string };
 
 /**
- * JWKS sets are memoised per URL. jose's remote set does its own caching,
- * rate-limited refetch on unknown `kid`, and cooldown — but only if we reuse
- * one instance. Creating one per request would refetch the keys per request.
+ * One JWKS set per URL: jose's caching and rate-limited refetch only work
+ * when the instance is reused.
  */
 const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
 
@@ -112,17 +97,12 @@ const NETWORK_ERROR_CODES = new Set([
 ]);
 
 /**
- * Distinguish "we could not fetch the key set" from "the token is bad".
- *
- * Worth the care: both arrive at the same catch, and conflating them turns a
- * Keycloak outage into a wave of 401s that looks like every user's token going
- * invalid at once. jose signals a non-200 from the JWKS endpoint with a plain
- * `JOSEError` (not a `JWKS*` subclass), and an unreachable host surfaces as a
- * Node system error, so neither is caught by an `instanceof JWKSTimeout` check
- * alone.
- *
- * `JWKSNoMatchingKey` is deliberately NOT treated as an outage — the key set
- * was fetched fine; the token just named a `kid` that is not in it.
+ * Distinguishes "could not fetch the key set" from "the token is bad", so a
+ * Keycloak outage does not look like every token going invalid at once. jose
+ * reports a JWKS non-200 as a plain `JOSEError` and an unreachable host as a
+ * Node system error, so an `instanceof JWKSTimeout` check alone misses both.
+ * `JWKSNoMatchingKey` is not an outage: the set was fetched, the `kid` is
+ * just unknown.
  */
 function isJwksRetrievalFailure(err: unknown): boolean {
   if (err instanceof joseErrors.JWKSTimeout || err instanceof joseErrors.JWKSInvalid) {
@@ -163,19 +143,12 @@ export function extractBearerToken(
 }
 
 /**
- * Cheap, unverified pre-check: does this bearer token even claim to be from
- * our Keycloak realm?
- *
- * Build 1's middleware runs in `dual` mode, where the same Authorization
- * header may carry either a Keycloak JWT or a better-auth bearer token. This
- * decides which validator to run. It proves nothing about authenticity — the
- * payload is read without checking the signature — so it must only ever be
- * used to *route*, never to admit.
+ * Unverified pre-check that the token is a JWT from our realm issuer. It
+ * reads the payload without checking the signature, so it may only be used to
+ * reject early, never to admit.
  */
 export function looksLikeKeycloakToken(token: string): boolean {
   if (!keycloakConfig.issuer) return false;
-  // A JWS compact serialisation has exactly three dot-separated segments;
-  // better-auth's bearer tokens are opaque and do not.
   if (token.split('.').length !== 3) return false;
   try {
     return decodeJwt(token).iss === keycloakConfig.issuer;
@@ -215,8 +188,7 @@ export async function verifyKeycloakToken(
     if (err instanceof joseErrors.JWTExpired) {
       return { ok: false, code: 'TOKEN_EXPIRED', message: 'Access token has expired' };
     }
-    // Infrastructure, not an auth failure — callers should log it as such and
-    // may retry, rather than telling the user their session is invalid.
+    // Infrastructure failure, not an auth failure: log as such; retryable.
     if (isJwksRetrievalFailure(err)) {
       return {
         ok: false,
@@ -261,26 +233,19 @@ export async function verifyKeycloakToken(
   };
 }
 
-/**
- * The claim carrying the set of signals organizations a caller may act for
- * (§5.1 of the migration design).
- */
+/** Claim carrying the signals organizations a caller may act for. */
 export const ACTING_ORG_CLAIM = 'signals_acting_orgs';
 
-/** Grant value meaning "any org" — see the note on `["*"]` in §5.1. */
+/** Grant value meaning "any org". */
 export const ACTING_ORG_WILDCARD = '*';
 
 /**
- * The acting-org grant this token carries, or **undefined when the claim is
- * absent entirely**.
+ * The acting-org grant, or undefined when the claim is absent. Absent means
+ * fall back to the header (`claim_preferred`); an empty array is a grant of
+ * nothing and must authorise nothing.
  *
- * That distinction is load-bearing: absent means "this token predates the claim,
- * fall back to the header" (`claim_preferred`), whereas an empty array is a real
- * grant of nothing and must authorise nothing.
- *
- * Accepts both shapes Keycloak produces: a JSON array from a multivalued mapper,
- * and a comma-separated string from a hardcoded-claim mapper (which emits a
- * plain string unless `jsonType.label` is set to JSON).
+ * Accepts a JSON array (multivalued mapper) or a comma-separated string
+ * (hardcoded-claim mapper without `jsonType.label` set to JSON).
  */
 export function actingOrgGrant(claims: KeycloakClaims): string[] | undefined {
   const raw = claims[ACTING_ORG_CLAIM];
@@ -312,35 +277,24 @@ export function realmRoles(claims: KeycloakClaims): string[] {
 }
 
 /**
- * Used by `resolve_session.ts` as the second gate on the human path
- * (`KEYCLOAK_REQUIRED_REALM_ROLES`). The client allowlist above is checked
- * against `azp`/`aud`; a realm role is assigned by the realm rather than named
- * by the client, so it is the part of the shared-realm defence a misconfigured
- * audience mapper cannot undo.
+ * Second gate on the human path (`KEYCLOAK_REQUIRED_REALM_ROLES`, checked in
+ * `resolve_session.ts`). A realm role is assigned by the realm, not named by
+ * the client, so a misconfigured audience mapper cannot undo it.
  */
 export function hasRealmRole(claims: KeycloakClaims, role: string): boolean {
   return realmRoles(claims).includes(role);
 }
 
 /**
- * True for a client-credentials (service account) token — an integrating DPG
- * calling signals — as opposed to a human's session token.
+ * True for a client-credentials (service-account) token. Any one signal
+ * suffices: `azp` in `service_client_ids`, a `client_id` claim, or a
+ * `service-account-` username. `azp` matters because the other two are
+ * optional (no `client_id` mapper on the bundled realm's service clients;
+ * `preferred_username` needs the `profile` scope), and misclassifying a
+ * service client as human locks it out with `BEARER_SESSION_NOT_SUPPORTED`.
  *
- * Keycloak marks service-account tokens with a `client_id` claim and a
- * `service-account-<clientId>` username; either signal is sufficient.
- *
- * `azp` is checked FIRST and is the only signal that cannot be configured away.
- * The other two are both optional in practice: the bundled realm's service
- * clients carry no `client_id` mapper, and `preferred_username` requires the
- * `profile` scope. Trimming that scope from a machine client is a natural
- * hardening step, and without this branch it would silently reclassify that
- * client as a human — which now means `401 BEARER_SESSION_NOT_SUPPORTED` on
- * every call. The failure mode of this discriminator is a lockout, so it errs
- * toward recognising a service token, not toward doubting one.
- *
- * Recognising a token here is not by itself an authorization: the caller still
- * has to resolve to a service account, and `service_client_ids` is empty by
- * default, so an unlisted client gains nothing from matching.
+ * Not an authorization by itself: the caller must still resolve to a service
+ * account, and `service_client_ids` is empty by default.
  */
 export function isServiceAccountToken(claims: KeycloakClaims): boolean {
   return (

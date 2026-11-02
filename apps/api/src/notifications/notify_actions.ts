@@ -19,10 +19,8 @@ export interface NotifierConfig {
 }
 
 /**
- * Brand display name for the sign-off ("Team {name}"): the action network's
- * `display_name` (e.g. "Blue Dot"), falling back to INSTANCE_NAME when the
- * network config has none. Best-effort — never throws. Reused by the retire
- * notifier (#418).
+ * Brand display name: the network's `display_name`, else INSTANCE_NAME.
+ * Never throws.
  */
 export async function resolveNetworkBrandName(networkId: string): Promise<string> {
   try {
@@ -40,11 +38,9 @@ export async function resolveNetworkBrandName(networkId: string): Promise<string
 let cachedConfig: NotifierConfig | null | undefined;
 
 /**
- * Memoised notifier config (email sender + cta). `null` when notifications
- * aren't configured. Shared with the retire notifier (#418) so both read the
- * same config + reset. Action emails stay gated on an explicit
- * NOTIFICATION_FROM_EMAIL plus at least one URL source (UI_HOST_BINDINGS or
- * FRONTEND_BASE_URL).
+ * Memoised email sender and CTA resolver for action, retire and item-lifecycle
+ * emails. `null` unless a notification client, NOTIFICATION_FROM_EMAIL and at
+ * least one URL source (UI_HOST_BINDINGS or FRONTEND_BASE_URL) are configured.
  */
 export function resolveNotifierConfig(): NotifierConfig | null {
   if (cachedConfig !== undefined) return cachedConfig;
@@ -55,10 +51,7 @@ export function resolveNotifierConfig(): NotifierConfig | null {
   const hasAnyUrl =
     !!frontendBaseUrl || Object.keys(uiHostBindings.byDomain).length > 0;
 
-  // Gate on "some URL source exists", not on the scalar alone: a split
-  // deployment configures UI_HOST_BINDINGS and may leave FRONTEND_BASE_URL
-  // unset, and requiring the scalar would silently stop EVERY action email
-  // rather than degrade one link (#569).
+  // A split deployment may set only UI_HOST_BINDINGS, so FRONTEND_BASE_URL alone is not required.
   if (!nc || !fromEmail || !hasAnyUrl) {
     cachedConfig = null;
     return cachedConfig;
@@ -83,12 +76,8 @@ export function resolveNotifierConfig(): NotifierConfig | null {
 }
 
 /**
- * Fire-and-forget entry point used by the action route seams. Resolves
- * recipients, builds the branded plan, and hands off to the central email
- * sender (`email/dispatch_email.ts`, #529) to render and post to the
- * notification service. Never throws and never blocks the route. No-op when
- * notifications are not configured (missing NS client / from-email / any
- * URL source).
+ * Entry point for action emails. Callers `void` it. No-op when notifications
+ * are not configured.
  */
 export async function dispatchActionNotifications(
   event: NotificationEvent,
@@ -97,16 +86,13 @@ export async function dispatchActionNotifications(
   const config = resolveNotifierConfig();
   if (!config) return;
 
-  // Brand name is per-network (the action's network display_name).
   const brandName = await resolveNetworkBrandName(event.target.network);
 
   const dispatcher = createDirectDispatcher({
     sendEmail: (args) => config.sender.dispatchEmail(args),
     resolveEmail: resolveOwnerEmail,
-    // Seeker-facing copy uses the provider's service name; provider-facing
-    // copy keeps the seeker generic. Use the same provider-like classification
-    // as the copy selection so the two never drift, and pass the counterparty's
-    // network so the item lookup can prune to its partition.
+    // Seeker-facing copy names the provider's service; provider-facing copy
+    // keeps the seeker generic. The network lets the lookup prune to one partition.
     resolveCounterpartyName: async (plan: NotificationPlan) =>
       resolveRecipientRole(plan.counterpartyDomain) === 'provider'
         ? resolveProviderServiceName(plan.counterpartyItemId, plan.counterpartyNetwork)
