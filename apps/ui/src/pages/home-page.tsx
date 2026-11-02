@@ -2165,6 +2165,7 @@ export function HomePage() {
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
+                  loading={mapMarkers.isLoading}
                   focusPoint={userLocation}
                   focusNonce={recenterNonce}
                   closePopupNonce={closePopupNonce}

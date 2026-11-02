@@ -534,20 +534,54 @@ describe('MapView — loading, empty state and maximize', () => {
     setActiveMapProvider('fake-alpha');
   });
 
-  it('shows the loading overlay first, then clears it once markers resolve', async () => {
-    render(
+  it('shows the loading message only while loading with no markers', async () => {
+    const { rerender } = render(<MapView schema={NAME_SCHEMA} items={[]} loading />);
+    expect(screen.getByText('Loading map data...')).toBeInTheDocument();
+
+    rerender(
       <MapView
         schema={NAME_SCHEMA}
         items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'Acme' })]}
+        loading
+      />,
+    );
+    expect(screen.queryByText('Loading map data...')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Acme' })).toBeInTheDocument();
+  });
+
+  it('hands the provider the built markers on the first render and the same array afterwards', () => {
+    const seen: MapMarker[][] = [];
+    registerMapProvider({
+      name: 'fake-capture',
+      component: ({ markers }: MapProviderProps) => {
+        seen.push(markers);
+        return null;
+      },
+    });
+    setActiveMapProvider('fake-capture');
+    const items = [itemAt('a', [{ lat: 10, lng: 20 }], { name: 'Acme' })];
+
+    const { rerender } = render(<MapView schema={NAME_SCHEMA} items={items} emptyMessage="one" />);
+    rerender(<MapView schema={NAME_SCHEMA} items={items} emptyMessage="two" />);
+
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[seen.length - 1]).toBe(seen[0]);
+  });
+
+  it('fans same-coordinate items onto separate points', async () => {
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[
+          itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' }),
+          itemAt('b', [{ lat: 10, lng: 20 }], { name: 'Second' }),
+        ]}
       />,
     );
 
-    expect(screen.getByText('Loading map data...')).toBeInTheDocument();
-
-    await waitFor(() =>
-      expect(screen.queryByText('Loading map data...')).not.toBeInTheDocument(),
-    );
-    expect(screen.getByRole('button', { name: 'Acme' })).toBeInTheDocument();
+    await screen.findByRole('button', { name: 'First' });
+    const positions = screen.getAllByText(/@ /).map((el) => el.textContent?.split('@ ')[1]);
+    expect(new Set(positions).size).toBe(2);
   });
 
   it('keeps the map mounted and overlays the default empty message when nothing resolves', async () => {

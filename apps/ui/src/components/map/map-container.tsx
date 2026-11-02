@@ -80,6 +80,8 @@ interface MapViewProps {
    * area", not "filtered out", so the home page passes an area message.
    */
   emptyMessage?: string;
+  /** True while the first markers are still loading; shows the loading message until any marker is drawn. */
+  loading?: boolean;
 }
 
 // Default map view when the viewer has no location. Set per deployment, not
@@ -139,11 +141,10 @@ export function MapView({
   resolveMarkerImage,
   onViewportChange,
   emptyMessage,
+  loading = false,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
-  const [markers, setMarkers] = React.useState<MapMarker[]>([]);
-  const [loading, setLoading] = React.useState(true);
   const [isMaximized, setIsMaximized] = React.useState(false);
 
   // Maximize changes the container size; dispatch a window 'resize' after the
@@ -175,67 +176,57 @@ export function MapView({
     };
   }, [focusPoint, center, zoom]);
 
-  React.useEffect(() => {
-    let cancelled = false;
+  const markers = React.useMemo(() => {
+    const titleField = findTitleField(schema);
+    const built: MapMarker[] = items.flatMap((item) => {
+      // One marker per stored `item_locations` entry.
+      const locs = Array.isArray((item.data as Record<string, unknown>).item_locations)
+        ? (
+            item.data as {
+              item_locations?: Array<{ lat: number; lng: number; label?: string }>;
+            }
+          ).item_locations ?? []
+        : [];
 
-    async function resolveMarkers() {
-      setLoading(true);
-      const titleField = findTitleField(schema);
+      // Locations are resolved server-side; the browser does not geocode
+      // (its Maps key is scoped to Maps JS and Places). Items with no stored
+      // location produce no marker.
+      if (locs.length === 0) return [];
 
-      const resolved = await Promise.all(
-        items.map((item) => {
-          // One marker per stored `item_locations` entry.
-          const locs = Array.isArray(
-            (item.data as Record<string, unknown>).item_locations
-          )
-            ? (
-                item.data as {
-                  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
-                }
-              ).item_locations ?? []
-            : [];
+      // Per-domain title first, then the single-schema heuristic, then 'Item'.
+      const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
+      const baseLabel =
+        resolvedLabel || (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
 
-          // Locations are resolved server-side; the browser does not geocode
-          // (its Maps key is scoped to Maps JS and Places). Items with no stored
-          // location produce no marker.
-          const points: Array<{ lat: number; lng: number; label?: string }> = locs;
-
-          if (points.length === 0) return [];
-
-          // Per-domain title first, then the single-schema heuristic, then 'Item'.
-          const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
-          const baseLabel =
-            resolvedLabel ||
-            (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
-
-          const precision: MapMarker['precision'] = 'exact';
-
-          return points.map(
-            (p, i) =>
-              ({
-                id: `${item.id}#${i}`,
-                lat: p.lat,
-                lng: p.lng,
-                label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
-                data: item.data,
-                precision,
-                geocodedFrom: undefined,
-                domain: item.domain,
-              }) satisfies MapMarker
-          );
-        })
+      return locs.map(
+        (p, i) =>
+          ({
+            id: `${item.id}#${i}`,
+            lat: p.lat,
+            lng: p.lng,
+            label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
+            data: item.data,
+            precision: 'exact',
+            geocodedFrom: undefined,
+            domain: item.domain,
+          }) satisfies MapMarker,
       );
-
-      if (!cancelled) {
-        const valid: MapMarker[] = resolved.flat();
-        setMarkers(spreadCoLocatedMarkers(valid, selfLocation ?? null));
-        setLoading(false);
-      }
-    }
-
-    void resolveMarkers();
-    return () => { cancelled = true; };
+    });
+    return spreadCoLocatedMarkers(built, selfLocation ?? null);
   }, [items, schema, resolveMarkerLabel, selfLocation]);
+
+  const markersById = React.useMemo(() => new Map(markers.map((m) => [m.id, m])), [markers]);
+  const handleMarkerClick = React.useMemo(
+    () =>
+      onMarkerSelect
+        ? (id: string) => {
+            onMarkerClick?.(id);
+            const marker = markersById.get(id);
+            if (marker) onMarkerSelect(marker);
+          }
+        : onMarkerClick,
+    [onMarkerSelect, onMarkerClick, markersById],
+  );
 
   // Loading and empty states overlay the map rather than replacing it, so zero
   // markers never removes the map. The overlay is inside the maximized
@@ -256,15 +247,7 @@ export function MapView({
         markers={markers}
         // Passes a handler only when the caller gave one: the default popup
         // shows a "View details" link exactly when `onMarkerClick` is set.
-        onMarkerClick={
-          onMarkerSelect
-            ? (id) => {
-                onMarkerClick?.(id);
-                const marker = markers.find((m) => m.id === id);
-                if (marker) onMarkerSelect(marker);
-              }
-            : onMarkerClick
-        }
+        onMarkerClick={handleMarkerClick}
         showPopup={showPopup}
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
@@ -293,7 +276,7 @@ export function MapView({
         </Button>
       </div>
       {/* Loading / empty-state overlay */}
-      {(loading || markers.length === 0) && (
+      {markers.length === 0 && (
         <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
