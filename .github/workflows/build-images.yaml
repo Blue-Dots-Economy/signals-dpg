@@ -78,7 +78,7 @@ jobs:
           # cut from a commit CI never saw (a feature branch, a local commit),
           # not a tag cut from a red one. A check for "not failed" would pass it.
           if [ -z "${runs}" ]; then
-            echo "::error title=No CI run for this commit::ci.yaml has never run for ${SHA}, so there is nothing to verify. Cut the release tag from a commit on develop or main that CI has already tested."
+            echo "::error title=No CI run for this commit::ci.yaml has never run for ${SHA}, so there is nothing to verify. Cut the release tag from a commit on develop, main or release/<sprint> that CI has already tested."
             exit 1
           fi
 
