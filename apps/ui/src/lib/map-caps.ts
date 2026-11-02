@@ -9,14 +9,14 @@
  * loads before the bundle), so they are retunable per deployment without a
  * rebuild:
  *   - `VITE_MAP_MARKER_CAP_CLUSTERED` (default 1000)
- *   - `VITE_MAP_MARKER_CAP_INDIVIDUAL` (default 500)
+ *   - `VITE_MAP_MARKER_CAP_INDIVIDUAL` (default 10000)
  *   - `VITE_MAP_CLUSTER_DISABLE_ZOOM` (default `DEFAULT_CLUSTER_DISABLE_ZOOM`, 14)
  */
 import { zoomBand, DEFAULT_CLUSTER_DISABLE_ZOOM } from './map-viewport-snap';
 import { getRuntimeEnv } from './runtime-env';
 
 const DEFAULT_CLUSTERED_MARKER_CAP = 1000;
-const DEFAULT_INDIVIDUAL_MARKER_CAP = 500;
+const DEFAULT_INDIVIDUAL_MARKER_CAP = 10000;
 
 function readPositiveIntEnv(raw: string | undefined, fallback: number): number {
   if (raw === undefined || raw === '') return fallback;
@@ -30,7 +30,7 @@ export function resolveClusteredMarkerCap(): number {
   return readPositiveIntEnv(getRuntimeEnv('VITE_MAP_MARKER_CAP_CLUSTERED'), DEFAULT_CLUSTERED_MARKER_CAP);
 }
 
-/** Reads `VITE_MAP_MARKER_CAP_INDIVIDUAL`, falling back to 500. Exported for tests. */
+/** Reads `VITE_MAP_MARKER_CAP_INDIVIDUAL`, falling back to 10000. Exported for tests. */
 export function resolveIndividualMarkerCap(): number {
   return readPositiveIntEnv(getRuntimeEnv('VITE_MAP_MARKER_CAP_INDIVIDUAL'), DEFAULT_INDIVIDUAL_MARKER_CAP);
 }

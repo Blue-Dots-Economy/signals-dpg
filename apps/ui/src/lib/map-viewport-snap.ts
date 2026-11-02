@@ -118,6 +118,11 @@ export function padBbox(bbox: RawBbox, factor = 0.25): RawBbox {
   };
 }
 
+/** The area the map fetches for a view: 25% of its span added on each side, clamped. */
+export function expandBboxForFetch(bbox: RawBbox): RawBbox {
+  return clampBbox(padBbox(bbox, 0.5));
+}
+
 /** Whether `inner` is fully contained within `outer` on both the lat and lng axes. */
 export function bboxContains(outer: RawBbox, inner: RawBbox): boolean {
   return (

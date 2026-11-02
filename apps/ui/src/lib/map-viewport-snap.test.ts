@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { snapBbox, zoomBand, snapViewportForKey, DEFAULT_CLUSTER_DISABLE_ZOOM, padBbox, bboxContains, shouldRefetch, clampBbox } from './map-viewport-snap';
+import { snapBbox, zoomBand, snapViewportForKey, DEFAULT_CLUSTER_DISABLE_ZOOM, padBbox, bboxContains, shouldRefetch, clampBbox, expandBboxForFetch } from './map-viewport-snap';
 
 // Span 0.5deg → cell = 0.5/8 = 0.0625deg exactly (a power of two already, so
 // no bucketing rounding to reason about). All four corners are exact
@@ -243,6 +243,26 @@ describe('clampBbox', () => {
       minLat: -10,
       minLng: -180,
       maxLat: 10,
+      maxLng: 180,
+    });
+  });
+});
+
+describe('expandBboxForFetch', () => {
+  it('pads the bbox by 25% of its span on each side', () => {
+    expect(expandBboxForFetch({ minLat: 10, minLng: 70, maxLat: 20, maxLng: 80 })).toEqual({
+      minLat: 7.5,
+      minLng: 67.5,
+      maxLat: 22.5,
+      maxLng: 82.5,
+    });
+  });
+
+  it('clamps a padded world-wide bbox to valid coordinates', () => {
+    expect(expandBboxForFetch({ minLat: -80, minLng: -179, maxLat: 80, maxLng: 179 })).toEqual({
+      minLat: -90,
+      minLng: -180,
+      maxLat: 90,
       maxLng: 180,
     });
   });

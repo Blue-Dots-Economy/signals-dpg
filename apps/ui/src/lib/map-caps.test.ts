@@ -24,14 +24,14 @@ describe('capForZoom', () => {
     expect(capForZoom(0)).toBe(1000);
   });
 
-  it('returns the individual cap (500) at/above the cluster-disable zoom', () => {
-    expect(capForZoom(DEFAULT_CLUSTER_DISABLE_ZOOM)).toBe(500);
-    expect(capForZoom(DEFAULT_CLUSTER_DISABLE_ZOOM + 4)).toBe(500);
+  it('returns the individual cap (10000) at/above the cluster-disable zoom', () => {
+    expect(capForZoom(DEFAULT_CLUSTER_DISABLE_ZOOM)).toBe(10000);
+    expect(capForZoom(DEFAULT_CLUSTER_DISABLE_ZOOM + 4)).toBe(10000);
   });
 
   it('honors an explicit cluster-disable-zoom override', () => {
     expect(capForZoom(9, { clusterDisableZoom: 10 })).toBe(1000);
-    expect(capForZoom(10, { clusterDisableZoom: 10 })).toBe(500);
+    expect(capForZoom(10, { clusterDisableZoom: 10 })).toBe(10000);
   });
 
   it('honors explicit cap overrides', () => {
@@ -52,9 +52,9 @@ describe('runtime-env overrides (VITE_MAP_MARKER_CAP_CLUSTERED / _INDIVIDUAL / V
     expect(resolveClusteredMarkerCap()).toBe(2500);
   });
 
-  it('resolveIndividualMarkerCap reads VITE_MAP_MARKER_CAP_INDIVIDUAL, falling back to 500', () => {
+  it('resolveIndividualMarkerCap reads VITE_MAP_MARKER_CAP_INDIVIDUAL, falling back to 10000', () => {
     mockRuntimeEnv({});
-    expect(resolveIndividualMarkerCap()).toBe(500);
+    expect(resolveIndividualMarkerCap()).toBe(10000);
     mockRuntimeEnv({ VITE_MAP_MARKER_CAP_INDIVIDUAL: '750' });
     expect(resolveIndividualMarkerCap()).toBe(750);
   });

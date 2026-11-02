@@ -11,6 +11,13 @@ vi.mock('@/lib/network-api', () => ({
   MAP_FETCH_LIMIT: 5000,
 }));
 import { fetchNetworkMarkers } from '@/lib/network-api';
+import { expandBboxForFetch } from '@/lib/map-viewport-snap';
+
+vi.mock('@/lib/map-caps', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/map-caps')>();
+  return { ...actual, capForZoom: vi.fn(actual.capForZoom) };
+});
+import { capForZoom } from '@/lib/map-caps';
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -141,12 +148,13 @@ describe('useMapMarkers', () => {
     const { result } = renderHook(() => useMapMarkers(network, [domains[0]], bboxViewport), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
+    const fetched = expandBboxForFetch(bboxViewport);
     expect(fetchNetworkMarkers).toHaveBeenCalledWith(
       expect.objectContaining({
-        min_lat: bboxViewport.minLat,
-        min_lng: bboxViewport.minLng,
-        max_lat: bboxViewport.maxLat,
-        max_lng: bboxViewport.maxLng,
+        min_lat: fetched.minLat,
+        min_lng: fetched.minLng,
+        max_lat: fetched.maxLat,
+        max_lng: fetched.maxLng,
       }),
       expect.anything(),
     );
@@ -204,7 +212,7 @@ describe('useMapMarkers', () => {
     expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
   });
 
-  it('refetches when a pan crosses a snapped grid cell', async () => {
+  it('refetches when a pan leaves the fetched area', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
       meta: { total: 0, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
       markers: [],
@@ -219,10 +227,10 @@ describe('useMapMarkers', () => {
 
     const panned = {
       ...bboxViewport,
-      minLat: bboxViewport.minLat + 0.1,
-      minLng: bboxViewport.minLng + 0.1,
-      maxLat: bboxViewport.maxLat + 0.1,
-      maxLng: bboxViewport.maxLng + 0.1,
+      minLat: bboxViewport.minLat + 0.2,
+      minLng: bboxViewport.minLng + 0.2,
+      maxLat: bboxViewport.maxLat + 0.2,
+      maxLng: bboxViewport.maxLng + 0.2,
     };
     rerender({ vp: panned });
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
@@ -245,9 +253,7 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
 
-  // #203 map-serverside-search Task 5: the padded-bbox + truncated-result
-  // refetch state machine. `bboxViewport` spans 0.5deg on each axis, so its
-  // padded bbox (25% inflate) is [18.9375, 19.5625] x [71.9375, 72.5625].
+  // Fetched area for `bboxViewport` (25% per side): [18.875, 19.625] x [71.875, 72.625].
   const containedBbox = {
     ...bboxViewport,
     minLat: bboxViewport.minLat + 0.01,
@@ -316,7 +322,7 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
   });
 
-  it('refetches a pan that escapes the padded bbox even when the last result was complete (#203 Task 5)', async () => {
+  it('refetches a pan that escapes the fetched area even when the last result was complete', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
       meta: { total: 3, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
       markers: [marker('a', 'student')],
@@ -329,14 +335,12 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
 
-    // Padded bbox is [18.9375, 19.5625] x [71.9375, 72.5625]; a +0.1 shift on
-    // every corner pushes maxLat to 19.6, escaping it.
     const pannedOut = {
       ...bboxViewport,
-      minLat: bboxViewport.minLat + 0.1,
-      minLng: bboxViewport.minLng + 0.1,
-      maxLat: bboxViewport.maxLat + 0.1,
-      maxLng: bboxViewport.maxLng + 0.1,
+      minLat: bboxViewport.minLat + 0.2,
+      minLng: bboxViewport.minLng + 0.2,
+      maxLat: bboxViewport.maxLat + 0.2,
+      maxLng: bboxViewport.maxLng + 0.2,
     };
     rerender({ vp: pannedOut });
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
@@ -365,12 +369,13 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
 
     const secondCall = vi.mocked(fetchNetworkMarkers).mock.calls[1][0];
+    const tighter = expandBboxForFetch(zoomedInAcrossBand);
     expect(secondCall).toEqual(
       expect.objectContaining({
-        min_lat: zoomedInAcrossBand.minLat,
-        min_lng: zoomedInAcrossBand.minLng,
-        max_lat: zoomedInAcrossBand.maxLat,
-        max_lng: zoomedInAcrossBand.maxLng,
+        min_lat: tighter.minLat,
+        min_lng: tighter.minLng,
+        max_lat: tighter.maxLat,
+        max_lng: tighter.maxLng,
       }),
     );
   });
@@ -398,7 +403,7 @@ describe('useMapMarkers', () => {
   // `meta.total` vs that same cap drives the exposed `truncated` flag the
   // over-dense "N+ in this area — zoom in" indicator reads. `bboxViewport`
   // (zoom: 8) bands as 'clustered' (cap 1000, so limit = 1001); zoom 14+
-  // bands as 'individual' (cap 500, so limit = 501) — see `map-caps.ts`'s
+  // bands as 'individual' (cap 10000, so limit = 10001) — see `map-caps.ts`'s
   // defaults.
   it('uses the clustered zoom-band cap (+1) as the limit on the bbox path, not the flat MAP_FETCH_LIMIT', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
@@ -417,7 +422,7 @@ describe('useMapMarkers', () => {
 
   it('uses the individual zoom-band cap (+1) once zoom is at/above the cluster-disable band', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
-      meta: { total: 0, limit: 501, offset: 0, partial: false, unavailable_instances: [] },
+      meta: { total: 0, limit: 10001, offset: 0, partial: false, unavailable_instances: [] },
       markers: [],
     });
 
@@ -428,7 +433,7 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(fetchNetworkMarkers).toHaveBeenCalledWith(
-      expect.objectContaining({ limit: 501 }),
+      expect.objectContaining({ limit: 10001 }),
       expect.anything(),
     );
   });
@@ -455,6 +460,132 @@ describe('useMapMarkers', () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.truncated).toBe(false);
+  });
+
+
+  it('requests the viewport padded by 25% per side', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 0, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [],
+    });
+    const vp = { lat: 15, lng: 75, radiusMeters: 500000, zoom: 8, minLat: 10, minLng: 70, maxLat: 20, maxLng: 80 };
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], vp), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(fetchNetworkMarkers).toHaveBeenCalledWith(
+      expect.objectContaining({ min_lat: 7.5, max_lat: 22.5, min_lng: 67.5, max_lng: 82.5 }),
+      expect.anything(),
+    );
+  });
+
+  it('does not refetch a pan that stays inside the fetched (padded) area', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    rerender({ vp: { ...bboxViewport, minLng: 72.1, maxLng: 72.6 } });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+  });
+
+  it('refetches a pan that goes 30% beyond the view', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    rerender({ vp: { ...bboxViewport, minLng: 72.15, maxLng: 72.65 } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps the previous markers while a viewport refetch is loading', async () => {
+    vi.mocked(fetchNetworkMarkers)
+      .mockResolvedValueOnce({
+        meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [marker('a', 'student')],
+      })
+      .mockImplementation(() => new Promise<MarkersResponse>(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.markers.map((m) => m.item_id)).toEqual(['a']));
+
+    rerender({ vp: { ...bboxViewport, minLat: 19.2, maxLat: 19.7, minLng: 72.2, maxLng: 72.7 } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+    expect(result.current.markers.map((m) => m.item_id)).toEqual(['a']);
+  });
+
+  it('clears the markers while a filter change is loading', async () => {
+    vi.mocked(fetchNetworkMarkers)
+      .mockResolvedValueOnce({
+        meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [marker('a', 'student')],
+      })
+      .mockImplementation(() => new Promise<MarkersResponse>(() => {}));
+
+    const { result, rerender } = renderHook(
+      ({ filters }: { filters: Record<string, unknown> }) =>
+        useMapMarkers(network, [domains[0]], bboxViewport, filters),
+      { wrapper, initialProps: { filters: { gender: ['female'] } } },
+    );
+    await waitFor(() => expect(result.current.markers.map((m) => m.item_id)).toEqual(['a']));
+
+    rerender({ filters: { gender: ['male'] } });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+    expect(result.current.markers).toEqual([]);
+  });
+
+  it('keeps the markers array reference across a pan that reuses the data', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.markers).toHaveLength(1));
+    const first = result.current.markers;
+
+    rerender({ vp: { ...bboxViewport, minLng: 72.05, maxLng: 72.55 } });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.markers).toBe(first);
+  });
+
+  it('does not refetch when zoom crosses 14 while both caps are equal', async () => {
+    vi.mocked(capForZoom).mockReturnValue(10000);
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 1, limit: 10001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    });
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: { ...bboxViewport, zoom: 13 } } },
+    );
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    rerender({ vp: { ...bboxViewport, zoom: 14 } });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+    vi.mocked(capForZoom).mockRestore();
   });
 
   // map-native-text-search: free-text search now filters the map server-side
@@ -623,13 +754,30 @@ describe('useMapMarkers — the count matches what is on screen (N4)', () => {
     expect(result.current.markers).toHaveLength(3);
   });
 
-  it('keeps the server total when the domain is truncated', async () => {
-    // Above the zoom-band cap: we do NOT hold the full set, so counting the
-    // returned markers would understate it. The caller renders "N+" from
-    // `truncated` in this case.
+  it('counts only the markers inside the visible area for a complete answer', async () => {
     vi.mocked(fetchNetworkMarkers).mockResolvedValue({
-      meta: { total: 100000, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
-      markers: [at('a', 19.0, 72.0)],
+      meta: { total: 3, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [at('a', 19.0, 72.0), at('b', 19.05, 72.05), at('c', 19.15, 72.15)],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], cityViewport), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.total).toBe(2);
+  });
+
+  it('for a capped answer, counts the fetched markers in view and marks it truncated', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 20000, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [
+        at('a', 19.0, 72.0),
+        at('b', 19.05, 72.05),
+        at('c', 18.95, 71.95),
+        at('d', 19.15, 72.15),
+        at('e', 18.85, 71.85),
+      ],
     });
 
     const { result } = renderHook(() => useMapMarkers(network, [domains[0]], cityViewport), {
@@ -637,6 +785,6 @@ describe('useMapMarkers — the count matches what is on screen (N4)', () => {
     });
 
     await waitFor(() => expect(result.current.truncated).toBe(true));
-    expect(result.current.total).toBe(100000);
+    expect(result.current.total).toBe(3);
   });
 });
