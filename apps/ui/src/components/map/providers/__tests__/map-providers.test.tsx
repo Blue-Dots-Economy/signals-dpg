@@ -28,11 +28,6 @@ interface RenderRecord {
   el?: object;
 }
 
-interface ClustererSpy {
-  options: Record<string, unknown>;
-  calls: Array<{ fn: string; arg?: unknown; noDraw?: boolean }>;
-}
-
 interface TestBridge {
   /** Fake L.Map returned by react-leaflet's useMap(). */
   map: unknown;
@@ -41,7 +36,6 @@ interface TestBridge {
   isMobile: boolean;
   themeMode: 'light' | 'dark';
   records: RenderRecord[];
-  clusterers: ClustererSpy[];
 }
 
 type BridgeHost = { __dpgMapTestBridge: TestBridge };
@@ -54,7 +48,6 @@ const bridge = (): TestBridge => (globalThis as unknown as BridgeHost).__dpgMapT
   isMobile: false,
   themeMode: 'light',
   records: [],
-  clusterers: [],
 };
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -150,20 +143,6 @@ vi.mock('react-leaflet', async () => {
   };
 
   return { MapContainer, TileLayer, Marker, Popup, useMap: () => host().map, useMapEvents };
-});
-
-vi.mock('react-leaflet-cluster', async () => {
-  const React_ = await import('react');
-  const host = () => (globalThis as unknown as BridgeHost).__dpgMapTestBridge;
-  const MarkerClusterGroup = (props: Record<string, unknown>) => {
-    host().records.push({ kind: 'MarkerClusterGroup', props });
-    return React_.createElement(
-      'div',
-      { 'data-testid': 'cluster-group' },
-      props.children as React.ReactNode,
-    );
-  };
-  return { default: MarkerClusterGroup };
 });
 
 vi.mock('@vis.gl/react-google-maps', async () => {
@@ -267,34 +246,6 @@ vi.mock('@vis.gl/react-google-maps', async () => {
     useAdvancedMarkerRef,
     useMap: () => host().gmap,
   };
-});
-
-vi.mock('@googlemaps/markerclusterer', () => {
-  const host = () => (globalThis as unknown as BridgeHost).__dpgMapTestBridge;
-  class MarkerClusterer {
-    options: Record<string, unknown>;
-    calls: Array<{ fn: string; arg?: unknown; noDraw?: boolean }> = [];
-    constructor(options: Record<string, unknown>) {
-      this.options = options;
-      host().clusterers.push(this as unknown as ClustererSpy);
-    }
-    addMarker(marker: unknown, noDraw?: boolean) {
-      this.calls.push({ fn: 'addMarker', arg: marker, noDraw });
-    }
-    removeMarker(marker: unknown, noDraw?: boolean) {
-      this.calls.push({ fn: 'removeMarker', arg: marker, noDraw });
-    }
-    render() {
-      this.calls.push({ fn: 'render' });
-    }
-    clearMarkers() {
-      this.calls.push({ fn: 'clearMarkers' });
-    }
-    setMap(map: unknown) {
-      this.calls.push({ fn: 'setMap', arg: map });
-    }
-  }
-  return { MarkerClusterer };
 });
 
 // Imported AFTER the mocks are declared; importing each provider is also what
@@ -450,14 +401,6 @@ function stubRect(node: Element, initial: { top: number; bottom: number; height:
   return rect;
 }
 
-/** Stand-in for google.maps.marker.AdvancedMarkerElement (used by the cluster renderer). */
-class FakeAdvancedMarkerElement {
-  opts: Record<string, unknown>;
-  constructor(opts: Record<string, unknown>) {
-    this.opts = opts;
-  }
-}
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function recordsOf(kind: string): RenderRecord[] {
@@ -485,16 +428,11 @@ beforeEach(() => {
   b.isMobile = false;
   b.themeMode = 'light';
   b.records = [];
-  b.clusterers = [];
   resizeObservers.length = 0;
 
-  const host = globalThis as unknown as {
-    ResizeObserver?: unknown;
-    google?: unknown;
-  };
+  const host = globalThis as unknown as { ResizeObserver?: unknown };
   originalResizeObserver = host.ResizeObserver;
   host.ResizeObserver = StubResizeObserver;
-  host.google = { maps: { marker: { AdvancedMarkerElement: FakeAdvancedMarkerElement } } };
 
   setRuntimeConfig(undefined);
   // The dark-basemap notice is once-per-session; without this reset the first
@@ -504,9 +442,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  const host = globalThis as unknown as { ResizeObserver?: unknown; google?: unknown };
+  const host = globalThis as unknown as { ResizeObserver?: unknown };
   host.ResizeObserver = originalResizeObserver;
-  delete host.google;
   setRuntimeConfig(undefined);
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
