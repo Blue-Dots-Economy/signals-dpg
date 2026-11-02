@@ -531,6 +531,26 @@ describe('useMapMarkers', () => {
     expect(result.current.markers.map((m) => m.item_id)).toEqual(['a']);
   });
 
+  it('drops the held markers and reports an error when the refetch for a new area fails', async () => {
+    vi.mocked(fetchNetworkMarkers)
+      .mockResolvedValueOnce({
+        meta: { total: 1, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+        markers: [marker('a', 'student')],
+      })
+      .mockRejectedValue(new Error('markers unavailable'));
+
+    const { result, rerender } = renderHook(
+      ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
+      { wrapper, initialProps: { vp: bboxViewport } },
+    );
+    await waitFor(() => expect(result.current.markers.map((m) => m.item_id)).toEqual(['a']));
+
+    rerender({ vp: { ...bboxViewport, minLat: 19.2, maxLat: 19.7, minLng: 72.2, maxLng: 72.7 } });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.markers).toEqual([]);
+  });
+
   it('clears the markers while a filter change is loading', async () => {
     vi.mocked(fetchNetworkMarkers)
       .mockResolvedValueOnce({

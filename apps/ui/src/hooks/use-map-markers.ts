@@ -270,7 +270,7 @@ export function useMapMarkers(
       return r.data;
     }
     const last = lastDataRef.current.get(domainId);
-    return last && last.search === search ? last.data : undefined;
+    return !r.isError && last && last.search === search ? last.data : undefined;
   });
   const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; markers: Marker[] } | null>(null);
   const dataChanged =
@@ -317,13 +317,12 @@ export function useMapMarkers(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markers identity tracks the data; cap and shownBboxSignature are the other inputs
   }, [markers, cap, shownBboxSignature]);
 
-  // Record the outcome once every active domain's query has settled on real data.
   const effectiveBboxSignature = effectiveBbox
     ? `${effectiveBbox.minLat},${effectiveBbox.minLng},${effectiveBbox.maxLat},${effectiveBbox.maxLng}`
     : null;
   React.useEffect(() => {
     if (!effectiveBbox || results.length === 0) return;
-    if (results.some((r) => r.isLoading)) return;
+    if (results.some((r) => r.isLoading || r.isError)) return;
     if (!results.some((r) => r.data)) return;
     heldRef.current = {
       bbox: effectiveBbox,
