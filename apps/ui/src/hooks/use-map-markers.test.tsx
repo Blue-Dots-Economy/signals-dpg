@@ -787,4 +787,25 @@ describe('useMapMarkers — the count matches what is on screen (N4)', () => {
     await waitFor(() => expect(result.current.truncated).toBe(true));
     expect(result.current.total).toBe(3);
   });
+
+  it('does not structurally share marker answers across a refetch of the same key', async () => {
+    vi.mocked(fetchNetworkMarkers).mockImplementation(async () => ({
+      meta: { total: 1, limit: 5000, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [marker('a', 'student')],
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const clientWrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], viewport), {
+      wrapper: clientWrapper,
+    });
+    await waitFor(() => expect(result.current.markers).toHaveLength(1));
+    const first = result.current.markers[0];
+
+    await client.invalidateQueries({ queryKey: ['markers'] });
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.markers[0]).not.toBe(first));
+  });
 });

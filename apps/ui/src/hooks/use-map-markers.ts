@@ -251,6 +251,7 @@ export function useMapMarkers(
             signal,
           ),
         staleTime: MAP_STALE_TIME_MS,
+        structuralSharing: false,
         // Skipped rather than sent, because the server would drop the facet
         // and return this domain's pins unfiltered.
         enabled: routed.satisfiable,
