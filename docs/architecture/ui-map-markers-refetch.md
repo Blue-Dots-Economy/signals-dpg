@@ -6,9 +6,10 @@ Describes `apps/ui/src/hooks/use-map-markers.ts` and the helpers it uses in
 ## One query per domain
 
 The map fetches `/api/v1/network/item/markers` once per visible domain through
-`useQueries`. Each query key (`queryKeys.markers`) carries the snapped bbox, the
-zoom band, a bbox token, that domain's facet filters, the trimmed `q` and the
-`limit`, so any change to what is requested produces a distinct cache entry.
+`useQueries`. Each query key (`queryKeys.markers`) carries the snapped bbox, a
+bbox token, that domain's facet filters, the trimmed `q` and the `limit`, so any
+change to what is requested produces a distinct cache entry. The key has no zoom
+band.
 
 Facets are routed per domain. The server silently drops a facet that is not a
 declared, non-private field of the domain's schema, so sending the same filter
@@ -26,24 +27,29 @@ request still sends the unrounded radius.
 
 ## Hold or refetch
 
-`heldRef` records the last completed fetch: its bbox, that bbox padded by 25%
-(`padBbox`), whether it was truncated, whether it was empty, and its zoom band.
-It is written only in an effect after every active domain's query has settled.
+The request is the visible view padded by 25% per side (`expandBboxForFetch`).
+`heldRef` records the last completed fetch: that padded bbox, whether it was
+truncated, whether it was empty, and the marker cap it used. It is written only
+in an effect after every active domain's query has settled on real answers
+(never while loading or in error).
 
-On each render the hook refetches at the current bbox when any of these holds:
+On each render the hook refetches, padding the current view again, when any of
+these holds:
 
 - there is no prior fetch;
-- the zoom band changed (clustered vs individual pins). The key already changes
-  on a band change, so the bbox must advance too, or the new key would fetch
-  the stale wide bbox;
-- the held result was empty. A held empty set can never be escaped, since every
-  later viewport is inside the padded bbox, so an empty result is always retried;
-- `shouldRefetch` says so: the held result was truncated, or the new bbox is
-  outside the padded one.
+- the cap changed;
+- the held result was empty, since every later viewport is inside the padded
+  bbox and an empty set could never be escaped;
+- `shouldRefetch` says so: the held result was truncated, or the view has left
+  the fetched area.
 
-Otherwise the held bbox is reused. React Query only refetches on a key change,
-so a stable key serves the held marker set and the provider re-clusters it
-locally.
+Otherwise the held bbox is reused: while the view stays inside the fetched area
+and the last answer was complete and non-empty, the key is stable and the
+provider re-clusters the held marker set locally.
+
+Each domain's previous answer is kept while a viewport refetch loads, so pins do
+not blink out. It is cleared when the filters or the search text change, and it
+is not used when that domain's current request failed.
 
 ### Bbox token
 
@@ -54,7 +60,7 @@ forces a new key. It is not bumped before the first fetch settles, so noisy
 initial viewport reports still dedupe. The refs are written during render with
 the compare-then-write pattern, which is safe under StrictMode's double render.
 
-## Zoom-band cap
+## Marker cap
 
 The bbox path requests `capForZoom(zoom) + 1` markers. A domain is truncated when
 its `meta.total` exceeds the cap; the extra one means a total exactly equal to
@@ -64,13 +70,12 @@ the flat `MAP_FETCH_LIMIT`.
 
 ## Count what is on screen
 
-When a held, non-truncated result covers the visible bbox, the hook counts the
-markers inside the visible bbox rather than reporting `meta.total`, which
-describes the larger fetched area. When the visible bbox is wider than the
-fetched one (a zoom-out before the next fetch lands), or the domain is
-truncated, it reports the server total.
+The count is the number of fetched markers inside the visible box, not
+`meta.total`, which describes the larger fetched area. For a capped answer that
+count is a lower bound and the pill shows it as "N+", including when it is 0.
 
 ## Failures
 
 `isError` is separate from an empty result, so the map does not claim an area is
-empty when the request failed.
+empty when the request failed. A failed domain shows no markers rather than its
+previous ones.
