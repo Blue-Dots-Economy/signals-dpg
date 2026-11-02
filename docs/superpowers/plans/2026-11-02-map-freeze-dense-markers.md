@@ -17,7 +17,7 @@
 - `supercluster` `8.0.1` and `@types/supercluster` `7.1.3`, exact versions (already in the lockfile).
 - Marker limit: `VITE_MAP_MARKER_CAP_INDIVIDUAL` default `10000` (was `500`); `VITE_MAP_MARKER_CAP_CLUSTERED` default stays `1000`.
 - Fetch padding: 25% of the view's height/width added on each side.
-- Clustering: merge only points whose pins would overlap on screen — supercluster `radius: 64` with the default `extent: 512` (= 32 screen px on 256-px tiles); clustering on at every zoom up to the provider's maximum (Google `22`, Leaflet `18`).
+- Clustering: merge points closer than 80 screen px — supercluster `radius: 160` with the default `extent: 512` (256-px tiles); clustering on at every zoom up to the provider's maximum (Google `22`, Leaflet `18`).
 - At the provider's maximum zoom, a cluster of `50` or fewer points is returned as its individual points.
 - Same-spot listings keep today's 10 m ring (`spreadCoLocatedMarkers`, unchanged).
 - Tourist map (`tourist/tourist-map.tsx`), self marker, recenter, count pill, "Search this area", popups and the mobile bottom sheet keep today's behaviour.
