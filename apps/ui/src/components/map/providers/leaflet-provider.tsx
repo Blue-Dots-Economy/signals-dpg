@@ -21,7 +21,7 @@ import { FitBounds } from '../fit-bounds';
 import { useMapClusters } from '../use-map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
 import { useStableCallback } from '../use-stable-callback';
-import { MarkerPopupCard } from '../marker-popup-card';
+import { PopupBody, PopupRendererProvider } from '../popup-renderer';
 import { createSelfMarkerDivIcon } from '../self-marker';
 import { useViewportReportEmitter } from './use-viewport-report';
 
@@ -166,7 +166,6 @@ function readCssVar(name: string, fallback: string): string {
  * marker's lucide icon in `--primary-foreground`.
  */
 function createMarkerDivIcon(IconComponent: LucideIcon, bg: string, iconColor: string): L.DivIcon {
-
   const svgString = renderToStaticMarkup(
     React.createElement(IconComponent, {
       size: 16,
@@ -367,14 +366,13 @@ const ClusterMarker = React.memo(function ClusterMarker({
     () => ({ click: () => onZoomTo(item.lat, item.lng, item.expansionZoom) }),
     [onZoomTo, item.lat, item.lng, item.expansionZoom],
   );
-  return <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} />;
+  return <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={1000 + item.count} />;
 });
 
 interface PointMarkerProps {
   marker: MapMarker;
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
-  renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
@@ -382,7 +380,6 @@ const PointMarker = React.memo(function PointMarker({
   marker,
   showPopup,
   onMarkerClick,
-  renderPopup,
   resolveIcon,
 }: PointMarkerProps) {
   const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain));
@@ -391,7 +388,7 @@ const PointMarker = React.memo(function PointMarker({
     <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers}>
       {showPopup && (
         <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
-          {renderPopup ? renderPopup(marker) : <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />}
+          <PopupBody marker={marker} onViewDetails={onMarkerClick} />
         </Popup>
       )}
     </Marker>
@@ -402,12 +399,11 @@ interface ClusterLayerProps {
   markers: MapMarker[];
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
-  renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
 }
 
 /** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
-function ClusterLayer({ markers, showPopup, onMarkerClick, renderPopup, resolveIcon }: ClusterLayerProps) {
+function ClusterLayer({ markers, showPopup, onMarkerClick, resolveIcon }: ClusterLayerProps) {
   const map = useMap();
   const view = useLeafletClusterView();
   const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });
@@ -431,7 +427,6 @@ function ClusterLayer({ markers, showPopup, onMarkerClick, renderPopup, resolveI
             marker={item.marker}
             showPopup={showPopup}
             onMarkerClick={onMarkerClick}
-            renderPopup={renderPopup}
             resolveIcon={resolveIcon}
           />
         ),
@@ -458,7 +453,6 @@ export function LeafletMapProvider({
   const { resolved: themeMode } = useThemeMode();
   const isDark = themeMode === 'dark';
   const stableMarkerClick = useStableCallback(onMarkerClick);
-  const stableRenderPopup = useStableCallback(renderPopup);
   const stableResolveIcon = useStableCallback(resolveIcon);
 
   // Leaflet has no dark basemap (see the TileLayer note), so tell the user
@@ -496,13 +490,14 @@ export function LeafletMapProvider({
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
       {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
       <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
-      <ClusterLayer
-        markers={markers}
-        showPopup={showPopup}
-        onMarkerClick={stableMarkerClick}
-        renderPopup={stableRenderPopup}
-        resolveIcon={stableResolveIcon}
-      />
+      <PopupRendererProvider value={renderPopup}>
+        <ClusterLayer
+          markers={markers}
+          showPopup={showPopup}
+          onMarkerClick={stableMarkerClick}
+          resolveIcon={stableResolveIcon}
+        />
+      </PopupRendererProvider>
       {/*
        * "You are here": outside the cluster layer so it is never clustered,
        * non-interactive so it never intercepts clicks on pins beneath it.

@@ -20,7 +20,7 @@ import type { DomainCount } from '../cluster-breakdown';
 import { useMapClusters } from '../use-map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
 import { useStableCallback } from '../use-stable-callback';
-import { MarkerPopupCard } from '../marker-popup-card';
+import { PopupBody, PopupRendererProvider } from '../popup-renderer';
 import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
@@ -198,7 +198,6 @@ interface PointMarkerProps {
   onClick: (marker: MapMarker) => void;
   onClose: () => void;
   onMarkerClick?: (id: string) => void;
-  renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
   resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
@@ -209,7 +208,6 @@ const PointMarker = React.memo(function PointMarker({
   onClick,
   onClose,
   onMarkerClick,
-  renderPopup,
   resolveIcon,
   resolveMarkerImage,
 }: PointMarkerProps) {
@@ -326,11 +324,7 @@ const PointMarker = React.memo(function PointMarker({
                   onClick={onClose}
                 />
                 <div className="relative">
-                  {renderPopup ? (
-                    renderPopup(marker)
-                  ) : (
-                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-                  )}
+                  <PopupBody marker={marker} onViewDetails={onMarkerClick} />
                 </div>
               </div>,
               document.body,
@@ -338,11 +332,7 @@ const PointMarker = React.memo(function PointMarker({
           : markerEl && (
               <InfoWindow anchor={markerEl} onCloseClick={onClose} headerDisabled zIndex={resolvePopupZIndex()}>
                 <div ref={popupContentRef}>
-                  {renderPopup ? (
-                    renderPopup(marker)
-                  ) : (
-                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-                  )}
+                  <PopupBody marker={marker} onViewDetails={onMarkerClick} />
                 </div>
               </InfoWindow>
             ))}
@@ -466,7 +456,6 @@ interface ClusterLayerProps {
   onMarkerActivate: (marker: MapMarker) => void;
   onMarkerDeactivate: () => void;
   onMarkerClick?: (id: string) => void;
-  renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
   resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
@@ -478,7 +467,6 @@ function ClusterLayer({
   onMarkerActivate,
   onMarkerDeactivate,
   onMarkerClick,
-  renderPopup,
   resolveIcon,
   resolveMarkerImage,
 }: ClusterLayerProps) {
@@ -489,6 +477,12 @@ function ClusterLayer({
   // Neutral gray fallback, not any network's brand colour.
   const primary = React.useMemo(() => resolveThemeColor('--primary', '#6b7280'), [themeMode]);
   const cameraAnimRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    if (activeMarkerId && !items.some((item) => item.kind === 'point' && item.marker.id === activeMarkerId)) {
+      onMarkerDeactivate();
+    }
+  }, [items, activeMarkerId, onMarkerDeactivate]);
 
   React.useEffect(
     () => () => {
@@ -501,7 +495,10 @@ function ClusterLayer({
     (lat: number, lng: number, expansionZoom: number) => {
       if (!map) return;
       const current = map.getZoom() ?? 12;
-      const zoom = Math.min(Math.max(expansionZoom, current + 1), CLUSTER_CLICK_MAX_ZOOM);
+      const zoom =
+        current >= CLUSTER_CLICK_MAX_ZOOM
+          ? current
+          : Math.min(Math.max(expansionZoom, current + 1), CLUSTER_CLICK_MAX_ZOOM);
       animateMapCamera(map, { lat, lng, zoom }, cameraAnimRef);
     },
     [map],
@@ -520,7 +517,6 @@ function ClusterLayer({
             onClick={onMarkerActivate}
             onClose={onMarkerDeactivate}
             onMarkerClick={onMarkerClick}
-            renderPopup={renderPopup}
             resolveIcon={resolveIcon}
             resolveMarkerImage={resolveMarkerImage}
           />
@@ -577,7 +573,6 @@ export function GoogleMapProvider({
   const activateMarker = React.useCallback((marker: MapMarker) => setActiveMarker(marker), []);
   const deactivateMarker = React.useCallback(() => setActiveMarker(null), []);
   const stableMarkerClick = useStableCallback(onMarkerClick);
-  const stableRenderPopup = useStableCallback(renderPopup);
   const stableResolveIcon = useStableCallback(resolveIcon);
   const stableResolveMarkerImage = useStableCallback(resolveMarkerImage);
 
@@ -635,19 +630,20 @@ export function GoogleMapProvider({
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <CameraTracker cameraRef={liveCameraRef} />
-        <ClusterLayer
-          markers={markers}
-          activeMarkerId={activeMarker?.id ?? null}
-          // With `showPopup` off no marker ever becomes active, so neither the
-          // InfoWindow nor the mobile overlay opens; clicks still reach
-          // `onMarkerClick`.
-          onMarkerActivate={showPopup ? activateMarker : noActivation}
-          onMarkerDeactivate={deactivateMarker}
-          onMarkerClick={stableMarkerClick}
-          renderPopup={stableRenderPopup}
-          resolveIcon={stableResolveIcon}
-          resolveMarkerImage={stableResolveMarkerImage}
-        />
+        <PopupRendererProvider value={renderPopup}>
+          <ClusterLayer
+            markers={markers}
+            activeMarkerId={activeMarker?.id ?? null}
+            // With `showPopup` off no marker ever becomes active, so neither the
+            // InfoWindow nor the mobile overlay opens; clicks still reach
+            // `onMarkerClick`.
+            onMarkerActivate={showPopup ? activateMarker : noActivation}
+            onMarkerDeactivate={deactivateMarker}
+            onMarkerClick={stableMarkerClick}
+            resolveIcon={stableResolveIcon}
+            resolveMarkerImage={stableResolveMarkerImage}
+          />
+        </PopupRendererProvider>
         {/*
          * "You are here": outside clustering so it is never clustered, and
          * non-clickable. The content is shifted by SELF_MARKER_GOOGLE_OFFSET_Y

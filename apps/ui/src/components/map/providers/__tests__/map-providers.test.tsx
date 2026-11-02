@@ -9,11 +9,11 @@ import type { MapMarker, MapViewport } from '@/engine/types';
 
 /**
  * Provider-logic tests for the two map providers. Both wrap third-party SDKs
- * (react-leaflet + leaflet.markercluster, @vis.gl/react-google-maps +
- * @googlemaps/markerclusterer), so those modules are mocked wholesale and the
- * assertions target the code the providers actually own: marker/divIcon
- * construction, cluster badge + size thresholds, viewport reporting, the
- * recenter / close-popup nonce guards, popup wiring and registry registration.
+ * (react-leaflet, @vis.gl/react-google-maps), so those modules are mocked
+ * wholesale and the assertions target the code the providers actually own:
+ * marker/divIcon construction, bubble and pin drawing from the shared
+ * clustering module, viewport reporting, the recenter / close-popup nonce
+ * guards, popup wiring and registry registration.
  *
  * The mocks communicate with the tests through a bridge object hung off
  * `globalThis` — vi.mock factories are hoisted above every top-level
@@ -743,6 +743,27 @@ describe('LeafletMapProvider', () => {
     expect(recordsOf('Marker').length).toBe(before);
   });
 
+  it('shows the latest renderPopup in an open popup without re-rendering the pin', () => {
+    bridge().map = createFakeLeafletMap();
+    const { rerender } = render(leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>old {m.label}</p> }));
+    expect(screen.getByText('old Alpha Academy')).toBeInTheDocument();
+    const pinRenders = recordsOf('Marker').length;
+
+    rerender(leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>new {m.label}</p> }));
+
+    expect(screen.getByText('new Alpha Academy')).toBeInTheDocument();
+    expect(recordsOf('Marker').length).toBe(pinRenders);
+  });
+
+  it('stacks a bubble above the pins', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(leafletElement({ markers: crowd }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
+
+    expect(recordsOf('Marker')[0].props.zIndexOffset).toBe(1200);
+  });
+
   it('listens for moveend and zoomend to re-cluster', async () => {
     const map = createFakeLeafletMap();
     bridge().map = map;
@@ -1004,6 +1025,33 @@ describe('GoogleMapProvider', () => {
     expect(betaRenders()).toBe(before);
   });
 
+  it('shows the latest renderPopup in an open InfoWindow', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap();
+    const { rerender } = render(googleElement({ markers: [ALPHA], renderPopup: (m) => <p>old {m.label}</p> }));
+    await userEvent.click(screen.getByRole('button', { name: 'Alpha Academy' }));
+    expect(screen.getByText('old Alpha Academy')).toBeInTheDocument();
+
+    rerender(googleElement({ markers: [ALPHA], renderPopup: (m) => <p>new {m.label}</p> }));
+
+    expect(screen.getByText('new Alpha Academy')).toBeInTheDocument();
+  });
+
+  it('does not reopen a popup when its pin leaves the drawn set and comes back', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap();
+    const { rerender } = render(googleElement({ markers: [ALPHA, BETA] }));
+    await userEvent.click(screen.getByRole('button', { name: 'Alpha Academy' }));
+    expect(screen.getByTestId('info-window')).toBeInTheDocument();
+
+    rerender(googleElement({ markers: [BETA] }));
+    await waitFor(() => expect(screen.queryByTestId('info-window')).not.toBeInTheDocument());
+    rerender(googleElement({ markers: [ALPHA, BETA] }));
+
+    expect(screen.getAllByTestId('gmap-marker')).toHaveLength(2);
+    expect(screen.queryByTestId('info-window')).not.toBeInTheDocument();
+  });
+
   it('opens an InfoWindow anchored to the clicked pin, and toggles it shut on a second click', async () => {
     const onMarkerClick = vi.fn((_id: string) => {});
     configureApiKey();
@@ -1249,6 +1297,22 @@ describe('GoogleMapProvider', () => {
     const finalCenter = gmap.moveCamera.mock.calls.at(-1)?.[0].center;
     expect(finalCenter?.lat).toBeCloseTo(19.25, 4);
     expect(finalCenter?.lng).toBeCloseTo(72.25, 4);
+  });
+
+  it('never zooms out when a bubble is clicked above the zoom cap', async () => {
+    configureApiKey();
+    const gmap = createFakeGoogleMap({ zoom: 21 });
+    bridge().gmap = gmap;
+    const crowd = Array.from({ length: 60 }, (_, i) => at(`crowd-${i}`, 19.25, 72.25));
+    render(googleElement({ markers: crowd }));
+
+    await userEvent.click(await screen.findByRole('button', { name: '60' }));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2300));
+    });
+
+    expect(gmap.moveCamera.mock.calls.length).toBeGreaterThan(0);
+    for (const [camera] of gmap.moveCamera.mock.calls) expect(camera.zoom).toBeGreaterThanOrEqual(21);
   });
 
   it('zooms a bubble click to the zoom where it splits', async () => {
