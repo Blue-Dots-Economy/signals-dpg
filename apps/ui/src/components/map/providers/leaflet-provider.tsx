@@ -5,9 +5,10 @@ import {
   Marker,
   Popup,
   useMap,
+  useMapEvents,
 } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
+import type { LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -15,15 +16,18 @@ import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
-import { tallyDomains } from '../cluster-breakdown';
+import type { DomainCount } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
+import { useMapClusters } from '../use-map-clusters';
+import type { ClusterView, MapClusterItem } from '../map-clusters';
+import { useStableCallback } from '../use-stable-callback';
 import { MarkerPopupCard } from '../marker-popup-card';
 import { createSelfMarkerDivIcon } from '../self-marker';
 import { useViewportReportEmitter } from './use-viewport-report';
 
 import 'leaflet/dist/leaflet.css';
-import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
-import 'react-leaflet-cluster/dist/assets/MarkerCluster.Default.css';
+
+const MAX_ZOOM = 18;
 
 /**
  * Session-scoped flag so the "dark mode is off for the map" notice shows once,
@@ -43,12 +47,6 @@ function claimDarkBasemapNotice(): boolean {
     return true;
   }
 }
-
-/**
- * L.Marker instance to domain, filled by each <Marker> ref callback and read
- * by `createClusterDivIcon` for the per-domain badge row.
- */
-const markerDomainMap = new WeakMap<object, string>();
 
 /** Pans/zooms the map when `center`, `zoom` or `focusNonce` changes. */
 function SetView({
@@ -167,14 +165,7 @@ function readCssVar(name: string, fallback: string): string {
  * Builds a 32 px teardrop divIcon in the theme `--primary` colour with the
  * marker's lucide icon in `--primary-foreground`.
  */
-function createMarkerDivIcon(
-  marker: MapMarker,
-  resolveIcon?: MapProviderProps['resolveIcon'],
-): L.DivIcon {
-  // Network theme colours, with a neutral gray fallback.
-  const bg = readCssVar('--primary', '#6b7280');
-  const iconColor = readCssVar('--primary-foreground', '#ffffff');
-  const IconComponent = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
+function createMarkerDivIcon(IconComponent: LucideIcon, bg: string, iconColor: string): L.DivIcon {
 
   const svgString = renderToStaticMarkup(
     React.createElement(IconComponent, {
@@ -215,25 +206,36 @@ function createMarkerDivIcon(
   });
 }
 
+const markerIconCache = new WeakMap<LucideIcon, Map<string, L.DivIcon>>();
+
+/** One teardrop icon per glyph and theme colour pair, shared by every pin that uses it. */
+function getMarkerDivIcon(IconComponent: LucideIcon): L.DivIcon {
+  const bg = readCssVar('--primary', '#6b7280');
+  const fg = readCssVar('--primary-foreground', '#ffffff');
+  const colourKey = `${bg}|${fg}`;
+  let byColour = markerIconCache.get(IconComponent);
+  if (!byColour) {
+    byColour = new Map();
+    markerIconCache.set(IconComponent, byColour);
+  }
+  let icon = byColour.get(colourKey);
+  if (!icon) {
+    icon = createMarkerDivIcon(IconComponent, bg, fg);
+    byColour.set(colourKey, icon);
+  }
+  return icon;
+}
+
 /**
  * Builds the cluster bubble in the network theme colours. When the cluster
  * spans several domains, a row of per-domain icon+count chips (largest first)
  * renders below the circle.
  */
-function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChildMarkers?: () => L.Marker[] }): L.DivIcon {
-  const count = cluster.getChildCount();
+export function createClusterDivIcon(count: number, breakdown: DomainCount[]): L.DivIcon {
   const bg = readCssVar('--primary', '#6b7280');
   const fg = readCssVar('--primary-foreground', '#ffffff');
   const size = count < 10 ? 34 : count < 100 ? 40 : 46;
 
-  const childMarkers: L.Marker[] = cluster.getAllChildMarkers?.() ?? [];
-  // Only markers with a known domain are tallied; one whose ref has not
-  // registered yet would otherwise add a phantom '' group and make a
-  // single-domain cluster look multi-domain. It still counts in the total.
-  const domains = childMarkers
-    .map((m) => markerDomainMap.get(m as object))
-    .filter((d): d is string => Boolean(d));
-  const breakdown = tallyDomains(domains);
   const multiDomain = breakdown.length > 1;
 
   let badgesHtml = '';
@@ -319,7 +321,124 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
   });
 }
 
+function readClusterView(map: L.Map): ClusterView | null {
+  const bounds = map.getBounds();
+  if (!bounds.isValid()) return null;
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const wraps = sw.lng > ne.lng;
+  return {
+    west: wraps ? -180 : sw.lng,
+    south: sw.lat,
+    east: wraps ? 180 : ne.lng,
+    north: ne.lat,
+    zoom: map.getZoom(),
+  };
+}
 
+function sameView(a: ClusterView | null, b: ClusterView | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.west === b.west && a.south === b.south && a.east === b.east && a.north === b.north && a.zoom === b.zoom;
+}
+
+/** The map's current bounds and zoom, updated on `moveend` and `zoomend`; null until the map has valid bounds. */
+function useLeafletClusterView(): ClusterView | null {
+  const map = useMap();
+  const [view, setView] = React.useState<ClusterView | null>(null);
+  const refresh = React.useCallback(() => {
+    const next = readClusterView(map);
+    setView((prev) => (sameView(prev, next) ? prev : next));
+  }, [map]);
+  const handlers = React.useMemo(() => ({ moveend: refresh, zoomend: refresh }), [refresh]);
+  useMapEvents(handlers);
+  React.useEffect(refresh, [refresh]);
+  return view;
+}
+
+const ClusterMarker = React.memo(function ClusterMarker({
+  item,
+  onZoomTo,
+}: {
+  item: Extract<MapClusterItem, { kind: 'cluster' }>;
+  onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
+}) {
+  const icon = React.useMemo(() => createClusterDivIcon(item.count, item.breakdown), [item.count, item.breakdown]);
+  const eventHandlers = React.useMemo(
+    () => ({ click: () => onZoomTo(item.lat, item.lng, item.expansionZoom) }),
+    [onZoomTo, item.lat, item.lng, item.expansionZoom],
+  );
+  return <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} />;
+});
+
+interface PointMarkerProps {
+  marker: MapMarker;
+  showPopup: boolean;
+  onMarkerClick?: (id: string) => void;
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
+}
+
+const PointMarker = React.memo(function PointMarker({
+  marker,
+  showPopup,
+  onMarkerClick,
+  renderPopup,
+  resolveIcon,
+}: PointMarkerProps) {
+  const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain));
+  const eventHandlers = React.useMemo(() => ({ click: () => onMarkerClick?.(marker.id) }), [onMarkerClick, marker.id]);
+  return (
+    <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers}>
+      {showPopup && (
+        <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
+          {renderPopup ? renderPopup(marker) : <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />}
+        </Popup>
+      )}
+    </Marker>
+  );
+});
+
+interface ClusterLayerProps {
+  markers: MapMarker[];
+  showPopup: boolean;
+  onMarkerClick?: (id: string) => void;
+  renderPopup?: (marker: MapMarker) => React.ReactNode;
+  resolveIcon?: MapProviderProps['resolveIcon'];
+}
+
+/** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
+function ClusterLayer({ markers, showPopup, onMarkerClick, renderPopup, resolveIcon }: ClusterLayerProps) {
+  const map = useMap();
+  const view = useLeafletClusterView();
+  const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });
+
+  const zoomTo = React.useCallback(
+    (lat: number, lng: number, expansionZoom: number) => {
+      const zoom = Math.min(Math.max(expansionZoom, map.getZoom() + 1), MAX_ZOOM);
+      map.setView([lat, lng], zoom);
+    },
+    [map],
+  );
+
+  return (
+    <>
+      {items.map((item) =>
+        item.kind === 'cluster' ? (
+          <ClusterMarker key={item.key} item={item} onZoomTo={zoomTo} />
+        ) : (
+          <PointMarker
+            key={item.key}
+            marker={item.marker}
+            showPopup={showPopup}
+            onMarkerClick={onMarkerClick}
+            renderPopup={renderPopup}
+            resolveIcon={resolveIcon}
+          />
+        ),
+      )}
+    </>
+  );
+}
 
 export function LeafletMapProvider({
   center,
@@ -338,6 +457,9 @@ export function LeafletMapProvider({
   const { t } = useTranslation();
   const { resolved: themeMode } = useThemeMode();
   const isDark = themeMode === 'dark';
+  const stableMarkerClick = useStableCallback(onMarkerClick);
+  const stableRenderPopup = useStableCallback(renderPopup);
+  const stableResolveIcon = useStableCallback(resolveIcon);
 
   // Leaflet has no dark basemap (see the TileLayer note), so tell the user
   // once per session. The Google provider has a dark style and no notice.
@@ -374,48 +496,15 @@ export function LeafletMapProvider({
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
       {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
       <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
-      {/* Clusters at low zoom; spiderfies at max zoom. */}
-      <MarkerClusterGroup
-        chunkedLoading
-        spiderfyOnMaxZoom
-        zoomToBoundsOnClick
-        maxClusterRadius={80}
-        iconCreateFunction={createClusterDivIcon}
-      >
-        {markers.map((marker) => {
-          const icon = createMarkerDivIcon(marker, resolveIcon);
-          const domain = marker.domain ?? '';
-
-          return (
-            <Marker
-              key={marker.id}
-              position={[marker.lat, marker.lng]}
-              icon={icon}
-              ref={(leafletMarker) => {
-                // react-leaflet passes the L.Marker instance here.
-                if (leafletMarker) {
-                  markerDomainMap.set(leafletMarker as object, domain);
-                }
-              }}
-              eventHandlers={{
-                click: () => onMarkerClick?.(marker.id),
-              }}
-            >
-              {showPopup && (
-                <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
-                  {renderPopup ? (
-                    renderPopup(marker)
-                  ) : (
-                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-                  )}
-                </Popup>
-              )}
-            </Marker>
-          );
-        })}
-      </MarkerClusterGroup>
+      <ClusterLayer
+        markers={markers}
+        showPopup={showPopup}
+        onMarkerClick={stableMarkerClick}
+        renderPopup={stableRenderPopup}
+        resolveIcon={stableResolveIcon}
+      />
       {/*
-       * "You are here": outside the cluster group so it is never clustered,
+       * "You are here": outside the cluster layer so it is never clustered,
        * non-interactive so it never intercepts clicks on pins beneath it.
        */}
       {selfLocation && (

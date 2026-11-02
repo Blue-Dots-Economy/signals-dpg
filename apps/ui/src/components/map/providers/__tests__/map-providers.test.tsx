@@ -135,7 +135,21 @@ vi.mock('react-leaflet', async () => {
     );
   };
 
-  return { MapContainer, TileLayer, Marker, Popup, useMap: () => host().map };
+  const useMapEvents = (handlers: Record<string, () => void>) => {
+    const map = host().map as {
+      on: (event: string, handler: () => void) => void;
+      off: (event: string, handler: () => void) => void;
+    };
+    React_.useEffect(() => {
+      for (const [event, handler] of Object.entries(handlers)) map.on(event, handler);
+      return () => {
+        for (const [event, handler] of Object.entries(handlers)) map.off(event, handler);
+      };
+    }, [map, handlers]);
+    return map;
+  };
+
+  return { MapContainer, TileLayer, Marker, Popup, useMap: () => host().map, useMapEvents };
 });
 
 vi.mock('react-leaflet-cluster', async () => {
@@ -285,7 +299,8 @@ vi.mock('@googlemaps/markerclusterer', () => {
 
 // Imported AFTER the mocks are declared; importing each provider is also what
 // self-registers it with the map registry.
-import { LeafletMapProvider } from '../leaflet-provider';
+import L from 'leaflet';
+import { LeafletMapProvider, createClusterDivIcon } from '../leaflet-provider';
 import { GoogleMapProvider } from '../google-maps-provider';
 import {
   getRegisteredProviders,
@@ -329,6 +344,7 @@ const GAMMA: MapMarker = {
 
 /** Fake L.Map: only the surface the Leaflet provider actually calls. */
 function createFakeLeafletMap(opts?: { boundsValid?: boolean; zoom?: number }) {
+  const state = { zoom: opts?.zoom ?? 11 };
   const listeners = new Map<string, Set<() => void>>();
   const bounds = {
     isValid: () => opts?.boundsValid ?? true,
@@ -336,12 +352,14 @@ function createFakeLeafletMap(opts?: { boundsValid?: boolean; zoom?: number }) {
     getSouthWest: () => ({ lat: 18.5, lng: 71.5 }),
   };
   return {
-    setView: vi.fn((_center: [number, number], _zoom: number) => {}),
+    setView: vi.fn((_center: [number, number], zoom: number) => {
+      state.zoom = zoom;
+    }),
     fitBounds: vi.fn((_bounds: Array<[number, number]>, _options?: unknown) => {}),
     closePopup: vi.fn(() => {}),
     getCenter: () => ({ lat: 19, lng: 72.5 }),
     getBounds: () => bounds,
-    getZoom: () => opts?.zoom ?? 11,
+    getZoom: () => state.zoom,
     on: vi.fn((event: string, handler: () => void) => {
       const set = listeners.get(event) ?? new Set<() => void>();
       set.add(handler);
@@ -452,15 +470,6 @@ function lastProps(kind: string): Record<string, unknown> {
   return list[list.length - 1].props;
 }
 
-/** De-duplicated SDK objects handed to refs, in mount order. */
-function sdkObjects(kind: string): object[] {
-  const seen: object[] = [];
-  for (const record of recordsOf(kind)) {
-    if (record.el && !seen.includes(record.el)) seen.push(record.el);
-  }
-  return seen;
-}
-
 function setRuntimeConfig(config: Record<string, string> | undefined): void {
   const host = window as unknown as { __DPG_UI_CONFIG__?: Record<string, string> };
   if (config === undefined) delete host.__DPG_UI_CONFIG__;
@@ -539,22 +548,12 @@ const leafletElement = (overrides: Partial<LeafletProps> = {}) => (
   <LeafletMapProvider center={[19, 72.5]} zoom={11} markers={[ALPHA]} {...overrides} />
 );
 
-type ClusterStub = {
-  getChildCount: () => number;
-  getAllChildMarkers?: () => object[];
-};
-
-function clusterIconFactory(): (cluster: ClusterStub) => DivIcon {
-  return lastProps('MarkerClusterGroup').iconCreateFunction as (c: ClusterStub) => DivIcon;
-}
-
 describe('LeafletMapProvider', () => {
-  it('renders one clustered marker per item, each with a popup card for that item', () => {
+  it('renders one marker per item, each with a popup card for that item', () => {
     bridge().map = createFakeLeafletMap();
     render(leafletElement({ markers: [ALPHA, BETA], onMarkerClick: vi.fn() }));
 
-    const group = screen.getByTestId('cluster-group');
-    expect(within(group).getAllByTestId('leaflet-marker')).toHaveLength(2);
+    expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(2);
     expect(screen.getByText('Alpha Academy')).toBeInTheDocument();
     expect(screen.getByText('Beta Institute')).toBeInTheDocument();
   });
@@ -677,15 +676,14 @@ describe('LeafletMapProvider', () => {
     expect(String(icon.options.html)).toContain('data-glyph="custom"');
   });
 
-  it('renders the non-interactive "You are here" marker OUTSIDE the cluster group', () => {
+  it('renders the non-interactive "You are here" marker outside the clustering output', () => {
     bridge().map = createFakeLeafletMap();
-    render(leafletElement({ markers: [ALPHA], selfLocation: { lat: 19, lng: 72.5 } }));
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(leafletElement({ markers: crowd, selfLocation: { lat: 19, lng: 72.5 } }));
 
-    // Only the item pin is inside the cluster group; the self-marker is a sibling
-    // so it can never be folded into a cluster.
-    const group = screen.getByTestId('cluster-group');
-    expect(within(group).getAllByTestId('leaflet-marker')).toHaveLength(1);
     expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(2);
+    const bubble = recordsOf('Marker').find((r) => r.props.interactive !== false)?.props;
+    expect(String((bubble?.icon as DivIcon).options.html)).toContain('>200</div>');
 
     const selfProps =
       recordsOf('Marker').find((r) => r.props.interactive === false)?.props ?? {};
@@ -702,48 +700,27 @@ describe('LeafletMapProvider', () => {
     expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1);
   });
 
-  it('configures the cluster group with the documented clustering options', () => {
-    bridge().map = createFakeLeafletMap();
-    render(leafletElement());
-
-    const props = lastProps('MarkerClusterGroup');
-    expect(props.chunkedLoading).toBe(true);
-    expect(props.spiderfyOnMaxZoom).toBe(true);
-    expect(props.zoomToBoundsOnClick).toBe(true);
-    expect(props.maxClusterRadius).toBe(80);
-  });
-
   it('sizes the cluster bubble by count band and shows the total', () => {
-    bridge().map = createFakeLeafletMap();
-    render(leafletElement());
-    const iconFor = clusterIconFactory();
-
-    const small = String(iconFor({ getChildCount: () => 4 }).options.html);
+    const small = String(createClusterDivIcon(4, []).options.html);
     expect(small).toContain('width: 34px');
     expect(small).toContain('>4</div>');
 
-    expect(String(iconFor({ getChildCount: () => 42 }).options.html)).toContain('width: 40px');
-    expect(String(iconFor({ getChildCount: () => 150 }).options.html)).toContain('width: 46px');
+    expect(String(createClusterDivIcon(42, []).options.html)).toContain('width: 40px');
+    expect(String(createClusterDivIcon(150, []).options.html)).toContain('width: 46px');
   });
 
   it('adds a per-domain badge row (and widens the icon) for a multi-domain cluster', () => {
-    bridge().map = createFakeLeafletMap();
-    render(leafletElement({ markers: [ALPHA, BETA, GAMMA] }));
-
-    const icon = clusterIconFactory()({
-      getChildCount: () => 3,
-      getAllChildMarkers: () => sdkObjects('Marker'),
-    });
+    const icon = createClusterDivIcon(3, [
+      { domain: 'seeker', count: 2 },
+      { domain: 'provider', count: 1 },
+    ]);
 
     const html = String(icon.options.html);
     expect(html).toContain('>3</div>');
-    // Two distinct domains → exactly two chips (seeker ×2 first, provider ×1).
     const chips = html.match(/<span/g) ?? [];
     expect(chips).toHaveLength(2);
-    // The dominant domain's chip carries its own count (seeker ×2).
     expect(html).toMatch(/>\s*2\s*<\/span>/);
 
-    // Width grows to fit the chips; height grows by the badge row.
     const size = icon.options.iconSize as Point;
     expect(size.x).toBe(2 * 38 + 3);
     expect(size.y).toBe(34 + 22);
@@ -752,31 +729,91 @@ describe('LeafletMapProvider', () => {
     expect(anchor.y).toBe(17);
   });
 
-  it('never fabricates an empty-domain group for markers with no known domain', () => {
-    const noDomain: MapMarker = {
-      id: 'delta',
-      lat: 19.4,
-      lng: 72.6,
-      label: 'Delta',
-      data: {},
-      precision: 'exact',
-    };
-    bridge().map = createFakeLeafletMap();
-    render(leafletElement({ markers: [ALPHA, GAMMA, noDomain] }));
+  it('shows no badge row for a single-domain cluster', () => {
+    const icon = createClusterDivIcon(3, [{ domain: 'seeker', count: 3 }]);
 
-    const icon = clusterIconFactory()({
-      getChildCount: () => 3,
-      getAllChildMarkers: () => sdkObjects('Marker'),
-    });
-
-    const html = String(icon.options.html);
-    // One real domain (seeker) → single-domain cluster: no badge chips at all…
-    expect(html).not.toContain('<span');
-    // …though the domain-less pin is still part of the headline total.
-    expect(html).toContain('>3</div>');
+    expect(String(icon.options.html)).not.toContain('<span');
     const size = icon.options.iconSize as Point;
     expect(size.x).toBe(34);
     expect(size.y).toBe(34);
+  });
+
+  it('draws one marker per visible bubble or pin, not one per listing', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+
+    render(leafletElement({ markers: [...crowd, BETA, GAMMA] }));
+
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(3));
+    const bubble = recordsOf('Marker').find((r) => String((r.props.icon as DivIcon).options.html).includes('>200</div>'));
+    expect(bubble).toBeDefined();
+    expect(screen.getByText('Beta Institute')).toBeInTheDocument();
+  });
+
+  it('zooms to the expansion zoom on bubble click', async () => {
+    const map = createFakeLeafletMap();
+    bridge().map = map;
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(leafletElement({ markers: crowd }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
+    const bubble = recordsOf('Marker')[0].props;
+    expect(bubble.position).toEqual([expect.any(Number), expect.any(Number)]);
+
+    await userEvent.click(screen.getByTestId('leaflet-marker'));
+
+    expect(map.setView).toHaveBeenCalledTimes(1);
+    const [latLng, zoom] = map.setView.mock.calls[0];
+    expect(latLng).toEqual(bubble.position);
+    expect(zoom).toBeGreaterThan(11);
+    expect(zoom).toBeLessThanOrEqual(18);
+  });
+
+  it('uses the 18 maximum zoom so small groups open at max zoom', async () => {
+    bridge().map = createFakeLeafletMap({ zoom: 18 });
+    const ring = [at('r1', 19, 72), at('r2', 19.00005, 72), at('r3', 19, 72.00005)];
+
+    render(leafletElement({ markers: ring }));
+
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(3));
+  });
+
+  it('reuses one icon per glyph', () => {
+    const UniqueGlyph = () => <svg data-glyph="unique" />;
+    const divIcon = vi.spyOn(L, 'divIcon');
+    bridge().map = createFakeLeafletMap();
+
+    render(
+      leafletElement({
+        markers: [ALPHA, BETA],
+        resolveIcon: () => UniqueGlyph as unknown as LucideIcon,
+      }),
+    );
+
+    const icons = recordsOf('Marker').map((r) => r.props.icon);
+    expect(icons[0]).toBe(icons[1]);
+    expect(divIcon).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not re-render a pin when the caller passes new inline callbacks', () => {
+    bridge().map = createFakeLeafletMap();
+    const { rerender } = render(
+      leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>{m.label}</p>, onMarkerClick: () => {} }),
+    );
+    const before = recordsOf('Marker').length;
+
+    rerender(leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>{m.label}</p>, onMarkerClick: () => {} }));
+
+    expect(recordsOf('Marker').length).toBe(before);
+  });
+
+  it('listens for moveend and zoomend to re-cluster', async () => {
+    const map = createFakeLeafletMap();
+    bridge().map = map;
+    render(leafletElement({ markers: [ALPHA, BETA] }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(2));
+
+    expect(map.listenerCount('moveend')).toBe(1);
+    expect(map.listenerCount('zoomend')).toBe(1);
   });
 
   it('drives the camera to the caller viewport when a specific profile is selected', () => {
@@ -851,7 +888,7 @@ describe('LeafletMapProvider', () => {
     bridge().map = map;
     const { unmount } = render(leafletElement({ onViewportChange }));
 
-    expect(map.listenerCount('moveend')).toBe(1);
+    expect(map.listenerCount('moveend')).toBe(2);
     onViewportChange.mockClear();
 
     act(() => map.fire('moveend'));
@@ -861,6 +898,7 @@ describe('LeafletMapProvider', () => {
 
     unmount();
     expect(map.listenerCount('moveend')).toBe(0);
+    expect(map.listenerCount('zoomend')).toBe(0);
   });
 
   it('skips the mount emit while the map bounds are not yet valid, but still emits on moveend', async () => {
@@ -875,13 +913,12 @@ describe('LeafletMapProvider', () => {
     await waitFor(() => expect(onViewportChange).toHaveBeenCalledTimes(1));
   });
 
-  it('attaches no moveend listener at all when the caller wants no viewport reports', () => {
+  it('attaches no viewport reporter when the caller wants no viewport reports', () => {
     const map = createFakeLeafletMap();
     bridge().map = map;
     render(leafletElement());
 
-    expect(map.listenerCount('moveend')).toBe(0);
-    expect(map.on).not.toHaveBeenCalled();
+    expect(map.listenerCount('moveend')).toBe(1);
   });
 
   it('closes the open popup only when closePopupNonce actually changes', () => {
