@@ -76,7 +76,7 @@ export function buildClusterIndex(markers: MapMarker[], options: ClusterIndexOpt
 
 /** Returns the bubbles and points inside `view` at its zoom. */
 export function queryClusters(index: MapClusterIndex, view: ClusterView): MapClusterItem[] {
-  const zoom = Math.floor(view.zoom);
+  const zoom = Math.min(Math.floor(view.zoom), index.maxZoom);
   const west = Math.max(-180, view.west);
   const east = Math.min(180, view.east);
   const features = index.tree.getClusters([west, view.south, east, view.north], zoom);

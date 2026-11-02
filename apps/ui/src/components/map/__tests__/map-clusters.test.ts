@@ -76,6 +76,14 @@ describe('queryClusters', () => {
     expect(items[0]).toMatchObject({ kind: 'cluster', count: 60 });
   });
 
+  it('treats a zoom beyond the maximum as the maximum', () => {
+    const big = Array.from({ length: 60 }, (_, i) => marker(`m${i}#0`, 28.6, 77.4));
+    const small = [marker('a#0', 28.7, 77.5), marker('b#0', 28.7, 77.5)];
+    const items = queryClusters(buildClusterIndex([...big, ...small], { maxZoom: 20 }), around(22));
+    expect(items.filter((i) => i.kind === 'cluster').map((i) => i.kind === 'cluster' && i.count)).toEqual([60]);
+    expect(items.filter((i) => i.kind === 'point')).toHaveLength(2);
+  });
+
   it('counts points, not listings', () => {
     const markers = [marker('a#0', 28.0, 77.0), marker('a#1', 29.5, 78.5)];
     const items = queryClusters(buildClusterIndex(markers, { maxZoom: 22 }), around(12));

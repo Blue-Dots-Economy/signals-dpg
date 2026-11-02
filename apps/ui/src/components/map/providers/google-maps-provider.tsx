@@ -1,7 +1,6 @@
 /// <reference types="google.maps" />
 import * as React from 'react';
 import { createPortal } from 'react-dom';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import {
   AdvancedMarker,
@@ -12,24 +11,19 @@ import {
   useAdvancedMarkerRef,
   useMap,
 } from '@vis.gl/react-google-maps';
-import type { AdvancedMarkerRef } from '@vis.gl/react-google-maps';
-import { MarkerClusterer, type Renderer, type Cluster } from '@googlemaps/markerclusterer';
 import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
-import { tallyDomains } from '../cluster-breakdown';
+import type { DomainCount } from '../cluster-breakdown';
+import { useMapClusters } from '../use-map-clusters';
+import type { ClusterView, MapClusterItem } from '../map-clusters';
+import { useStableCallback } from '../use-stable-callback';
 import { MarkerPopupCard } from '../marker-popup-card';
 import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
-
-/**
- * AdvancedMarkerElement to domain, filled by each ClusteredMarker and read by
- * the cluster renderer for the per-domain badge row.
- */
-const markerDomainMap = new WeakMap<object, string>();
 
 // Stacking: self (0) < item pins (500) < clusters (1000 + count) < popup. The
 // non-interactive "You" marker sits below item pins so an item on the same
@@ -58,31 +52,6 @@ function resolveClusterZoomAnimMs(): number {
   return Number.isFinite(n) && n >= 0 ? n : 2000;
 }
 const CLUSTER_ZOOM_ANIM_MS = resolveClusterZoomAnimMs();
-const WORLD_PX = 256;
-
-/**
- * The fractional zoom at which `bounds` fills `dim`, the same target as
- * `fitBounds`. Zero-size bounds (co-located points) yield the max cap.
- */
-function getBoundsZoomLevel(
-  bounds: google.maps.LatLngBounds,
-  dim: { width: number; height: number },
-): number {
-  const latRad = (lat: number) => {
-    const s = Math.sin((lat * Math.PI) / 180);
-    return Math.log((1 + s) / (1 - s)) / 2;
-  };
-  const zoomFor = (px: number, fraction: number) => Math.log(px / WORLD_PX / fraction) / Math.LN2;
-  const ne = bounds.getNorthEast();
-  const sw = bounds.getSouthWest();
-  const latFraction = (latRad(ne.lat()) - latRad(sw.lat())) / Math.PI;
-  const lngDiff = ne.lng() - sw.lng();
-  const lngFraction = (lngDiff < 0 ? lngDiff + 360 : lngDiff) / 360;
-  const latZoom = latFraction > 0 ? zoomFor(dim.height, latFraction) : CLUSTER_CLICK_MAX_ZOOM;
-  const lngZoom = lngFraction > 0 ? zoomFor(dim.width, lngFraction) : CLUSTER_CLICK_MAX_ZOOM;
-  return Math.min(latZoom, lngZoom, CLUSTER_CLICK_MAX_ZOOM);
-}
-
 /**
  * Animates the camera to `target` over CLUSTER_ZOOM_ANIM_MS with
  * `moveCamera`. The map has a `mapId` (vector map), so fractional zoom renders
@@ -137,105 +106,114 @@ function resolveThemeColor(varName: string, fallback: string): string {
   return ctx.fillStyle;
 }
 
-/**
- * Builds the cluster bubble as HTML for AdvancedMarkerElement content: the
- * total in a `--primary` circle and, when several domains are present, a row
- * of per-domain icon+count chips below it.
- */
-function buildClusterContent(
-  total: number,
-  breakdown: Array<{ domain: string; count: number }>,
-  primary: string,
-): HTMLElement {
-  const wrap = document.createElement('div');
-  // AdvancedMarkerElement anchors content bottom-centre to the point; shift down
-  // so the bubble sits roughly centred over the cluster location.
-  wrap.style.cssText =
-    'display:flex;flex-direction:column;align-items:center;transform:translateY(50%);';
-
-  const size = total < 10 ? 38 : total < 100 ? 44 : 50;
-  const circle = document.createElement('div');
-  // Hook for the mobile-only legibility rule in index.css.
-  circle.className = 'dpg-cluster-count';
-  circle.style.cssText =
-    `display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;` +
-    `background:${primary};color:#ffffff;border:2px solid #ffffff;border-radius:9999px;` +
-    `box-shadow:0 1px 4px rgba(0,0,0,0.35);font:600 14px ui-sans-serif,system-ui,sans-serif;`;
-  circle.textContent = String(total);
-  wrap.appendChild(circle);
-
-  if (breakdown.length > 1) {
-    const badges = document.createElement('div');
-    badges.style.cssText = 'display:flex;gap:4px;margin-top:-8px;';
-    for (const b of breakdown) {
-      const Icon = getIconForDomain(b.domain);
-      const iconSvg = renderToStaticMarkup(
-        React.createElement(Icon, { size: 11, color: primary, strokeWidth: 2.4 }),
-      );
-      const chip = document.createElement('span');
-      chip.style.cssText =
-        'display:inline-flex;align-items:center;gap:3px;background:#ffffff;border:1px solid #e2e8f0;' +
-        'border-radius:9999px;padding:2px 7px 2px 5px;font:600 11px ui-sans-serif,system-ui,sans-serif;' +
-        'color:#1e293b;box-shadow:0 1px 2px rgba(0,0,0,0.18);line-height:1;';
-      chip.innerHTML = `${iconSvg}<span>${b.count}</span>`;
-      badges.appendChild(chip);
-    }
-    wrap.appendChild(badges);
-  }
-
-  return wrap;
+/** The cluster bubble: the total in a `--primary` circle and, for several domains, a row of per-domain chips. */
+function ClusterBubble({
+  count,
+  breakdown,
+  primary,
+}: {
+  count: number;
+  breakdown: DomainCount[];
+  primary: string;
+}) {
+  const size = count < 10 ? 38 : count < 100 ? 44 : 50;
+  return (
+    // AdvancedMarker anchors content bottom-centre; shift down so the bubble is centred on the point.
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'translateY(50%)' }}>
+      <div
+        className="dpg-cluster-count"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: `${size}px`,
+          height: `${size}px`,
+          background: primary,
+          color: '#ffffff',
+          border: '2px solid #ffffff',
+          borderRadius: 9999,
+          boxShadow: '0 1px 4px rgba(0,0,0,0.35)',
+          font: '600 14px ui-sans-serif,system-ui,sans-serif',
+        }}
+      >
+        {count}
+      </div>
+      {breakdown.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, marginTop: -8 }}>
+          {breakdown.map((b) => {
+            const Icon = getIconForDomain(b.domain);
+            return (
+              <span
+                key={b.domain}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 9999,
+                  padding: '2px 7px 2px 5px',
+                  font: '600 11px ui-sans-serif,system-ui,sans-serif',
+                  color: '#1e293b',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.18)',
+                  lineHeight: 1,
+                }}
+              >
+                <Icon size={11} color={primary} strokeWidth={2.4} />
+                <span>{b.count}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
-/** Cluster renderer using the network theme colour and a per-domain breakdown. */
-const clusterRenderer: Renderer = {
-  render(cluster: Cluster) {
-    const { count, position, markers } = cluster;
-    // Neutral gray fallback, not any network's brand colour.
-    const primary = resolveThemeColor('--primary', '#6b7280');
+const ClusterMarker = React.memo(function ClusterMarker({
+  item,
+  primary,
+  onZoomTo,
+}: {
+  item: Extract<MapClusterItem, { kind: 'cluster' }>;
+  primary: string;
+  onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
+}) {
+  const position = React.useMemo(() => ({ lat: item.lat, lng: item.lng }), [item.lat, item.lng]);
+  return (
+    <AdvancedMarker
+      position={position}
+      title={String(item.count)}
+      zIndex={1000 + item.count}
+      onClick={() => onZoomTo(item.lat, item.lng, item.expansionZoom)}
+    >
+      <ClusterBubble count={item.count} breakdown={item.breakdown} primary={primary} />
+    </AdvancedMarker>
+  );
+});
 
-    // Only markers with a known domain are tallied; an unregistered one would
-    // add a phantom '' group. The total (`cluster.count`) is unaffected.
-    const domains = (markers ?? [])
-      .map((m) => markerDomainMap.get(m as object))
-      .filter((d): d is string => Boolean(d));
-    const breakdown = tallyDomains(domains);
-
-    return new google.maps.marker.AdvancedMarkerElement({
-      position,
-      content: buildClusterContent(count, breakdown, primary),
-      zIndex: 1000 + count,
-    });
-  },
-};
-
-// Each ClusteredMarker reports its AdvancedMarkerElement via `onMarkerReady`
-// so the parent can register it with the MarkerClusterer.
-
-interface ClusteredMarkerProps {
+interface PointMarkerProps {
   marker: MapMarker;
   isActive: boolean;
   onClick: (marker: MapMarker) => void;
   onClose: () => void;
   onMarkerClick?: (id: string) => void;
-  onMarkerReady: (id: string, el: NonNullable<AdvancedMarkerRef> | null) => void;
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   resolveIcon?: MapProviderProps['resolveIcon'];
   resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
-function ClusteredMarker({
+const PointMarker = React.memo(function PointMarker({
   marker,
   isActive,
   onClick,
   onClose,
   onMarkerClick,
-  onMarkerReady,
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
-}: ClusteredMarkerProps) {
+}: PointMarkerProps) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
-  const { id } = marker;
   const map = useMap();
   const isMobile = useIsMobile();
 
@@ -290,22 +268,13 @@ function ClusteredMarker({
   const DomainIcon = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
   const markerImage = resolveMarkerImage?.(marker) ?? null;
 
-  React.useEffect(() => {
-    if (markerEl) {
-      markerDomainMap.set(markerEl, marker.domain ?? '');
-    }
-    onMarkerReady(id, markerEl);
-    return () => {
-      onMarkerReady(id, null);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [markerEl, id]);
+  const position = React.useMemo(() => ({ lat: marker.lat, lng: marker.lng }), [marker.lat, marker.lng]);
 
   return (
     <>
       <AdvancedMarker
         ref={markerRef}
-        position={{ lat: marker.lat, lng: marker.lng }}
+        position={position}
         title={marker.label}
         // Above the "You" self-marker; see ITEM_MARKER_Z_INDEX.
         zIndex={ITEM_MARKER_Z_INDEX}
@@ -379,7 +348,7 @@ function ClusteredMarker({
             ))}
     </>
   );
-}
+});
 
 // Pans/zooms the map to `center`/`zoom` when `initialViewSet` is true; when
 // false it leaves the map alone so it does not fight user panning.
@@ -464,10 +433,34 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   return null;
 }
 
-// Keeps a MarkerClusterer in sync with the elements ClusteredMarker children
-// report.
+/** The map's current bounds and zoom, updated on every `idle`; null until the map has bounds. */
+function useGoogleClusterView(map: google.maps.Map | null): ClusterView | null {
+  const [view, setView] = React.useState<ClusterView | null>(null);
+  React.useEffect(() => {
+    if (!map) return;
+    const read = () => {
+      const bounds = map.getBounds();
+      const zoom = map.getZoom();
+      if (!bounds || zoom == null) return;
+      const ne = bounds.getNorthEast();
+      const sw = bounds.getSouthWest();
+      const wraps = sw.lng() > ne.lng();
+      setView({
+        west: wraps ? -180 : sw.lng(),
+        south: sw.lat(),
+        east: wraps ? 180 : ne.lng(),
+        north: ne.lat(),
+        zoom,
+      });
+    };
+    read();
+    const listener = map.addListener('idle', read);
+    return () => listener.remove();
+  }, [map]);
+  return view;
+}
 
-interface ClustererManagerProps {
+interface ClusterLayerProps {
   markers: MapMarker[];
   activeMarkerId: string | null;
   onMarkerActivate: (marker: MapMarker) => void;
@@ -478,7 +471,8 @@ interface ClustererManagerProps {
   resolveMarkerImage?: MapProviderProps['resolveMarkerImage'];
 }
 
-function ClustererManager({
+/** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
+function ClusterLayer({
   markers,
   activeMarkerId,
   onMarkerActivate,
@@ -487,116 +481,51 @@ function ClustererManager({
   renderPopup,
   resolveIcon,
   resolveMarkerImage,
-}: ClustererManagerProps) {
+}: ClusterLayerProps) {
   const map = useMap();
-
-  const markerElsRef = React.useRef<globalThis.Map<string, NonNullable<AdvancedMarkerRef>>>(new globalThis.Map());
-
-  const clustererRef = React.useRef<MarkerClusterer | null>(null);
-
-  const renderRafRef = React.useRef<number | null>(null);
+  const view = useGoogleClusterView(map);
+  const items = useMapClusters(markers, view, { maxZoom: CLUSTER_CLICK_MAX_ZOOM });
+  const { resolved: themeMode } = useThemeMode();
+  // Neutral gray fallback, not any network's brand colour.
+  const primary = React.useMemo(() => resolveThemeColor('--primary', '#6b7280'), [themeMode]);
   const cameraAnimRef = React.useRef<number | null>(null);
 
-  React.useEffect(() => {
-    if (!map) return;
-
-    const clusterer = new MarkerClusterer({
-      map,
-      renderer: clusterRenderer,
-      // Animates to the zoom the default `fitBounds(cluster.bounds)` would
-      // snap to, so one click reveals the cluster's contents.
-      onClusterClick: (_event, cluster, clusterMap) => {
-        const div = clusterMap.getDiv();
-        const dim = { width: div?.offsetWidth || 800, height: div?.offsetHeight || 600 };
-        const current = clusterMap.getZoom() ?? 12;
-        const fit = cluster.bounds ? getBoundsZoomLevel(cluster.bounds, dim) : current + 3;
-        // Zoom in at least one level, never past the cap.
-        const targetZoom = Math.min(Math.max(fit, current + 1), CLUSTER_CLICK_MAX_ZOOM);
-        const pos = cluster.position;
-        animateMapCamera(
-          clusterMap,
-          { lat: pos.lat(), lng: pos.lng(), zoom: targetZoom },
-          cameraAnimRef,
-        );
-      },
-    });
-    clustererRef.current = clusterer;
-
-    return () => {
-      // Cancel pending frames so nothing fires against a torn-down map.
-      if (renderRafRef.current != null) {
-        cancelAnimationFrame(renderRafRef.current);
-        renderRafRef.current = null;
-      }
-      if (cameraAnimRef.current != null) {
-        cancelAnimationFrame(cameraAnimRef.current);
-        cameraAnimRef.current = null;
-      }
-      // clearMarkers() then setMap(null) is the teardown; calling the internal
-      // onRemove() directly can throw. setMap() exists at runtime (inherited
-      // via OverlayViewSafe) but is missing from the type declaration.
-      clusterer.clearMarkers();
-      (clusterer as unknown as { setMap: (map: null) => void }).setMap(null);
-      clustererRef.current = null;
-    };
-  }, [map]);
-
-  // One clusterer render per frame. addMarker/removeMarker redraw the whole
-  // set by default, which is O(n^2) as markers register one by one, so they
-  // run with noDraw=true and this batches a single render().
-  const scheduleRender = React.useCallback(() => {
-    if (renderRafRef.current != null) return; // already scheduled this frame
-    renderRafRef.current = requestAnimationFrame(() => {
-      renderRafRef.current = null;
-      clustererRef.current?.render();
-    });
-  }, []);
-
-  const handleMarkerReady = React.useCallback(
-    (id: string, el: NonNullable<AdvancedMarkerRef> | null) => {
-      const clusterer = clustererRef.current;
-      if (!clusterer) return;
-
-      const prev = markerElsRef.current.get(id);
-
-      if (el === null) {
-        if (prev) {
-          clusterer.removeMarker(prev, true);
-          markerElsRef.current.delete(id);
-          scheduleRender();
-        }
-        return;
-      }
-
-      if (prev === el) return; // No change.
-
-      if (prev) {
-        clusterer.removeMarker(prev, true);
-      }
-
-      markerElsRef.current.set(id, el);
-      clusterer.addMarker(el, true);
-      scheduleRender();
+  React.useEffect(
+    () => () => {
+      if (cameraAnimRef.current != null) cancelAnimationFrame(cameraAnimRef.current);
     },
-    [scheduleRender],
+    [],
+  );
+
+  const zoomTo = React.useCallback(
+    (lat: number, lng: number, expansionZoom: number) => {
+      if (!map) return;
+      const current = map.getZoom() ?? 12;
+      const zoom = Math.min(Math.max(expansionZoom, current + 1), CLUSTER_CLICK_MAX_ZOOM);
+      animateMapCamera(map, { lat, lng, zoom }, cameraAnimRef);
+    },
+    [map],
   );
 
   return (
     <>
-      {markers.map((marker) => (
-        <ClusteredMarker
-          key={marker.id}
-          marker={marker}
-          isActive={activeMarkerId === marker.id}
-          onClick={onMarkerActivate}
-          onClose={onMarkerDeactivate}
-          onMarkerClick={onMarkerClick}
-          onMarkerReady={handleMarkerReady}
-          renderPopup={renderPopup}
-          resolveIcon={resolveIcon}
-          resolveMarkerImage={resolveMarkerImage}
-        />
-      ))}
+      {items.map((item) =>
+        item.kind === 'cluster' ? (
+          <ClusterMarker key={item.key} item={item} primary={primary} onZoomTo={zoomTo} />
+        ) : (
+          <PointMarker
+            key={item.key}
+            marker={item.marker}
+            isActive={activeMarkerId === item.marker.id}
+            onClick={onMarkerActivate}
+            onClose={onMarkerDeactivate}
+            onMarkerClick={onMarkerClick}
+            renderPopup={renderPopup}
+            resolveIcon={resolveIcon}
+            resolveMarkerImage={resolveMarkerImage}
+          />
+        ),
+      )}
     </>
   );
 }
@@ -622,6 +551,8 @@ function CameraTracker({
   return null;
 }
 
+const noActivation = (_marker: MapMarker) => {};
+
 export function GoogleMapProvider({
   center,
   zoom,
@@ -643,6 +574,12 @@ export function GoogleMapProvider({
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
   const liveCameraRef = React.useRef<{ center: { lat: number; lng: number }; zoom: number } | null>(null);
+  const activateMarker = React.useCallback((marker: MapMarker) => setActiveMarker(marker), []);
+  const deactivateMarker = React.useCallback(() => setActiveMarker(null), []);
+  const stableMarkerClick = useStableCallback(onMarkerClick);
+  const stableRenderPopup = useStableCallback(renderPopup);
+  const stableResolveIcon = useStableCallback(resolveIcon);
+  const stableResolveMarkerImage = useStableCallback(resolveMarkerImage);
 
   // Closes the open popup (mobile overlay or InfoWindow) when
   // `closePopupNonce` changes; the ref guard skips mount and unchanged nonces.
@@ -698,21 +635,21 @@ export function GoogleMapProvider({
         <MapViewController center={center} zoom={zoom} initialViewSet={initialViewSet} focusNonce={focusNonce} />
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <CameraTracker cameraRef={liveCameraRef} />
-        <ClustererManager
+        <ClusterLayer
           markers={markers}
           activeMarkerId={activeMarker?.id ?? null}
           // With `showPopup` off no marker ever becomes active, so neither the
           // InfoWindow nor the mobile overlay opens; clicks still reach
           // `onMarkerClick`.
-          onMarkerActivate={showPopup ? setActiveMarker : () => {}}
-          onMarkerDeactivate={() => setActiveMarker(null)}
-          onMarkerClick={onMarkerClick}
-          renderPopup={renderPopup}
-          resolveIcon={resolveIcon}
-          resolveMarkerImage={resolveMarkerImage}
+          onMarkerActivate={showPopup ? activateMarker : noActivation}
+          onMarkerDeactivate={deactivateMarker}
+          onMarkerClick={stableMarkerClick}
+          renderPopup={stableRenderPopup}
+          resolveIcon={stableResolveIcon}
+          resolveMarkerImage={stableResolveMarkerImage}
         />
         {/*
-         * "You are here": outside the clusterer so it is never clustered, and
+         * "You are here": outside clustering so it is never clustered, and
          * non-clickable. The content is shifted by SELF_MARKER_GOOGLE_OFFSET_Y
          * so AdvancedMarker's bottom-centre anchor lands on the dot's centre.
          */}

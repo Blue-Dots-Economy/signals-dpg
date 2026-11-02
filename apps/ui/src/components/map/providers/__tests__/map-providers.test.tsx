@@ -923,18 +923,16 @@ function configureApiKey(): void {
   setRuntimeConfig({ VITE_GOOGLE_MAPS_API_KEY: 'test-key' });
 }
 
-function firstClusterer(): ClustererSpy {
-  const clusterer = bridge().clusterers[0];
-  if (!clusterer) throw new Error('no MarkerClusterer was created');
-  return clusterer;
-}
+/** A pin at a given spot, built from ALPHA. */
+const at = (id: string, lat: number, lng: number, domain = 'seeker'): MapMarker => ({
+  ...ALPHA,
+  id,
+  label: id,
+  lat,
+  lng,
+  domain,
+});
 
-function clustererCalls(fn: string): Array<{ fn: string; arg?: unknown; noDraw?: boolean }> {
-  return firstClusterer().calls.filter((c) => c.fn === fn);
-}
-
-/** google.maps.LatLng stand-in (lat()/lng() accessors). */
-const latLng = (lat: number, lng: number) => ({ lat: () => lat, lng: () => lng });
 
 describe('GoogleMapProvider', () => {
   it('renders a configuration hint instead of a map when no API key is available', () => {
@@ -995,61 +993,41 @@ describe('GoogleMapProvider', () => {
     expect(lastProps('GMap').mapTypeControlOptions).toBeUndefined();
   });
 
-  it('registers every pin with the clusterer without drawing, batching the redraw', async () => {
+  it('draws one marker per visible bubble or pin, not one per listing', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
-    const many: MapMarker[] = Array.from({ length: 6 }, (_, i) => ({
-      ...ALPHA,
-      id: `pin-${i}`,
-      label: `Pin ${i}`,
-      lat: 19 + i / 100,
-    }));
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
 
-    render(googleElement({ markers: many }));
+    render(googleElement({ markers: [...crowd, BETA, GAMMA] }));
 
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(6));
-    // Every add is noDraw:true …
-    expect(clustererCalls('addMarker').every((c) => c.noDraw === true)).toBe(true);
-    // … and the redraws are coalesced per frame rather than one per marker (O(n), not O(n²)).
-    expect(clustererCalls('render').length).toBeGreaterThanOrEqual(1);
-    expect(clustererCalls('render').length).toBeLessThan(6);
-
-    expect(screen.getAllByTestId('gmap-marker')).toHaveLength(6);
-    expect(recordsOf('AdvancedMarker')[0].props.zIndex).toBe(500);
+    await waitFor(() => expect(screen.getAllByTestId('gmap-marker')).toHaveLength(3));
+    expect(screen.getByRole('button', { name: '200' })).toBeInTheDocument();
+    expect(recordsOf('AdvancedMarker').find((r) => r.props.title === 'Beta Institute')?.props.zIndex).toBe(500);
   });
 
-  it('deregisters a pin that drops out of the marker set', async () => {
+  it('removes a pin that drops out of the marker set', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
     const { rerender } = render(googleElement({ markers: [ALPHA, BETA] }));
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(2));
-    const betaEl = recordsOf('AdvancedMarker').find(
-      (r) => r.props.title === 'Beta Institute',
-    )?.el;
+    await waitFor(() => expect(screen.getAllByTestId('gmap-marker')).toHaveLength(2));
 
     rerender(googleElement({ markers: [ALPHA] }));
 
-    expect(clustererCalls('removeMarker')).toEqual([
-      { fn: 'removeMarker', arg: betaEl, noDraw: true },
-    ]);
     expect(screen.getAllByTestId('gmap-marker')).toHaveLength(1);
   });
 
-  it('tears the clusterer overlay down on unmount', async () => {
+  it('re-renders only the clicked pin when its popup opens', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
-    const { unmount } = render(googleElement({ markers: [ALPHA, BETA] }));
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(2));
+    render(googleElement({ markers: [ALPHA, BETA] }));
+    await waitFor(() => expect(screen.getAllByTestId('gmap-marker')).toHaveLength(2));
+    const betaRenders = () => recordsOf('AdvancedMarker').filter((r) => r.props.title === 'Beta Institute').length;
+    const before = betaRenders();
 
-    unmount();
+    await userEvent.click(screen.getByRole('button', { name: 'Alpha Academy' }));
 
-    // The manager's cleanup runs before its children's, so the per-marker
-    // removals are skipped (clustererRef is already null) — clearMarkers() drops
-    // all pins and setMap(null) detaches the OverlayView, which is the whole
-    // teardown. onRemove() must never be called directly (it can throw).
-    expect(clustererCalls('clearMarkers')).toHaveLength(1);
-    expect(clustererCalls('setMap')).toEqual([{ fn: 'setMap', arg: null }]);
-    expect(clustererCalls('removeMarker')).toHaveLength(0);
+    expect(screen.getByTestId('info-window')).toBeInTheDocument();
+    expect(betaRenders()).toBe(before);
   });
 
   it('opens an InfoWindow anchored to the clicked pin, and toggles it shut on a second click', async () => {
@@ -1190,8 +1168,8 @@ describe('GoogleMapProvider', () => {
         zoom: 14,
       }),
     );
-    // Viewport reporter + camera tracker.
-    expect(gmap.listeners.idle).toHaveLength(2);
+    // Viewport reporter, camera tracker and cluster view.
+    expect(gmap.listeners.idle).toHaveLength(3);
 
     onViewportChange.mockClear();
     act(() => gmap.fire('idle'));
@@ -1206,8 +1184,8 @@ describe('GoogleMapProvider', () => {
 
     render(googleElement());
 
-    // Only the camera tracker — the tourist app attaches no reporter.
-    expect(gmap.listeners.idle).toHaveLength(1);
+    // Camera tracker and cluster view only — the tourist app attaches no reporter.
+    expect(gmap.listeners.idle).toHaveLength(2);
   });
 
   it('reports nothing while the map has no bounds yet', () => {
@@ -1223,145 +1201,90 @@ describe('GoogleMapProvider', () => {
     expect(onViewportChange).not.toHaveBeenCalled();
   });
 
-  it('renders the self-marker below the pins, non-clickable and outside the clusterer', async () => {
+  it('renders the self-marker below the pins, non-clickable and outside clustering', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
 
     render(googleElement({ markers: [ALPHA], selfLocation: { lat: 19, lng: 72.5 } }));
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId('gmap-marker')).toHaveLength(1));
 
     const selfRecord = recordsOf('AdvancedMarker').find((r) => r.props.clickable === false);
     const itemRecord = recordsOf('AdvancedMarker').find((r) => r.props.clickable !== false);
     expect(selfRecord?.props.zIndex).toBe(0);
     expect(itemRecord?.props.zIndex).toBe(500);
-    // Never intercepts a click meant for a co-located item pin (#394).
     expect(selfRecord?.props.style).toEqual({ pointerEvents: 'none' });
 
     const selfMarker = screen.getByTestId('gmap-self-marker');
     expect(selfMarker).toHaveAttribute('aria-label', 'You');
     expect(within(selfMarker).getByText('You')).toBeInTheDocument();
-
-    // Exactly one element was clustered — and it is the item pin, not the self-marker.
-    expect(clustererCalls('addMarker')[0].arg).toBe(itemRecord?.el);
   });
 
   it('themes the cluster bubble with the total, sized by count band', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
-    render(googleElement({ markers: [ALPHA, BETA] }));
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(2));
+    const spot = (n: number) => Array.from({ length: n }, (_, i) => at(`p-${n}-${i}`, 19, 72));
 
-    const renderer = firstClusterer().options.renderer as {
-      render: (cluster: unknown) => FakeAdvancedMarkerElement;
-    };
-    const els = sdkObjects('AdvancedMarker');
-
-    const bubble = renderer.render({ count: 7, position: { lat: 19, lng: 72.5 }, markers: els });
-    expect(bubble.opts.zIndex).toBe(1007);
-    const content = bubble.opts.content as HTMLElement;
-    const circle = content.querySelector('.dpg-cluster-count') as HTMLElement;
+    const { rerender } = render(googleElement({ markers: spot(7) }));
+    const circle = await waitFor(() => document.querySelector('.dpg-cluster-count') as HTMLElement);
     expect(circle.textContent).toBe('7');
     expect(circle.style.width).toBe('38px');
+    expect(recordsOf('AdvancedMarker').find((r) => r.props.title === '7')?.props.zIndex).toBe(1007);
 
-    const medium = renderer.render({ count: 50, position: { lat: 19, lng: 72.5 }, markers: [] });
-    const large = renderer.render({ count: 200, position: { lat: 19, lng: 72.5 }, markers: [] });
-    expect(
-      ((medium.opts.content as HTMLElement).querySelector('.dpg-cluster-count') as HTMLElement)
-        .style.width,
-    ).toBe('44px');
-    expect(
-      ((large.opts.content as HTMLElement).querySelector('.dpg-cluster-count') as HTMLElement).style
-        .width,
-    ).toBe('50px');
+    rerender(googleElement({ markers: spot(50) }));
+    await waitFor(() =>
+      expect((document.querySelector('.dpg-cluster-count') as HTMLElement).style.width).toBe('44px'),
+    );
+    rerender(googleElement({ markers: spot(200) }));
+    await waitFor(() =>
+      expect((document.querySelector('.dpg-cluster-count') as HTMLElement).style.width).toBe('50px'),
+    );
   });
 
   it('adds one chip per domain to a multi-domain cluster bubble and none to a single-domain one', async () => {
     configureApiKey();
     bridge().gmap = createFakeGoogleMap();
-    render(googleElement({ markers: [ALPHA, BETA] }));
-    await waitFor(() => expect(clustererCalls('addMarker')).toHaveLength(2));
+    const { rerender } = render(
+      googleElement({ markers: [at('s', 19, 72, 'seeker'), at('p', 19, 72, 'provider')] }),
+    );
+    const circle = await waitFor(() => document.querySelector('.dpg-cluster-count') as HTMLElement);
+    const chips = circle.parentElement?.lastElementChild;
+    expect(circle.parentElement?.children).toHaveLength(2);
+    expect(chips?.children).toHaveLength(2);
+    expect(chips?.textContent).toContain('1');
 
-    const renderer = firstClusterer().options.renderer as {
-      render: (cluster: unknown) => FakeAdvancedMarkerElement;
-    };
-    const els = sdkObjects('AdvancedMarker');
-
-    const multi = renderer.render({ count: 2, position: { lat: 19, lng: 72.5 }, markers: els });
-    const multiContent = multi.opts.content as HTMLElement;
-    expect(multiContent.children).toHaveLength(2);
-    expect(multiContent.lastElementChild?.children).toHaveLength(2);
-    expect(multiContent.lastElementChild?.textContent).toContain('1');
-
-    const single = renderer.render({
-      count: 1,
-      position: { lat: 19, lng: 72.5 },
-      markers: [els[0]],
-    });
-    expect((single.opts.content as HTMLElement).children).toHaveLength(1);
+    rerender(googleElement({ markers: [at('s1', 19, 72, 'seeker'), at('s2', 19, 72, 'seeker')] }));
+    await waitFor(() =>
+      expect((document.querySelector('.dpg-cluster-count') as HTMLElement).parentElement?.children).toHaveLength(1),
+    );
   });
 
   it('animates a co-located cluster click all the way to the item-level zoom cap', async () => {
     configureApiKey();
     const gmap = createFakeGoogleMap({ zoom: 12 });
     bridge().gmap = gmap;
-    render(googleElement());
+    render(googleElement({ markers: [at('a', 19.25, 72.25), at('b', 19.25, 72.25), at('c', 19.25, 72.25)] }));
 
-    const onClusterClick = firstClusterer().options.onClusterClick as (
-      event: unknown,
-      cluster: unknown,
-      map: unknown,
-    ) => void;
-    const corner = latLng(19.5, 72.25);
-    onClusterClick(
-      null,
-      {
-        position: latLng(19.5, 72.25),
-        bounds: { getNorthEast: () => corner, getSouthWest: () => corner },
-      },
-      gmap,
-    );
+    await userEvent.click(await screen.findByRole('button', { name: '3' }));
 
     await waitFor(
       () => expect(gmap.moveCamera.mock.calls.at(-1)?.[0].zoom).toBeCloseTo(20, 5),
       { timeout: 4500 },
     );
-    // Animated, not an instant fitBounds snap: many frames, starting near the
-    // current zoom and landing on the cluster's own position.
     expect(gmap.moveCamera.mock.calls.length).toBeGreaterThan(2);
     expect(gmap.moveCamera.mock.calls[0][0].zoom).toBeLessThan(20);
-    // Interpolated per rAF frame, so the final centre is only as exact as the
-    // last frame's easing value. Under a loaded box (the full suite running in
-    // parallel) the animation can settle a few nanodegrees short, which an
-    // exact toEqual turns into a flake. Match the toBeCloseTo already used for
-    // zoom above: 6 decimal places is ~0.1 m, far tighter than any real
-    // camera-positioning requirement.
     const finalCenter = gmap.moveCamera.mock.calls.at(-1)?.[0].center;
-    expect(finalCenter?.lat).toBeCloseTo(19.5, 6);
-    expect(finalCenter?.lng).toBeCloseTo(72.25, 6);
+    expect(finalCenter?.lat).toBeCloseTo(19.25, 4);
+    expect(finalCenter?.lng).toBeCloseTo(72.25, 4);
   });
 
-  it('still zooms in one level when the cluster already fills the viewport', async () => {
+  it('zooms a bubble click to the zoom where it splits', async () => {
     configureApiKey();
     const gmap = createFakeGoogleMap({ zoom: 12 });
     bridge().gmap = gmap;
-    render(googleElement());
+    const lngPerPx = 360 / (256 * 2 ** 12);
+    render(googleElement({ markers: [at('a', 19.25, 72.25), at('b', 19.25, 72.25 + 60 * lngPerPx)] }));
 
-    const onClusterClick = firstClusterer().options.onClusterClick as (
-      event: unknown,
-      cluster: unknown,
-      map: unknown,
-    ) => void;
-    onClusterClick(
-      null,
-      {
-        position: latLng(0, 0),
-        bounds: {
-          getNorthEast: () => latLng(85, 180),
-          getSouthWest: () => latLng(-85, -180),
-        },
-      },
-      gmap,
-    );
+    await userEvent.click(await screen.findByRole('button', { name: '2' }));
 
     await waitFor(
       () => expect(gmap.moveCamera.mock.calls.at(-1)?.[0].zoom).toBeCloseTo(13, 5),
