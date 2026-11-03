@@ -27,11 +27,7 @@ import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
 
-// Stacking: self (0) < item pins (500) < clusters (1000 + count) < popup. The
-// non-interactive "You" marker sits below item pins so an item on the same
-// point (fanned only ~10 m, sub-pixel at low zoom) stays clickable. Advanced
-// markers share a stacking order with the InfoWindow, so the popup needs an
-// explicit zIndex above every cluster.
+// Stacking: self (0) < item pins (500) < clusters (1000 + count) < popup, so a pin on the viewer's own spot stays clickable.
 const SELF_MARKER_Z_INDEX = 0;
 const ITEM_MARKER_Z_INDEX = 500;
 // Popup zIndex. Runtime-env so it can be raised per deploy (config.js) without
@@ -43,7 +39,7 @@ function resolvePopupZIndex(): number {
   return Number.isSafeInteger(n) && n > 0 ? n : DEFAULT_POPUP_Z_INDEX;
 }
 
-// Zoom cap for a cluster click; co-located points zoom straight to it.
+// Zoom cap for a cluster click.
 const CLUSTER_CLICK_MAX_ZOOM = 20;
 // Cluster-click zoom animation duration (ms), tunable per deploy via runtime
 // config; default 2000, 0 = instant.

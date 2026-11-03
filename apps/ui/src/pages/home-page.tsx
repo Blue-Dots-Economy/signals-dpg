@@ -2267,7 +2267,7 @@ export function HomePage() {
                       )}
                   </MarkerDetailSheet>
                 )}
-                {/* "Search this area": applies the map viewport as the list's
+                {/* "List what's in this view": applies the map viewport as the list's
                     area and switches to the list in one action. */}
                 {mapViewport?.minLat !== undefined &&
                   mapViewport.minLng !== undefined &&

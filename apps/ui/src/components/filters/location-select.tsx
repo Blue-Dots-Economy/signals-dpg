@@ -190,8 +190,8 @@ export function LocationSelect({
             </span>
           </button>
 
-          {/* Shown only while active. A viewport comes from the map's "Search
-              this area"; it cannot be chosen from the list. */}
+          {/* Shown only while active. A viewport comes from the map's "List
+              what's in this view"; it cannot be chosen from the list. */}
           {value.mode === 'viewport' && (
             <div
               className={cn(rowClass, 'cursor-default hover:bg-transparent')}

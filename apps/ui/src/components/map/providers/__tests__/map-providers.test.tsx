@@ -626,8 +626,16 @@ describe('LeafletMapProvider', () => {
       recordsOf('Marker').find((r) => r.props.interactive === false)?.props ?? {};
     expect(selfProps.interactive).toBe(false);
     expect(selfProps.keyboard).toBe(false);
-    expect(selfProps.zIndexOffset).toBe(1000);
     expect(String((selfProps.icon as DivIcon).options.html)).toContain('You');
+  });
+
+  it('draws a listing on the viewer\'s own location above the "You are here" marker', () => {
+    bridge().map = createFakeLeafletMap();
+    render(leafletElement({ markers: [at('mine', 19, 72.5)], selfLocation: { lat: 19, lng: 72.5 } }));
+
+    const pin = recordsOf('Marker').find((r) => r.props.interactive !== false)?.props ?? {};
+    const self = recordsOf('Marker').find((r) => r.props.interactive === false)?.props ?? {};
+    expect(Number(pin.zIndexOffset ?? 0)).toBeGreaterThan(Number(self.zIndexOffset ?? 0));
   });
 
   it('renders no self-marker when the user has no resolved location', () => {
@@ -1368,6 +1376,17 @@ describe('GoogleMapProvider', () => {
       () => expect(gmap.moveCamera.mock.calls.at(-1)?.[0].zoom).toBeCloseTo(13, 5),
       { timeout: 4500 },
     );
+  });
+
+  it('draws a listing on the viewer\'s own location above the "You are here" marker', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap();
+    render(googleElement({ markers: [at('mine', 19, 72.5)], selfLocation: { lat: 19, lng: 72.5 } }));
+
+    await screen.findByRole('button', { name: 'mine' });
+    const pin = recordsOf('AdvancedMarker').find((r) => r.props.title === 'mine')?.props ?? {};
+    const self = recordsOf('AdvancedMarker').find((r) => r.props.clickable === false)?.props ?? {};
+    expect(Number(pin.zIndex)).toBeGreaterThan(Number(self.zIndex));
   });
 
   it('preserves the live camera across the light/dark remount of the map', () => {

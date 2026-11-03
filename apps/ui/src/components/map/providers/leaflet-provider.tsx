@@ -30,6 +30,9 @@ import { useViewportReportEmitter } from './use-viewport-report';
 import 'leaflet/dist/leaflet.css';
 
 const MAX_ZOOM = 18;
+// Stacking mirrors Google: self < item pins < bubbles (1000 + count), so a pin on the viewer's own spot stays visible.
+const SELF_Z_INDEX_OFFSET = 0;
+const ITEM_Z_INDEX_OFFSET = 500;
 
 /**
  * Session-scoped flag so the "dark mode is off for the map" notice shows once,
@@ -409,7 +412,7 @@ const PointMarker = React.memo(function PointMarker({
   const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain));
   const eventHandlers = React.useMemo(() => ({ click: () => onMarkerClick?.(marker.id) }), [onMarkerClick, marker.id]);
   return (
-    <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers}>
+    <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={ITEM_Z_INDEX_OFFSET}>
       {showPopup && (
         <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
           <PopupBody marker={marker} onViewDetails={onMarkerClick} />
@@ -554,7 +557,7 @@ export function LeafletMapProvider({
           icon={createSelfMarkerDivIcon(t('map.you_are_here_short'))}
           interactive={false}
           keyboard={false}
-          zIndexOffset={1000}
+          zIndexOffset={SELF_Z_INDEX_OFFSET}
         />
       )}
     </MapContainer>

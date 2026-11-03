@@ -52,7 +52,7 @@ export interface CapForZoomOptions {
 }
 
 /**
- * The zoom floor for offering "Search this area".
+ * The zoom floor for offering "List what's in this view".
  *
  * Set to street level (15): at city zoom the rectangle is not an "area" a user
  * recognises, and 15 sits just above `DEFAULT_CLUSTER_DISABLE_ZOOM` (14), so
