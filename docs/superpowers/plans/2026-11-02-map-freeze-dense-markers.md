@@ -17,10 +17,12 @@
 - `supercluster` `8.0.1` and `@types/supercluster` `7.1.3`, exact versions (already in the lockfile).
 - Marker limit: `VITE_MAP_MARKER_CAP_INDIVIDUAL` default `10000` (was `500`); `VITE_MAP_MARKER_CAP_CLUSTERED` default stays `1000`.
 - Fetch padding: 25% of the view's height/width added on each side.
-- Clustering: merge points closer than 80 screen px — supercluster `radius: 160` with the default `extent: 512` (256-px tiles); clustering on at every zoom up to the provider's maximum (Google `22`, Leaflet `18`).
-- At the provider's maximum zoom, a cluster of `50` or fewer points is returned as its individual points.
-- Same-spot listings keep today's 10 m ring (`spreadCoLocatedMarkers`, unchanged).
-- Tourist map (`tourist/tourist-map.tsx`), self marker, recenter, count pill, "Search this area", popups and the mobile bottom sheet keep today's behaviour.
+- Clustering: merge points closer than 80 screen px — supercluster `radius: 160` with the default `extent: 512` (256-px tiles); clustering on at every zoom up to the provider's maximum clustering zoom (Google `20`, Leaflet `18`).
+- ~~At the provider's maximum zoom, a cluster of `50` or fewer points is returned as its individual points.~~ Removed by Task 10.
+- ~~Same-spot listings keep today's 10 m ring.~~ Removed by Task 10; same-spot groups follow spec section 6.
+- Tourist map (`tourist/tourist-map.tsx`), self marker, recenter, count pill, "Search this area" (renamed "List what's in this view" in Task 13), popups and the mobile bottom sheet keep today's behaviour.
+- Every UI change covers desktop and phone (390×844) and is checked in the browser on both.
+- Every new or changed string goes into `en.json`, `hi.json` and `kn.json`.
 - Code comments: none by default; at most a single one-line comment where the code cannot show a non-obvious reason. No history, issue numbers or multi-line blocks. Run `git diff | grep '^+ *//'` before every commit and delete anything that fails this rule.
 - Tests on this 8 GB Mac: always `--pool=forks --maxWorkers=2`.
 - Commit messages describe the concrete change; no AI attribution lines.
@@ -284,3 +286,124 @@ Switch providers by setting `VITE_MAP_PROVIDER` (`google-maps` | `leaflet`) in b
 - [ ] **Step 4:** Full UI tests `pnpm --filter ui exec vitest run --pool=forks --maxWorkers=2` and `pnpm typecheck` → green.
 - [ ] **Step 5:** Record the final before/after table and the deferred same-spot observation (how the 2,500-listing point looks and performs at max zoom) in the measurements file.
 - [ ] **Step 6: Commit:** `git commit -m "docs(map): record final map freeze measurements and the same-spot observation"`
+
+
+---
+
+## Same-spot listings (spec section 6, added 2026-11-03)
+
+Tasks 10–14 implement the same-spot decision. Tasks 1–9 are done. Review Focus for these tasks:
+
+- **A bubble that cannot split, clicked far out (zoom 5–12)** — opens the card; it must not zoom step by step to the maximum first. Test in Task 11.
+- **A group mixing listing types (e.g. 2 Provider + 1 Seeker)** — the card shows both counts, and the list opens on a tab that has listings of the group. Tests in Tasks 11 and 12.
+- **One exact coordinate** — the list's area box is padded, so a zero-size box still returns the group. Test in Task 12.
+- **Leaving the group's list** — Back to map, the area chip and "Clear all" all remove the group area; the next "List what's in this view" uses the normal viewport label. Test in Task 12.
+- **A listing exactly on the viewer's location** — stays clickable above "You are here" on both providers. Test in Task 14.
+
+### Task 10: Clustering marks bubbles that cannot split; ring and max-zoom expansion removed
+
+**Files:**
+- Modify: `apps/ui/src/components/map/map-clusters.ts`, `apps/ui/src/components/map/map-container.tsx`
+- Delete: `apps/ui/src/components/map/spread-co-located-markers.test.ts`
+- Test: `apps/ui/src/components/map/__tests__/map-clusters.test.ts`
+
+**Interfaces:**
+- Produces: the `cluster` item of `MapClusterItem` gains `spot: SpotGroup | null`, where
+  ```ts
+  export interface SpotGroup {
+    exact: boolean;
+    bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number };
+  }
+  ```
+  `spot` is non-null exactly when `expansionZoom > index.maxZoom`. `exact` is true when every point's `lat.toFixed(6),lng.toFixed(6)` is identical. `MAX_ZOOM_EXPAND_LIMIT` is deleted.
+
+- [ ] **Step 1: Write the failing tests** in `map-clusters.test.ts`:
+  - `marks a bubble of points at one coordinate as an exact spot` — 5 markers at one coordinate, query at zoom 12 → one cluster, `spot.exact === true`, `bounds` min = max = that coordinate.
+  - `marks points a few metres apart that never separate as a near spot` — 4 markers within 3 m, query at `maxZoom` → one cluster, `spot.exact === false`.
+  - `leaves spot null for a bubble that splits by the maximum zoom` — two markers 200 px apart at zoom 15 → at zoom 12 one cluster with `spot === null`.
+  - `keeps a small same-spot group a bubble at the maximum zoom` — 3 markers at one coordinate, query at `maxZoom` → one cluster of 3, no points (replaces the old "≤ 50 expand" test, which is deleted).
+- [ ] **Step 2: Run to see them fail:** `bash .superpowers/sdd/2026-11-02-map-freeze-dense-markers/run-ui-tests.sh src/components/map/__tests__/map-clusters.test.ts`
+- [ ] **Step 3: Implement.** In `queryClusters`, drop the max-zoom expansion branch; compute `spot` only for clusters whose `getClusterExpansionZoom` exceeds `maxZoom`, from `getLeaves(clusterId, Infinity)`. In `map-container.tsx`, return `built` directly and delete `spreadCoLocatedMarkers` and `hashToUnit` with their test file.
+- [ ] **Step 4: Run the map tests** (`run-ui-tests.sh src/components/map`) → PASS; `pnpm --filter ui exec tsc --noEmit` → clean.
+- [ ] **Step 5: Commit:** `git commit -m "feat(map): keep same-spot listings as one bubble and mark bubbles that cannot split"`
+
+### Task 11: Same-spot card on both providers, desktop and phone
+
+**Files:**
+- Create: `apps/ui/src/components/map/spot-group-card.tsx`
+- Modify: `apps/ui/src/engine/types.ts` (`MapProviderProps`), `apps/ui/src/components/map/map-container.tsx` (`MapViewProps` pass-through), `apps/ui/src/components/map/providers/google-maps-provider.tsx`, `apps/ui/src/components/map/providers/leaflet-provider.tsx`
+- Test: `apps/ui/src/components/map/__tests__/spot-group-card.test.tsx`, `apps/ui/src/components/map/providers/__tests__/map-providers.test.tsx`
+
+**Interfaces:**
+- Consumes: `MapClusterItem` with `spot` (Task 10).
+- Produces:
+  ```ts
+  export interface OpenSpotGroup extends SpotGroup { key: string; count: number; breakdown: DomainCount[] }
+  // MapProviderProps / MapViewProps
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void; // phone: the page shows the sheet
+  onViewSpotGroup?: (group: OpenSpotGroup) => void;   // the card's list button
+  ```
+  `SpotGroupCard({ group, onView, onClose })` renders the title, sentence, per-type counts (domain labels as the bubble chips use) and the "View these {{count}} in the list" button (only when `onView` is given).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `spot-group-card.test.tsx`: exact vs near title and sentence; per-type counts shown; button calls `onView`; no button without `onView`.
+  - `map-providers.test.tsx`, for each provider: clicking a cluster with `spot` at zoom 8 does not change the zoom; on desktop it opens the card anchored to the bubble; with `useIsMobile` mocked true it calls `onSpotGroupSelect` and opens no map popup; clicking a cluster with `spot === null` still zooms to its expansion zoom.
+- [ ] **Step 2: Run to see them fail:** `run-ui-tests.sh src/components/map`
+- [ ] **Step 3: Implement.** Google: an `InfoWindow` anchored to the bubble's marker element, like the point popup. Leaflet: a `Popup` on the bubble marker. Phone on both: call `onSpotGroupSelect`. One open card at a time; opening a listing popup closes it and vice versa.
+- [ ] **Step 4: Run the map tests** → PASS; `tsc --noEmit` → clean.
+- [ ] **Step 5: Commit:** `git commit -m "feat(map): explain same-spot bubbles in a card with a button to the list"`
+
+### Task 12: The list scoped to the group, with banner and Back to map
+
+**Files:**
+- Modify: `apps/ui/src/lib/browse-discover.ts` (`BrowseArea`), `apps/ui/src/pages/home-page.tsx`, `apps/ui/src/components/filters/location-select.tsx`, `apps/ui/src/hooks/use-applied-filter-chips.ts` (only if the chip label needs the group)
+- Create: `apps/ui/src/components/map/spot-group-banner.tsx`
+- Test: `apps/ui/src/pages/__tests__/home-page.test.tsx`, `apps/ui/src/hooks/use-infinite-browse-items.test.tsx`, `apps/ui/src/components/filters/__tests__/location-select.test.tsx` (create if missing)
+
+**Interfaces:**
+- Consumes: `OpenSpotGroup`, `onSpotGroupSelect`, `onViewSpotGroup` (Task 11).
+- Produces: `BrowseArea`'s `viewport` member gains `spot?: { exact: boolean }`. The request is unchanged (`min_lat`/`min_lng`/`max_lat`/`max_lng` only).
+
+- [ ] **Step 1: Write the failing tests:**
+  - `use-infinite-browse-items.test.tsx`: a viewport area with `spot` sends the same four bounds and nothing else new.
+  - `home-page.test.tsx`: `onViewSpotGroup` with a zero-size box sets the area to the group's bounds padded by 5 m per side (≈ `0.000045°` latitude; longitude divided by `cos(lat)`), switches to the list, and shows the banner; Back to map clears the area and returns to the map; removing the area chip or "Clear all" also removes the banner; the list opens on the current tab when the group has that type, else on the group's largest type; on phone, `onSpotGroupSelect` shows the bottom sheet with `SpotGroupCard`, and its button does the same as desktop.
+  - `location-select.test.tsx`: a `spot` area shows the spot label, a plain viewport area the existing "The area shown on the map".
+- [ ] **Step 2: Run to see them fail:** `run-ui-tests.sh src/pages/__tests__/home-page.test.tsx src/hooks/use-infinite-browse-items.test.tsx src/components/filters`
+- [ ] **Step 3: Implement.** The phone sheet reuses the page's existing listing bottom sheet (`MarkerDetailSheet`) pattern. The banner renders above the list results only while `area.mode === 'viewport' && area.spot`.
+- [ ] **Step 4: Run the tests** → PASS; `tsc --noEmit` → clean.
+- [ ] **Step 5: Commit:** `git commit -m "feat(map): open a same-spot group's listings in the list with a Back to map banner"`
+
+### Task 13: Rename the button and add every string in every locale
+
+**Files:**
+- Modify: `apps/ui/src/i18n/locales/en.json`, `hi.json`, `kn.json`, `apps/ui/src/guide/tours.ts`
+- Test: `apps/ui/src/i18n/__tests__/spot-group-strings.test.ts` (create)
+
+- [ ] **Step 1: Write the failing test** `every same-spot string exists in every locale`: for each key added in Tasks 11–12 plus `home.search_this_area`, `en`, `hi` and `kn` each have a non-empty value; `en["home.search_this_area"] === "List what's in this view"`.
+- [ ] **Step 2: Run to see it fail.**
+- [ ] **Step 3: Implement.** English copy from spec section 6; Hindi and Kannada translations of the same copy; the tour text names the new label.
+- [ ] **Step 4: Run** `run-ui-tests.sh src/i18n src/guide` → PASS.
+- [ ] **Step 5: Commit:** `git commit -m "feat(map): rename Search this area to List what's in this view and translate the same-spot copy"`
+
+### Task 14: Listings stay clickable on the viewer's own location
+
+**Files:**
+- Modify: `apps/ui/src/components/map/providers/google-maps-provider.tsx`, `apps/ui/src/components/map/providers/leaflet-provider.tsx`
+- Test: `apps/ui/src/components/map/providers/__tests__/map-providers.test.tsx`
+
+- [ ] **Step 1: Write the failing test** per provider: a point and the self marker at the same coordinate → the point's z-order is above the self marker's.
+- [ ] **Step 2: Run to see it fail.**
+- [ ] **Step 3: Implement** by z-order only (Leaflet `zIndexOffset`, Google `zIndex`); do not move either marker.
+- [ ] **Step 4: Run the map tests** → PASS.
+- [ ] **Step 5: Commit:** `git commit -m "fix(map): draw listings above the You are here marker"`
+
+### Task 15: Verification for the same-spot work
+
+- [ ] **Step 1:** Full UI tests (`run-ui-tests.sh`) and `pnpm typecheck` → green; `pnpm --filter ui build` → succeeds.
+- [ ] **Step 2: Browser, both providers, desktop 1440×900 and phone 390×844, on the Tumkur seed** (1,400 at 13.3409, 77.101; 3 at 13.344, 77.105), signed out and signed in as `seeker2@yopmail.com`:
+  - the 1,400 stay one bubble at every zoom; no overlapping pins at any zoom;
+  - clicking either group at zoom 11 and at the maximum zoom opens the card (desktop) or sheet (phone) with the right title and counts;
+  - its button opens the list with only that group's listings; sort, filters and tabs apply to the group; Relevance is the default when signed in; the banner and Back to map work;
+  - "List what's in this view" shows under the same conditions as before with the new label;
+  - a bubble that can split still zooms on click; popups, count pill, recenter and "You are here" behave as before; tourist map loads.
+- [ ] **Step 3:** Re-run the perf probe on the production build for both providers; the Task 9 targets still hold.
