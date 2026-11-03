@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport, OpenSpotGroup } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { Button } from '@/components/ui/button';
@@ -230,10 +230,22 @@ export function MapView({
         ? (id: string) => {
             onMarkerClick?.(id);
             const marker = markersById.get(id);
-            if (marker) onMarkerSelect(marker);
+            if (!marker) return;
+            setIsMaximized(false);
+            onMarkerSelect(marker);
           }
         : onMarkerClick,
     [onMarkerSelect, onMarkerClick, markersById],
+  );
+  const handleSpotGroupSelect = React.useMemo(
+    () =>
+      onSpotGroupSelect
+        ? (group: OpenSpotGroup) => {
+            setIsMaximized(false);
+            onSpotGroupSelect(group);
+          }
+        : undefined,
+    [onSpotGroupSelect],
   );
 
   // Loading and empty states overlay the map rather than replacing it, so zero
@@ -266,7 +278,7 @@ export function MapView({
         resolveMarkerImage={resolveMarkerImage}
         onViewportChange={onViewportChange}
         renderSpotGroup={renderSpotGroup}
-        onSpotGroupSelect={onSpotGroupSelect}
+        onSpotGroupSelect={handleSpotGroupSelect}
       />
       {/* Top-right, clear of the providers' top-left controls. */}
       <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">

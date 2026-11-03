@@ -642,6 +642,25 @@ describe('MapView — loading, empty state and maximize', () => {
     ).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['a same-spot group', 'select spot'],
+    ['a listing', 'First'],
+  ])('leaves the maximized map when it hands %s to the page sheet', async (_label, button) => {
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' })]}
+        onSpotGroupSelect={vi.fn()}
+        onMarkerSelect={vi.fn()}
+      />,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Maximize map' }));
+
+    await userEvent.click(screen.getByRole('button', { name: button }));
+
+    expect(screen.getByRole('button', { name: 'Maximize map' })).toBeInTheDocument();
+  });
+
   it('toggles maximize, revealing the filters slot only while maximized', async () => {
     render(
       <MapView

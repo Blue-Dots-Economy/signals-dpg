@@ -107,6 +107,47 @@ describe('queryClusters', () => {
     expect(items[0].kind === 'cluster' && items[0].spot).toMatchObject({ exact: false });
   });
 
+  it('draws listings 40 m apart as separate pins at the maximum zoom', () => {
+    const markers = [marker('a#0', 28.6, 77.4), marker('b#0', 28.6 + 40 / 111_320, 77.4)];
+    const items = queryClusters(buildClusterIndex(markers, { maxZoom: 18 }), around(18));
+    expect(items.map((i) => i.kind)).toEqual(['point', 'point']);
+  });
+
+  it('zooms rather than explaining listings that separate at the maximum zoom', () => {
+    const markers = [marker('a#0', 28.6, 77.4), marker('b#0', 28.6 + 40 / 111_320, 77.4)];
+    const [item] = queryClusters(buildClusterIndex(markers, { maxZoom: 18 }), around(16));
+    expect(item).toMatchObject({ kind: 'cluster', count: 2, spot: null });
+  });
+
+  it('splits a loose bubble at the maximum zoom into its same-spot group and single pins', () => {
+    const markers = [
+      marker('a#0', 28.6, 77.4),
+      marker('b#0', 28.6, 77.4, 'provider'),
+      marker('c#0', 28.6, 77.4),
+      marker('d#0', 28.6 + 40 / 111_320, 77.4),
+    ];
+    const items = queryClusters(buildClusterIndex(markers, { maxZoom: 18 }), around(18));
+    const group = items.find((i) => i.kind === 'cluster');
+    expect(group).toMatchObject({
+      kind: 'cluster',
+      count: 3,
+      breakdown: [
+        { domain: 'seeker', count: 2 },
+        { domain: 'provider', count: 1 },
+      ],
+      spot: { exact: true },
+    });
+    expect(items.filter((i) => i.kind === 'point').map((i) => i.key)).toEqual(['p:d#0']);
+  });
+
+  it('keys a same-spot bubble by its listings, not by the order they were loaded in', () => {
+    const markers = Array.from({ length: 4 }, (_, i) => marker(`m${i}#0`, 28.6, 77.4));
+    const one = queryClusters(buildClusterIndex([marker('x#0', 29.5, 78.5), ...markers], { maxZoom: 20 }), around(12));
+    const two = queryClusters(buildClusterIndex([...markers].reverse(), { maxZoom: 20 }), around(12));
+    const key = (items: MapClusterItem[]) => items.find((i) => i.kind === 'cluster')?.key;
+    expect(key(one)).toBe(key(two));
+  });
+
   it('leaves spot empty for a bubble that splits by the maximum zoom', () => {
     const [item] = queryClusters(buildClusterIndex(pointsAtPixelOffset(15, 200), { maxZoom: 22 }), around(12));
     expect(item).toMatchObject({ kind: 'cluster', count: 2, spot: null });
