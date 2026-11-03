@@ -21,7 +21,7 @@ export function CheckboxWidget({
   uiSchema,
   options,
   registry,
-}: WidgetProps) {
+}: Readonly<WidgetProps>) {
   const invalid = Boolean(rawErrors && rawErrors.length > 0);
   const DescriptionFieldTemplate = getTemplate('DescriptionFieldTemplate', registry, options);
   const description = options.description || schema.description;
@@ -40,7 +40,7 @@ export function CheckboxWidget({
         <Checkbox
           id={id}
           name={htmlName || id}
-          checked={typeof value === 'undefined' ? false : Boolean(value)}
+          checked={Boolean(value)}
           required={required}
           disabled={disabled || readonly}
           autoFocus={autofocus}

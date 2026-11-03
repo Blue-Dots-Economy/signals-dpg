@@ -1,5 +1,5 @@
 /** Red message under a hand-built field; pair the control with `fieldErrorAria`. */
-export function InlineFieldError({ id, message }: { id: string; message?: string | null }) {
+export function InlineFieldError({ id, message }: Readonly<{ id: string; message?: string | null }>) {
   if (!message) return null;
   return (
     <p id={id} className="text-sm text-destructive">

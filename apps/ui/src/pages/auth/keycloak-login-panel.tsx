@@ -582,9 +582,8 @@ export function KeycloakLoginPanel() {
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
             {/* Segmented toggle. */}
-            <div
+            <fieldset
               id="signup-domain"
-              role="group"
               {...fieldErrorAria('signup-domain-error', domainError)}
               className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm"
             >
@@ -604,7 +603,7 @@ export function KeycloakLoginPanel() {
                   {formatDomainLabel(d.id, networkDomains)}
                 </button>
               ))}
-            </div>
+            </fieldset>
             <InlineFieldError id="signup-domain-error" message={domainError} />
           </div>
         )}

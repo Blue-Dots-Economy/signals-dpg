@@ -31,7 +31,7 @@ const YEARS = Array.from({ length: 121 }, (_, i) => CURRENT_YEAR - i);
  * The app Select rather than a native `<select>`, whose 121-option popup the
  * browser sizes to the full window height.
  */
-export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year', error }: BirthYearSelectProps) {
+export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year', error }: Readonly<BirthYearSelectProps>) {
   const { t } = useTranslation();
   const [year, setYear] = React.useState<string>('');
 
