@@ -1,5 +1,5 @@
 import Supercluster from 'supercluster';
-import type { MapMarker } from '@/engine/types';
+import type { MapMarker, OpenSpotGroup } from '@/engine/types';
 import { breakdownFromCounts } from './cluster-breakdown';
 import type { DomainCount } from './cluster-breakdown';
 
@@ -131,4 +131,10 @@ function describeSpot(index: MapClusterIndex, clusterId: number): SpotGroup {
     keys.add(`${marker.lat.toFixed(6)},${marker.lng.toFixed(6)}`);
   }
   return { exact: keys.size === 1, bounds: { minLat, minLng, maxLat, maxLng } };
+}
+
+/** The click payload for a bubble that cannot split; null for any other item. */
+export function openSpotGroupOf(item: MapClusterItem): OpenSpotGroup | null {
+  if (item.kind !== 'cluster' || !item.spot) return null;
+  return { key: item.key, count: item.count, breakdown: item.breakdown, exact: item.spot.exact, bounds: item.spot.bounds };
 }

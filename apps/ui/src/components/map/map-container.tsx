@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { Button } from '@/components/ui/button';
@@ -75,6 +75,10 @@ interface MapViewProps {
    * (see `useViewportReport`). Unset means no listener is attached.
    */
   onViewportChange?: (viewport: MapViewport) => void;
+  /** See `MapProviderProps.renderSpotGroup`. */
+  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
+  /** See `MapProviderProps.onSpotGroupSelect`. */
+  onSpotGroupSelect?: MapProviderProps['onSpotGroupSelect'];
   /**
    * Overrides the empty-state text. A viewport-scoped map means "none in this
    * area", not "filtered out", so the home page passes an area message.
@@ -140,6 +144,8 @@ export function MapView({
   resolveMarkerIcon,
   resolveMarkerImage,
   onViewportChange,
+  renderSpotGroup,
+  onSpotGroupSelect,
   emptyMessage,
   loading = false,
 }: MapViewProps) {
@@ -256,6 +262,8 @@ export function MapView({
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
         onViewportChange={onViewportChange}
+        renderSpotGroup={renderSpotGroup}
+        onSpotGroupSelect={onSpotGroupSelect}
       />
       {/* Top-right, clear of the providers' top-left controls. */}
       <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">

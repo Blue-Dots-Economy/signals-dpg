@@ -56,6 +56,14 @@ vi.mock('@/hooks/use-mobile', () => {
  * plus a button per marker (so `onMarkerClick` wiring is exercised by a real
  * click) and a button that emits a viewport (so `onViewportChange` is too).
  */
+const SPOT_GROUP = {
+  key: 'c:1',
+  count: 2,
+  breakdown: [{ domain: 'seeker', count: 2 }],
+  exact: true,
+  bounds: { minLat: 10, minLng: 20, maxLat: 10, maxLng: 20 },
+};
+
 function makeFakeProvider(name: string) {
   return function FakeProvider({
     center,
@@ -71,6 +79,8 @@ function makeFakeProvider(name: string) {
     resolveIcon,
     resolveMarkerImage,
     onViewportChange,
+    renderSpotGroup,
+    onSpotGroupSelect,
   }: MapProviderProps) {
     return (
       <div>
@@ -87,6 +97,10 @@ function makeFakeProvider(name: string) {
         <button type="button" onClick={() => onViewportChange?.(EMITTED_VIEWPORT)}>
           emit viewport
         </button>
+        <button type="button" onClick={() => onSpotGroupSelect?.(SPOT_GROUP)}>
+          select spot
+        </button>
+        {renderSpotGroup ? renderSpotGroup(SPOT_GROUP, () => {}) : null}
         <ul>
           {markers.map((marker) => {
             const image = resolveMarkerImage?.(marker);
@@ -565,6 +579,22 @@ describe('MapView — loading, empty state and maximize', () => {
 
     expect(seen[0]).toHaveLength(1);
     expect(seen[seen.length - 1]).toBe(seen[0]);
+  });
+
+  it('hands the same-spot card renderer and selection handler to the provider', async () => {
+    const onSpotGroupSelect = vi.fn();
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' })]}
+        renderSpotGroup={(group) => <p>{`spot card ${group.count}`}</p>}
+        onSpotGroupSelect={onSpotGroupSelect}
+      />,
+    );
+
+    expect(await screen.findByText('spot card 2')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'select spot' }));
+    expect(onSpotGroupSelect).toHaveBeenCalledWith(SPOT_GROUP);
   });
 
   it('keeps same-coordinate items at their shared coordinate', async () => {

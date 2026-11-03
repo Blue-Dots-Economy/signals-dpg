@@ -12,14 +12,16 @@ import type { LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport, OpenSpotGroup } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
 import type { DomainCount } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
 import { useMapClusters } from '../use-map-clusters';
+import { openSpotGroupOf } from '../map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
+import { SpotGroupCard } from '../spot-group-card';
 import { useStableCallback } from '../use-stable-callback';
 import { PopupBody, PopupRendererProvider } from '../popup-renderer';
 import { createSelfMarkerDivIcon } from '../self-marker';
@@ -356,17 +358,39 @@ function useLeafletClusterView(): ClusterView | null {
 
 const ClusterMarker = React.memo(function ClusterMarker({
   item,
+  showPopup,
   onZoomTo,
+  onSpotGroupSelect,
+  renderSpotGroup,
 }: {
   item: Extract<MapClusterItem, { kind: 'cluster' }>;
+  showPopup: boolean;
   onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void;
+  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
 }) {
+  const map = useMap();
   const icon = React.useMemo(() => createClusterDivIcon(item.count, item.breakdown), [item.count, item.breakdown]);
+  const group = React.useMemo(() => openSpotGroupOf(item), [item]);
   const eventHandlers = React.useMemo(
-    () => ({ click: () => onZoomTo(item.lat, item.lng, item.expansionZoom) }),
-    [onZoomTo, item.lat, item.lng, item.expansionZoom],
+    () => ({
+      click: () => {
+        if (!group) onZoomTo(item.lat, item.lng, item.expansionZoom);
+        else if (!showPopup) onSpotGroupSelect?.(group);
+      },
+    }),
+    [group, showPopup, onSpotGroupSelect, onZoomTo, item.lat, item.lng, item.expansionZoom],
   );
-  return <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={1000 + item.count} />;
+  const close = React.useCallback(() => map.closePopup(), [map]);
+  return (
+    <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={1000 + item.count}>
+      {group && showPopup && (
+        <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={360}>
+          {renderSpotGroup ? renderSpotGroup(group, close) : <SpotGroupCard group={group} onClose={close} />}
+        </Popup>
+      )}
+    </Marker>
+  );
 });
 
 interface PointMarkerProps {
@@ -400,10 +424,19 @@ interface ClusterLayerProps {
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
   resolveIcon?: MapProviderProps['resolveIcon'];
+  onSpotGroupSelect?: MapProviderProps['onSpotGroupSelect'];
+  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
 }
 
 /** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
-function ClusterLayer({ markers, showPopup, onMarkerClick, resolveIcon }: ClusterLayerProps) {
+function ClusterLayer({
+  markers,
+  showPopup,
+  onMarkerClick,
+  resolveIcon,
+  onSpotGroupSelect,
+  renderSpotGroup,
+}: ClusterLayerProps) {
   const map = useMap();
   const view = useLeafletClusterView();
   const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });
@@ -420,7 +453,14 @@ function ClusterLayer({ markers, showPopup, onMarkerClick, resolveIcon }: Cluste
     <>
       {items.map((item) =>
         item.kind === 'cluster' ? (
-          <ClusterMarker key={item.key} item={item} onZoomTo={zoomTo} />
+          <ClusterMarker
+            key={item.key}
+            item={item}
+            showPopup={showPopup}
+            onZoomTo={zoomTo}
+            onSpotGroupSelect={onSpotGroupSelect}
+            renderSpotGroup={renderSpotGroup}
+          />
         ) : (
           <PointMarker
             key={item.key}
@@ -448,12 +488,16 @@ export function LeafletMapProvider({
   showPopup = true,
   resolveIcon,
   onViewportChange,
+  renderSpotGroup,
+  onSpotGroupSelect,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const { resolved: themeMode } = useThemeMode();
   const isDark = themeMode === 'dark';
   const stableMarkerClick = useStableCallback(onMarkerClick);
   const stableResolveIcon = useStableCallback(resolveIcon);
+  const stableSpotGroupSelect = useStableCallback(onSpotGroupSelect);
+  const stableRenderSpotGroup = useStableCallback(renderSpotGroup);
 
   // Leaflet has no dark basemap (see the TileLayer note), so tell the user
   // once per session. The Google provider has a dark style and no notice.
@@ -496,6 +540,8 @@ export function LeafletMapProvider({
           showPopup={showPopup}
           onMarkerClick={stableMarkerClick}
           resolveIcon={stableResolveIcon}
+          onSpotGroupSelect={stableSpotGroupSelect}
+          renderSpotGroup={stableRenderSpotGroup}
         />
       </PopupRendererProvider>
       {/*

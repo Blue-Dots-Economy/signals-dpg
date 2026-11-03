@@ -11,14 +11,16 @@ import {
   useAdvancedMarkerRef,
   useMap,
 } from '@vis.gl/react-google-maps';
-import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport, OpenSpotGroup } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
 import type { DomainCount } from '../cluster-breakdown';
 import { useMapClusters } from '../use-map-clusters';
+import { openSpotGroupOf } from '../map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
+import { SpotGroupCard } from '../spot-group-card';
 import { useStableCallback } from '../use-stable-callback';
 import { PopupBody, PopupRendererProvider } from '../popup-renderer';
 import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
@@ -170,27 +172,48 @@ function ClusterBubble({
   );
 }
 
+const SpotGroupRendererContext = React.createContext<MapProviderProps['renderSpotGroup']>(undefined);
+const useSpotGroupRenderer = () => React.useContext(SpotGroupRendererContext);
+
 const ClusterMarker = React.memo(function ClusterMarker({
   item,
   primary,
   onZoomTo,
+  onSpotClick,
+  isSpotOpen,
+  onSpotClose,
 }: {
   item: Extract<MapClusterItem, { kind: 'cluster' }>;
   primary: string;
   onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
+  onSpotClick: (group: OpenSpotGroup) => void;
+  isSpotOpen: boolean;
+  onSpotClose: () => void;
 }) {
+  const [markerRef, markerEl] = useAdvancedMarkerRef();
+  const renderSpotGroup = useSpotGroupRenderer();
   const position = React.useMemo(() => ({ lat: item.lat, lng: item.lng }), [item.lat, item.lng]);
+  const group = React.useMemo(() => openSpotGroupOf(item), [item]);
   return (
-    <AdvancedMarker
-      position={position}
-      title={String(item.count)}
-      zIndex={1000 + item.count}
-      onClick={() => onZoomTo(item.lat, item.lng, item.expansionZoom)}
-    >
-      <ClusterBubble count={item.count} breakdown={item.breakdown} primary={primary} />
-    </AdvancedMarker>
+    <>
+      <AdvancedMarker
+        ref={markerRef}
+        position={position}
+        title={String(item.count)}
+        zIndex={1000 + item.count}
+        onClick={() => (group ? onSpotClick(group) : onZoomTo(item.lat, item.lng, item.expansionZoom))}
+      >
+        <ClusterBubble count={item.count} breakdown={item.breakdown} primary={primary} />
+      </AdvancedMarker>
+      {group && isSpotOpen && markerEl && (
+        <InfoWindow anchor={markerEl} onCloseClick={onSpotClose} headerDisabled zIndex={resolvePopupZIndex()}>
+          {renderSpotGroup ? renderSpotGroup(group, onSpotClose) : <SpotGroupCard group={group} onClose={onSpotClose} />}
+        </InfoWindow>
+      )}
+    </>
   );
 });
+
 
 interface PointMarkerProps {
   marker: MapMarker;
@@ -452,6 +475,9 @@ function useGoogleClusterView(map: google.maps.Map | null): ClusterView | null {
 
 interface ClusterLayerProps {
   markers: MapMarker[];
+  openSpotKey: string | null;
+  onSpotClick: (group: OpenSpotGroup) => void;
+  onSpotClose: () => void;
   activeMarkerId: string | null;
   onMarkerActivate: (marker: MapMarker) => void;
   onMarkerDeactivate: () => void;
@@ -463,6 +489,9 @@ interface ClusterLayerProps {
 /** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
 function ClusterLayer({
   markers,
+  openSpotKey,
+  onSpotClick,
+  onSpotClose,
   activeMarkerId,
   onMarkerActivate,
   onMarkerDeactivate,
@@ -483,6 +512,10 @@ function ClusterLayer({
       onMarkerDeactivate();
     }
   }, [items, activeMarkerId, onMarkerDeactivate]);
+
+  React.useEffect(() => {
+    if (openSpotKey && !items.some((item) => item.key === openSpotKey)) onSpotClose();
+  }, [items, openSpotKey, onSpotClose]);
 
   React.useEffect(
     () => () => {
@@ -508,7 +541,15 @@ function ClusterLayer({
     <>
       {items.map((item) =>
         item.kind === 'cluster' ? (
-          <ClusterMarker key={item.key} item={item} primary={primary} onZoomTo={zoomTo} />
+          <ClusterMarker
+            key={item.key}
+            item={item}
+            primary={primary}
+            onZoomTo={zoomTo}
+            onSpotClick={onSpotClick}
+            isSpotOpen={openSpotKey === item.key}
+            onSpotClose={onSpotClose}
+          />
         ) : (
           <PointMarker
             key={item.key}
@@ -563,6 +604,8 @@ export function GoogleMapProvider({
   resolveIcon,
   resolveMarkerImage,
   onViewportChange,
+  renderSpotGroup,
+  onSpotGroupSelect,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -570,8 +613,26 @@ export function GoogleMapProvider({
   const [activeMarker, setActiveMarker] = React.useState<MapMarker | null>(null);
   const apiKey = getRuntimeEnv('VITE_GOOGLE_MAPS_API_KEY');
   const liveCameraRef = React.useRef<{ center: { lat: number; lng: number }; zoom: number } | null>(null);
-  const activateMarker = React.useCallback((marker: MapMarker) => setActiveMarker(marker), []);
+  const [openSpotKey, setOpenSpotKey] = React.useState<string | null>(null);
+  const activateMarker = React.useCallback((marker: MapMarker) => {
+    setOpenSpotKey(null);
+    setActiveMarker(marker);
+  }, []);
   const deactivateMarker = React.useCallback(() => setActiveMarker(null), []);
+  const closeSpot = React.useCallback(() => setOpenSpotKey(null), []);
+  const stableSpotGroupSelect = useStableCallback(onSpotGroupSelect);
+  const stableRenderSpotGroup = useStableCallback(renderSpotGroup);
+  const spotClick = React.useCallback(
+    (group: OpenSpotGroup) => {
+      if (!showPopup) {
+        stableSpotGroupSelect?.(group);
+        return;
+      }
+      setActiveMarker(null);
+      setOpenSpotKey(group.key);
+    },
+    [showPopup, stableSpotGroupSelect],
+  );
   const stableMarkerClick = useStableCallback(onMarkerClick);
   const stableResolveIcon = useStableCallback(resolveIcon);
   const stableResolveMarkerImage = useStableCallback(resolveMarkerImage);
@@ -582,6 +643,7 @@ export function GoogleMapProvider({
   React.useEffect(() => {
     if (prevClosePopupNonce.current !== closePopupNonce) {
       setActiveMarker(null);
+      setOpenSpotKey(null);
     }
     prevClosePopupNonce.current = closePopupNonce;
   }, [closePopupNonce]);
@@ -623,7 +685,10 @@ export function GoogleMapProvider({
         // Clicking empty map area closes any open marker popup. Marker clicks
         // do not bubble to this handler in the Google Maps API, so opening a
         // popup is not immediately undone.
-        onClick={() => setActiveMarker(null)}
+        onClick={() => {
+          setActiveMarker(null);
+          setOpenSpotKey(null);
+        }}
         className="h-full w-full rounded-lg"
       >
         {/* Drives the camera only when initialViewSet is true. */}
@@ -631,8 +696,12 @@ export function GoogleMapProvider({
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <CameraTracker cameraRef={liveCameraRef} />
         <PopupRendererProvider value={renderPopup}>
+          <SpotGroupRendererContext.Provider value={renderSpotGroup ? stableRenderSpotGroup : undefined}>
           <ClusterLayer
             markers={markers}
+            openSpotKey={openSpotKey}
+            onSpotClick={spotClick}
+            onSpotClose={closeSpot}
             activeMarkerId={activeMarker?.id ?? null}
             // With `showPopup` off no marker ever becomes active, so neither the
             // InfoWindow nor the mobile overlay opens; clicks still reach
@@ -643,6 +712,7 @@ export function GoogleMapProvider({
             resolveIcon={stableResolveIcon}
             resolveMarkerImage={stableResolveMarkerImage}
           />
+          </SpotGroupRendererContext.Provider>
         </PopupRendererProvider>
         {/*
          * "You are here": outside clustering so it is never clustered, and

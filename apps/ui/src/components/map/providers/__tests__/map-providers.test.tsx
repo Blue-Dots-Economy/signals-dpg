@@ -690,7 +690,7 @@ describe('LeafletMapProvider', () => {
   it('zooms to the expansion zoom on bubble click', async () => {
     const map = createFakeLeafletMap();
     bridge().map = map;
-    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19 + (i % 20) * 0.001, 72 + Math.floor(i / 20) * 0.001));
     render(leafletElement({ markers: crowd }));
     await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
     const bubble = recordsOf('Marker')[0].props;
@@ -703,6 +703,30 @@ describe('LeafletMapProvider', () => {
     expect(latLng).toEqual(bubble.position);
     expect(zoom).toBeGreaterThan(11);
     expect(zoom).toBeLessThanOrEqual(18);
+  });
+
+  it('opens a same-spot card on a bubble that cannot split instead of zooming', async () => {
+    const map = createFakeLeafletMap();
+    bridge().map = map;
+    render(leafletElement({ markers: [at('a', 19, 72), at('b', 19, 72), at('c', 19, 72)] }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
+
+    await userEvent.click(screen.getByTestId('leaflet-marker'));
+
+    expect(map.setView).not.toHaveBeenCalled();
+    expect(screen.getByText('3 listings at this exact spot')).toBeInTheDocument();
+  });
+
+  it('hands a same-spot bubble to the page when popups are off', async () => {
+    bridge().map = createFakeLeafletMap();
+    const onSpotGroupSelect = vi.fn();
+    render(leafletElement({ markers: [at('a', 19, 72), at('b', 19, 72)], showPopup: false, onSpotGroupSelect }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
+
+    await userEvent.click(screen.getByTestId('leaflet-marker'));
+
+    expect(onSpotGroupSelect).toHaveBeenCalledWith(expect.objectContaining({ count: 2, exact: true }));
+    expect(screen.queryByTestId('leaflet-popup')).not.toBeInTheDocument();
   });
 
   it('keeps listings a few metres apart as one bubble at the 18 maximum zoom', async () => {
@@ -1280,39 +1304,55 @@ describe('GoogleMapProvider', () => {
     );
   });
 
-  it('animates a co-located cluster click all the way to the item-level zoom cap', async () => {
+  it.each([12, 21])('opens the same-spot card instead of zooming at zoom %i', async (zoom) => {
     configureApiKey();
-    const gmap = createFakeGoogleMap({ zoom: 12 });
+    const gmap = createFakeGoogleMap({ zoom });
     bridge().gmap = gmap;
     render(googleElement({ markers: [at('a', 19.25, 72.25), at('b', 19.25, 72.25), at('c', 19.25, 72.25)] }));
 
     await userEvent.click(await screen.findByRole('button', { name: '3' }));
-
-    await waitFor(
-      () => expect(gmap.moveCamera.mock.calls.at(-1)?.[0].zoom).toBeCloseTo(20, 5),
-      { timeout: 4500 },
-    );
-    expect(gmap.moveCamera.mock.calls.length).toBeGreaterThan(2);
-    expect(gmap.moveCamera.mock.calls[0][0].zoom).toBeLessThan(20);
-    const finalCenter = gmap.moveCamera.mock.calls.at(-1)?.[0].center;
-    expect(finalCenter?.lat).toBeCloseTo(19.25, 4);
-    expect(finalCenter?.lng).toBeCloseTo(72.25, 4);
-  });
-
-  it('never zooms out when a bubble is clicked above the zoom cap', async () => {
-    configureApiKey();
-    const gmap = createFakeGoogleMap({ zoom: 21 });
-    bridge().gmap = gmap;
-    const crowd = Array.from({ length: 60 }, (_, i) => at(`crowd-${i}`, 19.25, 72.25));
-    render(googleElement({ markers: crowd }));
-
-    await userEvent.click(await screen.findByRole('button', { name: '60' }));
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2300));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     });
 
-    expect(gmap.moveCamera.mock.calls.length).toBeGreaterThan(0);
-    for (const [camera] of gmap.moveCamera.mock.calls) expect(camera.zoom).toBeGreaterThanOrEqual(21);
+    expect(screen.getByTestId('info-window')).toBeInTheDocument();
+    expect(screen.getByText('3 listings at this exact spot')).toBeInTheDocument();
+    expect(gmap.moveCamera).not.toHaveBeenCalled();
+  });
+
+  it('hands a same-spot bubble to the page when the provider draws no popups', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap({ zoom: 12 });
+    const onSpotGroupSelect = vi.fn();
+    render(
+      googleElement({
+        markers: [at('a', 19.25, 72.25), at('b', 19.25, 72.25)],
+        showPopup: false,
+        onSpotGroupSelect,
+      }),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '2' }));
+
+    expect(onSpotGroupSelect).toHaveBeenCalledWith(expect.objectContaining({ count: 2, exact: true }));
+    expect(screen.queryByTestId('info-window')).not.toBeInTheDocument();
+  });
+
+  it('fills the same-spot card from renderSpotGroup and closes it on an empty-map click', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap({ zoom: 12 });
+    render(
+      googleElement({
+        markers: [at('a', 19.25, 72.25), at('b', 19.25, 72.25)],
+        renderSpotGroup: (group) => <p>custom {group.count}</p>,
+      }),
+    );
+
+    await userEvent.click(await screen.findByRole('button', { name: '2' }));
+    expect(screen.getByText('custom 2')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('google-map'));
+    expect(screen.queryByText('custom 2')).not.toBeInTheDocument();
   });
 
   it('zooms a bubble click to the zoom where it splits', async () => {
