@@ -32,6 +32,7 @@ export function ProfileConsentModal({
 }: ProfileConsentModalProps) {
   const { t } = useTranslation();
   const [checked, setChecked] = React.useState(false);
+  const [attempted, setAttempted] = React.useState(false);
   // Minor flow is two-phase: the consent checkbox, then the under-18 notice.
   const [minorNotice, setMinorNotice] = React.useState(false);
 
@@ -39,6 +40,7 @@ export function ProfileConsentModal({
   React.useEffect(() => {
     if (open) {
       setChecked(false);
+      setAttempted(false);
       setMinorNotice(false);
     }
   }, [open]);
@@ -106,13 +108,25 @@ export function ProfileConsentModal({
               checked={checked}
               onCheckedChange={setChecked}
               id="profile-consent-checkbox"
+              error={
+                attempted && !checked
+                  ? t('profile.consent_required_error', 'Tick the box to agree before you continue.')
+                  : undefined
+              }
             />
 
             <Button
               type="button"
-              disabled={!checked}
               // Minor: continue shows the under-18 notice; adults accept here.
-              onClick={() => (minor ? setMinorNotice(true) : onAccept())}
+              onClick={() => {
+                if (!checked) {
+                  setAttempted(true);
+                  document.getElementById('profile-consent-checkbox')?.focus();
+                  return;
+                }
+                if (minor) setMinorNotice(true);
+                else onAccept();
+              }}
               className="w-full bg-brand-cta text-[var(--brand-cta-foreground)] hover:brightness-110"
             >
               {t('consent.accept_continue')}

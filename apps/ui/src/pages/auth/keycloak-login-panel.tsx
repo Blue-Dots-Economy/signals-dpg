@@ -9,6 +9,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PhoneInput, toE164 } from '@/components/auth/phone-input';
 import { toast } from 'sonner';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { useNetworkConfig } from '@/hooks/use-network-config';
@@ -87,6 +89,10 @@ export function KeycloakLoginPanel() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [contactTouched, setContactTouched] = useState(false);
+  // The API's per-field rejections, cleared when that field is edited.
+  const [serverFieldErrors, setServerFieldErrors] = useState<{ name?: boolean; email?: boolean; phone?: boolean }>({});
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -212,7 +218,7 @@ export function KeycloakLoginPanel() {
       // On success the browser navigates to Keycloak and never gets here.
     } catch (err) {
       setIsRedirecting(false);
-      setError(err instanceof Error ? err.message : t('auth.oidc_error_desc'));
+      setError(apiErrorMessage(err, t, t('auth.oidc_error_desc')));
     }
   };
 
@@ -240,29 +246,54 @@ export function KeycloakLoginPanel() {
       // VITE_SERVED_BINDINGS names an undefined one); retrying cannot fix it.
       toast.error(t('auth.signup_options_unavailable'));
     } else {
-      toast.error(t('auth.select_domain_required'));
+      // Shown under the domain buttons.
+      document.getElementById('signup-domain')?.querySelector('button')?.focus();
     }
     return null;
   };
 
+  const invalidEntry = (field: string, example?: string) => {
+    const message = t('form.invalid_format', 'Please enter a valid {{field}}.', { field });
+    return example
+      ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', { message, example })
+      : t('form.error_invalid', 'Invalid entry. {{message}}', { message });
+  };
+  const contactRaw = signupChannel === 'phone' ? phoneNumber : email.trim();
+  const contactValid = signupChannel === 'phone' ? isValidPhoneNumber(phoneNumber) : hasEmailShape(email.trim());
+  const contactLabel = signupChannel === 'phone' ? t('auth.label_mobile') : t('auth.label_email');
+  const nameError = serverFieldErrors.name
+    ? invalidEntry(t('auth.label_name'))
+    : submitAttempted && !name.trim()
+      ? t('form.error_required', '{{label}} is required.', { label: t('auth.label_name') })
+      : null;
+  const contactError =
+    (signupChannel === 'phone' ? serverFieldErrors.phone : serverFieldErrors.email) ||
+    (contactRaw && !contactValid && (contactTouched || submitAttempted))
+      ? signupChannel === 'phone'
+        ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', {
+            message: t('auth.toast_invalid_phone_desc'),
+            example: '9876543210',
+          })
+        : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
+      : submitAttempted && !contactRaw
+        ? t('form.error_required', '{{label}} is required.', { label: contactLabel })
+        : null;
+  const domainError =
+    submitAttempted && domainOptions.length > 1 && !domain ? t('auth.select_domain_required') : null;
+  const ageError =
+    submitAttempted && selectedDomainIsGated && age === undefined ? t('auth.signup_dob_required') : null;
+
   const handleSignup = async () => {
     setError(null);
+    setSubmitAttempted(true);
 
     if (!name.trim()) {
-      setError(t('auth.signup_name_required'));
-      return;
-    }
-    if (signupChannel === 'phone' && !isValidPhoneNumber(phoneNumber)) {
-      toast.error(t('auth.toast_invalid_phone'), {
-        description: t('auth.toast_invalid_phone_desc'),
-      });
+      document.getElementById('signup-name')?.focus();
       return;
     }
     // The API takes `z.email()`, so catch a malformed address here.
-    if (signupChannel === 'email' && !hasEmailShape(email.trim())) {
-      toast.error(t('auth.toast_invalid_email'), {
-        description: t('auth.toast_invalid_email_desc'),
-      });
+    if (!contactValid) {
+      document.getElementById(signupChannel === 'phone' ? 'signup-phone' : 'signup-email')?.focus();
       return;
     }
     // A signup must carry a domain: `domain` is optional on POST /auth/signup,
@@ -286,7 +317,7 @@ export function KeycloakLoginPanel() {
     // field is optional in the form, so an unpicked year would sign a minor up
     // as an adult.
     if (domainIsGated && age === undefined) {
-      toast.error(t('auth.signup_dob_required'));
+      document.getElementById('signup-dob-year')?.focus();
       return;
     }
 
@@ -416,13 +447,13 @@ export function KeycloakLoginPanel() {
       );
       await handleSignIn(consentAttempt);
     } catch (err) {
-      const apiMessage = (err as { response?: { data?: { message?: unknown } } } | null)
-        ?.response?.data?.message;
-      setError(
-        typeof apiMessage === 'string' && apiMessage.trim() !== ''
-          ? apiMessage
-          : t('auth.oidc_error_desc')
-      );
+      const { status, fields } = readApiError(err);
+      const bad = { name: Boolean(fields?.name), email: Boolean(fields?.email), phone: Boolean(fields?.phoneNumber) };
+      if (status === 400 && (bad.name || bad.email || bad.phone)) {
+        setServerFieldErrors(bad);
+      } else {
+        setError(apiErrorMessage(err, t, t('auth.oidc_error_desc')));
+      }
     } finally {
       setIsSigningUp(false);
     }
@@ -499,16 +530,32 @@ export function KeycloakLoginPanel() {
           <Input
             id="signup-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setServerFieldErrors((prev) => ({ ...prev, name: false }));
+            }}
             placeholder={t('auth.placeholder_name')}
             autoComplete="name"
+            {...fieldErrorAria('signup-name-error', nameError)}
           />
+          <InlineFieldError id="signup-name-error" message={nameError} />
         </div>
 
         {signupChannel === 'phone' ? (
           <div className="space-y-1.5">
             <Label htmlFor="signup-phone">{t('auth.label_mobile')}</Label>
-            <PhoneInput id="signup-phone" value={phoneNumber} onChange={setPhoneNumber} />
+            <PhoneInput
+              id="signup-phone"
+              value={phoneNumber}
+              onChange={(v) => {
+                setPhoneNumber(v);
+                setServerFieldErrors((prev) => ({ ...prev, phone: false }));
+              }}
+              onBlur={() => setContactTouched(true)}
+              invalid={Boolean(contactError)}
+              describedBy={contactError ? 'signup-contact-error' : undefined}
+            />
+            <InlineFieldError id="signup-contact-error" message={contactError} />
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -517,10 +564,16 @@ export function KeycloakLoginPanel() {
               id="signup-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setServerFieldErrors((prev) => ({ ...prev, email: false }));
+              }}
+              onBlur={() => setContactTouched(true)}
               placeholder={t('auth.placeholder_email')}
               autoComplete="email"
+              {...fieldErrorAria('signup-contact-error', contactError)}
             />
+            <InlineFieldError id="signup-contact-error" message={contactError} />
           </div>
         )}
 
@@ -529,7 +582,12 @@ export function KeycloakLoginPanel() {
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
             {/* Segmented toggle. */}
-            <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
+            <div
+              id="signup-domain"
+              role="group"
+              {...fieldErrorAria('signup-domain-error', domainError)}
+              className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm"
+            >
               {domainOptions.map((d) => (
                 <button
                   key={d.id}
@@ -547,6 +605,7 @@ export function KeycloakLoginPanel() {
                 </button>
               ))}
             </div>
+            <InlineFieldError id="signup-domain-error" message={domainError} />
           </div>
         )}
 
@@ -555,7 +614,7 @@ export function KeycloakLoginPanel() {
         {selectedDomainIsGated && (
           <div className="space-y-1.5">
             <Label htmlFor="signup-dob-year">{t('auth.signup_dob_label_ym')}</Label>
-            <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
+            <BirthYearSelect idPrefix="signup-dob" onChange={setAge} error={ageError} />
             <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
           </div>
         )}

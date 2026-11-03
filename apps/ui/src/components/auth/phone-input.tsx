@@ -22,6 +22,9 @@ export interface PhoneInputProps {
   disabled?: boolean;
   placeholder?: string;
   invalid?: boolean;
+  /** Id of the element holding this field's error message. */
+  describedBy?: string;
+  onBlur?: () => void;
   className?: string;
 }
 
@@ -37,13 +40,15 @@ export function PhoneInput({
   disabled,
   placeholder,
   invalid,
+  describedBy,
+  onBlur,
   className,
 }: PhoneInputProps) {
   return (
     <div
       className={cn(
         'flex h-11 items-stretch overflow-hidden rounded-md border border-input bg-transparent shadow-xs focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50',
-        invalid && 'border-amber-500 focus-within:border-amber-500 focus-within:ring-amber-500/40',
+        invalid && 'border-destructive focus-within:border-destructive focus-within:ring-destructive/40',
         className,
       )}
     >
@@ -59,7 +64,9 @@ export function PhoneInput({
         value={value}
         onChange={(e) => onChange(sanitizeNationalPhone(e.target.value))}
         disabled={disabled}
+        onBlur={onBlur}
         aria-invalid={invalid}
+        aria-describedby={describedBy}
         className="min-w-0 flex-1 bg-transparent px-3 text-sm outline-none disabled:opacity-60"
       />
     </div>

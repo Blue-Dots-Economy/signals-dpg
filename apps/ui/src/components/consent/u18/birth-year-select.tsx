@@ -8,12 +8,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { ageFromBirthYear } from '@/lib/guardian-consent';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 
 export interface BirthYearSelectProps {
   /** Emits `currentYear - birthYear`, or undefined until a year is picked. */
   onChange: (age: number | undefined) => void;
   disabled?: boolean;
   idPrefix?: string;
+  /** Shown in red under the select, linked for screen readers. */
+  error?: string | null;
 }
 
 const NOW = new Date();
@@ -28,11 +31,12 @@ const YEARS = Array.from({ length: 121 }, (_, i) => CURRENT_YEAR - i);
  * The app Select rather than a native `<select>`, whose 121-option popup the
  * browser sizes to the full window height.
  */
-export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }: BirthYearSelectProps) {
+export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year', error }: BirthYearSelectProps) {
   const { t } = useTranslation();
   const [year, setYear] = React.useState<string>('');
 
   return (
+    <>
     <Select
       value={year}
       disabled={disabled}
@@ -44,6 +48,7 @@ export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }:
       <SelectTrigger
         id={`${idPrefix}-year`}
         aria-label={t('auth.dob_label_year', 'Birth year')}
+        {...fieldErrorAria(`${idPrefix}-year-error`, error)}
         className="h-11 w-full"
       >
         <SelectValue placeholder={t('auth.dob_year_placeholder', 'Year')} />
@@ -58,5 +63,7 @@ export function BirthYearSelect({ onChange, disabled, idPrefix = 'birth-year' }:
         ))}
       </SelectContent>
     </Select>
+    <InlineFieldError id={`${idPrefix}-year-error`} message={error} />
+    </>
   );
 }

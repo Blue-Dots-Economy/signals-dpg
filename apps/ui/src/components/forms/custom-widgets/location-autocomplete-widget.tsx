@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { WidgetProps } from '@rjsf/utils';
+import { errorId, type WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { getGeoProvider } from '@/lib/geo/provider';
@@ -23,6 +23,7 @@ export function LocationAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   rawErrors,
   registry,
   options,
@@ -135,13 +136,19 @@ export function LocationAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...(rawErrors && rawErrors.length > 0
+          ? { 'aria-invalid': true, 'aria-describedby': errorId(id) }
+          : {})}
         className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
           // Delay the close so a suggestion mousedown still registers.
-          blurRef.current = window.setTimeout(() => setOpen(false), 150);
+          blurRef.current = window.setTimeout(() => {
+            setOpen(false);
+            onBlur(id, text);
+          }, 150);
         }}
       />
       {open && suggestions.length > 0 && (

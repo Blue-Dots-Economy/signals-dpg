@@ -825,7 +825,8 @@ describe('ProfileFormPage geocode failure', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Couldn't create your profile");
-    expect(alert).toHaveTextContent('geo write failed');
+    expect(alert).toHaveTextContent('Something went wrong on our side. Please try again in a moment.');
+    expect(alert).not.toHaveTextContent('geo write failed');
     expect(errorSpy).toHaveBeenCalledWith('Failed to save profile:', expect.any(Error));
   });
 });

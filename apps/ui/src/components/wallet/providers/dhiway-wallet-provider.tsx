@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
+import { thrownErrorMessage } from '@/lib/api-error';
 import {
   Select,
   SelectContent,
@@ -67,6 +69,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
   const [verificationCode, setVerificationCode] = React.useState('');
   const [credentialGroups, setCredentialGroups] = React.useState<WalletCredentialData[]>([]);
   const [error, setError] = React.useState<string | null>(null);
+  const [fieldError, setFieldError] = React.useState<string | null>(null);
 
   const identifierOptions = React.useMemo(() => getIdentifierOptions(context.user), [context.user]);
 
@@ -78,7 +81,12 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
   }, [identifierOptions]);
 
   const requestCode = async () => {
-    if (!walletApi || !identifier) return;
+    if (!walletApi || isLoading) return;
+    if (!identifier) {
+      setFieldError(t('wallet.dhiway_identifier_required', 'Choose an email or phone number to receive the code.'));
+      return;
+    }
+    setFieldError(null);
     setIsLoading(true);
     setError(null);
 
@@ -86,14 +94,22 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       await walletApi.requestCode(identifier, identifierType);
       setStep('verify');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('wallet.dhiway_error_send_code'));
+      setError(thrownErrorMessage(err, t, t('wallet.dhiway_error_send_code')));
     } finally {
       setIsLoading(false);
     }
   };
 
   const verifyCode = async () => {
-    if (!walletApi || !identifier || !verificationCode.trim()) return;
+    if (!walletApi || !identifier || isLoading) return;
+    if (!verificationCode.trim()) {
+      setFieldError(
+        t('form.error_required', '{{label}} is required.', { label: t('wallet.dhiway_code_label', 'Verification code') }),
+      );
+      document.getElementById('dhiway-code')?.focus();
+      return;
+    }
+    setFieldError(null);
     setIsLoading(true);
     setError(null);
 
@@ -106,7 +122,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       setCredentialGroups(credentials.credentials);
       setStep('credentials');
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('wallet.dhiway_error_verify_code'));
+      setError(thrownErrorMessage(err, t, t('wallet.dhiway_error_verify_code')));
     } finally {
       setIsLoading(false);
     }
@@ -151,11 +167,12 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
                 value={identifier}
                 onValueChange={(value) => {
                   const selected = identifierOptions.find((option) => option.value === value);
+                  setFieldError(null);
                   setIdentifier(value);
                   if (selected) setIdentifierType(selected.type);
                 }}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger className="w-full" {...fieldErrorAria('dhiway-field-error', fieldError)}>
                   <SelectValue placeholder={t('wallet.dhiway_select_placeholder')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -171,6 +188,7 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
                 {identifier || t('wallet.dhiway_no_identifier')}
               </div>
             )}
+            <InlineFieldError id="dhiway-field-error" message={fieldError} />
           </div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             {identifierType === 'email' ? <Mail className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
@@ -182,14 +200,26 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
       {step === 'verify' && (
         <div className="space-y-4">
           <div className="space-y-2">
-            <p className="text-sm font-medium">{t('wallet.dhiway_enter_code')}</p>
+            <label htmlFor="dhiway-code" className="text-sm font-medium">{t('wallet.dhiway_enter_code')}</label>
             <Input
+              id="dhiway-code"
               value={verificationCode}
-              onChange={(event) => setVerificationCode(event.target.value)}
+              onChange={(event) => {
+                setVerificationCode(event.target.value);
+                setFieldError(null);
+              }}
               placeholder={t('wallet.dhiway_code_placeholder')}
+              {...fieldErrorAria('dhiway-code-error', fieldError)}
             />
+            <InlineFieldError id="dhiway-code-error" message={fieldError} />
           </div>
-          <Button variant="outline" onClick={() => setStep('identifier')}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setFieldError(null);
+              setStep('identifier');
+            }}
+          >
             {t('wallet.dhiway_change_identifier')}
           </Button>
         </div>
@@ -248,12 +278,12 @@ function DhiwayWalletProvider({ context, onSuccess, onCancel }: WalletImportProv
           {t('common.cancel')}
         </Button>
         {step === 'identifier' ? (
-          <Button onClick={requestCode} disabled={!identifier || isLoading}>
+          <Button onClick={requestCode} disabled={isLoading}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
             {t('wallet.dhiway_send_code')}
           </Button>
         ) : step === 'verify' ? (
-          <Button onClick={verifyCode} disabled={!verificationCode.trim() || isLoading}>
+          <Button onClick={verifyCode} disabled={isLoading}>
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {t('wallet.dhiway_verify_fetch')}
           </Button>

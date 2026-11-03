@@ -48,6 +48,7 @@ import {
   finalizeProfileConsent,
 } from '@/lib/consent-api';
 import axios from 'axios';
+import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
 
 import {
   createItem,
@@ -101,6 +102,9 @@ export function ProfileFormPage() {
   // Profiles" rows, not in this editor.
   const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
+  const [serverFieldErrors, setServerFieldErrors] = React.useState<Record<string, string> | undefined>();
+  // A valid form was submitted while consent/guardian was still pending.
+  const [gateAttempted, setGateAttempted] = React.useState(false);
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
@@ -359,7 +363,7 @@ export function ProfileFormPage() {
       } else if (status === 503) {
         toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
       } else {
-        toast.error(t('profile.error_generic_desc'));
+        toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
       }
     }
   }, [precreateRef, t]);
@@ -494,6 +498,7 @@ export function ProfileFormPage() {
 
     setIsSubmitting(true);
     setFormError(null);
+    setServerFieldErrors(undefined);
 
     try {
       // Resolve coordinates client-side with the same geocoder as the
@@ -663,14 +668,18 @@ export function ProfileFormPage() {
     } catch (err: unknown) {
       console.error('Failed to save profile:', err);
 
-      const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
-      const status = axiosError?.response?.status;
-      const error = axiosError?.response?.data;
+      const info = readApiError(err);
+      const status = info.status;
 
-      if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
+      if (info.fields && Object.keys(info.fields).length > 0) {
+        // Field messages go under their fields; no banner.
+        setServerFieldErrors(info.fields);
+      } else if (status === 403 && info.code === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
           title: t('profile.error_role_unavailable'),
-          description: error?.message ?? t('profile.error_role_unavailable_fallback_desc'),
+          description: isReadableServerMessage(info.message)
+            ? info.message
+            : t('profile.error_role_unavailable_fallback_desc'),
         });
       } else if (status === 401) {
         const redirectTo = `${location.pathname}${location.search}`;
@@ -678,7 +687,7 @@ export function ProfileFormPage() {
           description: t('profile.toast_sign_in_desc'),
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
-      } else if (status === 409 && error?.error === 'ITEM_ALREADY_EXISTS') {
+      } else if (status === 409 && info.code === 'ITEM_ALREADY_EXISTS') {
         // Match on the code, not the bare 409: PROFILE_LIMIT_REACHED,
         // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are 409s too, and
         // only a genuine duplicate is "already exists". Other 409s fall through
@@ -690,7 +699,7 @@ export function ProfileFormPage() {
       } else {
         setFormError({
           title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
-          description: error?.message ?? t('profile.error_generic_desc'),
+          description: apiErrorMessage(err, t, t('profile.error_generic_desc')),
         });
       }
     } finally {
@@ -788,14 +797,18 @@ export function ProfileFormPage() {
   const primaryLabel = needsConsent
     ? t('profile.btn_save_publish')
     : editPrimaryLabel;
-  const submitDisabled = isEdit
-    ? // Live edit: formValid only. Draft with consent: wait for the consent
-      // config, then require the tick.
-      !formValid || (isDraft && consentLoading) || (needsConsent && !consentChecked)
-    : !formValid ||
-      consentLoading ||
-      (needsConsent && !consentChecked) ||
-      (minorGatedCreate && !guardianVerifiedForCreate);
+  // Consent and guardian steps that must finish before a valid form is sent.
+  const consentPending = isEdit ? isDraft && consentLoading : consentLoading;
+  const gateBlocked =
+    consentPending ||
+    (needsConsent && !consentChecked) ||
+    (!isEdit && minorGatedCreate && !guardianVerifiedForCreate);
+  // Only a request in flight disables Submit; a click otherwise shows what is missing.
+  const submitDisabled = isSubmitting || consentPending;
+  const consentError =
+    gateAttempted && needsConsent && !consentChecked
+      ? t('profile.consent_required_error', 'Tick the box to agree before you continue.')
+      : undefined;
 
   // Action bar in PageShell's pinned footer, not sticky inside the scroll area
   // (which floated mid-content and added a second scrollbar). The submit is
@@ -811,6 +824,7 @@ export function ProfileFormPage() {
           <ConsentCheckbox
             text={statement}
             checked={consentChecked}
+            error={consentError}
             onCheckedChange={(v) => {
               setConsentChecked(v);
               if (v && minorGatedCreate && !guardianVerifiedForCreate) {
@@ -819,7 +833,10 @@ export function ProfileFormPage() {
             }}
           />
           {!isEdit && minorGatedCreate && consentChecked && (
-            <p className="text-sm text-muted-foreground">
+            <p
+              className={gateAttempted && !guardianVerifiedForCreate ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
+              role={gateAttempted && !guardianVerifiedForCreate ? 'alert' : undefined}
+            >
               {guardianVerifiedForCreate
                 ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
                 : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
@@ -927,7 +944,14 @@ export function ProfileFormPage() {
               <SchemaForm
                 id="profile-form"
                 schema={profileSchema}
-                onSubmit={handleSubmit}
+                onSubmit={(data) => {
+                  if (gateBlocked) {
+                    setGateAttempted(true);
+                    return;
+                  }
+                  void handleSubmit(data);
+                }}
+                serverErrors={serverFieldErrors}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 hideSubmit

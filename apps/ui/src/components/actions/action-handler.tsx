@@ -5,8 +5,9 @@ import { ActionModal } from './action-modal';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { ActionAbortedError } from '@/lib/action-abort';
-import { BulkSingleError } from '@/lib/bulk';
+import { apiErrorMessage } from '@/lib/api-error';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
+import type { TFunction } from 'i18next';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
@@ -25,7 +26,7 @@ import {
  * tailored message) and maps a draft/non-live source profile to a helpful
  * "complete your profile" prompt instead of the generic error.
  */
-function showActionError(err: unknown, t: (key: string) => string): void {
+function showActionError(err: unknown, t: TFunction): void {
   if (err instanceof ActionAbortedError) return;
   const code = (err as { code?: string })?.code;
   if (code === 'PROFILE_NOT_LIVE') {
@@ -34,12 +35,8 @@ function showActionError(err: unknown, t: (key: string) => string): void {
     });
     return;
   }
-  // Prefer the API's message for a per-item bulk error (e.g. 409
-  // ACTION_LIMIT_REACHED), but not the synthetic 'Request failed'
-  // placeholder.
-  const apiMessage = err instanceof BulkSingleError ? err.response.data.message : undefined;
   toast.error(t('actions.handler_error_title'), {
-    description: apiMessage && apiMessage !== 'Request failed' ? apiMessage : t('actions.handler_error_desc'),
+    description: apiErrorMessage(err, t, t('actions.handler_error_desc')),
   });
 }
 
@@ -80,10 +77,20 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     targetItemId: string;
   } | null>(null);
   const [loading, setLoading] = React.useState(false);
+  // The form stays mounted until the submit succeeds; while a guardian dialog
+  // is up it is hidden and reopened with `draft` on cancel or failure.
+  const [modalHidden, setModalHidden] = React.useState(false);
+  const [draft, setDraft] = React.useState<Record<string, unknown> | undefined>();
+  const closeModal = React.useCallback(() => {
+    setActiveAction(null);
+    setModalHidden(false);
+    setDraft(undefined);
+  }, []);
   // An action that returns GUARDIAN_OTP_REQUIRED is stashed and replayed with
   // the guardian's code.
   const gate = useGuardianOtpGate<GuardianChallenge>(async (c, otp) => {
     await onActionSubmit?.(c.type, c.schema, c.formData, c.targetItemId, otp);
+    closeModal();
   });
   // Deferred submit awaiting the ward's guardian-OTP confirmation.
   const [pendingGuardianConfirm, setPendingGuardianConfirm] = React.useState<
@@ -129,12 +136,13 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     schema: DotActionSchema,
     formData: Record<string, unknown>,
     targetItemId: string,
-  ) => {
+  ): Promise<'ok' | 'guardian' | 'error'> => {
     setLoading(true);
     try {
-      await submitWithGuardianGate(type, schema, formData, targetItemId);
+      return (await submitWithGuardianGate(type, schema, formData, targetItemId)) ? 'ok' : 'guardian';
     } catch (err) {
       showActionError(err, t);
+      return 'error';
     } finally {
       setLoading(false);
     }
@@ -160,9 +168,16 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
   const handleModalSubmit = (formData: Record<string, unknown>) => {
     if (!activeAction) return;
     const { type, schema, targetItemId } = activeAction;
-    // Close the form first so only one dialog (confirm or OTP) is visible.
-    setActiveAction(null);
-    gateSubmit(() => { void performSubmit(type, schema, formData, targetItemId); }, purposeForType(type));
+    setDraft(formData);
+    // Hide the form behind the confirm/OTP dialog so only one is visible.
+    if (guardianConfirmRequired) setModalHidden(true);
+    gateSubmit(() => {
+      void performSubmit(type, schema, formData, targetItemId).then((outcome) => {
+        if (outcome === 'ok') closeModal();
+        else if (outcome === 'guardian') setModalHidden(true);
+        else setModalHidden(false);
+      });
+    }, purposeForType(type));
   };
 
   return (
@@ -170,9 +185,10 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
       {children(triggerAction)}
       {activeAction && (
         <ActionModal
-          open={!!activeAction}
-          onOpenChange={(open) => !open && setActiveAction(null)}
+          open={!modalHidden}
+          onOpenChange={(open) => !open && closeModal()}
           actionSchema={activeAction.schema}
+          initialData={draft}
           onSubmit={handleModalSubmit}
           loading={loading}
           minor={guardianConfirmRequired}
@@ -180,7 +196,11 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
       )}
       <GuardianOtpDialog
         open={!!gate.challenge}
-        onOpenChange={(open) => !open && gate.setChallenge(null)}
+        onOpenChange={(open) => {
+          if (open) return;
+          gate.setChallenge(null);
+          setModalHidden(false);
+        }}
         onSubmitOtp={gate.submitOtp}
         purpose={
           gate.challenge
@@ -193,7 +213,11 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
       />
       <Dialog
         open={!!pendingGuardianConfirm}
-        onOpenChange={(open) => { if (!open) setPendingGuardianConfirm(null); }}
+        onOpenChange={(open) => {
+          if (open) return;
+          setPendingGuardianConfirm(null);
+          setModalHidden(false);
+        }}
       >
         <DialogContent className="max-h-[90dvh] overflow-y-auto">
           <DialogHeader>
@@ -202,7 +226,13 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
           </DialogHeader>
           {pendingGuardianConfirm && <GuardianOtpPurpose purpose={pendingGuardianConfirm.purpose} />}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPendingGuardianConfirm(null)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPendingGuardianConfirm(null);
+                setModalHidden(false);
+              }}
+            >
               {t('actions.guardian_confirm_cancel')}
             </Button>
             <Button

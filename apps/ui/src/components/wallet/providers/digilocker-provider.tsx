@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
+import { thrownErrorMessage } from '@/lib/api-error';
 import { registerWalletProvider } from '@/engine/wallet/wallet-registry';
 import type { WalletImportProviderProps, WalletProvider } from '@/engine/wallet/types';
 import {
@@ -73,6 +75,7 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
   const [authCode, setAuthCode] = React.useState('');
   const [launchUrl, setLaunchUrl] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [codeError, setCodeError] = React.useState<string | null>(null);
   const [isMonitoring, setIsMonitoring] = React.useState(false);
   const popupRef = React.useRef<Window | null>(null);
   const pollIntervalRef = React.useRef<number | null>(null);
@@ -115,7 +118,7 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
           summary: t('wallet.digilocker_summary'),
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : t('wallet.digilocker_error_complete'));
+        setError(thrownErrorMessage(err, t, t('wallet.digilocker_error_complete')));
       } finally {
         setIsLoading(false);
       }
@@ -194,7 +197,7 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
         setError(t('wallet.digilocker_timeout'));
       }, 600000);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('wallet.digilocker_error_start'));
+      setError(thrownErrorMessage(err, t, t('wallet.digilocker_error_start')));
     } finally {
       setIsLoading(false);
     }
@@ -231,12 +234,18 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
       </div>
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">{t('wallet.digilocker_code_label')}</p>
+        <label htmlFor="digilocker-code" className="text-sm font-medium">{t('wallet.digilocker_code_label')}</label>
         <Input
+          id="digilocker-code"
           value={authCode}
-          onChange={(event) => setAuthCode(event.target.value)}
+          onChange={(event) => {
+            setAuthCode(event.target.value);
+            setCodeError(null);
+          }}
           placeholder={t('wallet.digilocker_code_placeholder')}
+          {...fieldErrorAria('digilocker-code-error', codeError)}
         />
+        <InlineFieldError id="digilocker-code-error" message={codeError} />
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -268,7 +277,23 @@ function DigiLockerProvider({ onSuccess, onCancel }: WalletImportProviderProps) 
         <Button variant="ghost" onClick={onCancel}>
           {t('common.cancel')}
         </Button>
-        <Button onClick={() => void completeImport(authCode)} disabled={!authCode.trim() || isLoading}>
+        <Button
+          onClick={() => {
+            if (!authCode.trim() || !extractCode(authCode)) {
+              setCodeError(
+                authCode.trim()
+                  ? t('form.error_invalid', 'Invalid entry. {{message}}', {
+                      message: t('wallet.digilocker_code_invalid', 'Paste the code or the full link DigiLocker gave you.'),
+                    })
+                  : t('form.error_required', '{{label}} is required.', { label: t('wallet.digilocker_code_label') }),
+              );
+              document.getElementById('digilocker-code')?.focus();
+              return;
+            }
+            void completeImport(authCode);
+          }}
+          disabled={isLoading}
+        >
           {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
           {t('wallet.digilocker_import_btn')}
         </Button>
