@@ -19,7 +19,7 @@ const KEYS = [
   'browse.spot_back_to_map',
 ] as const;
 
-const locales: Record<string, Record<string, string>> = { en, hi, kn };
+const locales = { en, hi, kn } as unknown as Record<string, Record<string, string>>;
 
 describe('same-spot strings', () => {
   it.each(Object.keys(locales))('are all present in %s', (code) => {
