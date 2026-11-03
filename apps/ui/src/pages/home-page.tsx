@@ -11,6 +11,7 @@ import type {
   DotCardConfig,
   MapMarker,
   MapViewport,
+  OpenSpotGroup,
   ViewMode,
 } from '@/engine/types';
 import { PageShell } from '@/components/layout/page-shell';
@@ -30,6 +31,9 @@ import {
 } from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { SpotGroupCard } from '@/components/map/spot-group-card';
+import { SpotGroupBanner } from '@/components/map/spot-group-banner';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { MapErrorBoundary } from '@/components/map/map-error-boundary';
 import { SEARCH_AREA_MIN_ZOOM } from '@/lib/map-caps';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
@@ -69,6 +73,7 @@ import {
   excludeOwnItems,
   buildFilteredCardsForDomain,
   DEFAULT_BROWSE_AREA,
+  spotGroupArea,
   type DerivedBrowseParams,
   type BrowseArea,
   type BrowseSort,
@@ -583,6 +588,7 @@ export function HomePage() {
   // provider's popup. `null` = closed.
   const isMobile = useIsMobile();
   const [sheetMarker, setSheetMarker] = React.useState<MapMarker | null>(null);
+  const [sheetSpot, setSheetSpot] = React.useState<OpenSpotGroup | null>(null);
   // Leaving the map closes it, so returning to the map does not re-open it.
   React.useEffect(() => {
     if (viewMode !== 'map') setSheetMarker(null);
@@ -1457,6 +1463,38 @@ export function HomePage() {
     });
   };
 
+  const viewSpotGroup = (group: OpenSpotGroup) => {
+    const domain = group.breakdown.some((b) => b.domain === selectedDomain)
+      ? selectedDomain
+      : (group.breakdown[0]?.domain ?? selectedDomain);
+    setSheetSpot(null);
+    setArea(spotGroupArea(group));
+    if (domain) setSelectedDomain(domain);
+    setViewMode('list');
+    setSearchParams((prev) => {
+      prev.set('view', 'list');
+      if (domain) prev.set('domain', domain);
+      return prev;
+    });
+  };
+
+  const backToMapFromSpot = () => {
+    setArea(DEFAULT_BROWSE_AREA);
+    handleViewModeChange('map');
+  };
+
+  const renderSpotGroupCard = (group: OpenSpotGroup, close?: () => void) => (
+    <SpotGroupCard
+      group={group}
+      formatDomain={(d) => formatDomainLabel(d, network?.domains) || d}
+      onView={(g) => {
+        close?.();
+        viewSpotGroup(g);
+      }}
+      onClose={close}
+    />
+  );
+
   const handleViewModeChange = (mode: ViewMode) => {
     // The map is multi-domain and the list takes one, so on map → list collapse
     // the map's selection to one of its domains. Only when the list domain is
@@ -2063,6 +2101,9 @@ export function HomePage() {
           {(triggerAction) =>
             viewMode === 'list' ? (
               <>
+                {area.mode === 'viewport' && area.spot && (
+                  <SpotGroupBanner exact={area.spot.exact} onBackToMap={backToMapFromSpot} />
+                )}
                 {/* Federation degradation: some peer instances did not answer
                     in time, so the list is known-partial. In-flow here; the
                     map's banner is `fixed`. */}
@@ -2188,8 +2229,28 @@ export function HomePage() {
                   // Phone: the tapped marker opens in the bottom sheet instead.
                   showPopup={!isMobile}
                   onMarkerSelect={isMobile ? setSheetMarker : undefined}
+                  renderSpotGroup={renderSpotGroupCard}
+                  onSpotGroupSelect={isMobile ? setSheetSpot : undefined}
                 />
                 </MapErrorBoundary>
+                {isMobile && (
+                  <ResponsiveDialog
+                    open={sheetSpot !== null}
+                    onOpenChange={(open) => {
+                      if (!open) setSheetSpot(null);
+                    }}
+                    title={
+                      sheetSpot
+                        ? t(sheetSpot.exact ? 'map.spot_title_exact' : 'map.spot_title_near', {
+                            n: sheetSpot.count.toLocaleString(),
+                          })
+                        : ''
+                    }
+                    contentClassName="max-w-xl"
+                  >
+                    <div className="p-6 pt-8">{sheetSpot && renderSpotGroupCard(sheetSpot)}</div>
+                  </ResponsiveDialog>
+                )}
                 {isMobile && (
                   <MarkerDetailSheet
                     open={sheetMarker !== null}

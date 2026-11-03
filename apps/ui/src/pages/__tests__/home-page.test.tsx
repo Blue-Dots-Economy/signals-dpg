@@ -10,9 +10,11 @@ import type {
   DotNetworkSchema,
   MapMarker,
   MapViewport,
+  OpenSpotGroup,
   ViewMode,
 } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
+import type { BrowseArea } from '@/lib/browse-discover';
 import type { DiscoverFacetFilter, Marker as NetworkMarker } from '@/lib/network-api';
 import { HomePage } from '../home-page';
 
@@ -152,6 +154,7 @@ interface BrowseOpts {
   filters?: DiscoverFacetFilter[];
   relevance?: boolean;
   anchorItemId?: string;
+  area?: BrowseArea;
 }
 
 interface BrowseCall {
@@ -389,7 +392,20 @@ interface MapViewStubProps {
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   showPopup?: boolean;
   onMarkerSelect?: (marker: MapMarker) => void;
+  renderSpotGroup?: (group: OpenSpotGroup, close: () => void) => React.ReactNode;
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void;
 }
+
+let stubSpotGroup: OpenSpotGroup = {
+  key: 'c:1',
+  count: 3,
+  breakdown: [
+    { domain: 'provider', count: 2 },
+    { domain: 'mentor', count: 1 },
+  ],
+  exact: true,
+  bounds: { minLat: 12.9, minLng: 77.6, maxLat: 12.9, maxLng: 77.6 },
+};
 
 function MapViewStub({
   items,
@@ -399,8 +415,11 @@ function MapViewStub({
   renderPopup,
   showPopup = true,
   onMarkerSelect,
+  renderSpotGroup,
+  onSpotGroupSelect,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [spotOpen, setSpotOpen] = React.useState(false);
   const open = items.find((item) => item.id === openId);
   // The same marker the real MapView would build for an item's first location.
   const toMarker = (item: MapViewStubProps['items'][number]): MapMarker => ({
@@ -446,6 +465,13 @@ function MapViewStub({
         </button>
       ))}
       {open && renderPopup?.(toMarker(open))}
+      <button
+        type="button"
+        onClick={() => (showPopup ? setSpotOpen(true) : onSpotGroupSelect?.(stubSpotGroup))}
+      >
+        click spot bubble
+      </button>
+      {spotOpen && renderSpotGroup?.(stubSpotGroup, () => setSpotOpen(false))}
     </div>
   );
 }
@@ -879,6 +905,93 @@ describe('HomePage — map view', () => {
   // that rule would pin the map to one domain and destroy its multi-domain
   // view. The map's own selection now decides which /markers requests are
   // ISSUED, rather than which fetched markers survive a post-filter.
+  describe('same-spot group', () => {
+    const lastArea = () => browseCalls.filter((c) => c.enabled).at(-1)?.opts?.area;
+
+    beforeEach(() => {
+      stubSpotGroup = { ...stubSpotGroup, breakdown: [{ domain: 'provider', count: 2 }, { domain: 'mentor', count: 1 }] };
+    });
+
+    it('opens the group in the list, scoped to its padded box, with a banner', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      expect(screen.getByText('3 listings at this exact spot')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(screen.getByText('Showing the listings at one spot on the map')).toBeInTheDocument();
+      const area = lastArea();
+      expect(area).toMatchObject({ mode: 'viewport', spot: { exact: true } });
+      if (area?.mode !== 'viewport') throw new Error('expected a viewport area');
+      expect(area.bounds.minLat).toBeCloseTo(12.9 - 5 / 111_320, 9);
+      expect(area.bounds.maxLat).toBeCloseTo(12.9 + 5 / 111_320, 9);
+    });
+
+    it('keeps the current tab when the group has listings of that type', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=mentor');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(url()).toContain('domain=mentor');
+    });
+
+    it('switches to the group’s largest type when the current tab has none of it', async () => {
+      signedInSeeker();
+      stubSpotGroup = { ...stubSpotGroup, breakdown: [{ domain: 'provider', count: 3 }] };
+      renderHome('/?view=map&domain=mentor');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('domain=provider'));
+    });
+
+    it('goes back to the map and drops the group area from the banner', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await waitFor(() => expect(url()).toContain('view=list'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Back to map' }));
+
+      await waitFor(() => expect(url()).toContain('view=map'));
+      expect(lastArea()).toEqual({ mode: 'anywhere' });
+    });
+
+    it('drops the banner when Clear all resets the area', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await screen.findByText('Showing the listings at one spot on the map');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+
+      expect(screen.queryByText('Showing the listings at one spot on the map')).not.toBeInTheDocument();
+      expect(lastArea()).toEqual({ mode: 'anywhere' });
+    });
+
+    it('shows the group in the bottom sheet on a phone and opens the list from it', async () => {
+      signedInSeeker();
+      state.isMobile = true;
+      renderHome('/?view=map&domain=provider');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      const sheet = await screen.findByRole('dialog');
+      expect(within(sheet).getByText('3 listings at this exact spot', { selector: 'p' })).toBeInTheDocument();
+      await userEvent.click(within(sheet).getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(screen.getByText('Showing the listings at one spot on the map')).toBeInTheDocument();
+    });
+  });
+
   it('fetches every visible domain regardless of the list’s selected domain', async () => {
     signedInSeeker();
     renderHome('/?view=map&domain=provider');

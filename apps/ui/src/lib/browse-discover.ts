@@ -1,3 +1,4 @@
+import type { OpenSpotGroup } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
 import type { DiscoverFacetFilter } from '@/lib/network-api';
 import type { EnumFilterField } from '@/lib/enum-filters';
@@ -24,7 +25,28 @@ export type BrowseArea =
   | {
       mode: 'viewport';
       bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number };
+      /** Set when the rectangle is a same-spot group opened from the map. */
+      spot?: { exact: boolean };
     };
+
+const SPOT_PAD_METERS = 5;
+
+/** The list area for a same-spot group: its points' box, padded so a one-point box still matches. */
+export function spotGroupArea(group: OpenSpotGroup): BrowseArea {
+  const dLat = SPOT_PAD_METERS / 111_320;
+  const midLat = ((group.bounds.minLat + group.bounds.maxLat) / 2) * (Math.PI / 180);
+  const dLng = dLat / Math.max(Math.cos(midLat), 0.01);
+  return {
+    mode: 'viewport',
+    bounds: {
+      minLat: group.bounds.minLat - dLat,
+      minLng: group.bounds.minLng - dLng,
+      maxLat: group.bounds.maxLat + dLat,
+      maxLng: group.bounds.maxLng + dLng,
+    },
+    spot: { exact: group.exact },
+  };
+}
 
 /** Shared so the page, the hook and their tests agree on the default. */
 export const DEFAULT_BROWSE_AREA: BrowseArea = { mode: 'anywhere' };
