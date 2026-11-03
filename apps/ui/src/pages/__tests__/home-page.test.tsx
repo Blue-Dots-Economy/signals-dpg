@@ -394,6 +394,8 @@ interface MapViewStubProps {
   onMarkerSelect?: (marker: MapMarker) => void;
   renderSpotGroup?: (group: OpenSpotGroup, close: () => void) => React.ReactNode;
   onSpotGroupSelect?: (group: OpenSpotGroup) => void;
+  focusPoint?: { lat: number; lng: number } | null;
+  focusZoom?: number;
 }
 
 let stubSpotGroup: OpenSpotGroup = {
@@ -417,6 +419,8 @@ function MapViewStub({
   onMarkerSelect,
   renderSpotGroup,
   onSpotGroupSelect,
+  focusPoint,
+  focusZoom,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [spotOpen, setSpotOpen] = React.useState(false);
@@ -433,6 +437,7 @@ function MapViewStub({
   });
   return (
     <div data-testid="map-view">
+      <p>{`focus: ${focusPoint ? `${focusPoint.lat},${focusPoint.lng}` : 'none'} @ ${focusZoom ?? 'default'}`}</p>
       {filtersSlot}
       <button
         type="button"
@@ -962,6 +967,19 @@ describe('HomePage — map view', () => {
 
       await waitFor(() => expect(url()).toContain('view=map'));
       expect(lastArea()).toEqual({ mode: 'anywhere' });
+    });
+
+    it('returns to the view the group was opened from', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await waitFor(() => expect(url()).toContain('view=list'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Back to map' }));
+
+      expect(await screen.findByText('focus: 12.9,77.6 @ 12')).toBeInTheDocument();
     });
 
     it('drops the banner when Clear all resets the area', async () => {

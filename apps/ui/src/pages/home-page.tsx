@@ -589,6 +589,7 @@ export function HomePage() {
   const isMobile = useIsMobile();
   const [sheetMarker, setSheetMarker] = React.useState<MapMarker | null>(null);
   const [sheetSpot, setSheetSpot] = React.useState<OpenSpotGroup | null>(null);
+  const [spotReturnView, setSpotReturnView] = React.useState<{ lat: number; lng: number; zoom: number } | null>(null);
   // Leaving the map closes it, so returning to the map does not re-open it.
   React.useEffect(() => {
     if (viewMode !== 'map') setSheetMarker(null);
@@ -789,6 +790,7 @@ export function HomePage() {
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
       setPreferredSource(next);
+      setSpotReturnView(null);
       setRecenterNonce((n) => n + 1);
       // An explicit "Current location" click always retries: the auto-request
       // only fires from `idle`, and the browser re-prompts while permission is
@@ -1468,6 +1470,9 @@ export function HomePage() {
       ? selectedDomain
       : (group.breakdown[0]?.domain ?? selectedDomain);
     setSheetSpot(null);
+    setSpotReturnView(
+      mapViewport?.zoom !== undefined ? { lat: mapViewport.lat, lng: mapViewport.lng, zoom: mapViewport.zoom } : null,
+    );
     setArea(spotGroupArea(group));
     if (domain) setSelectedDomain(domain);
     setViewMode('list');
@@ -1480,12 +1485,13 @@ export function HomePage() {
 
   const backToMapFromSpot = () => {
     setArea(DEFAULT_BROWSE_AREA);
-    handleViewModeChange('map');
+    switchViewMode('map');
   };
 
-  const renderSpotGroupCard = (group: OpenSpotGroup, close?: () => void) => (
+  const renderSpotGroupCard = (group: OpenSpotGroup, close?: () => void, className?: string) => (
     <SpotGroupCard
       group={group}
+      className={className}
       formatDomain={(d) => formatDomainLabel(d, network?.domains) || d}
       onView={(g) => {
         close?.();
@@ -1496,6 +1502,11 @@ export function HomePage() {
   );
 
   const handleViewModeChange = (mode: ViewMode) => {
+    setSpotReturnView(null);
+    switchViewMode(mode);
+  };
+
+  const switchViewMode = (mode: ViewMode) => {
     // The map is multi-domain and the list takes one, so on map → list collapse
     // the map's selection to one of its domains. Only when the list domain is
     // not already one of the map's, so toggling does not reshuffle a choice;
@@ -2207,7 +2218,8 @@ export function HomePage() {
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
                   loading={mapMarkers.isLoading}
-                  focusPoint={userLocation}
+                  focusPoint={spotReturnView ?? userLocation}
+                  focusZoom={spotReturnView?.zoom}
                   focusNonce={recenterNonce}
                   closePopupNonce={closePopupNonce}
                   selfLocation={userLocation}
@@ -2248,7 +2260,9 @@ export function HomePage() {
                     }
                     contentClassName="max-w-xl"
                   >
-                    <div className="p-6 pt-8">{sheetSpot && renderSpotGroupCard(sheetSpot)}</div>
+                    <div className="p-6 pt-8">
+                      {sheetSpot && renderSpotGroupCard(sheetSpot, undefined, 'w-full border-0 p-0 shadow-none')}
+                    </div>
                   </ResponsiveDialog>
                 )}
                 {isMobile && (

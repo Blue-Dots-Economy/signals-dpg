@@ -3,6 +3,7 @@ import { List, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { OpenSpotGroup } from '@/engine/types';
 import { formatDomainLabel } from '@/lib/domain-icons';
+import { cn } from '@/lib/utils';
 import { getIconForDomain } from './domain-icons';
 
 interface SpotGroupCardProps {
@@ -10,20 +11,27 @@ interface SpotGroupCardProps {
   formatDomain?: (domain: string) => string;
   onView?: (group: OpenSpotGroup) => void;
   onClose?: () => void;
+  className?: string;
 }
 
 /** Explains a bubble that cannot split and offers its listings in the list. */
-export function SpotGroupCard({ group, formatDomain = formatDomainLabel, onView, onClose }: SpotGroupCardProps) {
+export function SpotGroupCard({ group, formatDomain = formatDomainLabel, onView, onClose, className }: SpotGroupCardProps) {
   const { t } = useTranslation();
   const n = group.count.toLocaleString();
   return (
-    <div className="relative w-[min(340px,calc(100vw-2rem))] space-y-3 p-1 text-sm" data-testid="spot-group-card">
+    <div
+      className={cn(
+        'relative w-[min(340px,calc(100vw-2rem))] space-y-3 rounded-2xl border border-border bg-background p-4 text-sm shadow-lg',
+        className,
+      )}
+      data-testid="spot-group-card"
+    >
       {onClose && (
         <button
           type="button"
           aria-label={t('map.spot_close')}
           onClick={onClose}
-          className="absolute right-0 top-0 inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent pointer-coarse:h-11 pointer-coarse:w-11"
+          className="absolute right-2 top-2 inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent pointer-coarse:h-11 pointer-coarse:w-11"
         >
           <X className="h-4 w-4" aria-hidden />
         </button>

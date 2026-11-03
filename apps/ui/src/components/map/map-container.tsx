@@ -32,6 +32,8 @@ interface MapViewProps {
    * fits all markers.
    */
   focusPoint?: { lat: number; lng: number } | null;
+  /** Zoom for `focusPoint`; defaults to city zoom. */
+  focusZoom?: number;
   /**
    * Monotonic counter bumped on an explicit recenter intent (e.g. the user
    * picks a location source). Forwarded to the provider so the map snaps back
@@ -133,6 +135,7 @@ export function MapView({
   center = DEFAULT_CENTER,
   zoom = DEFAULT_ZOOM,
   focusPoint,
+  focusZoom,
   focusNonce,
   closePopupNonce,
   selfLocation,
@@ -177,10 +180,10 @@ export function MapView({
     }
     return {
       effectiveCenter: [focusPoint.lat, focusPoint.lng] as [number, number],
-      effectiveZoom: PROFILE_ZOOM,
+      effectiveZoom: focusZoom ?? PROFILE_ZOOM,
       initialViewSet: true,
     };
-  }, [focusPoint, center, zoom]);
+  }, [focusPoint, focusZoom, center, zoom]);
 
   const markers = React.useMemo(() => {
     const titleField = findTitleField(schema);

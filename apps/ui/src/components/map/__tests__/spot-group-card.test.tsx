@@ -42,6 +42,11 @@ describe('SpotGroupCard', () => {
     expect(onView).toHaveBeenCalledWith(group());
   });
 
+  it('draws its own card background, since the map popups are transparent', () => {
+    render(<SpotGroupCard group={group()} />);
+    expect(screen.getByTestId('spot-group-card')).toHaveClass('bg-background');
+  });
+
   it('has no list button when nothing can open the list', () => {
     render(<SpotGroupCard group={group()} />);
     expect(screen.queryByRole('button', { name: /in the list/ })).not.toBeInTheDocument();

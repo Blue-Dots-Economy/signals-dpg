@@ -280,6 +280,13 @@ describe('MapView — center, zoom and focus point', () => {
     expect(screen.getByText(`self: ${BLR.lat},${BLR.lng}`)).toBeInTheDocument();
   });
 
+  it('centres on a focus point at the caller\'s focus zoom when one is given', async () => {
+    render(<MapView schema={NAME_SCHEMA} items={[]} focusPoint={BLR} focusZoom={17} />);
+
+    expect(await screen.findByText(`center: ${BLR.lat},${BLR.lng}`)).toBeInTheDocument();
+    expect(screen.getByText('zoom: 17')).toBeInTheDocument();
+  });
+
   it('normalises an undefined selfLocation to null and attaches no viewport listener when unset', async () => {
     render(<MapView schema={NAME_SCHEMA} items={[]} />);
 
