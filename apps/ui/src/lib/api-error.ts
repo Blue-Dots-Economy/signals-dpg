@@ -35,7 +35,8 @@ export function readApiError(err: unknown): ApiErrorInfo {
   // Fastify's request-schema 400: "body/guardianEmail Invalid email, body/name …".
   if (!fields && typeof data.message === 'string') {
     for (const m of data.message.matchAll(/(?:^|, )body\/([\w./]+) ([^,]+)/g)) {
-      (fields ??= {})[m[1]!.replace(/\//g, '.')] = m[2]!.trim();
+      fields ??= {};
+      fields[m[1]!.replaceAll('/', '.')] = m[2]!.trim();
     }
   }
   return {

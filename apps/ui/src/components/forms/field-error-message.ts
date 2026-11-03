@@ -104,7 +104,7 @@ export function formStandardMessage(
     detail = patternMessage(segments[0] ?? '');
   } else if (error.name && RULE_KINDS.has(error.name) && copy.rule) {
     const limit = error.params?.limit ?? error.params?.comparison;
-    detail = copy.rule(error.name as RuleKind, label, limit === undefined ? '' : String(limit));
+    detail = copy.rule(error.name as RuleKind, label, typeof limit === 'number' || typeof limit === 'string' ? String(limit) : '');
   } else {
     detail = copy.validValue(label);
   }
@@ -125,6 +125,16 @@ function withStop(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
 }
 
+/** Server (AJV) wording for limit failures, mapped to the form's rule copy. */
+const SERVER_LIMIT_RULES: ReadonlyArray<readonly [RegExp, RuleKind]> = [
+  [/^must NOT have fewer than (\d+) characters/, 'minLength'],
+  [/^must NOT have more than (\d+) characters/, 'maxLength'],
+  [/^must NOT have fewer than (\d+) items/, 'minItems'],
+  [/^must NOT have more than (\d+) items/, 'maxItems'],
+  [/^must be >=? ?(\S+)/, 'minimum'],
+  [/^must be <=? ?(\S+)/, 'maximum'],
+];
+
 /** The API's per-field message in the form's wording; null when the user can't fix it in the form. */
 export function serverFieldMessage(
   path: string,
@@ -140,13 +150,10 @@ export function serverFieldMessage(
   if (m === 'is not an allowed field') return null;
   const rule = (kind: RuleKind, limit: string) =>
     copy.invalid(withStop(copy.rule ? copy.rule(kind, label, limit) : copy.validValue(label)), undefined);
-  let match: RegExpMatchArray | null;
-  if ((match = m.match(/^must NOT have fewer than (\d+) characters/))) return rule('minLength', match[1]!);
-  if ((match = m.match(/^must NOT have more than (\d+) characters/))) return rule('maxLength', match[1]!);
-  if ((match = m.match(/^must NOT have fewer than (\d+) items/))) return rule('minItems', match[1]!);
-  if ((match = m.match(/^must NOT have more than (\d+) items/))) return rule('maxItems', match[1]!);
-  if ((match = m.match(/^must be >=? ?(\S+)/))) return rule('minimum', match[1]!);
-  if ((match = m.match(/^must be <=? ?(\S+)/))) return rule('maximum', match[1]!);
+  for (const [pattern, kind] of SERVER_LIMIT_RULES) {
+    const found = pattern.exec(m);
+    if (found) return rule(kind, found[1]!);
+  }
   if (m.startsWith('must be one of')) return rule('enum', '');
   // Remaining `must …` text is a type/format failure; anything else is the
   // field's authored pattern copy, already a sentence.

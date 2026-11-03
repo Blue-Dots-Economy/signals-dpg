@@ -646,7 +646,7 @@ function OtpLoginPage() {
               </Label>
               {/* Outlined buttons: nothing is pre-selected, so each option
                   must read as a button on its own. */}
-              <div className="flex flex-wrap gap-2 text-sm" role="group" {...fieldErrorAria('domain-error', domainError)}>
+              <fieldset className="flex flex-wrap gap-2 text-sm" {...fieldErrorAria('domain-error', domainError)}>
                 {domainOptions.map((d) => (
                   <button
                     key={d.id}
@@ -663,7 +663,7 @@ function OtpLoginPage() {
                     {domainLabel(d)}
                   </button>
                 ))}
-              </div>
+              </fieldset>
               <InlineFieldError id="domain-error" message={domainError} />
             </div>
           )}

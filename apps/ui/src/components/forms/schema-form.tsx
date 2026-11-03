@@ -38,7 +38,7 @@ const ShadcnBaseInputTemplate = ShadcnTemplates.BaseInputTemplate!;
  * shadcn's text input, marked `aria-invalid` while the field has an error.
  * Schema `examples` feed the error message only, not a browser suggestion list.
  */
-function BaseInputTemplate(props: BaseInputTemplateProps) {
+function BaseInputTemplate(props: Readonly<BaseInputTemplateProps>) {
   const invalid = (props.rawErrors?.length ?? 0) > 0;
   const { examples: _examples, ...schemaWithoutExamples } = props.schema;
   return (
@@ -679,8 +679,12 @@ export function SchemaForm({
     const errorSchema: Record<string, unknown> = {};
     const add = (segments: string[], message: string) => {
       let node = errorSchema;
-      for (const seg of segments) node = (node[seg] ??= {}) as Record<string, unknown>;
-      const list = ((node.__errors as string[] | undefined) ??= []);
+      for (const seg of segments) {
+        node[seg] ??= {};
+        node = node[seg] as Record<string, unknown>;
+      }
+      node.__errors ??= [];
+      const list = node.__errors as string[];
       if (!list.includes(message)) list.push(message);
     };
     if (!submitAttempted) {
@@ -697,7 +701,9 @@ export function SchemaForm({
       if (!message) continue;
       let node = merged;
       for (const seg of path.split('.').filter(Boolean)) {
-        node = (node[seg] = { ...((node[seg] as object | undefined) ?? {}) }) as Record<string, unknown>;
+        const next: Record<string, unknown> = { ...(node[seg] as object | undefined) };
+        node[seg] = next;
+        node = next;
       }
       const list = [...((node.__errors as string[] | undefined) ?? [])];
       if (!list.includes(message)) list.push(message);
