@@ -178,7 +178,7 @@ export function MapView({
 
   const markers = React.useMemo(() => {
     const titleField = findTitleField(schema);
-    const built: MapMarker[] = items.flatMap((item) => {
+    return items.flatMap((item): MapMarker[] => {
       // One marker per stored `item_locations` entry.
       const locs = Array.isArray((item.data as Record<string, unknown>).item_locations)
         ? (
@@ -212,8 +212,7 @@ export function MapView({
           }) satisfies MapMarker,
       );
     });
-    return spreadCoLocatedMarkers(built, selfLocation ?? null);
-  }, [items, schema, resolveMarkerLabel, selfLocation]);
+  }, [items, schema, resolveMarkerLabel]);
 
   const markersById = React.useMemo(() => new Map(markers.map((m) => [m.id, m])), [markers]);
   const handleMarkerClick = React.useMemo(
@@ -288,74 +287,6 @@ export function MapView({
     </div>
   );
 }
-
-/**
- * Stable hash of a string to [0, 1) (FNV-1a, 32-bit), so a marker's fan-out
- * angle depends only on its id. Iterates code points with `for...of`; an
- * index loop with `codePointAt` would double-read surrogate pairs.
- */
-function hashToUnit(str: string): number {
-  let h = 2166136261;
-  for (const ch of str) {
-    h ^= ch.codePointAt(0) as number;
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) / 4294967296;
-}
-
-/**
- * Fans markers that share an exact coordinate onto a ~10 m circle so each is
- * clickable on both providers (the Google Maps clusterer has no spiderfy).
- * Zoomed out they still cluster; the offset is small next to city-centroid
- * imprecision.
- *
- * `selfLocation` counts as a virtual group member: a single item on the
- * viewer's own coordinate is also fanned out, so it is not hidden under the
- * "You are here" marker. The self-marker itself never moves.
- */
-export function spreadCoLocatedMarkers(
-  markers: MapMarker[],
-  selfLocation?: { lat: number; lng: number } | null,
-): MapMarker[] {
-  // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
-  const RADIUS_DEG = 10 / 111_320;
-
-  const groups = new Map<string, MapMarker[]>();
-  for (const marker of markers) {
-    const key = `${marker.lat.toFixed(6)},${marker.lng.toFixed(6)}`;
-    const group = groups.get(key);
-    if (group) group.push(marker);
-    else groups.set(key, [marker]);
-  }
-
-  const selfKey = selfLocation
-    ? `${selfLocation.lat.toFixed(6)},${selfLocation.lng.toFixed(6)}`
-    : null;
-
-  const result: MapMarker[] = [];
-  for (const [key, group] of groups) {
-    const isAtSelfLocation = selfKey !== null && key === selfKey;
-    if (group.length === 1 && !isAtSelfLocation) {
-      result.push(group[0]);
-      continue;
-    }
-    // The angle depends only on the marker id, so a pin does not move when
-    // filters change. Longitude is scaled by cos(lat) to stay circular.
-    const latRad = (group[0].lat * Math.PI) / 180;
-    const lngScale = Math.max(Math.cos(latRad), 0.01);
-    for (const marker of group) {
-      const angle = hashToUnit(marker.id) * 2 * Math.PI;
-      result.push({
-        ...marker,
-        lat: marker.lat + RADIUS_DEG * Math.cos(angle),
-        lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
-      });
-    }
-  }
-
-  return result;
-}
-
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;

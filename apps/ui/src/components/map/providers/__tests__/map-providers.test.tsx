@@ -705,13 +705,13 @@ describe('LeafletMapProvider', () => {
     expect(zoom).toBeLessThanOrEqual(18);
   });
 
-  it('uses the 18 maximum zoom so small groups open at max zoom', async () => {
+  it('keeps listings a few metres apart as one bubble at the 18 maximum zoom', async () => {
     bridge().map = createFakeLeafletMap({ zoom: 18 });
     const ring = [at('r1', 19, 72), at('r2', 19.00005, 72), at('r3', 19, 72.00005)];
 
     render(leafletElement({ markers: ring }));
 
-    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
   });
 
   it('reuses one icon per glyph', () => {

@@ -12,6 +12,13 @@ export interface ClusterView {
   zoom: number;
 }
 
+/** A bubble that zooming in can never split, and the area its points cover. */
+export interface SpotGroup {
+  /** Every point shares one coordinate, to 6 decimal places. */
+  exact: boolean;
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number };
+}
+
 /** One thing to draw: a bubble standing for several points, or a single point. */
 export type MapClusterItem =
   | {
@@ -22,6 +29,7 @@ export type MapClusterItem =
       count: number;
       breakdown: DomainCount[];
       expansionZoom: number;
+      spot: SpotGroup | null;
     }
   | { kind: 'point'; key: string; marker: MapMarker };
 
@@ -32,9 +40,6 @@ export interface ClusterIndexOptions {
 
 /** Supercluster radius at its default 512 extent: 80 screen px on 256-px tiles, the same as Leaflet's clustering before. */
 export const CLUSTER_RADIUS = 160;
-
-/** At the maximum zoom, a cluster this size or smaller is drawn as its individual points. */
-export const MAX_ZOOM_EXPAND_LIMIT = 50;
 
 interface PointProps {
   id: string;
@@ -94,10 +99,7 @@ export function queryClusters(index: MapClusterIndex, view: ClusterView): MapClu
       continue;
     }
     const clusterId = props.cluster_id;
-    if (zoom >= index.maxZoom && props.point_count <= MAX_ZOOM_EXPAND_LIMIT) {
-      for (const leaf of index.tree.getLeaves(clusterId, Infinity)) pushPoint(leaf.properties.id);
-      continue;
-    }
+    const expansionZoom = index.tree.getClusterExpansionZoom(clusterId);
     const [lng, lat] = feature.geometry.coordinates;
     items.push({
       kind: 'cluster',
@@ -106,8 +108,27 @@ export function queryClusters(index: MapClusterIndex, view: ClusterView): MapClu
       lng,
       count: props.point_count,
       breakdown: breakdownFromCounts(props.counts),
-      expansionZoom: index.tree.getClusterExpansionZoom(clusterId),
+      expansionZoom,
+      spot: expansionZoom > index.maxZoom ? describeSpot(index, clusterId) : null,
     });
   }
   return items;
+}
+
+function describeSpot(index: MapClusterIndex, clusterId: number): SpotGroup {
+  let minLat = Infinity;
+  let minLng = Infinity;
+  let maxLat = -Infinity;
+  let maxLng = -Infinity;
+  const keys = new Set<string>();
+  for (const leaf of index.tree.getLeaves(clusterId, Infinity)) {
+    const marker = index.byId.get(leaf.properties.id);
+    if (!marker) continue;
+    minLat = Math.min(minLat, marker.lat);
+    minLng = Math.min(minLng, marker.lng);
+    maxLat = Math.max(maxLat, marker.lat);
+    maxLng = Math.max(maxLng, marker.lng);
+    keys.add(`${marker.lat.toFixed(6)},${marker.lng.toFixed(6)}`);
+  }
+  return { exact: keys.size === 1, bounds: { minLat, minLng, maxLat, maxLng } };
 }

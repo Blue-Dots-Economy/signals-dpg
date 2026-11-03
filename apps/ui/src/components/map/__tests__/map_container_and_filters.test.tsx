@@ -421,7 +421,7 @@ describe('MapView — marker resolution from item_locations', () => {
     expect(screen.getByLabelText('icon for Acme')).toBeInTheDocument();
   });
 
-  it('nudges a marker sitting exactly on the self-location so "You" never hides it', async () => {
+  it('keeps a marker on the self-location at its own coordinate', async () => {
     render(
       <MapView
         schema={NAME_SCHEMA}
@@ -431,8 +431,7 @@ describe('MapView — marker resolution from item_locations', () => {
     );
 
     await screen.findByRole('button', { name: 'On top of you' });
-    const exact = `a#0 @ ${BLR.lat.toFixed(5)},${BLR.lng.toFixed(5)}`;
-    expect(screen.queryByText(exact)).not.toBeInTheDocument();
+    expect(screen.getByText(`a#0 @ ${BLR.lat.toFixed(5)},${BLR.lng.toFixed(5)}`)).toBeInTheDocument();
   });
 
   it('ignores a stale in-flight resolution when items change mid-flight', async () => {
@@ -568,7 +567,7 @@ describe('MapView — loading, empty state and maximize', () => {
     expect(seen[seen.length - 1]).toBe(seen[0]);
   });
 
-  it('fans same-coordinate items onto separate points', async () => {
+  it('keeps same-coordinate items at their shared coordinate', async () => {
     render(
       <MapView
         schema={NAME_SCHEMA}
@@ -581,7 +580,8 @@ describe('MapView — loading, empty state and maximize', () => {
 
     await screen.findByRole('button', { name: 'First' });
     const positions = screen.getAllByText(/@ /).map((el) => el.textContent?.split('@ ')[1]);
-    expect(new Set(positions).size).toBe(2);
+    expect(positions).toHaveLength(2);
+    expect(new Set(positions).size).toBe(1);
   });
 
   it('keeps the map mounted and overlays the default empty message when nothing resolves', async () => {

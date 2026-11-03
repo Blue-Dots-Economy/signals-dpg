@@ -83,10 +83,33 @@ describe('queryClusters', () => {
     expect(item.kind === 'cluster' && item.expansionZoom).toBeGreaterThan(12);
   });
 
-  it('expands a small cluster at the maximum zoom', () => {
+  it('keeps a small same-spot group a bubble at the maximum zoom', () => {
     const markers = [marker('a#0', 28.6, 77.4), marker('b#0', 28.6, 77.4), marker('c#0', 28.6, 77.4)];
     const items = queryClusters(buildClusterIndex(markers, { maxZoom: 18 }), around(18));
-    expect(items.map((i) => i.kind)).toEqual(['point', 'point', 'point']);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: 'cluster', count: 3 });
+  });
+
+  it('marks a bubble of points at one coordinate as an exact spot', () => {
+    const markers = Array.from({ length: 5 }, (_, i) => marker(`m${i}#0`, 28.6, 77.4));
+    const [item] = queryClusters(buildClusterIndex(markers, { maxZoom: 20 }), around(12));
+    expect(item.kind === 'cluster' && item.spot).toEqual({
+      exact: true,
+      bounds: { minLat: 28.6, minLng: 77.4, maxLat: 28.6, maxLng: 77.4 },
+    });
+  });
+
+  it('marks points a few metres apart that never separate as a near spot', () => {
+    const step = 1 / 111_320;
+    const markers = Array.from({ length: 4 }, (_, i) => marker(`n${i}#0`, 28.6 + i * step, 77.4));
+    const items = queryClusters(buildClusterIndex(markers, { maxZoom: 18 }), around(18));
+    expect(items).toHaveLength(1);
+    expect(items[0].kind === 'cluster' && items[0].spot).toMatchObject({ exact: false });
+  });
+
+  it('leaves spot empty for a bubble that splits by the maximum zoom', () => {
+    const [item] = queryClusters(buildClusterIndex(pointsAtPixelOffset(15, 200), { maxZoom: 22 }), around(12));
+    expect(item).toMatchObject({ kind: 'cluster', count: 2, spot: null });
   });
 
   it('keeps a large same-spot group as one bubble at the maximum zoom', () => {
@@ -100,8 +123,8 @@ describe('queryClusters', () => {
     const big = Array.from({ length: 60 }, (_, i) => marker(`m${i}#0`, 28.6, 77.4));
     const small = [marker('a#0', 28.7, 77.5), marker('b#0', 28.7, 77.5)];
     const items = queryClusters(buildClusterIndex([...big, ...small], { maxZoom: 20 }), around(22));
-    expect(items.filter((i) => i.kind === 'cluster').map((i) => i.kind === 'cluster' && i.count)).toEqual([60]);
-    expect(items.filter((i) => i.kind === 'point')).toHaveLength(2);
+    expect(items.filter((i) => i.kind === 'cluster').map((i) => i.kind === 'cluster' && i.count).sort()).toEqual([2, 60]);
+    expect(items.filter((i) => i.kind === 'point')).toHaveLength(0);
   });
 
   it('counts points, not listings', () => {
