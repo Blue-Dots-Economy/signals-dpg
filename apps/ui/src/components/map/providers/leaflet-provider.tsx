@@ -21,9 +21,8 @@ import { FitBounds } from '../fit-bounds';
 import { useMapClusters } from '../use-map-clusters';
 import { openSpotGroupOf } from '../map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
-import { SpotGroupCard } from '../spot-group-card';
 import { useStableCallback } from '../use-stable-callback';
-import { PopupBody, PopupRendererProvider } from '../popup-renderer';
+import { PopupBody, PopupRendererProvider, SpotGroupBody, SpotGroupRendererProvider } from '../popup-renderer';
 import { createSelfMarkerDivIcon } from '../self-marker';
 import { useViewportReportEmitter } from './use-viewport-report';
 
@@ -364,13 +363,11 @@ const ClusterMarker = React.memo(function ClusterMarker({
   showPopup,
   onZoomTo,
   onSpotGroupSelect,
-  renderSpotGroup,
 }: {
   item: Extract<MapClusterItem, { kind: 'cluster' }>;
   showPopup: boolean;
   onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
   onSpotGroupSelect?: (group: OpenSpotGroup) => void;
-  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
 }) {
   const map = useMap();
   const icon = React.useMemo(() => createClusterDivIcon(item.count, item.breakdown), [item.count, item.breakdown]);
@@ -389,7 +386,7 @@ const ClusterMarker = React.memo(function ClusterMarker({
     <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={1000 + item.count}>
       {group && showPopup && (
         <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={360}>
-          {renderSpotGroup ? renderSpotGroup(group, close) : <SpotGroupCard group={group} onClose={close} />}
+          <SpotGroupBody group={group} onClose={close} />
         </Popup>
       )}
     </Marker>
@@ -428,7 +425,6 @@ interface ClusterLayerProps {
   onMarkerClick?: (id: string) => void;
   resolveIcon?: MapProviderProps['resolveIcon'];
   onSpotGroupSelect?: MapProviderProps['onSpotGroupSelect'];
-  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
 }
 
 /** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
@@ -438,7 +434,6 @@ function ClusterLayer({
   onMarkerClick,
   resolveIcon,
   onSpotGroupSelect,
-  renderSpotGroup,
 }: ClusterLayerProps) {
   const map = useMap();
   const view = useLeafletClusterView();
@@ -462,7 +457,6 @@ function ClusterLayer({
             showPopup={showPopup}
             onZoomTo={zoomTo}
             onSpotGroupSelect={onSpotGroupSelect}
-            renderSpotGroup={renderSpotGroup}
           />
         ) : (
           <PointMarker
@@ -500,7 +494,6 @@ export function LeafletMapProvider({
   const stableMarkerClick = useStableCallback(onMarkerClick);
   const stableResolveIcon = useStableCallback(resolveIcon);
   const stableSpotGroupSelect = useStableCallback(onSpotGroupSelect);
-  const stableRenderSpotGroup = useStableCallback(renderSpotGroup);
 
   // Leaflet has no dark basemap (see the TileLayer note), so tell the user
   // once per session. The Google provider has a dark style and no notice.
@@ -538,14 +531,15 @@ export function LeafletMapProvider({
       {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
       <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
       <PopupRendererProvider value={renderPopup}>
-        <ClusterLayer
-          markers={markers}
-          showPopup={showPopup}
-          onMarkerClick={stableMarkerClick}
-          resolveIcon={stableResolveIcon}
-          onSpotGroupSelect={stableSpotGroupSelect}
-          renderSpotGroup={stableRenderSpotGroup}
-        />
+        <SpotGroupRendererProvider value={renderSpotGroup}>
+          <ClusterLayer
+            markers={markers}
+            showPopup={showPopup}
+            onMarkerClick={stableMarkerClick}
+            resolveIcon={stableResolveIcon}
+            onSpotGroupSelect={stableSpotGroupSelect}
+          />
+        </SpotGroupRendererProvider>
       </PopupRendererProvider>
       {/*
        * "You are here": outside the cluster layer so it is never clustered,

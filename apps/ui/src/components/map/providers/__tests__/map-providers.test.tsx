@@ -111,10 +111,16 @@ vi.mock('react-leaflet', async () => {
       if (typeof refProp === 'function') (refProp as (m: object) => void)(instance);
     }, [refProp, instance]);
 
-    const handlers = props.eventHandlers as { click?: () => void } | undefined;
+    const handlers = props.eventHandlers as { click?: () => void; popupopen?: () => void } | undefined;
     return React_.createElement(
       'div',
-      { 'data-testid': 'leaflet-marker', onClick: () => handlers?.click?.() },
+      {
+        'data-testid': 'leaflet-marker',
+        onClick: () => {
+          handlers?.click?.();
+          handlers?.popupopen?.();
+        },
+      },
       props.children as React.ReactNode,
     );
   };
@@ -723,6 +729,19 @@ describe('LeafletMapProvider', () => {
 
     expect(map.setView).not.toHaveBeenCalled();
     expect(screen.getByText('3 listings at this exact spot')).toBeInTheDocument();
+  });
+
+  it('builds the same-spot card from the latest renderSpotGroup when it opens', async () => {
+    bridge().map = createFakeLeafletMap();
+    const markers = [at('a', 19, 72), at('b', 19, 72)];
+    const { rerender } = render(leafletElement({ markers, renderSpotGroup: () => <p>first page state</p> }));
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(1));
+    rerender(leafletElement({ markers, renderSpotGroup: () => <p>latest page state</p> }));
+
+    await userEvent.click(screen.getByTestId('leaflet-marker'));
+
+    expect(screen.getByText('latest page state')).toBeInTheDocument();
+    expect(screen.queryByText('first page state')).not.toBeInTheDocument();
   });
 
   it('hands a same-spot bubble to the page when popups are off', async () => {

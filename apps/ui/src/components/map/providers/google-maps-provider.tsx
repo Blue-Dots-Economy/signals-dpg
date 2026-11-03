@@ -20,9 +20,8 @@ import type { DomainCount } from '../cluster-breakdown';
 import { useMapClusters } from '../use-map-clusters';
 import { openSpotGroupOf } from '../map-clusters';
 import type { ClusterView, MapClusterItem } from '../map-clusters';
-import { SpotGroupCard } from '../spot-group-card';
 import { useStableCallback } from '../use-stable-callback';
-import { PopupBody, PopupRendererProvider } from '../popup-renderer';
+import { PopupBody, PopupRendererProvider, SpotGroupBody, SpotGroupRendererProvider } from '../popup-renderer';
 import { SelfMarkerContent, SELF_MARKER_GOOGLE_OFFSET_Y } from '../self-marker';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { useViewportReportEmitter } from './use-viewport-report';
@@ -168,9 +167,6 @@ function ClusterBubble({
   );
 }
 
-const SpotGroupRendererContext = React.createContext<MapProviderProps['renderSpotGroup']>(undefined);
-const useSpotGroupRenderer = () => React.useContext(SpotGroupRendererContext);
-
 const ClusterMarker = React.memo(function ClusterMarker({
   item,
   primary,
@@ -187,7 +183,6 @@ const ClusterMarker = React.memo(function ClusterMarker({
   onSpotClose: () => void;
 }) {
   const [markerRef, markerEl] = useAdvancedMarkerRef();
-  const renderSpotGroup = useSpotGroupRenderer();
   const position = React.useMemo(() => ({ lat: item.lat, lng: item.lng }), [item.lat, item.lng]);
   const group = React.useMemo(() => openSpotGroupOf(item), [item]);
   return (
@@ -203,7 +198,7 @@ const ClusterMarker = React.memo(function ClusterMarker({
       </AdvancedMarker>
       {group && isSpotOpen && markerEl && (
         <InfoWindow anchor={markerEl} onCloseClick={onSpotClose} headerDisabled zIndex={resolvePopupZIndex()}>
-          {renderSpotGroup ? renderSpotGroup(group, onSpotClose) : <SpotGroupCard group={group} onClose={onSpotClose} />}
+          <SpotGroupBody group={group} onClose={onSpotClose} />
         </InfoWindow>
       )}
     </>
@@ -617,7 +612,6 @@ export function GoogleMapProvider({
   const deactivateMarker = React.useCallback(() => setActiveMarker(null), []);
   const closeSpot = React.useCallback(() => setOpenSpotKey(null), []);
   const stableSpotGroupSelect = useStableCallback(onSpotGroupSelect);
-  const stableRenderSpotGroup = useStableCallback(renderSpotGroup);
   const spotClick = React.useCallback(
     (group: OpenSpotGroup) => {
       if (!showPopup) {
@@ -692,23 +686,23 @@ export function GoogleMapProvider({
         {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
         <CameraTracker cameraRef={liveCameraRef} />
         <PopupRendererProvider value={renderPopup}>
-          <SpotGroupRendererContext.Provider value={renderSpotGroup ? stableRenderSpotGroup : undefined}>
-          <ClusterLayer
-            markers={markers}
-            openSpotKey={openSpotKey}
-            onSpotClick={spotClick}
-            onSpotClose={closeSpot}
-            activeMarkerId={activeMarker?.id ?? null}
-            // With `showPopup` off no marker ever becomes active, so neither the
-            // InfoWindow nor the mobile overlay opens; clicks still reach
-            // `onMarkerClick`.
-            onMarkerActivate={showPopup ? activateMarker : noActivation}
-            onMarkerDeactivate={deactivateMarker}
-            onMarkerClick={stableMarkerClick}
-            resolveIcon={stableResolveIcon}
-            resolveMarkerImage={stableResolveMarkerImage}
-          />
-          </SpotGroupRendererContext.Provider>
+          <SpotGroupRendererProvider value={renderSpotGroup}>
+            <ClusterLayer
+              markers={markers}
+              openSpotKey={openSpotKey}
+              onSpotClick={spotClick}
+              onSpotClose={closeSpot}
+              activeMarkerId={activeMarker?.id ?? null}
+              // With `showPopup` off no marker ever becomes active, so neither the
+              // InfoWindow nor the mobile overlay opens; clicks still reach
+              // `onMarkerClick`.
+              onMarkerActivate={showPopup ? activateMarker : noActivation}
+              onMarkerDeactivate={deactivateMarker}
+              onMarkerClick={stableMarkerClick}
+              resolveIcon={stableResolveIcon}
+              resolveMarkerImage={stableResolveMarkerImage}
+            />
+          </SpotGroupRendererProvider>
         </PopupRendererProvider>
         {/*
          * "You are here": outside clustering so it is never clustered, and
