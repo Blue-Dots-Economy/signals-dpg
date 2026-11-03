@@ -58,10 +58,11 @@ export function buildClusterIndex(markers: MapMarker[], options: ClusterIndexOpt
     radius: CLUSTER_RADIUS,
     maxZoom: options.maxZoom,
     map: (props) => ({ counts: { [props.domain]: 1 } }),
+    // Supercluster copies cluster properties shallowly, so `counts` is rebuilt rather than mutated in place.
     reduce: (acc, props) => {
-      for (const [domain, n] of Object.entries(props.counts)) {
-        acc.counts[domain] = (acc.counts[domain] ?? 0) + n;
-      }
+      const counts = { ...acc.counts };
+      for (const [domain, n] of Object.entries(props.counts)) counts[domain] = (counts[domain] ?? 0) + n;
+      acc.counts = counts;
     },
   });
   tree.load(

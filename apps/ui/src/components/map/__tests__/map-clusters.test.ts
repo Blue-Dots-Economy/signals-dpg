@@ -58,6 +58,26 @@ describe('queryClusters', () => {
     ]);
   });
 
+  it('keeps each cluster\'s domain counts its own when clusters merge at lower zooms', () => {
+    const lngPerPx = 360 / (256 * 2 ** 12);
+    const markers = [
+      ...Array.from({ length: 3 }, (_, i) => marker(`s${i}#0`, 28.6, 77.4, 'seeker')),
+      ...Array.from({ length: 2 }, (_, i) => marker(`p${i}#0`, 28.6, 77.4 + 120 * lngPerPx, 'provider')),
+    ];
+    const index = buildClusterIndex(markers, { maxZoom: 22 });
+    const atTwelve = queryClusters(index, around(12));
+    for (const item of atTwelve) {
+      if (item.kind !== 'cluster') continue;
+      expect(item.breakdown.reduce((sum, b) => sum + b.count, 0)).toBe(item.count);
+    }
+    const merged = queryClusters(index, around(8));
+    expect(merged).toHaveLength(1);
+    expect(merged[0].kind === 'cluster' && merged[0].breakdown).toEqual([
+      { domain: 'seeker', count: 3 },
+      { domain: 'provider', count: 2 },
+    ]);
+  });
+
   it('gives the zoom a cluster click should go to', () => {
     const [item] = queryClusters(buildClusterIndex(pointsAtPixelOffset(12, 60), { maxZoom: 22 }), around(12));
     expect(item.kind === 'cluster' && item.expansionZoom).toBeGreaterThan(12);
