@@ -32,6 +32,8 @@ interface ActionModalProps {
   actionSchema: DotActionSchema;
   onSubmit: (formData: Record<string, unknown>) => void;
   loading?: boolean;
+  /** Values to re-seed the form with, e.g. after a failed submit. Must be stable. */
+  initialData?: Record<string, unknown>;
   /**
    * Minor ward on a guardian-gated domain: ticking the consent submits, so
    * ActionHandler's guardian confirm and OTP flow starts without a separate
@@ -41,6 +43,7 @@ interface ActionModalProps {
 }
 
 const ACTION_FORM_ID = 'action-requirement-form';
+const CONSENT_ID = 'consent-acknowledge';
 
 // Subtitle i18n keys per known action; others use
 // actions.modal_subtitle_fallback with the action title.
@@ -58,6 +61,7 @@ export function ActionModal({
   actionSchema,
   onSubmit,
   loading = false,
+  initialData,
   minor = false,
 }: ActionModalProps) {
   const { t } = useTranslation();
@@ -76,11 +80,16 @@ export function ActionModal({
   );
   const consentRequired = (actionSchema.reveals_pii_on_status?.length ?? 0) > 0;
   const [consentChecked, setConsentChecked] = useState(false);
+  const [consentAttempted, setConsentAttempted] = useState(false);
+  // Read at submit time: a minor's tick submits in the same event, before state updates.
+  const consentRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!open) return;
 
     setConsentChecked(false);
+    consentRef.current = false;
+    setConsentAttempted(false);
 
     const reqSchema = actionSchema.requirement_schema;
     if (!reqSchema) {
@@ -97,11 +106,8 @@ export function ActionModal({
     }
   }, [open, actionSchema]);
 
-  const handleSubmit = (formData: Record<string, unknown>) => {
+  const submitPayload = (formData: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...formData };
-    // Submit is only reachable once consent is ticked (Confirm is gated on it;
-    // for minors the tick submits), so do not read the possibly stale
-    // `consentChecked`.
     if (consentRequired) {
       payload[ACTION_CONSENT_SENTINEL] = {
         acknowledged: true as const,
@@ -112,12 +118,23 @@ export function ActionModal({
     onSubmit(payload);
   };
 
+  // Confirm: a missing tick shows its message under the consent box instead.
+  const handleSubmit = (formData: Record<string, unknown>) => {
+    if (consentRequired && !consentRef.current) {
+      setConsentAttempted(true);
+      document.getElementById(CONSENT_ID)?.focus();
+      return;
+    }
+    submitPayload(formData);
+  };
+
   // Minor: the consent tick submits, via the form's native submit when there
   // is a form so validation runs.
   const handleMinorConsentTick = () => {
     const formEl = document.getElementById(ACTION_FORM_ID) as HTMLFormElement | null;
-    if (resolvedSchema && formEl) formEl.requestSubmit();
-    else handleSubmit({});
+    if (resolvedSchema && formEl) {
+      formEl.requestSubmit();
+    } else submitPayload({});
   };
 
   const formContent = (
@@ -126,7 +143,9 @@ export function ActionModal({
         <SchemaForm
           id={ACTION_FORM_ID}
           schema={resolvedSchema}
+          formData={initialData}
           hideSubmit
+          disabled={loading}
           onSubmit={handleSubmit}
         />
       ) : (
@@ -135,8 +154,15 @@ export function ActionModal({
       {consentRequired && (
         <ConsentCheckbox
           text={consentText}
+          id={CONSENT_ID}
           checked={consentChecked}
+          error={
+            consentAttempted && !consentChecked
+              ? t('actions.consent_required_error', 'Tick the box to agree before you confirm.')
+              : undefined
+          }
           onCheckedChange={(v) => {
+            consentRef.current = v;
             setConsentChecked(v);
             if (v && minor) handleMinorConsentTick();
           }}
@@ -144,8 +170,6 @@ export function ActionModal({
       )}
     </>
   );
-
-  const consentGate = consentRequired && !consentChecked;
 
   const confirmButtonProps = resolvedSchema
     ? { type: 'submit' as const, form: ACTION_FORM_ID }
@@ -183,7 +207,7 @@ export function ActionModal({
       </Button>
       <Button
         {...confirmButtonProps}
-        disabled={loading || consentGate}
+        disabled={loading}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {loading ? t('actions.modal_processing') : t('actions.modal_confirm')}

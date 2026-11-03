@@ -40,6 +40,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import '@/components/map/providers';
 import { performAction, performActionsBulk, type Item } from '@/lib/item-api';
 import { BulkSingleError } from '@/lib/bulk';
+import { apiErrorMessage, isReadableServerMessage } from '@/lib/api-error';
 import { resolveBulkOutcome } from '@/lib/bulk-outcome';
 import { useCardSelection } from '@/hooks/use-card-selection';
 import { useNetworkConfigs, useResolvedNetwork, useNetworkConfig } from '@/hooks/use-network-config';
@@ -604,6 +605,8 @@ export function HomePage() {
   const browseSelection = useCardSelection();
   const [bulkConnectOpen, setBulkConnectOpen] = React.useState(false);
   const [bulkConnectBusy, setBulkConnectBusy] = React.useState(false);
+  // What the user typed in the bulk connect form, restored if a guardian step is cancelled.
+  const [bulkConnectDraft, setBulkConnectDraft] = React.useState<Record<string, unknown> | undefined>();
   // Minor ward bulk action: gated items come back GUARDIAN_OTP_REQUIRED after
   // one OTP goes to the guardian. Stash the payloads to resubmit with the code
   // (one guardian OTP dialog for the batch).
@@ -1215,6 +1218,7 @@ export function HomePage() {
         setBulkConnectOpen(false);
         return;
       }
+      setBulkConnectDraft(formData);
       // Minor ward: confirm before the bulk perform below sends the guardian OTP.
       if (
         !confirmed &&
@@ -1300,16 +1304,16 @@ export function HomePage() {
               total: outcome.total,
             }),
             {
-              description: outcome.firstError
+              description: isReadableServerMessage(outcome.firstError)
                 ? t('home.bulk_connect_first_error', { message: outcome.firstError })
-                : undefined,
+                : t('home.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.'),
             },
           );
           browseSelection.setSelected(outcome.failedIds);
         }
       } catch (err) {
         toast.error(t('home.bulk_connect_failed'), {
-          description: err instanceof Error ? err.message : undefined,
+          description: apiErrorMessage(err, t),
         });
       } finally {
         setBulkConnectBusy(false);
@@ -1612,7 +1616,11 @@ export function HomePage() {
   const bulkGuardianConfirmModal = (
     <Dialog
       open={!!bulkGuardianConfirm}
-      onOpenChange={(open) => { if (!open) setBulkGuardianConfirm(null); }}
+      onOpenChange={(open) => {
+        if (open) return;
+        setBulkGuardianConfirm(null);
+        setBulkConnectOpen(true);
+      }}
     >
       <DialogContent className="max-h-[90dvh] overflow-y-auto">
         <DialogHeader>
@@ -1627,7 +1635,13 @@ export function HomePage() {
           }}
         />
         <DialogFooter>
-          <Button variant="outline" onClick={() => setBulkGuardianConfirm(null)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setBulkGuardianConfirm(null);
+              setBulkConnectOpen(true);
+            }}
+          >
             {t('actions.guardian_confirm_cancel')}
           </Button>
           <Button
@@ -1670,6 +1684,7 @@ export function HomePage() {
                 succeeded: env2.summary.succeeded,
                 total: env2.summary.succeeded + otherFailedIds.length,
               }),
+              { description: t('home.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.') },
             );
             browseSelection.setSelected(otherFailedIds);
           } else {
@@ -1681,8 +1696,9 @@ export function HomePage() {
         // Still failing (wrong/expired code, throttled): throw a classified
         // error so GuardianOtpDialog shows it inline and stays open.
         const firstFail = env2.results.find((r) => r.status === 'error');
-        const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
-        throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
+        const failed = firstFail as { error?: string; message?: string } | undefined;
+        const code = guardianOtpErrorOf(failed) ?? failed?.error ?? 'UNKNOWN';
+        throw new BulkSingleError(code, failed?.message ?? '', 422);
       }}
     />
   );
@@ -2139,7 +2155,10 @@ export function HomePage() {
                         <button
                           type="button"
                           disabled={!connectAction || bulkConnectBusy}
-                          onClick={() => setBulkConnectOpen(true)}
+                          onClick={() => {
+                            setBulkConnectDraft(undefined);
+                            setBulkConnectOpen(true);
+                          }}
                           className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
                         >
                           {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
@@ -2151,6 +2170,7 @@ export function HomePage() {
                           onOpenChange={(open) => !open && setBulkConnectOpen(false)}
                           actionSchema={connectAction}
                           loading={bulkConnectBusy}
+                          initialData={bulkConnectDraft}
                           onSubmit={(fd) => handleBulkConnect(connectAction.action_type, fd)}
                         />
                       )}

@@ -69,6 +69,18 @@ describe('GuardianOtpStep', () => {
     expect(onVerified).not.toHaveBeenCalled();
   });
 
+  it('a server or network failure is not reported as an incorrect code', async () => {
+    verifyGuardian.mockRejectedValue({ isAxiosError: true, response: { status: 500, data: { error: 'CONSENT_WRITE_FAILED' } } });
+    await renderOtpStep(vi.fn(), vi.fn());
+
+    typeOtp('123456');
+
+    await waitFor(() =>
+      expect(screen.getByText('Something went wrong on our side. Please try again in a moment.')).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/incorrect code/i)).toBeNull();
+  });
+
   it('shows a friendly message on 429 throttling', async () => {
     verifyGuardian.mockRejectedValue({ isAxiosError: true, response: { status: 429 } });
     await renderOtpStep(vi.fn(), vi.fn());

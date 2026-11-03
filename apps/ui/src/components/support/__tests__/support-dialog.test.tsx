@@ -57,16 +57,37 @@ describe('SupportDialog', () => {
     expect(screen.getByRole('checkbox')).toBeInTheDocument();
   });
 
-  it('keeps submit disabled until details and consent are provided', async () => {
+  it('an incomplete Send shows each missing field under it and sends nothing', async () => {
     await renderDialog();
     const submit = screen.getByRole('button', { name: /send/i });
-    expect(submit).toBeDisabled();
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+
+    expect(screen.getByText('Please describe your issue')).toBeInTheDocument();
+    expect(screen.getByText('Please accept the consent to continue')).toBeInTheDocument();
+    expect(screen.getByLabelText('Details')).toHaveAttribute('aria-describedby', 'support-details-error');
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-invalid', 'true');
+    expect(submitSupport).not.toHaveBeenCalled();
 
     await userEvent.type(screen.getByLabelText('Details'), 'It broke');
-    expect(submit).toBeDisabled();
-
     await userEvent.click(screen.getByRole('checkbox'));
-    expect(submit).toBeEnabled();
+    expect(screen.queryByText('Please describe your issue')).toBeNull();
+    expect(screen.queryByText('Please accept the consent to continue')).toBeNull();
+  });
+
+  it('puts a server field rejection under that field, not raw validator text', async () => {
+    submitSupport.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 400, data: { message: 'body/email Invalid email address' } },
+    });
+    await renderDialog();
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(
+      await screen.findByText('Invalid entry. Please enter a valid Email. Example: name@example.com'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/body\/email/)).toBeNull();
   });
 
   it('submits the new payload and calls submitSupport', async () => {

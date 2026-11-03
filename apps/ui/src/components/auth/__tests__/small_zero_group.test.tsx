@@ -435,14 +435,31 @@ describe('toastGuardianSendError', () => {
     ).toBeInTheDocument();
   });
 
-  it('falls back to the caller-supplied message for any other HTTP status', async () => {
-    await toastAndFind(axiosErrorWithStatus(500));
+  it('falls back to the caller-supplied message for a 4xx without a readable message', async () => {
+    await toastAndFind(axiosErrorWithStatus(400));
 
     expect(await screen.findByText('Could not send the code.')).toBeInTheDocument();
   });
 
-  it('falls back to the caller-supplied message for a non-axios failure', async () => {
+  it('says the server failed for a 5xx, never the raw axios text', async () => {
+    await toastAndFind(axiosErrorWithStatus(500));
+
+    expect(
+      await screen.findByText('Something went wrong on our side. Please try again in a moment.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/request failed/i)).toBeNull();
+  });
+
+  it('says the server could not be reached for a network failure', async () => {
     await toastAndFind(new TypeError('network down'));
+
+    expect(
+      await screen.findByText("Couldn't reach the server. Check your connection and try again."),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to the caller-supplied message for any other non-axios failure', async () => {
+    await toastAndFind(new Error('boom'));
 
     expect(await screen.findByText('Could not send the code.')).toBeInTheDocument();
   });

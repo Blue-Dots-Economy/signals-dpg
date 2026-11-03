@@ -147,7 +147,8 @@ describe('SchemaForm inline errors are gated on blur', () => {
     const user = userEvent.setup();
     render(<SchemaForm schema={schema} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />);
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText(/must have required property/i)).toBeInTheDocument();
+    expect(await screen.findByText('Name is required.')).toBeInTheDocument();
+    expect(screen.queryByText(/must have required property/i)).toBeNull();
   });
 
   it('still blocks submit while a value is invalid', async () => {
@@ -233,8 +234,8 @@ describe('conditionally required fields (if/then), e.g. licensed → Licence Num
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(submit).not.toHaveBeenCalled();
-    expect(await screen.findByText(/must have required property 'Licence Number'/)).toBeInTheDocument();
-    expect(screen.getByText(/must have required property 'Licence Type'/)).toBeInTheDocument();
+    expect(await screen.findByText('Licence Number is required.')).toBeInTheDocument();
+    expect(screen.getByText('Licence Type is required.')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/"then"/);
   });
 });

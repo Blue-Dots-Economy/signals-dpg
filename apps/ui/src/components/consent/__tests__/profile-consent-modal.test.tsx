@@ -10,11 +10,16 @@ describe('ProfileConsentModal — adult', () => {
     const onAccept = vi.fn();
     render(<ProfileConsentModal open statement={STATEMENT} onAccept={onAccept} />);
 
+    // Never disabled: an unticked click says what to do and accepts nothing.
     const accept = screen.getByRole('button', { name: /accept & continue/i });
-    expect(accept).toBeDisabled();
+    expect(accept).toBeEnabled();
+    await userEvent.click(accept);
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(screen.getByText('Tick the box to agree before you continue.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-invalid', 'true');
 
     await userEvent.click(screen.getByRole('checkbox'));
-    expect(accept).toBeEnabled();
+    expect(screen.queryByText('Tick the box to agree before you continue.')).toBeNull();
 
     await userEvent.click(accept);
     expect(onAccept).toHaveBeenCalledOnce();
@@ -29,7 +34,8 @@ describe('ProfileConsentModal — minor', () => {
     // Age isn't surfaced up front — the ordinary consent title + checkbox show.
     expect(screen.getByText(/confirm your profile consent/i)).toBeInTheDocument();
     const accept = screen.getByRole('button', { name: /accept & continue/i });
-    expect(accept).toBeDisabled();
+    await userEvent.click(accept);
+    expect(screen.queryByText(/under 18/i)).toBeNull();
 
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(accept);
@@ -58,6 +64,6 @@ describe('ProfileConsentModal — minor', () => {
     rerender(<ProfileConsentModal open={false} minor statement={STATEMENT} onAccept={onAccept} />);
     rerender(<ProfileConsentModal open minor statement={STATEMENT} onAccept={onAccept} />);
     expect(screen.queryByRole('button', { name: /verify with guardian/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /accept & continue/i })).toBeDisabled();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-checked', 'false');
   });
 });

@@ -419,7 +419,7 @@ describe('SupportDialog', () => {
 
   it('guards a submit that bypasses the disabled button: missing details', async () => {
     renderSupportDialog();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
 
     fireEvent.submit(supportForm());
 

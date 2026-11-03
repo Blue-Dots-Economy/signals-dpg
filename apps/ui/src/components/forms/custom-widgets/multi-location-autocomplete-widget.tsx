@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { WidgetProps } from '@rjsf/utils';
+import { errorId, type WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
@@ -53,6 +53,7 @@ interface RowComboboxProps {
   value: string;
   disabled: boolean;
   hasError: boolean;
+  errorDescribedBy?: string;
   suggestions: GeoSuggestion[];
   open: boolean;
   onInput: (next: string) => void;
@@ -70,6 +71,7 @@ function RowCombobox({
   value,
   disabled,
   hasError,
+  errorDescribedBy,
   suggestions,
   open,
   onInput,
@@ -103,6 +105,7 @@ function RowCombobox({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
+        {...(hasError ? { 'aria-invalid': true, 'aria-describedby': errorDescribedBy } : {})}
         className={cn(hasError && 'border-destructive')}
         onChange={(e) => onInput(e.target.value)}
         onKeyDown={onKeyDown}
@@ -148,6 +151,7 @@ export function MultiLocationAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   schema,
   rawErrors,
   registry,
@@ -334,6 +338,7 @@ export function MultiLocationAutocompleteWidget({
               value={row.name}
               disabled={isDisabled}
               hasError={Boolean(rawErrors && rawErrors.length > 0)}
+              errorDescribedBy={errorId(id)}
               suggestions={search.suggestions}
               open={search.open}
               onInput={(next) => handleInput(index, next)}
@@ -341,7 +346,10 @@ export function MultiLocationAutocompleteWidget({
               onBlurClose={() => {
                 const ref = refsArray.current[index];
                 if (ref) {
-                  ref.blur = window.setTimeout(() => updateSearch(index, { open: false }), 150);
+                  ref.blur = window.setTimeout(() => {
+                    updateSearch(index, { open: false });
+                    onBlur(id, value);
+                  }, 150);
                 }
               }}
               onChoose={(s) => choose(index, s)}
@@ -368,10 +376,6 @@ export function MultiLocationAutocompleteWidget({
       >
         + Add city
       </button>
-
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
-      )}
     </div>
   );
 }

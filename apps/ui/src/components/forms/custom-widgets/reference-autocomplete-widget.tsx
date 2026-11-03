@@ -1,5 +1,5 @@
 import * as React from 'react';
-import type { WidgetProps } from '@rjsf/utils';
+import { errorId, type WidgetProps } from '@rjsf/utils';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { useSuggestionKeyboard } from './use-suggestion-keyboard';
@@ -131,10 +131,12 @@ export function ReferenceAutocompleteWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   rawErrors,
   placeholder,
   options,
 }: WidgetProps) {
+  const invalid = Boolean(rawErrors && rawErrors.length > 0);
   const opts = options as
     | { source?: string; subtitleFields?: string[] }
     | undefined;
@@ -231,12 +233,16 @@ export function ReferenceAutocompleteWidget({
         aria-controls={listboxId}
         aria-autocomplete="list"
         aria-activedescendant={activeDescendantId}
-        className={cn(rawErrors && rawErrors.length > 0 && 'border-destructive')}
+        {...(invalid ? { 'aria-invalid': true, 'aria-describedby': errorId(id) } : {})}
+        className={cn(invalid && 'border-destructive')}
         onChange={(e) => handleInput(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(suggestions.length > 0)}
         onBlur={() => {
-          blurRef.current = window.setTimeout(() => setOpen(false), 150);
+          blurRef.current = window.setTimeout(() => {
+            setOpen(false);
+            onBlur(id, text);
+          }, 150);
         }}
       />
       {open && suggestions.length > 0 && (
@@ -272,9 +278,6 @@ export function ReferenceAutocompleteWidget({
             );
           })}
         </ul>
-      )}
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
       )}
     </div>
   );
