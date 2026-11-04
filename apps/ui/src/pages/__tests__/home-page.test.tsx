@@ -219,7 +219,7 @@ const browsedDomains = () =>
     browseCalls.filter((c) => c.enabled && c.domainId !== null).map((c) => c.domainId as string),
   );
 const markerCalls: MarkerCall[] = [];
-const totalsCalls: { domainIds: string[]; enabled: boolean }[] = [];
+const totalsCalls: { domainIds: string[]; enabled: boolean; anchors: (string | undefined)[] }[] = [];
 const requestBrowserLocation = vi.fn();
 const fetchNextPage = vi.fn();
 const preferredSources: string[] = [];
@@ -363,8 +363,13 @@ vi.mock('@/hooks/use-browse-totals', () => ({
     _filters: Record<string, unknown>,
     _search: string,
     enabled: boolean,
+    anchorFor?: (domain: string) => string | undefined,
   ) => {
-    totalsCalls.push({ domainIds: domains.map((d) => d.id), enabled });
+    totalsCalls.push({
+      domainIds: domains.map((d) => d.id),
+      enabled,
+      anchors: domains.map((d) => anchorFor?.(d.id)),
+    });
     return { total: 0, mappable: 0, notMappable: 0, isLoading: false };
   },
 }));
@@ -681,6 +686,26 @@ describe('HomePage — no listing request before sign-in is known', () => {
     ]);
     expect(asked.has('seeker')).toBe(false);
     expect(asked.size).toBeGreaterThan(0);
+  });
+
+  it('sends no listing request before the active profile is picked on a fresh sign-in', async () => {
+    signedInSeeker();
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
+    const providerTotals = totalsCalls
+      .filter((c) => c.enabled)
+      .flatMap((c) => c.domainIds.map((id, i) => ({ id, anchor: c.anchors[i] })))
+      .filter((c) => c.id === 'provider');
+    expect(providerTotals.length).toBeGreaterThan(0);
+    expect(providerTotals.every((c) => c.anchor === 'me-1')).toBe(true);
+    const providerList = browseCalls.filter((c) => c.enabled && c.domainId === 'provider');
+    expect(providerList.every((c) => c.opts?.anchorItemId === 'me-1')).toBe(true);
+  });
+
+  it('does not wait forever for a signed-in user with no profiles', async () => {
+    state.myItems = [];
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
   });
 
   it('starts at once for a visitor, without waiting on own profiles', () => {

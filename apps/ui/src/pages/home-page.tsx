@@ -649,7 +649,6 @@ export function HomePage() {
   // Settled = resolved either way (fail-open: an error yields an empty set, so
   // the gate can still prompt). Signed-out users resolve immediately.
   const profilesResolved = !user || myItemsFetched;
-  const browseReady = !authLoading && profilesResolved;
   const consentLoaded = !user || consentQuery.isSuccess || consentQuery.isError;
   const queryClient = useQueryClient();
 
@@ -686,6 +685,7 @@ export function HomePage() {
   // my-profiles settle. The ref stops a background refetch from resetting a
   // manual selection.
   const restoredForNetwork = React.useRef<string | null>(null);
+  const [profileRestoredFor, setProfileRestoredFor] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!user) {
       // Signed out: clear selection and any open consent gate; allow restore
@@ -693,11 +693,13 @@ export function HomePage() {
       setActiveProfileId(null);
       setPendingConsentProfileId(null);
       restoredForNetwork.current = null;
+      setProfileRestoredFor(null);
       return;
     }
     if (!network || !myItemsFetched) return;
     if (restoredForNetwork.current === network.id) return;
     restoredForNetwork.current = network.id;
+    setProfileRestoredFor(network.id);
 
     const storedId = getStoredActiveProfileId(network.id);
     if (storedId && myItems.some((p) => p.item_id === storedId)) {
@@ -710,6 +712,9 @@ export function HomePage() {
       clearStoredActiveProfileId(network.id);
     }
   }, [user, network, myItemsFetched, myItems]);
+
+  const browseReady =
+    !authLoading && (!user || (myItemsFetched && profileRestoredFor === network?.id));
 
   const myItem = React.useMemo(() => {
     if (!myItems.length) return null;
