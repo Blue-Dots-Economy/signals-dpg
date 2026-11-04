@@ -19,12 +19,14 @@ function markerInBbox(
   m: Marker,
   bbox: { minLat: number; minLng: number; maxLat: number; maxLng: number },
 ): boolean {
+  const crossesMeridian = bbox.minLng > bbox.maxLng;
   return (m.item_locations ?? []).some(
     (l) =>
       l.lat >= bbox.minLat &&
       l.lat <= bbox.maxLat &&
-      l.lng >= bbox.minLng &&
-      l.lng <= bbox.maxLng,
+      (crossesMeridian
+        ? l.lng >= bbox.minLng || l.lng <= bbox.maxLng
+        : l.lng >= bbox.minLng && l.lng <= bbox.maxLng),
   );
 }
 const MAP_CACHE_TTL_SECONDS = 90;
@@ -163,7 +165,9 @@ export function useMapMarkers(
           lastTruncated: heldRef.current.truncated,
         });
   let effectiveBbox: RawBbox | null = null;
-  if (rawBbox) effectiveBbox = needsRefetch ? expandBboxForFetch(rawBbox) : heldRef.current!.bbox;
+  if (rawBbox && !needsRefetch) effectiveBbox = heldRef.current!.bbox;
+  else if (rawBbox) effectiveBbox = heldRef.current?.truncated ? rawBbox : expandBboxForFetch(rawBbox);
+  const effectiveIsPadded = rawBbox !== null && effectiveBbox !== rawBbox;
 
   // The bbox path fetches `cap + 1`, so a total exactly equal to the cap still
   // reads as complete. The radius path keeps the flat `MAP_FETCH_LIMIT`.
@@ -269,13 +273,14 @@ export function useMapMarkers(
     const last = lastDataRef.current.get(domainId);
     return !r.isError && last?.search === search ? last.data : undefined;
   });
-  const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; markers: Marker[] } | null>(null);
+  const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; cap: number; markers: Marker[] } | null>(null);
   const dataChanged =
     markersRef.current === null ||
+    markersRef.current.cap !== cap ||
     markersRef.current.data.length !== dataList.length ||
     dataList.some((d, i) => d !== markersRef.current!.data[i]);
   if (dataChanged) {
-    markersRef.current = { data: dataList, markers: dataList.flatMap((d) => d?.markers ?? []) };
+    markersRef.current = { data: dataList, cap, markers: dataList.flatMap((d) => d?.markers.slice(0, cap) ?? []) };
   }
   const markers = markersRef.current!.markers;
   const dataSignature = results.map((r) => `${r.status}:${r.dataUpdatedAt}`).join('|');
@@ -307,7 +312,7 @@ export function useMapMarkers(
       truncated = truncated || data.meta.total > cap;
       // For a capped answer this on-screen count is a lower bound; the caller shows it as "N+".
       total += shownBbox
-        ? data.markers.filter((m) => markerInBbox(m, shownBbox)).length
+        ? data.markers.slice(0, cap).filter((m) => markerInBbox(m, shownBbox)).length
         : data.meta.total;
     }
     return { total, partial, truncated };
@@ -317,6 +322,7 @@ export function useMapMarkers(
   const effectiveBboxSignature = effectiveBbox
     ? `${effectiveBbox.minLat},${effectiveBbox.minLng},${effectiveBbox.maxLat},${effectiveBbox.maxLng}`
     : null;
+  const [, rerenderForUnpaddedFetch] = React.useReducer((n: number) => n + 1, 0);
   React.useEffect(() => {
     if (!effectiveBbox || results.length === 0) return;
     if (results.some((r) => r.isLoading || r.isError)) return;
@@ -327,6 +333,8 @@ export function useMapMarkers(
       empty: markers.length === 0,
       cap,
     };
+    // A capped answer for the padded area may have left out listings on screen; fetch the view alone.
+    if (summary.truncated && effectiveIsPadded) rerenderForUnpaddedFetch();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature capture the identity of effectiveBbox/results for this effect
   }, [effectiveBboxSignature, dataSignature, summary.truncated]);
 

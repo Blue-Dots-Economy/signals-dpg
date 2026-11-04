@@ -290,15 +290,15 @@ describe('useMapMarkers', () => {
       markers: [marker('a', 'student')],
     });
 
-    const { result, rerender } = renderHook(
+    const { rerender } = renderHook(
       ({ vp }: { vp: typeof bboxViewport }) => useMapMarkers(network, [domains[0]], vp),
       { wrapper, initialProps: { vp: bboxViewport } },
     );
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(fetchNetworkMarkers).toHaveBeenCalledTimes(1);
+    // A capped answer for the padded area is fetched again for the view alone.
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
 
     rerender({ vp: containedBbox });
-    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(3));
   });
 
   it('refetches a contained zoom-in when the last result was EMPTY', async () => {
@@ -806,6 +806,52 @@ describe('useMapMarkers — the count matches what is on screen (N4)', () => {
 
     await waitFor(() => expect(result.current.truncated).toBe(true));
     expect(result.current.total).toBe(3);
+  });
+
+  it('counts the markers on screen when the view crosses the 180° meridian', async () => {
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 3, limit: 1001, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [at('east', 10, 120), at('west', 10, -175), at('outside', 10, 0)],
+    });
+    const crossing = { lat: 10, lng: 150, radiusMeters: 5000000, minLat: -40, minLng: 100, maxLat: 60, maxLng: -170, zoom: 3 };
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], crossing), { wrapper });
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.total).toBe(2);
+  });
+
+  it('draws no more than the cap from a capped answer', async () => {
+    vi.mocked(capForZoom).mockReturnValue(4);
+    vi.mocked(fetchNetworkMarkers).mockResolvedValue({
+      meta: { total: 20000, limit: 5, offset: 0, partial: false, unavailable_instances: [] },
+      markers: [at('a', 19.0, 72.0), at('b', 19.01, 72.0), at('c', 19.02, 72.0), at('d', 19.03, 72.0), at('e', 19.04, 72.0)],
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], cityViewport), { wrapper });
+
+    await waitFor(() => expect(result.current.truncated).toBe(true));
+    expect(result.current.markers).toHaveLength(4);
+    vi.mocked(capForZoom).mockReset();
+  });
+
+  it('fetches the visible area alone when the padded fetch is capped, and stops saying "zoom in" once it fits', async () => {
+    vi.mocked(fetchNetworkMarkers).mockImplementation(async (query) => {
+      const padded = (query as { min_lat?: number }).min_lat !== cityViewport.minLat;
+      return padded
+        ? { meta: { total: 20000, limit: 1001, offset: 0, partial: false, unavailable_instances: [] }, markers: [at('a', 19.0, 72.0)] }
+        : { meta: { total: 2, limit: 1001, offset: 0, partial: false, unavailable_instances: [] }, markers: [at('a', 19.0, 72.0), at('b', 19.05, 72.05)] };
+    });
+
+    const { result } = renderHook(() => useMapMarkers(network, [domains[0]], cityViewport), { wrapper });
+
+    await waitFor(() => expect(fetchNetworkMarkers).toHaveBeenCalledTimes(2));
+    expect(fetchNetworkMarkers).toHaveBeenLastCalledWith(
+      expect.objectContaining({ min_lat: 18.9, max_lat: 19.1, min_lng: 71.9, max_lng: 72.1 }),
+      expect.anything(),
+    );
+    await waitFor(() => expect(result.current.truncated).toBe(false));
+    expect(result.current.total).toBe(2);
   });
 
   it('does not structurally share marker answers across a refetch of the same key', async () => {

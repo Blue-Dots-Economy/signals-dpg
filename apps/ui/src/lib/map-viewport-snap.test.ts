@@ -217,11 +217,11 @@ describe('clampBbox', () => {
     });
   });
 
-  it('clamps latitudes past the poles', () => {
+  it('clamps latitudes to the furthest north and south the map can show', () => {
     expect(clampBbox({ minLat: -120, minLng: 10, maxLat: 120, maxLng: 20 })).toEqual({
-      minLat: -90,
+      minLat: -85.05112878,
       minLng: 10,
-      maxLat: 90,
+      maxLat: 85.05112878,
       maxLng: 20,
     });
   });
@@ -260,9 +260,9 @@ describe('expandBboxForFetch', () => {
 
   it('clamps a padded world-wide bbox to valid coordinates', () => {
     expect(expandBboxForFetch({ minLat: -80, minLng: -179, maxLat: 80, maxLng: 179 })).toEqual({
-      minLat: -90,
+      minLat: -85.05112878,
       minLng: -180,
-      maxLat: 90,
+      maxLat: 85.05112878,
       maxLng: 180,
     });
   });

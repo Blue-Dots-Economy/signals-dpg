@@ -142,6 +142,9 @@ export interface RefetchDecisionInput {
   lastTruncated: boolean;
 }
 
+/** The furthest north or south a web map can show; a pole-to-pole box also fails the API's geography filter. */
+const MAX_MAP_LAT = 85.05112878;
+
 /**
  * Clamp a viewport bbox to real-world coordinates.
  *
@@ -152,8 +155,8 @@ export interface RefetchDecisionInput {
  * collapses to the whole world.
  */
 export function clampBbox(bbox: RawBbox): RawBbox {
-  const minLat = Math.max(-90, Math.min(90, bbox.minLat));
-  const maxLat = Math.max(-90, Math.min(90, bbox.maxLat));
+  const minLat = Math.max(-MAX_MAP_LAT, Math.min(MAX_MAP_LAT, bbox.minLat));
+  const maxLat = Math.max(-MAX_MAP_LAT, Math.min(MAX_MAP_LAT, bbox.maxLat));
   const spansWorld = bbox.maxLng - bbox.minLng >= 360 || bbox.minLng > bbox.maxLng;
   return spansWorld
     ? { minLat, minLng: -180, maxLat, maxLng: 180 }
