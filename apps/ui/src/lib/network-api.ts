@@ -3,7 +3,7 @@ import type { DotNetworkSchema } from '../engine/types';
 import { createApiClient } from './api-client';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 
-interface CachedSchemaEntry {
+export interface CachedSchemaEntry {
   cache_key: string;
   kind: 'network_config' | 'domain_item_schema' | 'instance_custom_item_schema' | 'item_schema_url' | 'consent_config';
   network?: string;
@@ -347,12 +347,30 @@ export async function fetchDiscover(
   };
 }
 
-export async function fetchNetworkConfigs(): Promise<DotNetworkSchema[]> {
+/** Every schema entry this deployment serves, across all its networks. */
+export async function fetchSchemaEntries(): Promise<CachedSchemaEntry[]> {
   const response = await networkApiClient.get<CachedSchemaEntry[]>(
     '/api/v1/network/schemas'
   );
-  const configs = response.data.filter((e) => e.kind === 'network_config');
-  return configs.map((c) => c.schema);
+  return response.data;
+}
+
+export function networkConfigsIn(entries: CachedSchemaEntry[]): DotNetworkSchema[] {
+  return entries.filter((e) => e.kind === 'network_config').map((e) => e.schema);
+}
+
+/** @throws Error when `entries` holds no config for `networkId`. */
+export function networkConfigIn(
+  entries: CachedSchemaEntry[],
+  networkId: string
+): DotNetworkSchema {
+  const config = entries.find(
+    (e) => e.kind === 'network_config' && e.network === networkId
+  );
+  if (!config) {
+    throw new Error(`Network "${networkId}" not found`);
+  }
+  return config.schema;
 }
 
 export async function fetchNetworkConfig(
@@ -362,9 +380,5 @@ export async function fetchNetworkConfig(
     '/api/v1/network/schemas',
     { params: { network: networkId } }
   );
-  const config = response.data.find((e) => e.kind === 'network_config');
-  if (!config) {
-    throw new Error(`Network "${networkId}" not found`);
-  }
-  return config.schema;
+  return networkConfigIn(response.data, networkId);
 }
