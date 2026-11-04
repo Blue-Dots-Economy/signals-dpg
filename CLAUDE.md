@@ -28,7 +28,7 @@ Other load-bearing docs:
 - `.claude/rules/database-conventions.md` — migration editing rule, partition pruning, `user.tags`, PII location jitter. Triggers on routes/services/utils, `packages/database`, `apps/api/db`.
 - `.claude/rules/env-vars.md` — the two-places-must-change-together rule for new env vars. Triggers on `packages/config/src/secrets.ts` and `turbo.json`.
 
-One rule has no `paths` and loads in every session: `.claude/rules/pull-requests.md` — one PR per block (packages, api, ui, infra/config/docs), linked as a GitHub stack with `gh stack`; a combined PR only for a small change and only with the user's explicit approval; CI started by hand on stacked PRs.
+One rule has no `paths` and loads in every session: `.claude/rules/pull-requests.md` — one PR per block (api, ui, infra/config), with package and doc changes in the PR of the block they belong to, linked as a GitHub stack with `gh stack`; a combined PR only for a small change and only with the user's explicit approval; CI started by hand on stacked PRs.
 
 **Nested docs.** Auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (**no longer auth** — PII crypto only, since #517), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
 

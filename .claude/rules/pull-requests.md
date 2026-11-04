@@ -8,15 +8,29 @@ Each block is one PR. Listed bottom to top; this is also the stack order.
 
 | # | Block | Holds |
 | --- | --- | --- |
-| 1 | Shared packages | `packages/*` |
-| 2 | API | `apps/api`, including `apps/api/db`, `apps/api/drizzle` and the root `openapi.json` that `spec:dump` regenerates |
-| 3 | UI | `apps/ui` |
-| 4 | Infra, config and docs | `infra/`, `docker/`, `local-setup/`, `local-mail-sink/`, `scripts/`, `docs/`, `draft/`, `examples/`, `.github/`, root files, `AGENTS.md` and the root `CLAUDE.md` |
+| 1 | API | `apps/api`, including `apps/api/db`, `apps/api/drizzle` and the root `openapi.json` that `spec:dump` regenerates |
+| 2 | UI | `apps/ui` |
+| 3 | Infra and config | `infra/`, `docker/`, `local-setup/`, `local-mail-sink/`, `scripts/`, `examples/`, `.github/` and root files |
 
 - Open a PR only for the blocks the change touches.
 - A block's own tests and its own `CLAUDE.md` go in that block's PR.
 - A block may depend only on blocks below it. Each PR must typecheck, lint and pass its tests on top of the PRs below it.
-- `pnpm-lock.yaml` goes with the lowest PR whose `package.json` changes.
+
+### Shared packages
+
+Shared packages (`packages/*`) have no PR of their own. A package change goes in the lowest PR of the stack whose block uses it, so every PR above builds on it. For example, a `packages/config` change used by both the API and the UI goes in the API PR.
+
+- A change that touches only `packages/*` is one PR.
+- `pnpm-lock.yaml` goes with the PR that holds the `package.json` change.
+
+### Docs
+
+Docs (`docs/`, `draft/`, `AGENTS.md`, the root `CLAUDE.md`) have no PR of their own. Each doc change goes in the PR of the block it describes:
+
+- A doc about one block (for example an API runbook in `docs/operations/`) goes in that block's PR.
+- A doc about infra or config goes in the infra and config PR.
+- A doc that spans several blocks, or belongs to none (a cross-cutting design, `AGENTS.md`, the root `CLAUDE.md`), goes in the top PR of the stack.
+- A change that touches only docs is one PR.
 
 ## One PR for several blocks
 
