@@ -604,6 +604,12 @@ describe('MapView — loading, empty state and maximize', () => {
     expect(onSpotGroupSelect).toHaveBeenCalledWith(SPOT_GROUP);
   });
 
+  it('labels a marker "Item" when its title field holds an object', async () => {
+    render(<MapView schema={NAME_SCHEMA} items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: { first: 'A' } })]} />);
+
+    expect(await screen.findByRole('button', { name: 'Item' })).toBeInTheDocument();
+  });
+
   it('keeps same-coordinate items at their shared coordinate', async () => {
     render(
       <MapView

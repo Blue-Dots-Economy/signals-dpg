@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Map as MapIcon } from 'lucide-react';
 
 /** Tells the viewer the list shows one same-spot group from the map, with a way back. */
-export function SpotGroupBanner({ exact, onBackToMap }: { exact: boolean; onBackToMap: () => void }) {
+export function SpotGroupBanner({ exact, onBackToMap }: Readonly<{ exact: boolean; onBackToMap: () => void }>) {
   const { t } = useTranslation();
   return (
     <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm">

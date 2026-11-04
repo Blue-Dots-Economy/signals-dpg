@@ -397,7 +397,7 @@ interface PointMarkerProps {
   marker: MapMarker;
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
-  resolveIcon?: MapProviderProps['resolveIcon'];
+  resolveIcon?: NonNullable<MapProviderProps['resolveIcon']>;
 }
 
 const PointMarker = React.memo(function PointMarker({
@@ -423,8 +423,8 @@ interface ClusterLayerProps {
   markers: MapMarker[];
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
-  resolveIcon?: MapProviderProps['resolveIcon'];
-  onSpotGroupSelect?: MapProviderProps['onSpotGroupSelect'];
+  resolveIcon?: NonNullable<MapProviderProps['resolveIcon']>;
+  onSpotGroupSelect?: NonNullable<MapProviderProps['onSpotGroupSelect']>;
 }
 
 /** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
@@ -434,7 +434,7 @@ function ClusterLayer({
   onMarkerClick,
   resolveIcon,
   onSpotGroupSelect,
-}: ClusterLayerProps) {
+}: Readonly<ClusterLayerProps>) {
   const map = useMap();
   const view = useLeafletClusterView();
   const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });

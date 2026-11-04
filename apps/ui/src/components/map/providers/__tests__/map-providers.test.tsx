@@ -791,7 +791,7 @@ describe('LeafletMapProvider', () => {
 
     rerender(leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>{m.label}</p>, onMarkerClick: () => {} }));
 
-    expect(recordsOf('Marker').length).toBe(before);
+    expect(recordsOf('Marker')).toHaveLength(before);
   });
 
   it('shows the latest renderPopup in an open popup without re-rendering the pin', () => {
@@ -803,7 +803,7 @@ describe('LeafletMapProvider', () => {
     rerender(leafletElement({ markers: [ALPHA], renderPopup: (m) => <p>new {m.label}</p> }));
 
     expect(screen.getByText('new Alpha Academy')).toBeInTheDocument();
-    expect(recordsOf('Marker').length).toBe(pinRenders);
+    expect(recordsOf('Marker')).toHaveLength(pinRenders);
   });
 
   it('stacks a bubble above the pins', async () => {

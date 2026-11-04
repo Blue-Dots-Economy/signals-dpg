@@ -78,9 +78,9 @@ interface MapViewProps {
    */
   onViewportChange?: (viewport: MapViewport) => void;
   /** See `MapProviderProps.renderSpotGroup`. */
-  renderSpotGroup?: MapProviderProps['renderSpotGroup'];
+  renderSpotGroup?: NonNullable<MapProviderProps['renderSpotGroup']>;
   /** See `MapProviderProps.onSpotGroupSelect`. */
-  onSpotGroupSelect?: MapProviderProps['onSpotGroupSelect'];
+  onSpotGroupSelect?: NonNullable<MapProviderProps['onSpotGroupSelect']>;
   /**
    * Overrides the empty-state text. A viewport-scoped map means "none in this
    * area", not "filtered out", so the home page passes an area message.
@@ -205,7 +205,7 @@ export function MapView({
       // Per-domain title first, then the single-schema heuristic, then 'Item'.
       const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
       const baseLabel =
-        resolvedLabel || (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
+        resolvedLabel || titleText(titleField ? item.data[titleField] : undefined);
 
       return locs.map(
         (p, i) =>
@@ -309,6 +309,11 @@ export function MapView({
       )}
     </div>
   );
+}
+
+function titleText(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return 'Item';
 }
 
 function findTitleField(schema: RJSFSchema): string | null {

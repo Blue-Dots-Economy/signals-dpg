@@ -162,11 +162,8 @@ export function useMapMarkers(
           paddedBbox: heldRef.current.bbox,
           lastTruncated: heldRef.current.truncated,
         });
-  const effectiveBbox: RawBbox | null = !rawBbox
-    ? null
-    : needsRefetch
-      ? expandBboxForFetch(rawBbox)
-      : heldRef.current!.bbox;
+  let effectiveBbox: RawBbox | null = null;
+  if (rawBbox) effectiveBbox = needsRefetch ? expandBboxForFetch(rawBbox) : heldRef.current!.bbox;
 
   // The bbox path fetches `cap + 1`, so a total exactly equal to the cap still
   // reads as complete. The radius path keeps the flat `MAP_FETCH_LIMIT`.
@@ -270,7 +267,7 @@ export function useMapMarkers(
       return r.data;
     }
     const last = lastDataRef.current.get(domainId);
-    return !r.isError && last && last.search === search ? last.data : undefined;
+    return !r.isError && last?.search === search ? last.data : undefined;
   });
   const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; markers: Marker[] } | null>(null);
   const dataChanged =

@@ -15,7 +15,7 @@ interface SpotGroupCardProps {
 }
 
 /** Explains a bubble that cannot split and offers its listings in the list. */
-export function SpotGroupCard({ group, formatDomain = formatDomainLabel, onView, onClose, className }: SpotGroupCardProps) {
+export function SpotGroupCard({ group, formatDomain = formatDomainLabel, onView, onClose, className }: Readonly<SpotGroupCardProps>) {
   const { t } = useTranslation();
   const n = group.count.toLocaleString();
   return (

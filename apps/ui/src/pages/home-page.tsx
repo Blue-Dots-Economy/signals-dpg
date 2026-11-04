@@ -1488,6 +1488,9 @@ export function HomePage() {
     switchViewMode('map');
   };
 
+  const spotGroupTitle = (group: OpenSpotGroup) =>
+    t(group.exact ? 'map.spot_title_exact' : 'map.spot_title_near', { n: group.count.toLocaleString() });
+
   const renderSpotGroupCard = (group: OpenSpotGroup, close?: () => void, className?: string) => (
     <SpotGroupCard
       group={group}
@@ -2251,13 +2254,7 @@ export function HomePage() {
                     onOpenChange={(open) => {
                       if (!open) setSheetSpot(null);
                     }}
-                    title={
-                      sheetSpot
-                        ? t(sheetSpot.exact ? 'map.spot_title_exact' : 'map.spot_title_near', {
-                            n: sheetSpot.count.toLocaleString(),
-                          })
-                        : ''
-                    }
+                    title={sheetSpot ? spotGroupTitle(sheetSpot) : ''}
                     contentClassName="max-w-xl"
                   >
                     <div className="p-6 pt-8">

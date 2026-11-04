@@ -98,35 +98,39 @@ export function queryClusters(index: MapClusterIndex, view: ClusterView): MapClu
       pushPoint((props as PointProps).id);
       continue;
     }
-    const clusterId = props.cluster_id;
-    const expansionZoom = index.tree.getClusterExpansionZoom(clusterId);
-    const [lng, lat] = feature.geometry.coordinates;
-    const bubble = {
-      kind: 'cluster' as const,
-      key: `c:${clusterId}`,
-      lat,
-      lng,
-      count: props.point_count,
-      breakdown: breakdownFromCounts(props.counts),
-      expansionZoom,
-      spot: null,
-    };
-    if (expansionZoom <= index.maxZoom) {
-      items.push(bubble);
-      continue;
-    }
-    const leaves = index.tree
-      .getLeaves(clusterId, Infinity)
-      .flatMap((leaf) => index.byId.get(leaf.properties.id) ?? []);
-    const groups = groupWithinPin(leaves, index.maxZoom);
-    if (groups.length === 1) items.push(spotBubble(groups[0], index.maxZoom));
-    else if (zoom < index.maxZoom) items.push(bubble);
-    else for (const group of groups) {
-      if (group.length === 1) pushPoint(group[0].id);
-      else items.push(spotBubble(group, index.maxZoom));
-    }
+    items.push(...clusterItems(index, props, feature.geometry.coordinates, zoom));
   }
   return items;
+}
+
+function clusterItems(
+  index: MapClusterIndex,
+  props: Supercluster.ClusterProperties & ClusterProps,
+  [lng, lat]: number[],
+  zoom: number,
+): MapClusterItem[] {
+  const clusterId = props.cluster_id;
+  const expansionZoom = index.tree.getClusterExpansionZoom(clusterId);
+  const bubble: MapClusterItem = {
+    kind: 'cluster',
+    key: `c:${clusterId}`,
+    lat,
+    lng,
+    count: props.point_count,
+    breakdown: breakdownFromCounts(props.counts),
+    expansionZoom,
+    spot: null,
+  };
+  if (expansionZoom <= index.maxZoom) return [bubble];
+  const leaves = index.tree
+    .getLeaves(clusterId, Infinity)
+    .flatMap((leaf) => index.byId.get(leaf.properties.id) ?? []);
+  const groups = groupWithinPin(leaves, index.maxZoom);
+  if (groups.length === 1) return [spotBubble(groups[0], index.maxZoom)];
+  if (zoom < index.maxZoom) return [bubble];
+  return groups.map((group): MapClusterItem =>
+    group.length === 1 ? { kind: 'point', key: `p:${group[0].id}`, marker: group[0] } : spotBubble(group, index.maxZoom),
+  );
 }
 
 /** Listings closer than this many screen pixels at the maximum zoom, about one pin across, form one same-spot group. */

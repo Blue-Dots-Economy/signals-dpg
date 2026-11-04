@@ -103,17 +103,23 @@ function resolveThemeColor(varName: string, fallback: string): string {
   return ctx.fillStyle;
 }
 
+function bubbleSize(count: number): number {
+  if (count < 10) return 38;
+  if (count < 100) return 44;
+  return 50;
+}
+
 /** The cluster bubble: the total in a `--primary` circle and, for several domains, a row of per-domain chips. */
 function ClusterBubble({
   count,
   breakdown,
   primary,
-}: {
+}: Readonly<{
   count: number;
   breakdown: DomainCount[];
   primary: string;
-}) {
-  const size = count < 10 ? 38 : count < 100 ? 44 : 50;
+}>) {
+  const size = bubbleSize(count);
   return (
     // AdvancedMarker anchors content bottom-centre; shift down so the bubble is centred on the point.
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', transform: 'translateY(50%)' }}>
@@ -489,7 +495,7 @@ function ClusterLayer({
   onMarkerClick,
   resolveIcon,
   resolveMarkerImage,
-}: ClusterLayerProps) {
+}: Readonly<ClusterLayerProps>) {
   const map = useMap();
   const view = useGoogleClusterView(map);
   const items = useMapClusters(markers, view, { maxZoom: CLUSTER_CLICK_MAX_ZOOM });
