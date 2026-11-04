@@ -281,7 +281,7 @@ describe('AuthProvider — a late session restore must not clobber a fresh login
     });
 
     await act(async () => {
-      await result.current.verifyOtp({ type: 'phone', value: '+919620388881' }, '123456');
+      await result.current.verifyOtp({ phoneNumber: '+919620388881' }, '123456');
     });
     await act(async () => {
       releaseRestore?.();
