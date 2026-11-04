@@ -2,7 +2,7 @@ import axios from 'axios';
 
 import { apiConfig } from './api-config';
 import { emitSessionExpired } from './auth-events';
-import { fetchBffSession, getCsrfToken } from './bff-session';
+import { currentBffSession, getCsrfToken } from './bff-session';
 
 export function createApiClient() {
   const client = axios.create({
@@ -23,10 +23,10 @@ export function createApiClient() {
       // React runs child effects before parent ones, so on a first login the
       // callback page's writes (e.g. the parked consent) can start before the
       // AuthProvider's `fetchBffSession()` has populated the token, and the
-      // write would get a 403. Awaiting here closes that race. `fetchBffSession`
+      // write would get a 403. Awaiting here closes that race. `currentBffSession`
       // uses `fetch`, not this client, so there is no recursion.
       if (!csrf) {
-        await fetchBffSession();
+        await currentBffSession();
         csrf = getCsrfToken();
       }
       if (csrf) config.headers['x-csrf-token'] = csrf;

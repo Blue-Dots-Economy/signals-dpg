@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const state = vi.hoisted(() => ({ token: null as string | null, fetches: 0 }));
 
 vi.mock('../bff-session', () => ({
-  fetchBffSession: async () => {
+  currentBffSession: async () => {
     state.fetches += 1;
     state.token = 'csrf-late';
     return { authenticated: true };
