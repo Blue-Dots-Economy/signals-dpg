@@ -129,6 +129,8 @@ type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['chil
  */
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
 
+const NO_DOMAINS: DotNetworkDomain[] = [];
+
 export function isWideViewport(viewport: MapViewport | null): boolean {
   if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
   return viewport.maxLng - viewport.minLng >= WIDE_VIEWPORT_LNG_SPAN_DEGREES;
@@ -560,7 +562,7 @@ function resolveRelevanceApplied(
 
 export function HomePage() {
   const { t } = useTranslation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isLoading: authLoading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
@@ -647,6 +649,7 @@ export function HomePage() {
   // Settled = resolved either way (fail-open: an error yields an empty set, so
   // the gate can still prompt). Signed-out users resolve immediately.
   const profilesResolved = !user || myItemsFetched;
+  const browseReady = !authLoading && profilesResolved;
   const consentLoaded = !user || consentQuery.isSuccess || consentQuery.isError;
   const queryClient = useQueryClient();
 
@@ -1003,7 +1006,13 @@ export function HomePage() {
   // The map fetches slim viewport markers per selected domain (empty selection
   // = all visible) and clusters them; free-text `search` and the facets are
   // applied server-side.
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
+  const mapMarkers = useMapMarkers(
+    network,
+    browseReady ? mapDomains : NO_DOMAINS,
+    mapViewport,
+    activeFieldFilters,
+    search,
+  );
 
   // Per-target-domain profile anchor: `anchorItemIdForTarget` consults the
   // interaction matrix to decide whether the active profile may anchor
@@ -1026,7 +1035,7 @@ export function HomePage() {
     mapDomains,
     activeFieldFilters,
     search,
-    viewMode === 'map',
+    viewMode === 'map' && browseReady,
     // The list's anchor too, or a typed query does not narrow this count.
     anchorFor,
   );
@@ -1119,7 +1128,9 @@ export function HomePage() {
       // `?domain=`, and fetching it wastes a request (or draws a 403 on the
       // anchor for a non-interacting domain).
       enabled:
-        selectedDomain !== null && visibleDomains.some((d) => d.id === selectedDomain),
+        browseReady &&
+        selectedDomain !== null &&
+        visibleDomains.some((d) => d.id === selectedDomain),
       ...browseHookOpts,
       anchorItemId: resolveSingleDomainAnchor(selectedDomain, anchorFor),
     },
@@ -1799,7 +1810,7 @@ export function HomePage() {
   // viewport count lives in its own pill.
   const contentCount = viewMode === 'map' ? browseTotals.total : singleDomainList.total;
   const contentLoading =
-    viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading;
+    !browseReady || (viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading);
 
   // Suppressed on an empty or loading list, where `BrowseEmptyState` or the
   // skeleton explains instead.
@@ -2156,7 +2167,7 @@ export function HomePage() {
                   // `selectedDomain === null` is the transient state before the
                   // default domain resolves; the feed is disabled, so show
                   // loading rather than "no listings".
-                  loading={singleDomainList.isLoading || selectedDomain === null}
+                  loading={!browseReady || singleDomainList.isLoading || selectedDomain === null}
                   emptyState={
                     <BrowseEmptyState
                       search={search}
@@ -2220,7 +2231,7 @@ export function HomePage() {
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
-                  loading={mapMarkers.isLoading}
+                  loading={!browseReady || mapMarkers.isLoading}
                   focusPoint={spotReturnView ?? userLocation}
                   focusZoom={spotReturnView?.zoom}
                   focusNonce={recenterNonce}
