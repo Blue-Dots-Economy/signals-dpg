@@ -28,6 +28,8 @@ Other load-bearing docs:
 - `.claude/rules/database-conventions.md` — migration editing rule, partition pruning, `user.tags`, PII location jitter. Triggers on routes/services/utils, `packages/database`, `apps/api/db`.
 - `.claude/rules/env-vars.md` — the two-places-must-change-together rule for new env vars. Triggers on `packages/config/src/secrets.ts` and `turbo.json`.
 
+One rule has no `paths` and loads in every session: `.claude/rules/pull-requests.md` — one PR per block (packages, api, ui, infra/config/docs), linked as a GitHub stack with `gh stack`; a combined PR only for a small change and only with the user's explicit approval; CI started by hand on stacked PRs.
+
 **Nested docs.** Auto-loaded when working inside their subtree — read the relevant one before making changes there: `apps/api/CLAUDE.md` (route auth wiring, config-cache patterns, notifications/support), `apps/api/src/services/metrics/README.md` (the recompute directionality model), `apps/ui/CLAUDE.md` (runtime-env config, theming/i18n, data fetching), `apps/ui/src/engine/README.md` (schema ref resolution), `packages/auth/CLAUDE.md` (**no longer auth** — PII crypto only, since #517), `packages/config/CLAUDE.md` (network/consent config loading), `packages/database/src/utils/README.md` (partition management vs query pruning).
 
 ## Core mental model
@@ -156,4 +158,4 @@ Six workflows, and the split between them is load-bearing: **`ci.yaml` checks, `
 
 ## Authoring pull requests
 
-When you open a PR, include an **In Plain Terms** section in the description: a short, jargon-free explanation a non-expert teammate can follow — what the problem was and what the change does, in everyday language — alongside the usual Summary / Release Notes. Skip it only for a pure chore with no behavioural effect. This lives here as a Claude authoring rule rather than in the GitHub PR template on purpose, so PRs opened from other tools/flows aren't forced through it. For release and promotion PRs, use the `release-pr-notes` skill from the `bluedots` plugin marketplace; it writes every release section, including Breaking changes / config and What users will notice.
+Split a change into one PR per block and stack them, as `.claude/rules/pull-requests.md` sets out. When you open a PR, include an **In Plain Terms** section in the description: a short, jargon-free explanation a non-expert teammate can follow — what the problem was and what the change does, in everyday language — alongside the usual Summary / Release Notes. Skip it only for a pure chore with no behavioural effect. This lives here as a Claude authoring rule rather than in the GitHub PR template on purpose, so PRs opened from other tools/flows aren't forced through it. For release and promotion PRs, use the `release-pr-notes` skill from the `bluedots` plugin marketplace; it writes every release section, including Breaking changes / config and What users will notice.
