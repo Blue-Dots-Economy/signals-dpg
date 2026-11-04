@@ -37,7 +37,7 @@ Also measure: one 70,000-marker answer compressed while three other requests are
 File: the entrypoint server block in `apps/ui/Dockerfile`.
 
 - `gzip on; gzip_vary on; gzip_comp_level 5; gzip_min_length 1024; gzip_types` for JS, CSS, JSON, SVG and plain text (HTML is always included).
-- `location ^~ /assets/` and `location ^~ /tourist/assets/`: `Cache-Control "public, max-age=31536000, immutable"`, `try_files $uri =404`, so a missing hashed file is a 404, not `index.html` cached for a year.
+- `location ^~ /assets/`: `Cache-Control "public, max-age=31536000, immutable"` on success only (no `always`), `try_files $uri =404`, so a missing hashed file is an uncached 404, not `index.html` cached for a year. The tourist variant serves its own `index.html` and `/assets/` from its own root, so the same rule covers it.
 - `location = /index.html` and the SPA fallback: `Cache-Control "no-cache"`.
 - Static `/config.js`: `Cache-Control "no-cache"`. The host-binding branch keeps `no-store`.
 - `/brand/`, `/reference/`, `analytics.js`: unchanged.
