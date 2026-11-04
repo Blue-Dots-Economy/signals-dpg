@@ -110,3 +110,25 @@ Record before/after response sizes on dev for the JS bundle, schemas and a large
 - Body: `Closes #880`, `Closes #881`, short plain words, no code details.
 - Must say plainly: on fast office Wi-Fi the gain is small; on mobile data, which is how most seekers open the site, it is large. Include the measured sizes (e.g. job-posting map data 1.5 MB → 0.27 MB).
 - Note that the API rejects more than 25,000 map markers today, so raising the map cap to 60–70k needs that limit raised too.
+
+## Results (local, 2026-11-04)
+
+Same port for both (Google Maps refuses other ports, so both used the same fallback), two alternating runs each, `/?view=map`:
+
+| | Before | After |
+|---|---|---|
+| API requests, signed out | 20 | 13 |
+| API requests, signed in | 29 | 20 |
+| Schemas / session checks (signed out) | 3 / 5 | 1 / 1 |
+| Discover + markers, signed in | 7 + 9, two waves | 3 + 4, one wave |
+| Consent 401 for visitors | yes | no |
+| API bytes over the wire, signed out | 4.09 MB | 0.48 MB |
+| API bytes over the wire, signed in | 2.04 MB | 0.36 MB |
+| Visitor: list feed starts | ~0.9 s | ~0.9 s |
+| Full map markers start | ~1.5 s | ~1.6 s |
+
+Locally everything is on loopback, so start times do not move; the gain is fewer and smaller requests, which matters on mobile data. Waiting for the session check costs visitors nothing measurable (it answers within ~10 ms of auth config).
+
+Compression: all job-posting markers 2,049,669 → 379,983 bytes (brotli 4); synthetic 70,000 markers 13.6 → 2.8 MB (~100 ms). Small requests during four large compressed answers: median 0.2–0.3 ms, worst cases the same as without compression. nginx (stock image, both variants and host-routed): main JS 2,555,289 → 758,272 bytes gzip, unpacks byte-identical.
+
+Browser check: list and counts on desktop and 390×844, signed in and out; map on 5173 (Google) desktop and mobile, signed in (own-profile centre, correct domains) and out (clusters); no "no listings" flash while waiting, no new console errors.
