@@ -3,8 +3,8 @@ import { redis } from '@api/db/secondary/redis';
 /**
  * Sweeps the item read caches for one (network, domain) after a mutation:
  * `local-item-fetch:*` (1 s TTL, item_fetch_cache.ts) and `item-count:*` /
- * `item-page:*` (network-config TTL, inter_instance_fetch.ts). The
- * inter-instance entries are the long-lived ones a user would notice.
+ * `item-page:*` / `marker-page:*` (network-config TTL, inter_instance_fetch.ts).
+ * The inter-instance entries are the long-lived ones a user would notice.
  */
 export async function invalidateItemFetchCache(
   network: string,
@@ -14,6 +14,7 @@ export async function invalidateItemFetchCache(
     `local-item-fetch:*${network}*${domain}*`,
     `item-count:${network}:${domain}:*`,
     `item-page:${network}:${domain}:*`,
+    `marker-page:${network}:${domain}:*`,
   ];
   await Promise.all(patterns.map(deleteByPattern));
 }
