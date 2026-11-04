@@ -164,6 +164,8 @@ server {
     index index.html;
     gzip on;
     gzip_vary on;
+    # Kong adds a Via header, and nginx does not gzip requests that carry one unless this is set.
+    gzip_proxied any;
     gzip_comp_level 5;
     gzip_min_length 1024;
     gzip_types text/css text/plain text/javascript application/javascript application/json image/svg+xml;
