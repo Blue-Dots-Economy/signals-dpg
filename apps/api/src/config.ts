@@ -39,6 +39,7 @@ export const apiConfig = {
   consent_support_email: networkRuntime.CONSENT_SUPPORT_EMAIL,
   allow_extra_schema_data: networkRuntime.ALLOW_EXTRA_SCHEMA_DATA,
   bulk_max_items: networkRuntime.BULK_MAX_ITEMS,
+  markers_max_limit: networkRuntime.MARKERS_MAX_LIMIT,
   export_max_rows: networkRuntime.EXPORT_MAX_ROWS,
   export_timezone: networkRuntime.EXPORT_TIMEZONE,
   export_rate_limit_per_hour: networkRuntime.EXPORT_RATE_LIMIT_PER_HOUR,

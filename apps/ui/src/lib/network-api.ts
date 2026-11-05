@@ -43,9 +43,6 @@ export function resolveProfilePageSize(): number {
 
 export const PROFILE_PAGE_SIZE = resolveProfilePageSize();
 
-// Cap for map-viewport marker fetches. Override via build-time
-// `VITE_MAP_FETCH_LIMIT`; falls back to 25000. Must not exceed the server
-// markers cap (25000 in `packages/schemas`) or the request is rejected.
 const DEFAULT_MAP_FETCH_LIMIT = 25000;
 
 export function resolveMapFetchLimit(): number {

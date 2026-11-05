@@ -159,7 +159,6 @@ export function useMapMarkers(
   let effectiveBbox: RawBbox | null = null;
   if (rawBbox) effectiveBbox = needsRefetch ? expandBboxForFetch(rawBbox) : heldRef.current!.bbox;
 
-  // The radius path keeps the flat `MAP_FETCH_LIMIT`.
   const limit = effectiveBbox ? MARKER_CAP : MAP_FETCH_LIMIT;
 
   // A contained zoom-in can snap to the same grid cell as the held bbox and

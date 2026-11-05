@@ -138,6 +138,7 @@ Sourced from the Zod schemas in `packages/config/src/secrets.ts`.
 | `NETWORK_CONFIG_LOCAL_FILE` | optional | Path(s) resolved relative to `process.cwd()` by `network_config_loader.ts`. Defaults to `../../examples/schemas/yellow_dot/network.json` (the API process runs from `apps/api/`). Helm sets `/app/schemas/yellow_dot.json,/app/schemas/blue_dot.json`. |
 | `NETWORK_CONFIG_URLS` | conditional | Required when `NETWORK_CONFIG_SOURCE=remote` and no `SCHEMA_REGISTRY_URL` is set. |
 | `ALLOW_EXTRA_SCHEMA_DATA` | optional | Defaults to `false`. |
+| `MARKERS_MAX_LIMIT` | optional | Most map markers one `/network/item/markers` request returns. A request asking for more gets this many, with the full `meta.total`, instead of a 400; the map then treats the view as cut off and fetches again when the user zooms in. Defaults to `25000`; whole numbers from 1 to `100000`, anything else fails at startup. Also applied to peer `/markers_local` requests, so instances with different values still work together. |
 
 **Schema registry (`SchemaRegistrySecretsSchema` / `OptionalSchemaRegistrySecretsSchema`)**
 
