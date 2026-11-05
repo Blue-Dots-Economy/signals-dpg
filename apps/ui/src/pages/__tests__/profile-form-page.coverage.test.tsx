@@ -652,8 +652,8 @@ describe('ProfileFormPage submit failures', () => {
     createItemMock.mockRejectedValue(
       httpError(400, {
         error: 'INVALID_ITEM_STATE',
-        message: 'Invalid item_state: phone: Please enter a valid Mobile.',
-        fields: { phone: 'Please enter a valid Mobile.' },
+        message: 'Invalid item_state: Full Name: Please enter a valid Full Name.',
+        fields: { 'Full Name': 'Please enter a valid Full Name.' },
       }),
     );
 
@@ -661,10 +661,27 @@ describe('ProfileFormPage submit failures', () => {
     await submitCreate();
 
     await waitFor(() =>
-      expect(screen.getByTestId('server-errors')).toHaveTextContent('{"phone":"Please enter a valid Mobile."}'),
+      expect(screen.getByTestId('server-errors')).toHaveTextContent('{"Full Name":"Please enter a valid Full Name."}'),
     );
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText(/Invalid item_state/)).toBeNull();
+  });
+
+  it('a server field the form does not show is reported in the banner, not dropped', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: email: is not an allowed field',
+        fields: { email: 'is not an allowed field' },
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Couldn't create your profile");
+    expect(alert).toHaveTextContent('Some saved details cannot be changed in this form (email).');
   });
 
   it('a failing edit shows the update-failed title with the generic description', async () => {

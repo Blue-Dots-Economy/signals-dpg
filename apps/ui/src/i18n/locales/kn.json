@@ -350,6 +350,7 @@
   "profile.error_create_failed": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ರಚಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "profile.error_role_unavailable": "ಈ ಇನ್‌ಸ್ಟ್ಯಾನ್ಸ್‌ನಲ್ಲಿ ಪಾತ್ರ ಲಭ್ಯವಿಲ್ಲ",
   "profile.error_update_failed": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ನವೀಕರಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
+  "profile.error_fields_not_in_form": "ಉಳಿಸಿದ ಕೆಲವು ವಿವರಗಳನ್ನು ಈ ಫಾರ್ಮ್‌ನಲ್ಲಿ ಬದಲಾಯಿಸಲು ಸಾಧ್ಯವಿಲ್ಲ ({{fields}}). ದಯವಿಟ್ಟು ಬೆಂಬಲವನ್ನು ಸಂಪರ್ಕಿಸಿ.",
   "profile.fill_details": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ವಿವರಗಳನ್ನು ತುಂಬಿಸಿ",
   "profile.loading_profile": "ಪ್ರೊಫೈಲ್ ಲೋಡ್ ಮಾಡಲಾಗುತ್ತಿದೆ...",
   "profile.loading_schemas": "ನೆಟ್‌ವರ್ಕ್ ಸ್ಕೀಮಾಗಳನ್ನು ಲೋಡ್ ಮಾಡಲಾಗುತ್ತಿದೆ...",

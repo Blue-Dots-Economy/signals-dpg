@@ -350,6 +350,7 @@
   "profile.error_create_failed": "आपकी प्रोफ़ाइल नहीं बन सकी",
   "profile.error_role_unavailable": "इस इंस्टेंस पर भूमिका उपलब्ध नहीं है",
   "profile.error_update_failed": "आपकी प्रोफ़ाइल अपडेट नहीं हो सकी",
+  "profile.error_fields_not_in_form": "कुछ सहेजे गए विवरण इस फ़ॉर्म में नहीं बदले जा सकते ({{fields}})। कृपया सहायता से संपर्क करें।",
   "profile.fill_details": "अपनी प्रोफ़ाइल विवरण भरें",
   "profile.loading_profile": "प्रोफ़ाइल लोड हो रही है...",
   "profile.loading_schemas": "नेटवर्क स्कीमा लोड हो रहे हैं...",
