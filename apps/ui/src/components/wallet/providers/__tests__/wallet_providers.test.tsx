@@ -5,15 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WalletImportContext, WalletImportResult } from '@/engine/wallet/types';
 import { getWalletProvider } from '@/engine/wallet/wallet-registry';
 import { digiLockerApi } from '@/lib/digilocker-api';
-import { walletApi, type WalletCredential, type WalletCredentialData } from '@/lib/wallet-api';
-// Importing the provider modules is what registers them in the wallet
-// registry; the components themselves are not exported.
-import '../dhiway-wallet-provider';
+// Importing the provider module is what registers it in the wallet
+// registry; the component itself is not exported.
 import '../digilocker-provider';
 
-// Both provider modules read a module-level singleton (`digiLockerApi` /
-// `walletApi`) that is `null` unless the VITE_* env vars are set, so the whole
-// flow is dead code unless the api module is mocked with a live object.
+// The provider reads a module-level `digiLockerApi` singleton that is `null`
+// unless the VITE_* env vars are set, so the whole flow is dead code unless
+// the api module is mocked with a live object.
 // Factories must not touch outer bindings (they hoist), hence the bare vi.fn()s
 // with implementations installed in beforeEach.
 vi.mock('@/lib/digilocker-api', () => ({
@@ -28,20 +26,7 @@ vi.mock('@/lib/digilocker-api', () => ({
   getDigiLockerCallbackOrigins: () => ['http://localhost:3000', 'https://agent.example.org'],
 }));
 
-vi.mock('@/lib/wallet-api', () => ({
-  walletApi: {
-    requestCode: vi.fn(),
-    verifyCode: vi.fn(),
-    getVerifiedCredentials: vi.fn(),
-    setAuthToken: vi.fn(),
-    clearAuthToken: vi.fn(),
-    transformSelectedCredential: vi.fn(),
-  },
-  isWalletConfigured: () => true,
-}));
-
 const digilocker = vi.mocked(digiLockerApi as NonNullable<typeof digiLockerApi>);
-const wallet = vi.mocked(walletApi as NonNullable<typeof walletApi>);
 
 function getProvider(name: string) {
   const provider = getWalletProvider(name);
@@ -50,7 +35,7 @@ function getProvider(name: string) {
 }
 
 // The app is schema-driven: the import context always carries the network
-// schema/form data even though these two providers only read `context.user`.
+// schema/form data even though this provider only reads `context.user`.
 function makeContext(
   user: Partial<WalletImportContext['user']> = {},
 ): WalletImportContext {
@@ -100,15 +85,6 @@ beforeEach(() => {
       rawPayload: subject,
     }),
   );
-  wallet.transformSelectedCredential.mockImplementation(
-    (credentialData: WalletCredentialData, credential: WalletCredential) => ({
-      data: {},
-      candidates: { full_name: credential.credentialSubject?.name },
-      rawPayload: { credential, credentialData },
-      metadata: { credentialId: credential.id, provider: 'dhiway-wallet' },
-      summary: 'Diploma Certificate from City College Board',
-    }),
-  );
 });
 
 afterEach(() => {
@@ -116,16 +92,11 @@ afterEach(() => {
 });
 
 describe('wallet provider registry entries', () => {
-  it('registers digilocker and dhiway-wallet with labels and config hints', () => {
+  it('registers digilocker with its label and config hint', () => {
     const digilockerProvider = getProvider('digilocker');
     expect(digilockerProvider.label).toBe('DigiLocker');
     expect(digilockerProvider.isConfigured()).toBe(true);
     expect(digilockerProvider.getConfigurationHint?.()).toContain('VITE_AGENT_URL');
-
-    const dhiwayProvider = getProvider('dhiway-wallet');
-    expect(dhiwayProvider.label).toBe('Dhiway Wallet');
-    expect(dhiwayProvider.isConfigured()).toBe(true);
-    expect(dhiwayProvider.getConfigurationHint?.()).toContain('VITE_VC_WALLET_URL');
   });
 });
 
@@ -548,254 +519,5 @@ describe('DigiLockerProvider', () => {
       expect(vi.mocked(popup.close)).toHaveBeenCalledTimes(1);
       expect(screen.queryByText(/^Waiting for DigiLocker to finish/)).not.toBeInTheDocument();
     });
-  });
-});
-
-describe('DhiwayWalletProvider', () => {
-  const credential: WalletCredential = {
-    id: 'cred-1',
-    issuanceDate: '2026-01-15T00:00:00.000Z',
-    credentialSchema: { title: 'Diploma Certificate' },
-    credentialSubject: {
-      name: 'Asha Kumar',
-      college: 'City College',
-      score: 88,
-      fourth: 'not-previewed',
-      nested: { skipped: true },
-    },
-  };
-  const credentialData: WalletCredentialData = {
-    id: 42,
-    metadata: { orgName: 'City College Board', issuedBy: 'Registrar' },
-    credentials: [credential],
-  };
-
-  function renderDhiway(user: Partial<WalletImportContext['user']> = {}) {
-    return renderProvider('dhiway-wallet', makeContext(user));
-  }
-
-  async function reachCredentialsStep(credentials: WalletCredentialData[]) {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    wallet.verifyCode.mockResolvedValue({ message: 'ok', token: 'wallet-token' });
-    wallet.getVerifiedCredentials.mockResolvedValue({
-      total: credentials.length,
-      credentials,
-    });
-    const handles = renderDhiway();
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-    await userEvent.type(
-      await screen.findByPlaceholderText('Enter the code you received'),
-      '  123456  ',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Verify and fetch credentials' }));
-    return handles;
-  }
-
-  it('auto-selects the only identifier and sends a code to it', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    renderDhiway();
-
-    expect(screen.getByText('asha@example.org')).toBeInTheDocument();
-    expect(
-      screen.getByText('A verification code will be sent to your selected email.'),
-    ).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    expect(wallet.requestCode).toHaveBeenCalledWith('asha@example.org', 'email');
-    expect(await screen.findByText('Enter verification code')).toBeInTheDocument();
-  });
-
-  it('uses the phone identifier when only a phone number is on the account', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    renderDhiway({ email: null, phoneNumber: '+919000000000' });
-
-    expect(
-      screen.getByText('A verification code will be sent to your selected phone.'),
-    ).toBeInTheDocument();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    expect(wallet.requestCode).toHaveBeenCalledWith('+919000000000', 'phone');
-  });
-
-  it('requires an explicit choice when both email and phone exist', () => {
-    renderDhiway({ email: 'asha@example.org', phoneNumber: '+919000000000' });
-
-    expect(screen.getByRole('combobox')).toBeInTheDocument();
-    expect(screen.getByText('Select email or phone')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
-  });
-
-  it('disables sending when the account has no identifier at all', () => {
-    renderDhiway({ email: null, phoneNumber: null });
-
-    expect(screen.getByText('No identifier available')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
-  });
-
-  it('shows the api error when requesting a code fails and stays on step one', async () => {
-    wallet.requestCode.mockRejectedValue(new Error('wallet is down'));
-    renderDhiway();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    expect(await screen.findByText('wallet is down')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeInTheDocument();
-    expect(screen.queryByText('Enter verification code')).not.toBeInTheDocument();
-  });
-
-  it('falls back to a generic message for non-Error request failures', async () => {
-    wallet.requestCode.mockRejectedValue('nope');
-    renderDhiway();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    expect(await screen.findByText('Failed to send verification code')).toBeInTheDocument();
-  });
-
-  it('keeps verification disabled until a non-blank code is typed', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    renderDhiway();
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    const verify = await screen.findByRole('button', { name: 'Verify and fetch credentials' });
-    expect(verify).toBeDisabled();
-
-    await userEvent.type(screen.getByPlaceholderText('Enter the code you received'), '   ');
-    expect(verify).toBeDisabled();
-
-    await userEvent.type(screen.getByPlaceholderText('Enter the code you received'), '9');
-    expect(verify).toBeEnabled();
-  });
-
-  it('lets the user go back and change the identifier', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    renderDhiway();
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Change identifier' }));
-
-    expect(screen.getByText('Choose an identifier')).toBeInTheDocument();
-    expect(screen.queryByText('Enter verification code')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeEnabled();
-  });
-
-  it('trims the code, stores the token and lists the returned credentials', async () => {
-    await reachCredentialsStep([credentialData]);
-
-    expect(await screen.findByText('City College Board')).toBeInTheDocument();
-    expect(wallet.verifyCode).toHaveBeenCalledWith('asha@example.org', '123456');
-    expect(wallet.setAuthToken).toHaveBeenCalledWith('wallet-token');
-    expect(wallet.getVerifiedCredentials).toHaveBeenCalledWith('asha@example.org');
-
-    expect(screen.getByText('Registrar')).toBeInTheDocument();
-    expect(screen.getByText('Diploma Certificate')).toBeInTheDocument();
-    expect(screen.getByText('Verified')).toBeInTheDocument();
-    expect(
-      screen.getByText(`Issued ${new Date('2026-01-15T00:00:00.000Z').toLocaleDateString()}`),
-    ).toBeInTheDocument();
-
-    // Preview shows only the first three scalar subject values.
-    expect(screen.getByText('Asha Kumar')).toBeInTheDocument();
-    expect(screen.getByText('City College')).toBeInTheDocument();
-    expect(screen.getByText('88')).toBeInTheDocument();
-    expect(screen.queryByText('not-previewed')).not.toBeInTheDocument();
-  });
-
-  it('does not set an auth token when the verify response omits one', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    wallet.verifyCode.mockResolvedValue({ message: 'ok' });
-    wallet.getVerifiedCredentials.mockResolvedValue({ total: 0, credentials: [] });
-    renderDhiway();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-    await userEvent.type(
-      await screen.findByPlaceholderText('Enter the code you received'),
-      '123456',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Verify and fetch credentials' }));
-
-    expect(await screen.findByText('No verified credentials were found.')).toBeInTheDocument();
-    expect(wallet.setAuthToken).not.toHaveBeenCalled();
-  });
-
-  it('shows the api error when verification fails and stays on the code step', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    wallet.verifyCode.mockRejectedValue(new Error('That code has expired'));
-    renderDhiway();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-    await userEvent.type(
-      await screen.findByPlaceholderText('Enter the code you received'),
-      '000000',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Verify and fetch credentials' }));
-
-    expect(await screen.findByText('That code has expired')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Enter the code you received')).toBeInTheDocument();
-    expect(wallet.getVerifiedCredentials).not.toHaveBeenCalled();
-  });
-
-  it('falls back to a generic message for non-Error verification failures', async () => {
-    wallet.requestCode.mockResolvedValue({ message: 'sent' });
-    wallet.verifyCode.mockRejectedValue({ status: 401 });
-    renderDhiway();
-
-    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
-    await userEvent.type(
-      await screen.findByPlaceholderText('Enter the code you received'),
-      '000000',
-    );
-    await userEvent.click(screen.getByRole('button', { name: 'Verify and fetch credentials' }));
-
-    expect(await screen.findByText('Failed to verify code')).toBeInTheDocument();
-  });
-
-  it('falls back to generic issuer and credential labels when metadata is missing', async () => {
-    await reachCredentialsStep([
-      { id: 7, credentials: [{ id: 'cred-bare' }] },
-    ]);
-
-    expect(await screen.findByText('Credential issuer')).toBeInTheDocument();
-    expect(screen.getByText('Wallet credential')).toBeInTheDocument();
-    expect(screen.getByText('Credential')).toBeInTheDocument();
-    expect(screen.queryByText(/^Issued /)).not.toBeInTheDocument();
-  });
-
-  it('hands the selected credential to onSuccess', async () => {
-    const { onSuccess } = await reachCredentialsStep([credentialData]);
-
-    await userEvent.click(
-      await screen.findByRole('button', { name: 'Import this credential' }),
-    );
-
-    expect(wallet.transformSelectedCredential).toHaveBeenCalledWith(credentialData, credential);
-    expect(onSuccess).toHaveBeenCalledWith(
-      expect.objectContaining({
-        providerName: 'dhiway-wallet',
-        providerLabel: 'Dhiway Wallet',
-        summary: 'Diploma Certificate from City College Board',
-        candidates: { full_name: 'Asha Kumar' },
-        metadata: { credentialId: 'cred-1', provider: 'dhiway-wallet' },
-      }),
-    );
-  });
-
-  it('hides the primary action once credentials are listed', async () => {
-    await reachCredentialsStep([credentialData]);
-
-    await screen.findByText('City College Board');
-    expect(screen.queryByRole('button', { name: 'Send code' })).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Verify and fetch credentials' }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
-  });
-
-  it('calls onCancel when the user cancels', async () => {
-    const { onCancel } = renderDhiway();
-    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
