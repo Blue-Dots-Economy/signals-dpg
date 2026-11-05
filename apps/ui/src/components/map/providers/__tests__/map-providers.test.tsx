@@ -267,6 +267,8 @@ import {
 
 // ─── Fixtures & fakes ────────────────────────────────────────────────────────
 
+const COLOURS = { bg: '#123456', fg: '#ffffff' };
+
 const ALPHA: MapMarker = {
   id: 'alpha',
   lat: 19.1,
@@ -652,19 +654,19 @@ describe('LeafletMapProvider', () => {
   });
 
   it('sizes the cluster bubble by count band and shows the total', () => {
-    const small = String(createClusterDivIcon(4, []).options.html);
+    const small = String(createClusterDivIcon(4, [], COLOURS).options.html);
     expect(small).toContain('width: 34px');
     expect(small).toContain('>4</div>');
 
-    expect(String(createClusterDivIcon(42, []).options.html)).toContain('width: 40px');
-    expect(String(createClusterDivIcon(150, []).options.html)).toContain('width: 46px');
+    expect(String(createClusterDivIcon(42, [], COLOURS).options.html)).toContain('width: 40px');
+    expect(String(createClusterDivIcon(150, [], COLOURS).options.html)).toContain('width: 46px');
   });
 
   it('adds a per-domain badge row (and widens the icon) for a multi-domain cluster', () => {
     const icon = createClusterDivIcon(3, [
       { domain: 'seeker', count: 2 },
       { domain: 'provider', count: 1 },
-    ]);
+    ], COLOURS);
 
     const html = String(icon.options.html);
     expect(html).toContain('>3</div>');
@@ -681,12 +683,24 @@ describe('LeafletMapProvider', () => {
   });
 
   it('shows no badge row for a single-domain cluster', () => {
-    const icon = createClusterDivIcon(3, [{ domain: 'seeker', count: 3 }]);
+    const icon = createClusterDivIcon(3, [{ domain: 'seeker', count: 3 }], COLOURS);
 
     expect(String(icon.options.html)).not.toContain('<span');
     const size = icon.options.iconSize as Point;
     expect(size.x).toBe(34);
     expect(size.y).toBe(34);
+  });
+
+  it('reads the theme colours once per draw, not once per bubble or pin', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    const spy = vi.spyOn(window, 'getComputedStyle');
+
+    render(leafletElement({ markers: [...crowd, BETA, GAMMA] }));
+
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(3));
+    expect(spy.mock.calls.filter(([el]) => el === document.documentElement)).toHaveLength(1);
+    spy.mockRestore();
   });
 
   it('draws one marker per visible bubble or pin, not one per listing', async () => {

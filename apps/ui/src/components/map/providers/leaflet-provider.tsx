@@ -155,14 +155,16 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   return null;
 }
 
-/**
- * Reads a CSS custom property from <html>, where the network theme sets
- * `--primary`. Returns `fallback` when unset or outside the DOM.
- */
-function readCssVar(name: string, fallback: string): string {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
+/** The theme's marker fill and its foreground colour. */
+interface ThemeColours {
+  bg: string;
+  fg: string;
+}
+
+function readThemeColours(): ThemeColours {
+  const style = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string) => style?.getPropertyValue(name).trim() || fallback;
+  return { bg: read('--primary', '#6b7280'), fg: read('--primary-foreground', '#ffffff') };
 }
 
 /**
@@ -212,9 +214,7 @@ function createMarkerDivIcon(IconComponent: LucideIcon, bg: string, iconColor: s
 const markerIconCache = new WeakMap<LucideIcon, Map<string, L.DivIcon>>();
 
 /** One teardrop icon per glyph and theme colour pair, shared by every pin that uses it. */
-function getMarkerDivIcon(IconComponent: LucideIcon): L.DivIcon {
-  const bg = readCssVar('--primary', '#6b7280');
-  const fg = readCssVar('--primary-foreground', '#ffffff');
+function getMarkerDivIcon(IconComponent: LucideIcon, { bg, fg }: ThemeColours): L.DivIcon {
   const colourKey = `${bg}|${fg}`;
   let byColour = markerIconCache.get(IconComponent);
   if (!byColour) {
@@ -234,9 +234,7 @@ function getMarkerDivIcon(IconComponent: LucideIcon): L.DivIcon {
  * spans several domains, a row of per-domain icon+count chips (largest first)
  * renders below the circle.
  */
-export function createClusterDivIcon(count: number, breakdown: DomainCount[]): L.DivIcon {
-  const bg = readCssVar('--primary', '#6b7280');
-  const fg = readCssVar('--primary-foreground', '#ffffff');
+export function createClusterDivIcon(count: number, breakdown: DomainCount[], { bg, fg }: ThemeColours): L.DivIcon {
   const size = count < 10 ? 34 : count < 100 ? 40 : 46;
 
   const multiDomain = breakdown.length > 1;
@@ -360,17 +358,22 @@ function useLeafletClusterView(): ClusterView | null {
 
 const ClusterMarker = React.memo(function ClusterMarker({
   item,
+  colours,
   showPopup,
   onZoomTo,
   onSpotGroupSelect,
 }: {
   item: Extract<MapClusterItem, { kind: 'cluster' }>;
+  colours: ThemeColours;
   showPopup: boolean;
   onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
   onSpotGroupSelect?: (group: OpenSpotGroup) => void;
 }) {
   const map = useMap();
-  const icon = React.useMemo(() => createClusterDivIcon(item.count, item.breakdown), [item.count, item.breakdown]);
+  const icon = React.useMemo(
+    () => createClusterDivIcon(item.count, item.breakdown, colours),
+    [item.count, item.breakdown, colours],
+  );
   const group = React.useMemo(() => openSpotGroupOf(item), [item]);
   const eventHandlers = React.useMemo(
     () => ({
@@ -395,6 +398,7 @@ const ClusterMarker = React.memo(function ClusterMarker({
 
 interface PointMarkerProps {
   marker: MapMarker;
+  colours: ThemeColours;
   showPopup: boolean;
   onMarkerClick?: (id: string) => void;
   resolveIcon?: NonNullable<MapProviderProps['resolveIcon']>;
@@ -402,11 +406,12 @@ interface PointMarkerProps {
 
 const PointMarker = React.memo(function PointMarker({
   marker,
+  colours,
   showPopup,
   onMarkerClick,
   resolveIcon,
 }: PointMarkerProps) {
-  const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain));
+  const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain), colours);
   const eventHandlers = React.useMemo(() => ({ click: () => onMarkerClick?.(marker.id) }), [onMarkerClick, marker.id]);
   return (
     <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={ITEM_Z_INDEX_OFFSET}>
@@ -438,6 +443,8 @@ function ClusterLayer({
   const map = useMap();
   const view = useLeafletClusterView();
   const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });
+  const { resolved: themeMode } = useThemeMode();
+  const colours = React.useMemo(() => readThemeColours(), [themeMode]);
 
   const zoomTo = React.useCallback(
     (lat: number, lng: number, expansionZoom: number) => {
@@ -454,6 +461,7 @@ function ClusterLayer({
           <ClusterMarker
             key={item.key}
             item={item}
+            colours={colours}
             showPopup={showPopup}
             onZoomTo={zoomTo}
             onSpotGroupSelect={onSpotGroupSelect}
@@ -462,6 +470,7 @@ function ClusterLayer({
           <PointMarker
             key={item.key}
             marker={item.marker}
+            colours={colours}
             showPopup={showPopup}
             onMarkerClick={onMarkerClick}
             resolveIcon={resolveIcon}
