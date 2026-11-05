@@ -41,10 +41,9 @@ both of these are true:
 1. The form has a profile schema loaded (i.e. we know what fields to fill), and
 2. At least one wallet provider is configured for this deployment.
 
-Clicking it opens a chooser listing the available wallet providers. DigiLocker is
-one; **Dhiway** (a verifiable-credential wallet) is the other. Each is listed
-with a short description, and one that isn't configured is shown greyed out with
-the reason. The user picks DigiLocker and the DigiLocker panel opens.
+Clicking it opens a chooser listing the available wallet providers; DigiLocker is
+currently the only one. Each is listed with a short description, and one that
+isn't configured is shown greyed out with the reason. The user picks DigiLocker and the DigiLocker panel opens.
 
 ---
 
