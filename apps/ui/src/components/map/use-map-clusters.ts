@@ -1,15 +1,19 @@
 import * as React from 'react';
 import type { MapMarker } from '@/engine/types';
-import { buildClusterIndex, queryClusters } from './map-clusters';
-import type { ClusterIndexOptions, ClusterView, MapClusterItem } from './map-clusters';
+import { buildClusterIndex, queryClusters, resolveClusterRadiusPx } from './map-clusters';
+import type { ClusterView, MapClusterItem } from './map-clusters';
 
-/** The bubbles and points to draw for `view`; the index is rebuilt only when `markers` changes. */
+/** The bubbles and points to draw for `view`; the index is rebuilt only when `markers` or the radius changes. */
 export function useMapClusters(
   markers: MapMarker[],
   view: ClusterView | null,
-  options: ClusterIndexOptions,
+  options: { maxZoom: number },
 ): MapClusterItem[] {
   const { maxZoom } = options;
-  const index = React.useMemo(() => buildClusterIndex(markers, { maxZoom }), [markers, maxZoom]);
+  const radiusPx = resolveClusterRadiusPx();
+  const index = React.useMemo(
+    () => buildClusterIndex(markers, { maxZoom, radiusPx }),
+    [markers, maxZoom, radiusPx],
+  );
   return React.useMemo(() => (view ? queryClusters(index, view) : []), [index, view]);
 }
