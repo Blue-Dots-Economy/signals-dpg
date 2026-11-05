@@ -56,9 +56,8 @@ export const queryKeys = {
   /**
    * Map markers for one domain within a viewport. `filters` is built by
    * `useMapMarkers` and carries:
-   * - `snappedBbox` + `zoomBand` (see `lib/map-viewport-snap.ts`) when the
-   *   viewport has a bbox, so a pan/zoom within the same grid cell and band
-   *   reuses the entry.
+   * - `snappedBbox` (see `lib/map-viewport-snap.ts`) when the viewport has a
+   *   bbox, so a pan/zoom within the same grid cell reuses the entry.
    * - `bboxToken` (bbox path only): bumped to force a new key when a
    *   contained zoom-in must refetch because the held result was truncated,
    *   even if the snapped bbox rounds to the same cell.

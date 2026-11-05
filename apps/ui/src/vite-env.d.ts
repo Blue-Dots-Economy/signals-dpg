@@ -34,12 +34,8 @@ interface ImportMetaEnv {
   readonly VITE_MAP_DEFAULT_CENTER?: string;
   /** Per-deployment default map zoom (falls back to 12). */
   readonly VITE_MAP_DEFAULT_ZOOM?: string;
-  /** Marker cap while zoomed below the cluster-disable zoom (#203 Task 6). Falls back to 1000. */
-  readonly VITE_MAP_MARKER_CAP_CLUSTERED?: string;
-  /** Marker cap at/above the cluster-disable zoom, once pins render individually (#203 Task 6). Falls back to 500. */
-  readonly VITE_MAP_MARKER_CAP_INDIVIDUAL?: string;
-  /** Zoom level at/above which the map disables clustering (#203 Task 6). Falls back to 14. */
-  readonly VITE_MAP_CLUSTER_DISABLE_ZOOM?: string;
+  /** Most map markers fetched per domain for one view, at every zoom. Falls back to 10000. */
+  readonly VITE_MAP_MARKER_CAP?: string;
   /** Duration (ms) of the smooth cluster-click zoom animation. Falls back to 2000; 0 = instant. */
   readonly VITE_MAP_CLUSTER_ZOOM_ANIM_MS?: string;
   /** zIndex of the Google map's marker popup; must exceed every pin and cluster. Falls back to 1000000. */
