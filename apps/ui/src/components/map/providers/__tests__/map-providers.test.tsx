@@ -703,6 +703,19 @@ describe('LeafletMapProvider', () => {
     spy.mockRestore();
   });
 
+  it('brings a hovered bubble in front of the bubbles it overlaps', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 7 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(leafletElement({ markers: crowd }));
+    const latest = () => recordsOf('Marker').filter((r) => String((r.props.icon as DivIcon).options.html).includes('>7</div>')).at(-1)!.props;
+    await waitFor(() => expect(latest().zIndexOffset).toBe(1007));
+
+    act(() => (latest().eventHandlers as { mouseover: () => void }).mouseover());
+    expect(latest().zIndexOffset).toBeGreaterThan(1007 + 1_000_000);
+    act(() => (latest().eventHandlers as { mouseout: () => void }).mouseout());
+    expect(latest().zIndexOffset).toBe(1007);
+  });
+
   it('draws one marker per visible bubble or pin, not one per listing', async () => {
     bridge().map = createFakeLeafletMap();
     const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
@@ -1304,6 +1317,20 @@ describe('GoogleMapProvider', () => {
     const selfMarker = screen.getByTestId('gmap-self-marker');
     expect(selfMarker).toHaveAttribute('aria-label', 'You');
     expect(within(selfMarker).getByText('You')).toBeInTheDocument();
+  });
+
+  it('brings a hovered bubble in front of the bubbles it overlaps, below the popup', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap();
+    const crowd = Array.from({ length: 7 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(googleElement({ markers: crowd }));
+    const latest = () => recordsOf('AdvancedMarker').filter((r) => r.props.title === '7').at(-1)!.props;
+    await waitFor(() => expect(latest().zIndex).toBe(1007));
+
+    act(() => (latest().onMouseEnter as () => void)());
+    expect(latest().zIndex).toBe(999_999);
+    act(() => (latest().onMouseLeave as () => void)());
+    expect(latest().zIndex).toBe(1007);
   });
 
   it('themes the cluster bubble with the total, sized by count band', async () => {

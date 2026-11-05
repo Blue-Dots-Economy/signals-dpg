@@ -32,6 +32,7 @@ const MAX_ZOOM = 18;
 // Stacking mirrors Google: self < item pins < bubbles (1000 + count), so a pin on the viewer's own spot stays visible.
 const SELF_Z_INDEX_OFFSET = 0;
 const ITEM_Z_INDEX_OFFSET = 500;
+const HOVERED_CLUSTER_Z_INDEX_OFFSET = 10_000_000;
 
 /**
  * Session-scoped flag so the "dark mode is off for the map" notice shows once,
@@ -375,18 +376,26 @@ const ClusterMarker = React.memo(function ClusterMarker({
     [item.count, item.breakdown, colours],
   );
   const group = React.useMemo(() => openSpotGroupOf(item), [item]);
+  const [hovered, setHovered] = React.useState(false);
   const eventHandlers = React.useMemo(
     () => ({
       click: () => {
         if (!group) onZoomTo(item.lat, item.lng, item.expansionZoom);
         else if (!showPopup) onSpotGroupSelect?.(group);
       },
+      mouseover: () => setHovered(true),
+      mouseout: () => setHovered(false),
     }),
     [group, showPopup, onSpotGroupSelect, onZoomTo, item.lat, item.lng, item.expansionZoom],
   );
   const close = React.useCallback(() => map.closePopup(), [map]);
   return (
-    <Marker position={[item.lat, item.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={1000 + item.count}>
+    <Marker
+      position={[item.lat, item.lng]}
+      icon={icon}
+      eventHandlers={eventHandlers}
+      zIndexOffset={hovered ? HOVERED_CLUSTER_Z_INDEX_OFFSET : 1000 + item.count}
+    >
       {group && showPopup && (
         <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={360}>
           <SpotGroupBody group={group} onClose={close} />
