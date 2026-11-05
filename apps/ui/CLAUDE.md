@@ -37,7 +37,7 @@ Both resolve independently through the same priority chain: `?query` param → `
 
 ## Data fetching
 
-No generated API client. `src/lib/api-client.ts` builds one shared `axios` instance with **two** interceptors — a request one attaching the per-session CSRF token on unsafe methods (the session itself rides an httpOnly cookie the browser sends automatically), and a response one that ends the session when the server says it is gone (see below) — and each `src/lib/*-api.ts` file (`auth-api`, `item-api`, `network-api`, `action-api`, `consent-api`, `wallet-api`, `digilocker-api`, `match-score-api`, `support-api`, `bulk-api`) wraps a specific set of endpoints by hand. React Query (`@tanstack/react-query`) is the caching layer, used via hooks (`use-network-config.ts`, `use-consent-config.ts`, `use-consent-gate.ts`, etc.) rather than context — `auth-context.tsx` is the only React Context in the app.
+No generated API client. `src/lib/api-client.ts` builds one shared `axios` instance with **two** interceptors — a request one attaching the per-session CSRF token on unsafe methods (the session itself rides an httpOnly cookie the browser sends automatically), and a response one that ends the session when the server says it is gone (see below) — and each `src/lib/*-api.ts` file (`auth-api`, `item-api`, `network-api`, `action-api`, `consent-api`, `digilocker-api`, `match-score-api`, `support-api`, `bulk-api`) wraps a specific set of endpoints by hand. React Query (`@tanstack/react-query`) is the caching layer, used via hooks (`use-network-config.ts`, `use-consent-config.ts`, `use-consent-gate.ts`, etc.) rather than context — `auth-context.tsx` is the only React Context in the app.
 
 ## Session expiry is a two-part chain — both parts are required
 
