@@ -49,6 +49,7 @@ import {
 } from '@/lib/consent-api';
 import axios from 'axios';
 import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
+import { schemaNodeAt } from '@/components/forms/field-error-message';
 
 import {
   createItem,
@@ -671,9 +672,30 @@ export function ProfileFormPage() {
       const info = readApiError(err);
       const status = info.status;
 
-      if (info.fields && Object.keys(info.fields).length > 0) {
+      const onForm: Record<string, string> = {};
+      const offForm: string[] = [];
+      for (const [path, message] of Object.entries(info.fields ?? {})) {
+        const shown =
+          message.trim() !== 'is not an allowed field' &&
+          schemaNodeAt(profileSchema, path.split('.').filter(Boolean)) !== undefined;
+        if (shown) onForm[path] = message;
+        else offForm.push(path);
+      }
+
+      if (offForm.length > 0) {
+        // The form has no field to show these on, so they go in the banner.
+        if (Object.keys(onForm).length > 0) setServerFieldErrors(onForm);
+        setFormError({
+          title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
+          description: t(
+            'profile.error_fields_not_in_form',
+            'Some saved details cannot be changed in this form ({{fields}}). Please contact support.',
+            { fields: offForm.join(', ') },
+          ),
+        });
+      } else if (Object.keys(onForm).length > 0) {
         // Field messages go under their fields; no banner.
-        setServerFieldErrors(info.fields);
+        setServerFieldErrors(onForm);
       } else if (status === 403 && info.code === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
           title: t('profile.error_role_unavailable'),

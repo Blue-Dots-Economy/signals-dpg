@@ -427,6 +427,7 @@
   "profile.error_create_failed": "Couldn't create your profile",
   "profile.error_role_unavailable": "Role not available on this instance",
   "profile.error_update_failed": "Couldn't update your profile",
+  "profile.error_fields_not_in_form": "Some saved details cannot be changed in this form ({{fields}}). Please contact support.",
   "profile.fill_details": "Fill in your profile details",
   "profile.import_credentials": "Import Credentials",
   "profile.loading_profile": "Loading profile...",
