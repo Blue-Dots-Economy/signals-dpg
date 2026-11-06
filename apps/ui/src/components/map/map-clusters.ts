@@ -2,6 +2,7 @@ import Supercluster from 'supercluster';
 import type { MapMarker, OpenSpotGroup } from '@/engine/types';
 import { breakdownFromCounts } from './cluster-breakdown';
 import type { DomainCount } from './cluster-breakdown';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 /** The map area and zoom to cluster for, in degrees. */
 export interface ClusterView {
@@ -36,10 +37,19 @@ export type MapClusterItem =
 export interface ClusterIndexOptions {
   /** The provider's maximum zoom; clustering runs up to it. */
   maxZoom: number;
+  /** Points closer than this many screen pixels merge into one bubble. */
+  radiusPx: number;
 }
 
-/** Supercluster radius at its default 512 extent: 80 screen px on 256-px tiles, the same as Leaflet's clustering before. */
-export const CLUSTER_RADIUS = 160;
+const DEFAULT_CLUSTER_RADIUS_PX = 80;
+const MIN_CLUSTER_RADIUS_PX = 20;
+const MAX_CLUSTER_RADIUS_PX = 300;
+
+/** Reads `VITE_MAP_CLUSTER_RADIUS_PX`: a whole number of pixels from 20 to 300, else 80. */
+export function resolveClusterRadiusPx(): number {
+  const n = Number(getRuntimeEnv('VITE_MAP_CLUSTER_RADIUS_PX') || Number.NaN);
+  return Number.isInteger(n) && n >= MIN_CLUSTER_RADIUS_PX && n <= MAX_CLUSTER_RADIUS_PX ? n : DEFAULT_CLUSTER_RADIUS_PX;
+}
 
 interface PointProps {
   id: string;
@@ -60,7 +70,8 @@ export interface MapClusterIndex {
 /** Builds the clustering index for a marker list. */
 export function buildClusterIndex(markers: MapMarker[], options: ClusterIndexOptions): MapClusterIndex {
   const tree = new Supercluster<PointProps, ClusterProps>({
-    radius: CLUSTER_RADIUS,
+    // Supercluster's radius is in tile units: 512 per 256-px tile.
+    radius: options.radiusPx * 2,
     maxZoom: options.maxZoom,
     map: (props) => ({ counts: { [props.domain]: 1 } }),
     // Supercluster copies cluster properties shallowly, so `counts` is rebuilt rather than mutated in place.

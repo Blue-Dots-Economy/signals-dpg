@@ -8,8 +8,8 @@ Describes `apps/ui/src/hooks/use-map-markers.ts` and the helpers it uses in
 The map fetches `/api/v1/network/item/markers` once per visible domain through
 `useQueries`. Each query key (`queryKeys.markers`) carries the snapped bbox, a
 bbox token, that domain's facet filters, the trimmed `q` and the `limit`, so any
-change to what is requested produces a distinct cache entry. The key has no zoom
-band.
+change to what is requested produces a distinct cache entry. The key has no
+zoom.
 
 Facets are routed per domain. The server silently drops a facet that is not a
 declared, non-private field of the domain's schema, so sending the same filter
@@ -29,7 +29,7 @@ request still sends the unrounded radius.
 
 The request is the visible view padded by 25% per side (`expandBboxForFetch`).
 `heldRef` records the last completed fetch: that padded bbox, whether it was
-truncated, whether it was empty, and the marker cap it used. It is written only
+truncated and whether it was empty. It is written only
 in an effect after every active domain's query has settled on real answers
 (never while loading or in error).
 
@@ -37,7 +37,6 @@ On each render the hook refetches, padding the current view again, when any of
 these holds:
 
 - there is no prior fetch;
-- the cap changed;
 - the held result was empty, since every later viewport is inside the padded
   bbox and an empty set could never be escaped;
 - `shouldRefetch` says so: the held result was truncated, or the view has left
@@ -62,11 +61,12 @@ the compare-then-write pattern, which is safe under StrictMode's double render.
 
 ## Marker cap
 
-The bbox path requests `capForZoom(zoom) + 1` markers. A domain is truncated when
-its `meta.total` exceeds the cap; the extra one means a total exactly equal to
-the cap still counts as complete. Truncation is ORed across domains and drives
-both the refetch decision and the "N+ in this area" pill. The radius path keeps
-the flat `MAP_FETCH_LIMIT`.
+The bbox path requests `MARKER_CAP` markers (`VITE_MAP_MARKER_CAP`), the same at
+every zoom. A domain is truncated when it sent fewer markers than its
+`meta.total`. The comparison is with what arrived, not with the cap, because the
+server caps a request at its own `MARKERS_MAX_LIMIT`, which can be lower.
+Truncation is ORed across domains and drives both the refetch decision and the
+"N+ in this area" pill. The radius path keeps the flat `MAP_FETCH_LIMIT`.
 
 ## Count what is on screen
 

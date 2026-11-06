@@ -191,13 +191,16 @@ const ClusterMarker = React.memo(function ClusterMarker({
   const [markerRef, markerEl] = useAdvancedMarkerRef();
   const position = React.useMemo(() => ({ lat: item.lat, lng: item.lng }), [item.lat, item.lng]);
   const group = React.useMemo(() => openSpotGroupOf(item), [item]);
+  const [hovered, setHovered] = React.useState(false);
   return (
     <>
       <AdvancedMarker
         ref={markerRef}
         position={position}
         title={String(item.count)}
-        zIndex={1000 + item.count}
+        zIndex={hovered ? resolvePopupZIndex() - 1 : 1000 + item.count}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         onClick={() => (group ? onSpotClick(group) : onZoomTo(item.lat, item.lng, item.expansionZoom))}
       >
         <ClusterBubble count={item.count} breakdown={item.breakdown} primary={primary} />

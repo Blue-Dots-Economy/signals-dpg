@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { snapBbox, zoomBand, snapViewportForKey, DEFAULT_CLUSTER_DISABLE_ZOOM, padBbox, bboxContains, shouldRefetch, clampBbox, expandBboxForFetch } from './map-viewport-snap';
+import { snapBbox, snapViewportForKey, padBbox, bboxContains, shouldRefetch, clampBbox, expandBboxForFetch } from './map-viewport-snap';
 
 // Span 0.5deg → cell = 0.5/8 = 0.0625deg exactly (a power of two already, so
 // no bucketing rounding to reason about). All four corners are exact
@@ -63,78 +63,33 @@ describe('snapBbox', () => {
   });
 });
 
-describe('zoomBand', () => {
-  it('bands a zoom below the cluster-disable threshold as clustered', () => {
-    expect(zoomBand(DEFAULT_CLUSTER_DISABLE_ZOOM - 1)).toBe('clustered');
-    expect(zoomBand(0)).toBe('clustered');
-  });
-
-  it('bands a zoom at/above the cluster-disable threshold as individual', () => {
-    expect(zoomBand(DEFAULT_CLUSTER_DISABLE_ZOOM)).toBe('individual');
-    expect(zoomBand(DEFAULT_CLUSTER_DISABLE_ZOOM + 5)).toBe('individual');
-  });
-
-  it('two zooms within the same band produce the same band value', () => {
-    expect(zoomBand(6)).toBe(zoomBand(9));
-  });
-
-  it('a zoom crossing the band boundary produces a different band value', () => {
-    expect(zoomBand(DEFAULT_CLUSTER_DISABLE_ZOOM - 1)).not.toBe(zoomBand(DEFAULT_CLUSTER_DISABLE_ZOOM));
-  });
-
-  it('respects a custom cluster-disable-zoom threshold', () => {
-    expect(zoomBand(10, 10)).toBe('individual');
-    expect(zoomBand(9, 10)).toBe('clustered');
-  });
-});
-
 describe('snapViewportForKey', () => {
   it('returns null when the viewport has no bbox (radius-only callers)', () => {
-    expect(snapViewportForKey({ zoom: 10 })).toBeNull();
+    expect(snapViewportForKey({})).toBeNull();
   });
 
-  it('returns the snapped bbox + zoom band when the viewport has a bbox', () => {
-    const result = snapViewportForKey({ ...BASE_BBOX, zoom: 12 });
-    expect(result).not.toBeNull();
-    expect(result?.snappedBbox).toEqual(snapBbox(BASE_BBOX));
-    expect(result?.zoomBand).toBe('clustered');
+  it('returns the snapped bbox when the viewport has a bbox', () => {
+    expect(snapViewportForKey(BASE_BBOX)?.snappedBbox).toEqual(snapBbox(BASE_BBOX));
   });
 
-  it('same/contained viewport + same zoom band → identical result', () => {
-    const a = snapViewportForKey({ ...BASE_BBOX, zoom: 8 });
+  it('same/contained viewport → identical result', () => {
     const contained = {
       minLat: BASE_BBOX.minLat + 0.01,
       minLng: BASE_BBOX.minLng + 0.01,
       maxLat: BASE_BBOX.maxLat - 0.01,
       maxLng: BASE_BBOX.maxLng - 0.01,
     };
-    const b = snapViewportForKey({ ...contained, zoom: 9 });
-    expect(a).toEqual(b);
+    expect(snapViewportForKey(BASE_BBOX)).toEqual(snapViewportForKey(contained));
   });
 
   it('a pan crossing a grid cell produces a different result', () => {
-    const a = snapViewportForKey({ ...BASE_BBOX, zoom: 8 });
     const panned = {
       minLat: BASE_BBOX.minLat + 0.1,
       minLng: BASE_BBOX.minLng + 0.1,
       maxLat: BASE_BBOX.maxLat + 0.1,
       maxLng: BASE_BBOX.maxLng + 0.1,
     };
-    const b = snapViewportForKey({ ...panned, zoom: 8 });
-    expect(a).not.toEqual(b);
-  });
-
-  it('a zoom crossing the cluster-disable band produces a different result even with the same bbox', () => {
-    const a = snapViewportForKey({ ...BASE_BBOX, zoom: DEFAULT_CLUSTER_DISABLE_ZOOM - 1 });
-    const b = snapViewportForKey({ ...BASE_BBOX, zoom: DEFAULT_CLUSTER_DISABLE_ZOOM });
-    expect(a).not.toEqual(b);
-  });
-
-  it('treats a missing zoom as band 0 (clustered), distinct from an explicit high zoom', () => {
-    const a = snapViewportForKey({ ...BASE_BBOX });
-    const b = snapViewportForKey({ ...BASE_BBOX, zoom: DEFAULT_CLUSTER_DISABLE_ZOOM });
-    expect(a?.zoomBand).toBe('clustered');
-    expect(b?.zoomBand).toBe('individual');
+    expect(snapViewportForKey(BASE_BBOX)).not.toEqual(snapViewportForKey(panned));
   });
 });
 

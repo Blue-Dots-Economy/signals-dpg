@@ -267,6 +267,8 @@ import {
 
 // ─── Fixtures & fakes ────────────────────────────────────────────────────────
 
+const COLOURS = { bg: '#123456', fg: '#ffffff' };
+
 const ALPHA: MapMarker = {
   id: 'alpha',
   lat: 19.1,
@@ -652,19 +654,19 @@ describe('LeafletMapProvider', () => {
   });
 
   it('sizes the cluster bubble by count band and shows the total', () => {
-    const small = String(createClusterDivIcon(4, []).options.html);
+    const small = String(createClusterDivIcon(4, [], COLOURS).options.html);
     expect(small).toContain('width: 34px');
     expect(small).toContain('>4</div>');
 
-    expect(String(createClusterDivIcon(42, []).options.html)).toContain('width: 40px');
-    expect(String(createClusterDivIcon(150, []).options.html)).toContain('width: 46px');
+    expect(String(createClusterDivIcon(42, [], COLOURS).options.html)).toContain('width: 40px');
+    expect(String(createClusterDivIcon(150, [], COLOURS).options.html)).toContain('width: 46px');
   });
 
   it('adds a per-domain badge row (and widens the icon) for a multi-domain cluster', () => {
     const icon = createClusterDivIcon(3, [
       { domain: 'seeker', count: 2 },
       { domain: 'provider', count: 1 },
-    ]);
+    ], COLOURS);
 
     const html = String(icon.options.html);
     expect(html).toContain('>3</div>');
@@ -681,12 +683,37 @@ describe('LeafletMapProvider', () => {
   });
 
   it('shows no badge row for a single-domain cluster', () => {
-    const icon = createClusterDivIcon(3, [{ domain: 'seeker', count: 3 }]);
+    const icon = createClusterDivIcon(3, [{ domain: 'seeker', count: 3 }], COLOURS);
 
     expect(String(icon.options.html)).not.toContain('<span');
     const size = icon.options.iconSize as Point;
     expect(size.x).toBe(34);
     expect(size.y).toBe(34);
+  });
+
+  it('reads the theme colours once per draw, not once per bubble or pin', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 200 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    const spy = vi.spyOn(window, 'getComputedStyle');
+
+    render(leafletElement({ markers: [...crowd, BETA, GAMMA] }));
+
+    await waitFor(() => expect(screen.getAllByTestId('leaflet-marker')).toHaveLength(3));
+    expect(spy.mock.calls.filter(([el]) => el === document.documentElement)).toHaveLength(1);
+    spy.mockRestore();
+  });
+
+  it('brings a hovered bubble in front of the bubbles it overlaps', async () => {
+    bridge().map = createFakeLeafletMap();
+    const crowd = Array.from({ length: 7 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(leafletElement({ markers: crowd }));
+    const latest = () => recordsOf('Marker').filter((r) => String((r.props.icon as DivIcon).options.html).includes('>7</div>')).at(-1)!.props;
+    await waitFor(() => expect(latest().zIndexOffset).toBe(1007));
+
+    act(() => (latest().eventHandlers as { mouseover: () => void }).mouseover());
+    expect(latest().zIndexOffset).toBeGreaterThan(1007 + 1_000_000);
+    act(() => (latest().eventHandlers as { mouseout: () => void }).mouseout());
+    expect(latest().zIndexOffset).toBe(1007);
   });
 
   it('draws one marker per visible bubble or pin, not one per listing', async () => {
@@ -1290,6 +1317,20 @@ describe('GoogleMapProvider', () => {
     const selfMarker = screen.getByTestId('gmap-self-marker');
     expect(selfMarker).toHaveAttribute('aria-label', 'You');
     expect(within(selfMarker).getByText('You')).toBeInTheDocument();
+  });
+
+  it('brings a hovered bubble in front of the bubbles it overlaps, below the popup', async () => {
+    configureApiKey();
+    bridge().gmap = createFakeGoogleMap();
+    const crowd = Array.from({ length: 7 }, (_, i) => at(`crowd-${i}`, 19, 72));
+    render(googleElement({ markers: crowd }));
+    const latest = () => recordsOf('AdvancedMarker').filter((r) => r.props.title === '7').at(-1)!.props;
+    await waitFor(() => expect(latest().zIndex).toBe(1007));
+
+    act(() => (latest().onMouseEnter as () => void)());
+    expect(latest().zIndex).toBe(999_999);
+    act(() => (latest().onMouseLeave as () => void)());
+    expect(latest().zIndex).toBe(1007);
   });
 
   it('themes the cluster bubble with the total, sized by count band', async () => {

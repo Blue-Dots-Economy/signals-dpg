@@ -6,7 +6,7 @@ import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/t
 import { queryKeys } from '@/lib/query-keys';
 import { snapViewportForKey, shouldRefetch, clampBbox, expandBboxForFetch } from '@/lib/map-viewport-snap';
 import type { RawBbox } from '@/lib/map-viewport-snap';
-import { capForZoom } from '@/lib/map-caps';
+import { MARKER_CAP } from '@/lib/map-caps';
 import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 
 // Design: docs/architecture/ui-map-markers-refetch.md
@@ -68,9 +68,8 @@ interface UseMapMarkersResult {
   total: number;
   partial: boolean;
   /**
-   * Whether any active domain's `meta.total` exceeds the zoom-band cap
-   * (`capForZoom`). Drives the refetch decision and the over-dense
-   * "N+ in this area" indicator.
+   * Whether any active domain sent fewer markers than its `meta.total`. Drives
+   * the refetch decision and the over-dense "N+ in this area" indicator.
    */
   truncated: boolean;
   isLoading: boolean;
@@ -82,7 +81,7 @@ interface UseMapMarkersResult {
 interface HeldBboxState {
   /** The area the last fetch requested (the view padded by `expandBboxForFetch`). */
   bbox: RawBbox;
-  /** Whether any domain's last fetch reported `meta.total > capForZoom(zoom)`. */
+  /** Whether any domain's last fetch sent fewer markers than its `meta.total`. */
   truncated: boolean;
   /**
    * Whether that fetch returned no markers. An empty held result is always
@@ -90,8 +89,6 @@ interface HeldBboxState {
    * empty set would strand the map blank until a reload.
    */
   empty: boolean;
-  /** The marker cap the last fetch used; a different cap forces a refetch. */
-  cap: number;
 }
 
 /**
@@ -151,14 +148,11 @@ export function useMapMarkers(
 
   // Written only from the effect below, so it reflects the last completed fetch.
   const heldRef = React.useRef<HeldBboxState | null>(null);
-  const cap = capForZoom(viewport?.zoom ?? 0);
-  const capChanged = heldRef.current !== null && cap !== heldRef.current.cap;
   const needsRefetch = !rawBbox
     ? false
     : !heldRef.current
       ? true // no prior fetch to compare against — must fetch
-      : capChanged ||
-        heldRef.current.empty ||
+      : heldRef.current.empty ||
         shouldRefetch({
           newBbox: rawBbox,
           paddedBbox: heldRef.current.bbox,
@@ -169,9 +163,7 @@ export function useMapMarkers(
   else if (rawBbox) effectiveBbox = heldRef.current?.truncated ? rawBbox : expandBboxForFetch(rawBbox);
   const effectiveIsPadded = rawBbox !== null && effectiveBbox !== rawBbox;
 
-  // The bbox path fetches `cap + 1`, so a total exactly equal to the cap still
-  // reads as complete. The radius path keeps the flat `MAP_FETCH_LIMIT`.
-  const limit = effectiveBbox ? cap + 1 : MAP_FETCH_LIMIT;
+  const limit = effectiveBbox ? MARKER_CAP : MAP_FETCH_LIMIT;
 
   // A contained zoom-in can snap to the same grid cell as the held bbox and
   // leave the key unchanged. `bboxToken` is bumped once per new raw bbox while
@@ -190,7 +182,7 @@ export function useMapMarkers(
     }
   }
 
-  const snappedKey = effectiveBbox ? snapViewportForKey({ ...effectiveBbox, zoom: viewport?.zoom }) : null;
+  const snappedKey = effectiveBbox ? snapViewportForKey(effectiveBbox) : null;
   // Radius-bucket key for radius-only viewports.
   const buckets = viewport && !snappedKey ? viewportBuckets(viewport) : null;
   const latBucket = buckets?.latBucket ?? null;
@@ -273,14 +265,13 @@ export function useMapMarkers(
     const last = lastDataRef.current.get(domainId);
     return !r.isError && last?.search === search ? last.data : undefined;
   });
-  const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; cap: number; markers: Marker[] } | null>(null);
+  const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; markers: Marker[] } | null>(null);
   const dataChanged =
     markersRef.current === null ||
-    markersRef.current.cap !== cap ||
     markersRef.current.data.length !== dataList.length ||
     dataList.some((d, i) => d !== markersRef.current!.data[i]);
   if (dataChanged) {
-    markersRef.current = { data: dataList, cap, markers: dataList.flatMap((d) => d?.markers.slice(0, cap) ?? []) };
+    markersRef.current = { data: dataList, markers: dataList.flatMap((d) => d?.markers ?? []) };
   }
   const markers = markersRef.current!.markers;
   const dataSignature = results.map((r) => `${r.status}:${r.dataUpdatedAt}`).join('|');
@@ -309,15 +300,16 @@ export function useMapMarkers(
     for (const data of dataList) {
       if (!data) continue;
       partial = partial || data.meta.partial;
-      truncated = truncated || data.meta.total > cap;
+      // The server may cap below `limit`, so compare with what actually arrived.
+      truncated = truncated || data.meta.total > data.markers.length;
       // For a capped answer this on-screen count is a lower bound; the caller shows it as "N+".
       total += shownBbox
-        ? data.markers.slice(0, cap).filter((m) => markerInBbox(m, shownBbox)).length
+        ? data.markers.filter((m) => markerInBbox(m, shownBbox)).length
         : data.meta.total;
     }
     return { total, partial, truncated };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- markers identity tracks the data; cap and shownBboxSignature are the other inputs
-  }, [markers, cap, shownBboxSignature]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markers identity tracks the data; shownBboxSignature is the other input
+  }, [markers, shownBboxSignature]);
 
   const effectiveBboxSignature = effectiveBbox
     ? `${effectiveBbox.minLat},${effectiveBbox.minLng},${effectiveBbox.maxLat},${effectiveBbox.maxLng}`
@@ -331,7 +323,6 @@ export function useMapMarkers(
       bbox: effectiveBbox,
       truncated: summary.truncated,
       empty: markers.length === 0,
-      cap,
     };
     // A capped answer for the padded area may have left out listings on screen; fetch the view alone.
     if (summary.truncated && effectiveIsPadded) rerenderForUnpaddedFetch();

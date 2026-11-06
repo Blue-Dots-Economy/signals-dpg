@@ -406,8 +406,7 @@ export async function fetchMarkersAcrossInstances(input: {
       await scatterGatherPage<FetchMarkersResponseMarker>({
         activeInstances: activeInstances.map((entry) => entry.instanceUrl),
         filters: input.filters,
-        // MarkersBodySchema caps `limit` at 25000 on the peer.
-        peerLimitMax: 25000,
+        peerLimitMax: apiConfig.markers_max_limit,
         fetchPage: async ({ instanceUrl, filters }) =>
           (await fetchInstanceMarkers({ instanceUrl, filters, log: input.log })).markers,
       });
