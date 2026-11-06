@@ -33,6 +33,7 @@ import {
 
 import { useUpdateActionStatus, actionKeys } from '@/hooks/use-actions';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/api-error';
 
 interface ActionStatusUpdaterProps {
   action: Action | null;
@@ -88,17 +89,21 @@ export function ActionStatusUpdater({
   const targetStatus = suggestedStatus ?? '';
   const [consentChecked, setConsentChecked] = React.useState(false);
   const [remarks, setRemarks] = React.useState('');
+  const [attempted, setAttempted] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setConsentChecked(false);
       setRemarks('');
+      setAttempted(false);
       gate.setChallenge(null);
     }
   }, [open]);
 
   // Resolved from the network config, so consent fields need no prop drilling.
-  const { data: networkConfig } = useNetworkConfig(action?.target_item_network ?? null);
+  const { data: networkConfig, isError: networkConfigFailed } = useNetworkConfig(
+    action?.target_item_network ?? null,
+  );
 
   const interaction = React.useMemo(() => {
     if (!networkConfig || !action) return null;
@@ -147,6 +152,14 @@ export function ActionStatusUpdater({
   );
 
   const handleSubmit = () => {
+    setAttempted(true);
+    // Without the config we cannot tell whether consent is required; the
+    // message under the buttons says so.
+    if (!networkConfig) return;
+    if (requiresConsent && !consentChecked) {
+      document.getElementById('consent-acknowledge')?.focus();
+      return;
+    }
     if (!targetStatus) {
       toast.error(t('actions.toast_no_status_title'), {
         description: t('actions.toast_no_status_desc'),
@@ -186,7 +199,7 @@ export function ActionStatusUpdater({
           onOpenChange(false);
           return;
         }
-        toast.error(t('actions.toast_update_failed', { message: error.message }));
+        toast.error(t('actions.toast_update_failed', { message: apiErrorMessage(error, t) }));
       },
     });
   };
@@ -198,6 +211,11 @@ export function ActionStatusUpdater({
           text={consentText}
           checked={consentChecked}
           onCheckedChange={setConsentChecked}
+          error={
+            attempted && !consentChecked
+              ? t('actions.consent_required_error', 'Tick the box to agree before you confirm.')
+              : undefined
+          }
         />
       ) : (
         <div className="space-y-2">
@@ -230,18 +248,32 @@ export function ActionStatusUpdater({
     />
   );
 
+  const configMessage =
+    attempted && !networkConfig
+      ? networkConfigFailed
+        ? t('actions.updater_config_error', "Couldn't load the details for this request. Check your connection, then close and try again.")
+        : t('actions.updater_config_loading', 'Still loading. Please try again in a moment.')
+      : undefined;
+
   const footer = (
-    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-      <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-        {t('common.cancel')}
-      </Button>
-      <Button
-        onClick={handleSubmit}
-        disabled={isPending || !networkConfig || (requiresConsent && !consentChecked)}
-        className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
-      >
-        {isPending ? t('actions.btn_updating') : t('actions.btn_submit')}
-      </Button>
+    <div className="space-y-2">
+      {configMessage && (
+        <p role="alert" className="text-sm text-destructive sm:text-right">
+          {configMessage}
+        </p>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
+          {t('common.cancel')}
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={isPending}
+          className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
+        >
+          {isPending ? t('actions.btn_updating') : t('actions.btn_submit')}
+        </Button>
+      </div>
     </div>
   );
 

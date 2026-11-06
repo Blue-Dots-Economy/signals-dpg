@@ -1,15 +1,16 @@
 import * as React from 'react';
-import axios from 'axios';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
+import { isValidPhoneNumber } from '@/lib/auth-api';
 import { useAuth } from '@/contexts/auth-context';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { toastGuardianSendError } from '@/lib/guardian-consent';
+import { readApiError } from '@/lib/api-error';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 import { ConsentModal } from '@/components/consent/consent-modal';
 import {
   submitGuardian,
@@ -62,10 +63,15 @@ export function GuardianFormStep({
   const [serverFlaggedSameContact, setServerFlaggedSameContact] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [validationError, setValidationError] = React.useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = React.useState(false);
+  const [phoneTouched, setPhoneTouched] = React.useState(false);
+  // Fields the server rejected (400), cleared when that field is edited.
+  const [serverInvalid, setServerInvalid] = React.useState<{ name?: boolean; email?: boolean; phone?: boolean }>({});
 
-  // guardianPhone is the national 10-digit part; the wire value is E.164.
-  const guardianPhoneE164 = toE164(guardianPhone);
-  const hasContact = Boolean(guardianEmail.trim()) || guardianPhone.length === 10;
+  // guardianPhone is the full E.164 value from PhoneInput.
+  const guardianPhoneE164 = guardianPhone;
+  const phoneValid = isValidPhoneNumber(guardianPhone);
+  const hasContact = Boolean(guardianEmail.trim()) || phoneValid;
 
   // A ward cannot be their own guardian. Also enforced server-side
   // (409 SAME_CONTACT_NOT_ALLOWED).
@@ -81,30 +87,41 @@ export function GuardianFormStep({
     setValidationError(null);
   };
 
-  const canSubmit =
-    Boolean(guardianName.trim()) &&
-    hasContact &&
-    !sameContactBlocked &&
-    !isSubmitting;
+  const nameLabel = t('u18.guardian_label_parent_name', 'Guardian Name');
+  const emailLabel = t('u18.guardian_label_parent_email', 'Guardian Email');
+  const phoneLabel = t('u18.guardian_label_parent_phone', 'Guardian Phone Number');
+  const invalidField = (label: string) =>
+    t('form.error_invalid', 'Invalid entry. {{message}}', {
+      message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+    });
+  const partialPhone = guardianPhone.length > 0 && !phoneValid;
+
+  const nameError = serverInvalid.name
+    ? t('form.error_invalid', 'Invalid entry. {{message}}', {
+        message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: nameLabel }),
+      })
+    : submitAttempted && !guardianName.trim()
+      ? t('form.error_required', '{{label}} is required.', { label: nameLabel })
+      : null;
+  const emailError = serverInvalid.email ? invalidField(emailLabel) : null;
+  const phoneError =
+    serverInvalid.phone || (partialPhone && (phoneTouched || submitAttempted))
+      ? invalidField(phoneLabel)
+      : submitAttempted && !hasContact
+        ? t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number.")
+        : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!guardianName.trim()) return;
-    if (!hasContact) {
-      setValidationError(
-        t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number."),
-      );
+    if (isSubmitting) return;
+    setSubmitAttempted(true);
+    if (!guardianName.trim() || !hasContact || partialPhone) {
+      const firstId = !guardianName.trim() ? 'u18-guardian-name' : 'u18-guardian-phone';
+      document.getElementById(firstId)?.focus();
       return;
     }
-    if (sameContactBlocked) {
-      setValidationError(
-        t(
-          'u18.guardian_error_same_contact_not_allowed',
-          "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
-        ),
-      );
-      return;
-    }
+    // The same-contact message is already shown under the contact fields.
+    if (sameContactBlocked) return;
 
     // With no consent config there is nothing to show, so proceed; the server
     // still records the ward's terms/privacy rows.
@@ -125,7 +142,7 @@ export function GuardianFormStep({
       brand: brand ?? null,
       guardianName: guardianName.trim(),
       ...(guardianEmail.trim() ? { guardianEmail: guardianEmail.trim() } : {}),
-      ...(guardianPhone.length === 10 ? { guardianPhone: guardianPhoneE164 } : {}),
+      ...(phoneValid ? { guardianPhone: guardianPhoneE164 } : {}),
       guardianDeclarationAccepted: true,
     };
 
@@ -133,19 +150,18 @@ export function GuardianFormStep({
       const result = await submit(body);
       if (result.otpSent) onSubmitted(body);
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { error?: string } | undefined)?.error
-        : undefined;
+      const { status, code, fields } = readApiError(err);
+      const badFields = {
+        name: Boolean(fields?.guardianName),
+        email: Boolean(fields?.guardianEmail),
+        phone: Boolean(fields?.guardianPhone),
+      };
 
-      if (status === 409 && code === 'SAME_CONTACT_NOT_ALLOWED') {
+      if (status === 400 && (badFields.name || badFields.email || badFields.phone)) {
+        setServerInvalid(badFields);
+      } else if (status === 409 && code === 'SAME_CONTACT_NOT_ALLOWED') {
+        // Shown under the contact fields.
         setServerFlaggedSameContact(true);
-        toast.error(
-          t(
-            'u18.guardian_error_same_contact_not_allowed',
-            "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
-          ),
-        );
       } else if (status === 409 && code === 'GUARDIAN_WARD_LIMIT') {
         setValidationError(
           t(
@@ -189,10 +205,14 @@ export function GuardianFormStep({
         <Input
           id="u18-guardian-name"
           value={guardianName}
-          onChange={(e) => setGuardianName(e.target.value)}
+          onChange={(e) => {
+            setGuardianName(e.target.value);
+            setServerInvalid((prev) => ({ ...prev, name: false }));
+          }}
           disabled={isSubmitting}
-          required
+          {...fieldErrorAria('u18-guardian-name-error', nameError)}
         />
+        <InlineFieldError id="u18-guardian-name-error" message={nameError} />
       </div>
 
       <div className="space-y-1.5">
@@ -203,10 +223,18 @@ export function GuardianFormStep({
           id="u18-guardian-email"
           type="email"
           value={guardianEmail}
-          onChange={(e) => { setGuardianEmail(e.target.value); clearWarnings(); }}
+          onChange={(e) => {
+            setGuardianEmail(e.target.value);
+            clearWarnings();
+            setServerInvalid((prev) => ({ ...prev, email: false }));
+          }}
           disabled={isSubmitting}
-          aria-invalid={sameContactBlocked}
+          aria-invalid={Boolean(emailError) || sameContactBlocked || undefined}
+          aria-describedby={
+            emailError ? 'u18-guardian-email-error' : sameContactBlocked ? 'u18-guardian-same-contact' : undefined
+          }
         />
+        <InlineFieldError id="u18-guardian-email-error" message={emailError} />
       </div>
 
       <div className="space-y-1.5">
@@ -216,10 +244,19 @@ export function GuardianFormStep({
         <PhoneInput
           id="u18-guardian-phone"
           value={guardianPhone}
-          onChange={(v) => { setGuardianPhone(v); clearWarnings(); }}
+          onChange={(v) => {
+            setGuardianPhone(v);
+            clearWarnings();
+            setServerInvalid((prev) => ({ ...prev, phone: false }));
+          }}
+          onBlur={() => setPhoneTouched(true)}
           disabled={isSubmitting}
-          invalid={sameContactBlocked}
+          invalid={Boolean(phoneError) || sameContactBlocked}
+          describedBy={
+            phoneError ? 'u18-guardian-phone-error' : sameContactBlocked ? 'u18-guardian-same-contact' : undefined
+          }
         />
+        <InlineFieldError id="u18-guardian-phone-error" message={phoneError} />
       </div>
 
       <p className="text-sm text-muted-foreground">
@@ -228,7 +265,7 @@ export function GuardianFormStep({
 
       {sameContactBlocked && (
         <div className="rounded-md border border-destructive bg-destructive/10 p-3">
-          <p className="text-sm text-destructive">
+          <p id="u18-guardian-same-contact" className="text-sm text-destructive">
             {t(
               'u18.guardian_error_same_contact_not_allowed',
               "Your guardian's contact can't be the same as your own. Please use a different email or phone number.",
@@ -239,7 +276,7 @@ export function GuardianFormStep({
 
       {validationError && <p className="text-sm text-destructive">{validationError}</p>}
 
-      <Button type="submit" disabled={!canSubmit} className="w-full">
+      <Button type="submit" disabled={isSubmitting} className="w-full">
         {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}
         {t('u18.guardian_continue', 'Continue')}
       </Button>

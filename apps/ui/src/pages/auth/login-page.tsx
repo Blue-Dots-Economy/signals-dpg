@@ -26,13 +26,15 @@ import { useNetworkTheme } from '@/theme/theme-provider';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { buildOutstandingConsent, type OutstandingConsent } from '@/lib/consent-gate';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/api-error';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 import { fetchNetworkConfig } from '@/lib/network-api';
 import type { DotNetworkDomain } from '@/engine/types';
 import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromAge } from '@/lib/guardian-consent';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { KeycloakLoginPanel } from './keycloak-login-panel';
 import { SessionExpiredNotice } from './session-expired-notice';
@@ -130,6 +132,8 @@ function OtpLoginPage() {
   const [domain, setDomain] = useState('');
   const [userExists, setUserExists] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [contactTouched, setContactTouched] = useState(false);
   const [consentGate, setConsentGate] = useState<ConsentGateState | null>(null);
   // Shared with the wrapper via React Query. The fail-safe default (gated,
   // both channels) keeps the API authoritative if the request fails.
@@ -199,12 +203,10 @@ function OtpLoginPage() {
     }
   }, [authCfg, mode]);
 
-  // phoneNumber holds the national part; the wire value is the full E.164.
-  const fullPhone = toE164(phoneNumber);
+  // phoneNumber is the full E.164 value from PhoneInput.
+  const fullPhone = phoneNumber;
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
-  // Phone mode needs the full 10-digit national number before "Continue".
-  const contactComplete = mode === 'email' ? email.trim().length > 0 : phoneNumber.length === 10;
   const contactLabel = mode === 'email'
     ? t('auth.contact_label_email')
     : t('auth.contact_label_phone');
@@ -248,9 +250,9 @@ function OtpLoginPage() {
     setConsentGate(null);
     try {
       await proceedToOtp(ident, userEx, uname, extras, gate.pendingConsent);
-    } catch {
+    } catch (err) {
       toast.error(t('auth.toast_send_code_error'), {
-        description: t('auth.toast_send_code_error_desc'),
+        description: apiErrorMessage(err, t, t('auth.toast_send_code_error_desc')),
       });
     }
   };
@@ -350,9 +352,9 @@ function OtpLoginPage() {
       setIsLoading(true);
       try {
         await proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
-      } catch {
+      } catch (err) {
         toast.error(t('auth.toast_send_code_error'), {
-          description: t('auth.toast_send_code_error_desc'),
+          description: apiErrorMessage(err, t, t('auth.toast_send_code_error_desc')),
         });
       } finally {
         setIsLoading(false);
@@ -363,9 +365,9 @@ function OtpLoginPage() {
     setIsLoading(true);
     try {
       await runConsentThenOtp(gate.identifier, gate.exists, gate.resolvedName, extras);
-    } catch {
+    } catch (err) {
       toast.error(t('auth.toast_send_code_error'), {
-        description: t('auth.toast_send_code_error_desc'),
+        description: apiErrorMessage(err, t, t('auth.toast_send_code_error_desc')),
       });
     } finally {
       setIsLoading(false);
@@ -375,21 +377,33 @@ function OtpLoginPage() {
   // Guards split out of handleSubmit for complexity (Sonar S3776).
   // handleSubmit's `finally` owns `setIsLoading(false)`.
 
-  /** Toasts and returns false when the number/email is malformed. */
+  const contactFieldLabel = mode === 'email' ? t('auth.label_email') : t('auth.label_mobile');
+  const contactWellFormed =
+    mode === 'phone' ? isValidPhoneNumber(fullPhone) : /^[^\s@]+@[^\s.@]+\.[^\s@]+$/.test(email.trim());
+  // Wrong value: on leaving the field; empty: only after Continue.
+  const contactError = !contactValue.trim()
+    ? submitAttempted
+      ? t('form.error_required', '{{label}} is required.', { label: contactFieldLabel })
+      : null
+    : !contactWellFormed && (contactTouched || submitAttempted)
+      ? mode === 'phone'
+        ? t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_phone_desc') })
+        : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
+      : null;
+  const nameError =
+    submitAttempted && userExists === false && !name.trim()
+      ? t('form.error_required', '{{label}} is required.', { label: t('auth.label_name') })
+      : null;
+  const domainError =
+    submitAttempted && userExists === false && domainOptions.length > 1 && !domain
+      ? t('auth.select_domain_required')
+      : null;
+
+  /** False (focusing the field) when the number/email is missing or malformed. */
   const validateContact = (): boolean => {
-    if (mode === 'phone' && !isValidPhoneNumber(fullPhone)) {
-      toast.error(t('auth.toast_invalid_phone'), {
-        description: t('auth.toast_invalid_phone_desc'),
-      });
-      return false;
-    }
-    if (mode === 'email' && !/^[^\s@]+@[^\s.@]+\.[^\s@]+$/.test(email.trim())) {
-      toast.error(t('auth.toast_invalid_email'), {
-        description: t('auth.toast_invalid_email_desc'),
-      });
-      return false;
-    }
-    return true;
+    if (contactValue.trim() && contactWellFormed) return true;
+    document.getElementById('contact')?.focus();
+    return false;
   };
 
   /** Signup-only guards (self-signup gate, name, domain). True = halt. */
@@ -402,17 +416,19 @@ function OtpLoginPage() {
       return true;
     }
     if (!exists && !name.trim()) {
-      toast.info(t('auth.toast_one_more_step'), {
-        description: t('auth.toast_one_more_step_desc', { contactLabel }),
-      });
+      // First reveal of the name field gets a nudge; later attempts show the field's own message.
+      if (userExists !== false) {
+        toast.info(t('auth.toast_one_more_step'), {
+          description: t('auth.toast_one_more_step_desc', { contactLabel }),
+        });
+      } else {
+        document.getElementById('name')?.focus();
+      }
       return true;
     }
     if (!exists && !domain) {
-      toast.error(
-        domainOptions.length === 0
-          ? t('auth.signup_options_unavailable')
-          : t('auth.select_domain_required'),
-      );
+      // With several options the message sits under the domain buttons.
+      if (domainOptions.length <= 1) toast.error(t('auth.signup_options_unavailable'));
       return true;
     }
     return false;
@@ -447,7 +463,9 @@ function OtpLoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!contactValue.trim()) return;
+    if (isLoading) return;
+    // Name/domain messages wait until those fields have been shown once.
+    setSubmitAttempted(userExists !== null || !contactValue.trim() || !contactWellFormed);
 
     // The OTP send fails silently on a malformed number, so check here.
     if (!validateContact()) return;
@@ -489,9 +507,9 @@ function OtpLoginPage() {
       }
 
       await runConsentThenOtp(identifier, exists, resolvedName, resolvedSignupExtras);
-    } catch {
+    } catch (err) {
       toast.error(t('auth.toast_send_code_error'), {
-        description: t('auth.toast_send_code_error_desc'),
+        description: apiErrorMessage(err, t, t('auth.toast_send_code_error_desc')),
       });
     } finally {
       setIsLoading(false);
@@ -515,9 +533,9 @@ function OtpLoginPage() {
         { contactLabel },
       ),
     });
-    void proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, gate.resolvedSignupExtras).catch(() => {
+    void proceedToOtp(gate.identifier, gate.exists, gate.resolvedName, gate.resolvedSignupExtras).catch((err: unknown) => {
       toast.error(t('auth.toast_send_code_error'), {
-        description: t('auth.toast_send_code_error_desc'),
+        description: apiErrorMessage(err, t, t('auth.toast_send_code_error_desc')),
       });
     });
   };
@@ -625,7 +643,7 @@ function OtpLoginPage() {
               </Label>
               {/* Outlined buttons: nothing is pre-selected, so each option
                   must read as a button on its own. */}
-              <div className="flex flex-wrap gap-2 text-sm">
+              <fieldset className="flex flex-wrap gap-2 text-sm" {...fieldErrorAria('domain-error', domainError)}>
                 {domainOptions.map((d) => (
                   <button
                     key={d.id}
@@ -642,7 +660,8 @@ function OtpLoginPage() {
                     {domainLabel(d)}
                   </button>
                 ))}
-              </div>
+              </fieldset>
+              <InlineFieldError id="domain-error" message={domainError} />
             </div>
           )}
 
@@ -656,8 +675,11 @@ function OtpLoginPage() {
                 id="contact"
                 value={phoneNumber}
                 onChange={setPhoneNumber}
+                onBlur={() => setContactTouched(true)}
                 disabled={isLoading}
                 placeholder={t('auth.placeholder_phone', '10-digit mobile number')}
+                invalid={Boolean(contactError)}
+                describedBy={contactError ? 'contact-error' : undefined}
               />
             ) : (
               <Input
@@ -666,11 +688,13 @@ function OtpLoginPage() {
                 placeholder={t('auth.placeholder_email')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                onBlur={() => setContactTouched(true)}
                 disabled={isLoading}
-                required
                 className="h-11"
+                {...fieldErrorAria('contact-error', contactError)}
               />
             )}
+            <InlineFieldError id="contact-error" message={contactError} />
           </div>
 
           {/* Name — only shown when creating account (and self-signup isn't gated) */}
@@ -686,9 +710,10 @@ function OtpLoginPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 disabled={isLoading}
-                required
                 className="h-11"
+                {...fieldErrorAria('name-error', nameError)}
               />
+              <InlineFieldError id="name-error" message={nameError} />
             </div>
           )}
 
@@ -701,7 +726,7 @@ function OtpLoginPage() {
           {/* CTA */}
           <button
             type="submit"
-            disabled={isLoading || !contactComplete}
+            disabled={isLoading}
             className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-11"
           >
             {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}

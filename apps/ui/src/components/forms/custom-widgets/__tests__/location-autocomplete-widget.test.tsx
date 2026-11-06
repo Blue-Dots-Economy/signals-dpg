@@ -15,6 +15,7 @@ function renderWidget(overrides: Partial<WidgetProps> = {}) {
     id: 'root_location',
     value: '',
     onChange,
+    onBlur: vi.fn(),
     schema: {},
     options: {},
     label: 'Location',

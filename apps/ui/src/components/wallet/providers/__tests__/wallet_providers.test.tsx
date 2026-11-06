@@ -134,19 +134,25 @@ describe('DigiLockerProvider', () => {
     return renderProvider('digilocker', makeContext());
   }
 
-  it('starts with the import button disabled until a code is present', async () => {
+  it('an Import with no code says the code is required under the field and calls nothing', async () => {
     renderDigiLocker();
 
     expect(screen.getByText('DigiLocker')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import from DigiLocker' })).toBeDisabled();
     // No flow started yet, so neither the waiting nor the manual hint shows.
     expect(screen.queryByText(/automatic detection/)).not.toBeInTheDocument();
+
+    const importBtn = screen.getByRole('button', { name: 'Import from DigiLocker' });
+    expect(importBtn).toBeEnabled();
+    await userEvent.click(importBtn);
+    expect(screen.getByText('Authorization code or redirect URL is required.')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Paste the code or redirect URL here')).toHaveAttribute('aria-invalid', 'true');
+    expect(digilocker.completeAuth).not.toHaveBeenCalled();
 
     await userEvent.type(
       screen.getByPlaceholderText('Paste the code or redirect URL here'),
       'PASTED',
     );
-    expect(screen.getByRole('button', { name: 'Import from DigiLocker' })).toBeEnabled();
+    expect(screen.queryByText('Authorization code or redirect URL is required.')).toBeNull();
   });
 
   it('imports a manually pasted authorization code', async () => {
@@ -619,19 +625,24 @@ describe('DhiwayWalletProvider', () => {
     expect(wallet.requestCode).toHaveBeenCalledWith('+919000000000', 'phone');
   });
 
-  it('requires an explicit choice when both email and phone exist', () => {
+  it('requires an explicit choice when both email and phone exist', async () => {
     renderDhiway({ email: 'asha@example.org', phoneNumber: '+919000000000' });
 
     expect(screen.getByRole('combobox')).toBeInTheDocument();
     expect(screen.getByText('Select email or phone')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(screen.getByText('Choose an email or phone number to receive the code.')).toBeInTheDocument();
+    expect(screen.getByRole('combobox')).toHaveAttribute('aria-invalid', 'true');
+    expect(wallet.requestCode).not.toHaveBeenCalled();
   });
 
-  it('disables sending when the account has no identifier at all', () => {
+  it('says why sending cannot start when the account has no identifier at all', async () => {
     renderDhiway({ email: null, phoneNumber: null });
 
     expect(screen.getByText('No identifier available')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeDisabled();
+    await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(screen.getByText('Choose an email or phone number to receive the code.')).toBeInTheDocument();
+    expect(wallet.requestCode).not.toHaveBeenCalled();
   });
 
   it('shows the api error when requesting a code fails and stays on step one', async () => {
@@ -654,19 +665,21 @@ describe('DhiwayWalletProvider', () => {
     expect(await screen.findByText('Failed to send verification code')).toBeInTheDocument();
   });
 
-  it('keeps verification disabled until a non-blank code is typed', async () => {
+  it('a blank code shows "required" under the field instead of sending', async () => {
     wallet.requestCode.mockResolvedValue({ message: 'sent' });
     renderDhiway();
     await userEvent.click(screen.getByRole('button', { name: 'Send code' }));
 
     const verify = await screen.findByRole('button', { name: 'Verify and fetch credentials' });
-    expect(verify).toBeDisabled();
+    expect(verify).toBeEnabled();
 
     await userEvent.type(screen.getByPlaceholderText('Enter the code you received'), '   ');
-    expect(verify).toBeDisabled();
+    await userEvent.click(verify);
+    expect(screen.getByText('Verification code is required.')).toBeInTheDocument();
+    expect(wallet.verifyCode).not.toHaveBeenCalled();
 
     await userEvent.type(screen.getByPlaceholderText('Enter the code you received'), '9');
-    expect(verify).toBeEnabled();
+    expect(screen.queryByText('Verification code is required.')).toBeNull();
   });
 
   it('lets the user go back and change the identifier', async () => {

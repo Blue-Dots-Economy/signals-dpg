@@ -831,7 +831,7 @@ describe('OtpPage — resend', () => {
 
   it('a successful resend clears a previous wrong-code error', async () => {
     mocks.countdown = 0;
-    mocks.verifyOtp.mockRejectedValue(new Error('bad code'));
+    mocks.verifyOtp.mockRejectedValue({ response: { status: 400, data: { error: 'INVALID_OTP' } } });
     await renderOtp();
 
     submitOtpCode();
@@ -849,8 +849,19 @@ describe('OtpPage — wrong code', () => {
     mocks.getU18Status.mockResolvedValue({ isMinor: false });
   });
 
+  it('a network failure is not reported as a wrong code', async () => {
+    mocks.verifyOtp.mockRejectedValue(new TypeError('Failed to fetch'));
+    await renderOtp();
+
+    submitOtpCode('000000');
+
+    expect(await screen.findByText("Couldn't check your code")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't reach the server. Check your connection and try again.")).toBeInTheDocument();
+    expect(screen.queryByText(/incorrect verification code/i)).toBeNull();
+  });
+
   it('shows the incorrect-code alert and stays on the page', async () => {
-    mocks.verifyOtp.mockRejectedValue(new Error('invalid otp'));
+    mocks.verifyOtp.mockRejectedValue({ response: { status: 400, data: { error: 'INVALID_OTP' } } });
     await renderOtp();
 
     submitOtpCode('000000');

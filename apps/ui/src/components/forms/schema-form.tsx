@@ -1,5 +1,5 @@
 import * as React from 'react';
-import Form from '@rjsf/shadcn';
+import Form, { Templates as ShadcnTemplates } from '@rjsf/shadcn';
 import validator from '@rjsf/validator-ajv8';
 import { useTranslation } from 'react-i18next';
 import type {
@@ -8,19 +8,50 @@ import type {
   RegistryWidgetsType,
   ObjectFieldTemplateProps,
   RJSFValidationError,
+  ErrorSchema,
+  BaseInputTemplateProps,
 } from '@rjsf/utils';
 import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
+import { PhoneWidget } from './custom-widgets/phone-widget';
+import { isPhoneFieldName } from '@/components/auth/phone-input';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
 import { ClearableSelectWidget } from './custom-widgets/clearable-select-widget';
+import { CheckboxWidget } from './custom-widgets/checkbox-widget';
 import CustomFieldTemplate from './custom-field-template';
 import { resolveFormLayout, type FormLayout } from '@/theme/form-layouts';
 import { resolveVisibleSchema } from '@/lib/show-if';
 import { filterErrorSchemaToVisited } from './field-error-visibility';
-import { FIELD_ERROR_MESSAGE_MARKER, resolvePatternErrorMessage } from './field-error-message';
+import {
+  FIELD_ERROR_MESSAGE_MARKER,
+  formStandardMessage,
+  isMissingValueError,
+  resolvePatternErrorMessage,
+  serverFieldMessage,
+  type FieldErrorCopy,
+} from './field-error-message';
 import { cn } from '@/lib/utils';
+
+
+const ShadcnBaseInputTemplate = ShadcnTemplates.BaseInputTemplate!;
+
+/**
+ * shadcn's text input, marked `aria-invalid` while the field has an error.
+ * Schema `examples` are dropped, so the browser shows no suggestion list from them.
+ */
+function BaseInputTemplate(props: Readonly<BaseInputTemplateProps>) {
+  const invalid = (props.rawErrors?.length ?? 0) > 0;
+  const { examples: _examples, ...schemaWithoutExamples } = props.schema;
+  return (
+    <ShadcnBaseInputTemplate
+      {...props}
+      schema={schemaWithoutExamples}
+      extraProps={{ ...props.extraProps, ...(invalid ? { 'aria-invalid': true } : {}) }}
+    />
+  );
+}
 
 interface RjsfError {
   property?: string;
@@ -108,6 +139,11 @@ interface SchemaFormProps {
    * without skipping a level.
    */
   sectionHeadingLevel?: 2 | 3;
+  /**
+   * The API's per-field messages from a rejected submit, keyed by dotted path.
+   * Each shows under its field until the user changes that field's value.
+   */
+  serverErrors?: Record<string, string>;
 }
 
 // ObjectFieldTemplate rendering layout sections, pairing adjacent `twoColumn`
@@ -251,6 +287,10 @@ function generateUiSchema(
       uiSchema[key] = { 'ui:widget': 'date' };
     }
 
+    if (typed.type === 'string' && isPhoneFieldName(key)) {
+      uiSchema[key] = { 'ui:widget': 'phone' };
+    }
+
     if (typed.format === 'email') {
       uiSchema[key] = { 'ui:placeholder': 'email@example.com' };
     }
@@ -341,12 +381,14 @@ function generateUiSchema(
 
 const widgets: RegistryWidgetsType = {
   date: DatePickerWidget,
+  phone: PhoneWidget,
   'location-autocomplete': LocationAutocompleteWidget,
   'location-multi': MultiLocationAutocompleteWidget,
   'reference-autocomplete': ReferenceAutocompleteWidget,
   // Overrides the theme's `SelectWidget` by name, so every enum field gets a
   // clear button when optional.
   SelectWidget: ClearableSelectWidget,
+  CheckboxWidget,
 };
 
 function stripMetaSchema(schema: RJSFSchema): RJSFSchema {
@@ -487,6 +529,7 @@ export function SchemaForm({
   networkId,
   formContext,
   sectionHeadingLevel = 3,
+  serverErrors,
 }: Readonly<SchemaFormProps>) {
   const { t } = useTranslation();
 
@@ -529,8 +572,7 @@ export function SchemaForm({
   /**
    * Readable copy for a failed `pattern`, since AJV's message is the raw
    * regex: the field's `x-error-message`, else the `x-uri` default, else a
-   * generic. Used by both error paths, as `extraErrors` bypasses
-   * `transformErrors`.
+   * generic. Reached through `formStandardMessage`, which both error paths use.
    */
   const patternMessageFor = React.useCallback(
     (property: string): string => {
@@ -543,17 +585,47 @@ export function SchemaForm({
     [baseSchema, uriFieldKeys, t],
   );
 
+  const errorCopy = React.useMemo<FieldErrorCopy>(
+    () => ({
+      required: (label) => t('form.error_required', '{{label}} is required.', { label }),
+      invalid: (message) => t('form.error_invalid', 'Invalid entry. {{message}}', { message }),
+      validValue: (label) => t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+      rule: (kind, label, limit) => {
+        switch (kind) {
+          case 'minLength':
+            return t('form.rule_min_length', '{{label}} must be at least {{limit}} characters.', { label, limit });
+          case 'maxLength':
+            return t('form.rule_max_length', '{{label}} must be at most {{limit}} characters.', { label, limit });
+          case 'minimum':
+            return t('form.rule_minimum', '{{label}} must be at least {{limit}}.', { label, limit });
+          case 'maximum':
+            return t('form.rule_maximum', '{{label}} must be at most {{limit}}.', { label, limit });
+          case 'exclusiveMinimum':
+            return t('form.rule_exclusive_minimum', '{{label}} must be more than {{limit}}.', { label, limit });
+          case 'exclusiveMaximum':
+            return t('form.rule_exclusive_maximum', '{{label}} must be less than {{limit}}.', { label, limit });
+          case 'minItems':
+            return t('form.rule_min_items', 'Choose at least {{limit}} for {{label}}.', { label, limit });
+          case 'maxItems':
+            return t('form.rule_max_items', 'Choose at most {{limit}} for {{label}}.', { label, limit });
+          case 'enum':
+            return t('form.rule_enum', 'Choose one of the listed options for {{label}}.', { label });
+        }
+      },
+    }),
+    [t],
+  );
+
   const transformErrors = React.useCallback(
     (errors: RJSFValidationError[]) =>
       errors.filter((error) => !isConditionalSummary(error)).map((error) => {
-        if (error.name !== 'pattern') return error;
-        const field = (error.property ?? '').replace(/^\./, '').split('.')[0];
-        const message = patternMessageFor(field);
+        const message = formStandardMessage(error, baseSchema, errorCopy, patternMessageFor);
         // `stack` is what RJSF's ErrorList renders, so rewrite it too.
-        return { ...error, message, stack: `${error.property} ${message}` };
+        return { ...error, message, stack: message };
       }),
-    [patternMessageFor],
+    [baseSchema, errorCopy, patternMessageFor],
   );
+
 
   // A ref, so an inline-arrow callback does not re-fire the effect below in a
   // render loop.
@@ -568,6 +640,8 @@ export function SchemaForm({
     const detail = getSchemaFormValidity(validator, rjsfSchema, data);
     cb(detail.valid, detail);
   }, [rjsfSchema, data]);
+
+  const containerRef = React.useRef<HTMLDivElement>(null);
 
   // Visited fields by RJSF id ("root_phone"); only these get errors.
   const [touchedFieldIds, setTouchedFieldIds] = React.useState<ReadonlySet<string>>(
@@ -590,29 +664,61 @@ export function SchemaForm({
     setSubmitAttempted(false);
   }, [schema]);
 
-  // Display errors via `extraErrors`, limited to visited fields. `liveValidate`
-  // is off because it errors every invalid field at once and the theme reddens
-  // borders from `rawErrors`. RJSF still validates on submit.
-  const extraErrors = React.useMemo(() => {
-    const { errors, errorSchema } = validator.validateFormData(data, rjsfSchema);
-    const patternFields = new Set(
-      errors
-        .filter((error) => error.name === 'pattern')
-        .map((error) => (error.property ?? '').replace(/^\./, '').split('.')[0])
-        .filter(Boolean),
-    );
-    const readable: Record<string, unknown> = { ...errorSchema };
-    // Drop the root-level `if` summary.
-    const ifMessages = new Set(errors.filter(isConditionalSummary).map((e) => e.message));
-    const rootErrors = (readable.__errors as string[] | undefined)?.filter((m) => !ifMessages.has(m));
-    if (rootErrors && rootErrors.length > 0) readable.__errors = rootErrors;
-    else delete readable.__errors;
-    for (const property of patternFields) {
-      readable[property] = { __errors: [patternMessageFor(property)] };
+  // Field values as they were when `serverErrors` arrived; a server message
+  // stays only while its field still holds that value.
+  const [serverSnapshot, setServerSnapshot] = React.useState<Record<string, string>>({});
+  const dataRef = React.useRef(data);
+  dataRef.current = data;
+  React.useEffect(() => {
+    const snap: Record<string, string> = {};
+    for (const path of Object.keys(serverErrors ?? {})) {
+      snap[path] = JSON.stringify(valueAtProperty(dataRef.current, path) ?? null);
     }
-    return filterErrorSchemaToVisited(readable as typeof errorSchema, touchedFieldIds, submitAttempted);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rjsfSchema, data, touchedFieldIds, submitAttempted, patternMessageFor]);
+    setServerSnapshot(snap);
+    const first = Object.keys(serverErrors ?? {})[0];
+    if (first) focusErrorField(containerRef.current, { property: `.${first}` });
+  }, [serverErrors]);
+
+  // Before the first Submit, show wrong values on visited fields through
+  // `extraErrors`; "required" waits for the Submit. After it, `liveValidate`
+  // shows every error and keeps them current while the user edits. Server
+  // messages are added in both phases.
+  const extraErrors = React.useMemo(() => {
+    const errorSchema: Record<string, unknown> = {};
+    const add = (segments: string[], message: string) => {
+      let node = errorSchema;
+      for (const seg of segments) {
+        node[seg] ??= {};
+        node = node[seg] as Record<string, unknown>;
+      }
+      node.__errors ??= [];
+      const list = node.__errors as string[];
+      if (!list.includes(message)) list.push(message);
+    };
+    if (!submitAttempted) {
+      const { errors } = validator.validateFormData(data, rjsfSchema);
+      for (const e of transformErrors(errors.filter((err) => !isMissingValueError(err)))) {
+        if (e.message) add((e.property ?? '').replace(/\[(\w+)\]/g, '.$1').split('.').filter(Boolean), e.message);
+      }
+    }
+    const client = filterErrorSchemaToVisited(errorSchema as ErrorSchema, touchedFieldIds, false) as Record<string, unknown>;
+    const merged: Record<string, unknown> = { ...client };
+    for (const [path, raw] of Object.entries(serverErrors ?? {})) {
+      if (serverSnapshot[path] !== JSON.stringify(valueAtProperty(data, path) ?? null)) continue;
+      const message = serverFieldMessage(path, raw, baseSchema, errorCopy);
+      if (!message) continue;
+      let node = merged;
+      for (const seg of path.split('.').filter(Boolean)) {
+        const next: Record<string, unknown> = { ...(node[seg] as object | undefined) };
+        node[seg] = next;
+        node = next;
+      }
+      const list = [...((node.__errors as string[] | undefined) ?? [])];
+      if (!list.includes(message)) list.push(message);
+      node.__errors = list;
+    }
+    return merged as ErrorSchema;
+  }, [rjsfSchema, data, touchedFieldIds, submitAttempted, transformErrors, serverErrors, serverSnapshot, baseSchema, errorCopy]);
 
   // The schema's `x-form-layout` wins; the code-side `formLayouts` map is the
   // fallback for networks without one.
@@ -622,12 +728,11 @@ export function SchemaForm({
 
   const templates = {
     FieldTemplate: CustomFieldTemplate,
+    BaseInputTemplate,
     ...(activeLayout
       ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout, sectionHeadingLevel) }
       : {}),
   };
-
-  const containerRef = React.useRef<HTMLDivElement>(null);
 
   return (
     <div
@@ -665,7 +770,7 @@ export function SchemaForm({
         }
         showErrorList={false}
         extraErrors={extraErrors}
-        liveValidate={false}
+        liveValidate={submitAttempted ? 'onChange' : false}
         noHtml5Validate
         omitExtraData
         liveOmit

@@ -21,10 +21,10 @@ vi.mock('@/hooks/use-support-config', () => ({
   useSupportConfig: () => ({ config: supportConfig, isLoading: false }),
 }));
 
+// One object, as the real context keeps it stable: the dialog's prefill re-runs when `user` changes.
+const signedInUser = { name: 'Asha K', email: 'asha@example.com', phoneNumber: '+919000000000' };
 vi.mock('@/contexts/auth-context', () => ({
-  useAuth: () => ({
-    user: { name: 'Asha K', email: 'asha@example.com', phoneNumber: '+919000000000' },
-  }),
+  useAuth: () => ({ user: signedInUser }),
 }));
 
 // Sonner's toast.*() calls render into whatever <Toaster /> is mounted in the
@@ -47,7 +47,8 @@ describe('SupportDialog', () => {
     await renderDialog();
     expect(screen.getByLabelText('Name')).toHaveValue('Asha K');
     expect(screen.getByLabelText('Email')).toHaveValue('asha@example.com');
-    expect(screen.getByLabelText('Phone')).toHaveValue('+919000000000');
+    expect(screen.getByLabelText('Phone')).toHaveValue('9000000000');
+    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
   });
 
   it('renders the type options and consent checkbox', async () => {
@@ -57,16 +58,68 @@ describe('SupportDialog', () => {
     expect(screen.getByRole('checkbox')).toBeInTheDocument();
   });
 
-  it('keeps submit disabled until details and consent are provided', async () => {
+  it('an incomplete Send shows each missing field under it and sends nothing', async () => {
     await renderDialog();
     const submit = screen.getByRole('button', { name: /send/i });
-    expect(submit).toBeDisabled();
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+
+    expect(screen.getByText('Please describe your issue')).toBeInTheDocument();
+    expect(screen.getByText('Please accept the consent to continue')).toBeInTheDocument();
+    expect(screen.getByLabelText('Details')).toHaveAttribute('aria-describedby', 'support-details-error');
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-invalid', 'true');
+    expect(submitSupport).not.toHaveBeenCalled();
 
     await userEvent.type(screen.getByLabelText('Details'), 'It broke');
-    expect(submit).toBeDisabled();
-
     await userEvent.click(screen.getByRole('checkbox'));
-    expect(submit).toBeEnabled();
+    expect(screen.queryByText('Please describe your issue')).toBeNull();
+    expect(screen.queryByText('Please accept the consent to continue')).toBeNull();
+  });
+
+  it('puts a server field rejection under that field, not raw validator text', async () => {
+    submitSupport.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 400, data: { message: 'body/email Invalid email address' } },
+    });
+    await renderDialog();
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(
+      await screen.findByText('Invalid entry. Please enter a valid Email.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/body\/email/)).toBeNull();
+  });
+
+  it('flags a wrong phone once the field is left, and refuses to send it', async () => {
+    await renderDialog();
+    const phone = screen.getByLabelText('Phone');
+    await userEvent.clear(phone);
+    await userEvent.type(phone, '12345');
+    await userEvent.tab();
+    const message = 'Invalid entry. Please enter a valid Phone.';
+    expect(screen.getByText(message)).toBeInTheDocument();
+    expect(phone).toHaveAttribute('aria-invalid', 'true');
+
+    await userEvent.type(screen.getByLabelText('Details'), 'It broke');
+    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('button', { name: /send/i }));
+    expect(submitSupport).not.toHaveBeenCalled();
+
+    await userEvent.clear(phone);
+    await userEvent.type(phone, '9876543210');
+    expect(screen.queryByText(message)).toBeNull();
+  });
+
+  it('flags a wrong email once the field is left', async () => {
+    await renderDialog();
+    const email = screen.getByLabelText('Email');
+    await userEvent.clear(email);
+    await userEvent.type(email, 'not-an-email');
+    await userEvent.tab();
+    expect(
+      screen.getByText('Invalid entry. Please enter a valid Email.'),
+    ).toBeInTheDocument();
   });
 
   it('submits the new payload and calls submitSupport', async () => {

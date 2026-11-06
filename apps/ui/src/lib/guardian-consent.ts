@@ -2,6 +2,7 @@ import axios from 'axios';
 import { toast } from 'sonner';
 import type { TFunction } from 'i18next';
 import type { DotNetworkSchema } from '@/engine/types';
+import { apiErrorMessage } from '@/lib/api-error';
 
 /**
  * Whether a domain routes minors through the U18 guardian consent flow.
@@ -35,7 +36,7 @@ export function isMinorFromAge(age: number): boolean {
 
 /**
  * Toasts a guardian OTP-send failure: 429 and 503 get shared copy, anything
- * else the caller's fallback message.
+ * else `apiErrorMessage` with the caller's fallback.
  */
 export function toastGuardianSendError(
   err: unknown,
@@ -50,6 +51,6 @@ export function toastGuardianSendError(
       t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."),
     );
   } else {
-    toast.error(t(fallback.key, fallback.def));
+    toast.error(apiErrorMessage(err, t, t(fallback.key, fallback.def)));
   }
 }
