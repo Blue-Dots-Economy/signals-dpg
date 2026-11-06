@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitSupport, type SupportType } from '@/lib/support-api';
+import { isValidPhoneNumber } from '@/lib/auth-api';
 import { useSupportConfig } from '@/hooks/use-support-config';
 import {
   encodeAttachments,
@@ -53,6 +54,8 @@ function resolveSubmitErrorToast(
 
 type SupportField = 'name' | 'email' | 'phone' | 'details' | 'contact' | 'consent' | 'attachments';
 
+const EMAIL_SHAPE = /^[^\s@]+@[^\s.@]+\.[^\s@]+$/;
+
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -65,6 +68,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [left, setLeft] = useState<{ email?: boolean; phone?: boolean }>({});
   // Messages from the server or the attachment picker, cleared when that field changes.
   const [extraErrors, setExtraErrors] = useState<Partial<Record<SupportField, string>>>({});
   const clearExtra = (field: SupportField) =>
@@ -87,6 +91,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     setConsent(false);
     setAttachments([]);
     setSubmitAttempted(false);
+    setLeft({});
     setExtraErrors({});
   };
 
@@ -122,6 +127,8 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const trimmedEmail = email.trim();
   const trimmedPhone = phone.trim();
   const hasContact = Boolean(trimmedEmail || trimmedPhone);
+  const emailWrong = Boolean(trimmedEmail) && !EMAIL_SHAPE.test(trimmedEmail);
+  const phoneWrong = Boolean(trimmedPhone) && !isValidPhoneNumber(trimmedPhone);
 
   const invalidField = (label: string, example?: string) => {
     const message = t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label });
@@ -135,8 +142,16 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
       (submitAttempted && !trimmedName
         ? t('form.error_required', '{{label}} is required.', { label: t('support.label_name') })
         : undefined),
-    email: extraErrors.email,
-    phone: extraErrors.phone,
+    email:
+      extraErrors.email ??
+      ((left.email || submitAttempted) && emailWrong
+        ? invalidField(t('support.label_email'), 'name@example.com')
+        : undefined),
+    phone:
+      extraErrors.phone ??
+      ((left.phone || submitAttempted) && phoneWrong
+        ? invalidField(t('support.label_phone'), '9876543210')
+        : undefined),
     contact: submitAttempted && !hasContact ? t('support.validation_contact_required') : undefined,
     details:
       extraErrors.details ??
@@ -158,9 +173,15 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     e.preventDefault();
     if (isSubmitting) return;
     setSubmitAttempted(true);
-    const missing = (['name', 'contact', 'details', 'consent'] as const).find((field) =>
-      field === 'name' ? !trimmedName : field === 'contact' ? !hasContact : field === 'details' ? !details.trim() : !consent,
-    );
+    const blocked: Record<'name' | 'email' | 'phone' | 'contact' | 'details' | 'consent', boolean> = {
+      name: !trimmedName,
+      email: emailWrong,
+      phone: phoneWrong,
+      contact: !hasContact,
+      details: !details.trim(),
+      consent: !consent,
+    };
+    const missing = (['name', 'email', 'phone', 'contact', 'details', 'consent'] as const).find((field) => blocked[field]);
     if (missing) {
       document.getElementById(FIELD_IDS[missing])?.focus();
       return;
@@ -257,6 +278,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
                 setEmail(e.target.value);
                 clearExtra('email');
               }}
+              onBlur={() => setLeft((prev) => ({ ...prev, email: true }))}
               maxLength={320}
               disabled={isSubmitting}
               {...fieldErrorAria(
@@ -276,6 +298,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
                 setPhone(e.target.value);
                 clearExtra('phone');
               }}
+              onBlur={() => setLeft((prev) => ({ ...prev, phone: true }))}
               maxLength={20}
               disabled={isSubmitting}
               {...fieldErrorAria(

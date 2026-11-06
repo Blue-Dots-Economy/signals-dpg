@@ -26,7 +26,8 @@ vi.mock('@/lib/support-api', () => ({
 }));
 vi.mock('@/hooks/use-match-score', () => ({ useMatchScore: vi.fn() }));
 vi.mock('@/hooks/use-actions', () => ({ usePendingActionsCount: vi.fn() }));
-vi.mock('@/lib/auth-api', () => ({
+vi.mock('@/lib/auth-api', async (importOriginal) => ({
+  isValidPhoneNumber: (await importOriginal<typeof import('@/lib/auth-api')>()).isValidPhoneNumber,
   getSession: vi.fn(),
   signOut: vi.fn(),
   checkUser: vi.fn(),
