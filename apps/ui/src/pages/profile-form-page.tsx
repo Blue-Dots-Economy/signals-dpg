@@ -66,6 +66,16 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 
 import { getDomainIcon, formatDomainLabel } from '@/lib/domain-icons';
 
+/** A field's title for the user, else its top-level name in plain words. */
+function readableFieldName(schema: unknown, segments: string[]): string {
+  const title = schemaNodeAt(schema, segments.slice(0, 1))?.title;
+  if (typeof title === 'string' && title.trim()) return title;
+  return (segments[0] ?? '')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
 export function ProfileFormPage() {
   const { t } = useTranslation();
   const location = useLocation();
@@ -624,10 +634,11 @@ export function ProfileFormPage() {
           isFieldVisible(top, data) &&
           schemaNodeAt(profileSchema, segments) !== undefined;
         if (shown) onForm[path] = message;
-        else offForm.push(path);
+        else offForm.push(readableFieldName(profileSchema, segments));
       }
 
       if (offForm.length > 0) {
+        const names = [...new Set(offForm)];
         // The form has no field to show these on, so they go in the banner.
         if (Object.keys(onForm).length > 0) setServerFieldErrors(onForm);
         setFormError({
@@ -635,7 +646,7 @@ export function ProfileFormPage() {
           description: t(
             'profile.error_fields_not_in_form',
             'Some saved details cannot be changed in this form ({{fields}}). Please contact support.',
-            { fields: offForm.join(', ') },
+            { fields: names.join(', ') },
           ),
         });
       } else if (Object.keys(onForm).length > 0) {

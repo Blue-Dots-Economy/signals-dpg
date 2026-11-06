@@ -1,5 +1,6 @@
 import axios from 'axios';
 import type { TFunction } from 'i18next';
+import { getCsrfToken } from '@/lib/bff-session';
 
 /** What a failed request told us, read off an axios error (or a BulkSingleError). */
 export interface ApiErrorInfo {
@@ -80,7 +81,11 @@ export function apiErrorMessage(err: unknown, t: TFunction, fallback?: string): 
   }
   const { status } = info;
   if (status === undefined) return generic;
-  if (status === 401) return t('errors.session', 'Your session has ended. Please sign in again.');
+  // "Session ended" only makes sense if this browser held a session; a sign-in
+  // screen's 401 (e.g. send-OTP) falls through to the server's own message.
+  if (status === 401 && getCsrfToken() !== null) {
+    return t('errors.session', 'Your session has ended. Please sign in again.');
+  }
   if (status === 403) return t('errors.forbidden', "You don't have permission to do this.");
   if (status === 429) return t('errors.rate_limited', 'Too many attempts. Please wait a moment and try again.');
   if (status >= 500) return t('errors.server', 'Something went wrong on our side. Please try again in a moment.');
