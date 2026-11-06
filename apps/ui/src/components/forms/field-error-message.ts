@@ -33,22 +33,30 @@ export function resolvePatternErrorMessage(
 }
 
 /**
- * Form-standard sentences: missing → "required"; wrong → "Invalid entry", with
- * the example only for format-type fields (email, phone, URL).
+ * Form-standard sentences: missing → "required"; wrong → "Invalid entry" with the reason.
  */
 export interface FieldErrorCopy {
   required: (label: string) => string;
-  invalid: (message: string, example: string | undefined) => string;
+  invalid: (message: string) => string;
   /** "Please enter a valid {label}." for keywords whose AJV text is developer-facing. */
   validValue: (label: string) => string;
   /** Readable copy for a length/range/choice rule; without it, `validValue` is used. */
   rule?: (kind: RuleKind, label: string, limit: string) => string;
 }
 
-export type RuleKind = 'minLength' | 'maxLength' | 'minimum' | 'maximum' | 'minItems' | 'maxItems' | 'enum';
+export type RuleKind =
+  | 'minLength'
+  | 'maxLength'
+  | 'minimum'
+  | 'maximum'
+  | 'exclusiveMinimum'
+  | 'exclusiveMaximum'
+  | 'minItems'
+  | 'maxItems'
+  | 'enum';
 
 const RULE_KINDS: ReadonlySet<string> = new Set<RuleKind>([
-  'minLength', 'maxLength', 'minimum', 'maximum', 'minItems', 'maxItems', 'enum',
+  'minLength', 'maxLength', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minItems', 'maxItems', 'enum',
 ]);
 
 /** The subset of an RJSF error this module reads. */
@@ -79,8 +87,7 @@ export function isMissingValueError(e: FieldErrorInput): boolean {
 }
 
 /**
- * Message under a field: "{title} is required." or "Invalid entry. …", plus
- * the schema's first `examples` value for a failed pattern, format or type.
+ * Message under a field: "{title} is required." or "Invalid entry. …".
  */
 export function formStandardMessage(
   error: FieldErrorInput,
@@ -94,9 +101,7 @@ export function formStandardMessage(
     segments.push(missingKey);
   }
   const node = schemaNodeAt(schema, segments);
-  const label = labelOf(node, segments);
-  const formatError = error.name === 'pattern' || error.name === 'format' || error.name === 'type';
-  const example = formatError ? exampleOf(node) : undefined;
+  const label = labelOf(schema, node, segments);
 
   if (isMissingValueError(error)) return copy.required(label);
   let detail: string;
@@ -108,18 +113,19 @@ export function formStandardMessage(
   } else {
     detail = copy.validValue(label);
   }
-  return copy.invalid(withStop(detail), example);
+  return copy.invalid(withStop(detail));
 }
 
-function labelOf(node: Record<string, unknown> | undefined, segments: string[]): string {
+function labelOf(schema: unknown, node: Record<string, unknown> | undefined, segments: string[]): string {
   const title = node?.title;
-  return typeof title === 'string' && title.trim() ? title : (segments.at(-1) ?? 'value');
+  if (typeof title === 'string' && title.trim()) return title;
+  // An array item has no title of its own; name the list it belongs to.
+  if (segments.length > 1 && /^\d+$/.test(segments.at(-1) ?? '')) {
+    return labelOf(schema, schemaNodeAt(schema, segments.slice(0, -1)), segments.slice(0, -1));
+  }
+  return segments.at(-1) ?? 'value';
 }
 
-function exampleOf(node: Record<string, unknown> | undefined): string | undefined {
-  const ex = node?.examples;
-  return Array.isArray(ex) && ex.length > 0 ? String(ex[0]) : undefined;
-}
 
 function withStop(text: string): string {
   return /[.!?]$/.test(text) ? text : `${text}.`;
@@ -131,8 +137,11 @@ const SERVER_LIMIT_RULES: ReadonlyArray<readonly [RegExp, RuleKind]> = [
   [/^must NOT have more than (\d+) characters/, 'maxLength'],
   [/^must NOT have fewer than (\d+) items/, 'minItems'],
   [/^must NOT have more than (\d+) items/, 'maxItems'],
-  [/^must be >=? ?(\S+)/, 'minimum'],
-  [/^must be <=? ?(\S+)/, 'maximum'],
+  // Ajv writes ">=" / "<=" for inclusive bounds and ">" / "<" for exclusive ones.
+  [/^must be >= ?(\S+)/, 'minimum'],
+  [/^must be <= ?(\S+)/, 'maximum'],
+  [/^must be > ?(\S+)/, 'exclusiveMinimum'],
+  [/^must be < ?(\S+)/, 'exclusiveMaximum'],
 ];
 
 /** The API's per-field message in the form's wording; null when the user can't fix it in the form. */
@@ -144,12 +153,12 @@ export function serverFieldMessage(
 ): string | null {
   const segments = path.split('.').filter(Boolean);
   const node = schemaNodeAt(schema, segments);
-  const label = labelOf(node, segments);
+  const label = labelOf(schema, node, segments);
   const m = message.trim();
   if (m === 'is required') return copy.required(label);
   if (m === 'is not an allowed field') return null;
   const rule = (kind: RuleKind, limit: string) =>
-    copy.invalid(withStop(copy.rule ? copy.rule(kind, label, limit) : copy.validValue(label)), undefined);
+    copy.invalid(withStop(copy.rule ? copy.rule(kind, label, limit) : copy.validValue(label)));
   for (const [pattern, kind] of SERVER_LIMIT_RULES) {
     const found = pattern.exec(m);
     if (found) return rule(kind, found[1]!);
@@ -158,5 +167,5 @@ export function serverFieldMessage(
   // Remaining `must …` text is a type/format failure; anything else is the
   // field's authored pattern copy, already a sentence.
   const detail = m.startsWith('must') ? copy.validValue(label) : m;
-  return copy.invalid(withStop(detail), exampleOf(node));
+  return copy.invalid(withStop(detail));
 }

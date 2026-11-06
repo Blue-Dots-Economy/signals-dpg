@@ -7,7 +7,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
 import { toast } from 'sonner';
 import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
@@ -252,12 +252,10 @@ export function KeycloakLoginPanel() {
     return null;
   };
 
-  const invalidEntry = (field: string, example?: string) => {
-    const message = t('form.invalid_format', 'Please enter a valid {{field}}.', { field });
-    return example
-      ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', { message, example })
-      : t('form.error_invalid', 'Invalid entry. {{message}}', { message });
-  };
+  const invalidEntry = (field: string) =>
+    t('form.error_invalid', 'Invalid entry. {{message}}', {
+      message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field }),
+    });
   const contactRaw = signupChannel === 'phone' ? phoneNumber : email.trim();
   const contactValid = signupChannel === 'phone' ? isValidPhoneNumber(phoneNumber) : hasEmailShape(email.trim());
   const contactLabel = signupChannel === 'phone' ? t('auth.label_mobile') : t('auth.label_email');
@@ -270,10 +268,7 @@ export function KeycloakLoginPanel() {
     (signupChannel === 'phone' ? serverFieldErrors.phone : serverFieldErrors.email) ||
     (contactRaw && !contactValid && (contactTouched || submitAttempted))
       ? signupChannel === 'phone'
-        ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', {
-            message: t('auth.toast_invalid_phone_desc'),
-            example: '9876543210',
-          })
+        ? t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_phone_desc') })
         : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
       : submitAttempted && !contactRaw
         ? t('form.error_required', '{{label}} is required.', { label: contactLabel })
@@ -307,7 +302,7 @@ export function KeycloakLoginPanel() {
     // non-E.164 phone here would not match the Keycloak token at first login and
     // the guardian record would be silently dropped.
     const identifier: AuthIdentifier =
-      signupChannel === 'phone' ? { phoneNumber: toE164(phoneNumber) } : { email: email.trim() };
+      signupChannel === 'phone' ? { phoneNumber } : { email: email.trim() };
 
     // Read from the resolved entry, not the render-time flag, which falls back
     // to `false` for an unknown domain.

@@ -46,6 +46,7 @@ import {
 import axios from 'axios';
 import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
 import { schemaNodeAt } from '@/components/forms/field-error-message';
+import { isFieldVisible } from '@/lib/show-if';
 
 import {
   createItem,
@@ -614,9 +615,14 @@ export function ProfileFormPage() {
       const onForm: Record<string, string> = {};
       const offForm: string[] = [];
       for (const [path, message] of Object.entries(info.fields ?? {})) {
+        const segments = path.split('.').filter(Boolean);
+        const top = segments[0] ? schemaNodeAt(profileSchema, [segments[0]]) : undefined;
+        // On the form only if the schema has it and its show-if rule shows it now.
         const shown =
           message.trim() !== 'is not an allowed field' &&
-          schemaNodeAt(profileSchema, path.split('.').filter(Boolean)) !== undefined;
+          top !== undefined &&
+          isFieldVisible(top, data) &&
+          schemaNodeAt(profileSchema, segments) !== undefined;
         if (shown) onForm[path] = message;
         else offForm.push(path);
       }

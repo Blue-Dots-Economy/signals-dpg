@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { TFunction } from 'i18next';
-import { AxiosError } from 'axios';
+import { AxiosError, CanceledError } from 'axios';
 import { apiErrorMessage, isReadableServerMessage, readApiError, thrownErrorMessage } from './api-error';
 
 const t = ((key: string, def?: string) => def ?? key) as unknown as TFunction;
@@ -28,6 +28,11 @@ describe('readApiError', () => {
       httpError(400, { message: 'body/guardianEmail Invalid email, body/name Too small' }),
     );
     expect(info.fields).toEqual({ guardianEmail: 'Invalid email', name: 'Too small' });
+  });
+
+  it('does not call a cancelled request a connection problem', () => {
+    expect(readApiError(new CanceledError()).network).toBe(false);
+    expect(readApiError(new AxiosError('canceled', 'ERR_CANCELED')).network).toBe(false);
   });
 
   it('flags a request that never reached the server', () => {

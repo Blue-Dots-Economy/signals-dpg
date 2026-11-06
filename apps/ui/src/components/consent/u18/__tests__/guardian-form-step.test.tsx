@@ -59,13 +59,13 @@ describe('GuardianFormStep', () => {
     expect(screen.queryByText('Guardian Name is required.')).toBeNull();
   });
 
-  it('a partial phone shows "Invalid entry" with an example once the field is left', async () => {
+  it('a partial phone shows "Invalid entry" once the field is left', async () => {
     await renderForm(vi.fn());
     await userEvent.type(screen.getByLabelText(/guardian phone number/i), '98765');
     expect(screen.queryByText(/Invalid entry/)).toBeNull();
     await userEvent.tab();
     expect(
-      screen.getByText('Invalid entry. Please enter a valid Guardian Phone Number. Example: 9876543210'),
+      screen.getByText('Invalid entry. Please enter a valid Guardian Phone Number.'),
     ).toBeInTheDocument();
   });
 
@@ -79,7 +79,7 @@ describe('GuardianFormStep', () => {
     await userEvent.type(screen.getByLabelText(/guardian email/i), 'a@b');
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
     expect(
-      await screen.findByText('Invalid entry. Please enter a valid Guardian Email. Example: name@example.com'),
+      await screen.findByText('Invalid entry. Please enter a valid Guardian Email.'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/body\/guardianEmail/)).toBeNull();
   });

@@ -13,6 +13,7 @@ import type {
 } from '@rjsf/utils';
 import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
+import { PhoneWidget } from './custom-widgets/phone-widget';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
@@ -32,11 +33,14 @@ import {
 } from './field-error-message';
 import { cn } from '@/lib/utils';
 
+/** Field names that hold a phone number. */
+const PHONE_FIELD_NAME = /(phone|mobile)/i;
+
 const ShadcnBaseInputTemplate = ShadcnTemplates.BaseInputTemplate!;
 
 /**
  * shadcn's text input, marked `aria-invalid` while the field has an error.
- * Schema `examples` feed the error message only, not a browser suggestion list.
+ * Schema `examples` are dropped, so the browser shows no suggestion list from them.
  */
 function BaseInputTemplate(props: Readonly<BaseInputTemplateProps>) {
   const invalid = (props.rawErrors?.length ?? 0) > 0;
@@ -284,6 +288,10 @@ function generateUiSchema(
       uiSchema[key] = { 'ui:widget': 'date' };
     }
 
+    if (typed.type === 'string' && PHONE_FIELD_NAME.test(key)) {
+      uiSchema[key] = { 'ui:widget': 'phone' };
+    }
+
     if (typed.format === 'email') {
       uiSchema[key] = { 'ui:placeholder': 'email@example.com' };
     }
@@ -374,6 +382,7 @@ function generateUiSchema(
 
 const widgets: RegistryWidgetsType = {
   date: DatePickerWidget,
+  phone: PhoneWidget,
   'location-autocomplete': LocationAutocompleteWidget,
   'location-multi': MultiLocationAutocompleteWidget,
   'reference-autocomplete': ReferenceAutocompleteWidget,
@@ -564,8 +573,7 @@ export function SchemaForm({
   /**
    * Readable copy for a failed `pattern`, since AJV's message is the raw
    * regex: the field's `x-error-message`, else the `x-uri` default, else a
-   * generic. Used by both error paths, as `extraErrors` bypasses
-   * `transformErrors`.
+   * generic. Reached through `formStandardMessage`, which both error paths use.
    */
   const patternMessageFor = React.useCallback(
     (property: string): string => {
@@ -581,10 +589,7 @@ export function SchemaForm({
   const errorCopy = React.useMemo<FieldErrorCopy>(
     () => ({
       required: (label) => t('form.error_required', '{{label}} is required.', { label }),
-      invalid: (message, example) =>
-        example
-          ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', { message, example })
-          : t('form.error_invalid', 'Invalid entry. {{message}}', { message }),
+      invalid: (message) => t('form.error_invalid', 'Invalid entry. {{message}}', { message }),
       validValue: (label) => t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
       rule: (kind, label, limit) => {
         switch (kind) {
@@ -596,6 +601,10 @@ export function SchemaForm({
             return t('form.rule_minimum', '{{label}} must be at least {{limit}}.', { label, limit });
           case 'maximum':
             return t('form.rule_maximum', '{{label}} must be at most {{limit}}.', { label, limit });
+          case 'exclusiveMinimum':
+            return t('form.rule_exclusive_minimum', '{{label}} must be more than {{limit}}.', { label, limit });
+          case 'exclusiveMaximum':
+            return t('form.rule_exclusive_maximum', '{{label}} must be less than {{limit}}.', { label, limit });
           case 'minItems':
             return t('form.rule_min_items', 'Choose at least {{limit}} for {{label}}.', { label, limit });
           case 'maxItems':

@@ -4,7 +4,8 @@ import { Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
+import { isValidPhoneNumber } from '@/lib/auth-api';
 import { useAuth } from '@/contexts/auth-context';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { toastGuardianSendError } from '@/lib/guardian-consent';
@@ -67,9 +68,10 @@ export function GuardianFormStep({
   // Fields the server rejected (400), cleared when that field is edited.
   const [serverInvalid, setServerInvalid] = React.useState<{ name?: boolean; email?: boolean; phone?: boolean }>({});
 
-  // guardianPhone is the national 10-digit part; the wire value is E.164.
-  const guardianPhoneE164 = toE164(guardianPhone);
-  const hasContact = Boolean(guardianEmail.trim()) || guardianPhone.length === 10;
+  // guardianPhone is the full E.164 value from PhoneInput.
+  const guardianPhoneE164 = guardianPhone;
+  const phoneValid = isValidPhoneNumber(guardianPhone);
+  const hasContact = Boolean(guardianEmail.trim()) || phoneValid;
 
   // A ward cannot be their own guardian. Also enforced server-side
   // (409 SAME_CONTACT_NOT_ALLOWED).
@@ -88,12 +90,11 @@ export function GuardianFormStep({
   const nameLabel = t('u18.guardian_label_parent_name', 'Guardian Name');
   const emailLabel = t('u18.guardian_label_parent_email', 'Guardian Email');
   const phoneLabel = t('u18.guardian_label_parent_phone', 'Guardian Phone Number');
-  const invalidWithExample = (label: string, example: string) =>
-    t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', {
+  const invalidField = (label: string) =>
+    t('form.error_invalid', 'Invalid entry. {{message}}', {
       message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
-      example,
     });
-  const partialPhone = guardianPhone.length > 0 && guardianPhone.length < 10;
+  const partialPhone = guardianPhone.length > 0 && !phoneValid;
 
   const nameError = serverInvalid.name
     ? t('form.error_invalid', 'Invalid entry. {{message}}', {
@@ -102,10 +103,10 @@ export function GuardianFormStep({
     : submitAttempted && !guardianName.trim()
       ? t('form.error_required', '{{label}} is required.', { label: nameLabel })
       : null;
-  const emailError = serverInvalid.email ? invalidWithExample(emailLabel, 'name@example.com') : null;
+  const emailError = serverInvalid.email ? invalidField(emailLabel) : null;
   const phoneError =
     serverInvalid.phone || (partialPhone && (phoneTouched || submitAttempted))
-      ? invalidWithExample(phoneLabel, '9876543210')
+      ? invalidField(phoneLabel)
       : submitAttempted && !hasContact
         ? t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number.")
         : null;
@@ -141,7 +142,7 @@ export function GuardianFormStep({
       brand: brand ?? null,
       guardianName: guardianName.trim(),
       ...(guardianEmail.trim() ? { guardianEmail: guardianEmail.trim() } : {}),
-      ...(guardianPhone.length === 10 ? { guardianPhone: guardianPhoneE164 } : {}),
+      ...(phoneValid ? { guardianPhone: guardianPhoneE164 } : {}),
       guardianDeclarationAccepted: true,
     };
 

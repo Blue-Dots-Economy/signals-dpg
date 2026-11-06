@@ -34,7 +34,7 @@ import { getServedScope } from '@/lib/served-binding';
 import type { SignupExtras } from '@/lib/signup-domain';
 import { SignupDobStep } from '@/components/consent/u18/signup-dob-step';
 import { isMinorFromAge } from '@/lib/guardian-consent';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { KeycloakLoginPanel } from './keycloak-login-panel';
 import { SessionExpiredNotice } from './session-expired-notice';
@@ -203,8 +203,8 @@ function OtpLoginPage() {
     }
   }, [authCfg, mode]);
 
-  // phoneNumber holds the national part; the wire value is the full E.164.
-  const fullPhone = toE164(phoneNumber);
+  // phoneNumber is the full E.164 value from PhoneInput.
+  const fullPhone = phoneNumber;
   const identifier: AuthIdentifier = mode === 'email' ? { email } : { phoneNumber: fullPhone };
   const contactValue = mode === 'email' ? email : phoneNumber;
   const contactLabel = mode === 'email'
@@ -387,10 +387,7 @@ function OtpLoginPage() {
       : null
     : !contactWellFormed && (contactTouched || submitAttempted)
       ? mode === 'phone'
-        ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', {
-            message: t('auth.toast_invalid_phone_desc'),
-            example: '9876543210',
-          })
+        ? t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_phone_desc') })
         : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
       : null;
   const nameError =

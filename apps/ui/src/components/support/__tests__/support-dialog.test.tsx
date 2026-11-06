@@ -47,7 +47,8 @@ describe('SupportDialog', () => {
     await renderDialog();
     expect(screen.getByLabelText('Name')).toHaveValue('Asha K');
     expect(screen.getByLabelText('Email')).toHaveValue('asha@example.com');
-    expect(screen.getByLabelText('Phone')).toHaveValue('+919000000000');
+    expect(screen.getByLabelText('Phone')).toHaveValue('9000000000');
+    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
   });
 
   it('renders the type options and consent checkbox', async () => {
@@ -85,7 +86,7 @@ describe('SupportDialog', () => {
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: /send/i }));
     expect(
-      await screen.findByText('Invalid entry. Please enter a valid Email. Example: name@example.com'),
+      await screen.findByText('Invalid entry. Please enter a valid Email.'),
     ).toBeInTheDocument();
     expect(screen.queryByText(/body\/email/)).toBeNull();
   });
@@ -96,7 +97,7 @@ describe('SupportDialog', () => {
     await userEvent.clear(phone);
     await userEvent.type(phone, '12345');
     await userEvent.tab();
-    const message = 'Invalid entry. Please enter a valid Phone. Example: 9876543210';
+    const message = 'Invalid entry. Please enter a valid Phone.';
     expect(screen.getByText(message)).toBeInTheDocument();
     expect(phone).toHaveAttribute('aria-invalid', 'true');
 
@@ -117,7 +118,7 @@ describe('SupportDialog', () => {
     await userEvent.type(email, 'not-an-email');
     await userEvent.tab();
     expect(
-      screen.getByText('Invalid entry. Please enter a valid Email. Example: name@example.com'),
+      screen.getByText('Invalid entry. Please enter a valid Email.'),
     ).toBeInTheDocument();
   });
 

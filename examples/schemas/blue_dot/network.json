@@ -97,8 +97,7 @@
             "phone": {
               "type": "string",
               "title": "Mobile Number",
-              "pattern": "^[0-9]{10}$",
-              "examples": ["9876543210"],
+              "pattern": "^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+(?!91)[1-9][0-9]{7,14})$",
               "private": true
             },
             "age": {
@@ -886,15 +885,13 @@
             "hiringManagerPhoneNumber": {
               "type": "string",
               "title": "Hiring Manager Mobile Number",
-              "pattern": "^[0-9]{10}$",
-              "examples": ["9876543210"],
+              "pattern": "^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+(?!91)[1-9][0-9]{7,14})$",
               "private": true
             },
             "hiringManagerEmail": {
               "type": "string",
               "title": "Hiring Manager Email",
               "format": "email",
-              "examples": ["hiring@company.com"],
               "private": true
             },
             "role": {

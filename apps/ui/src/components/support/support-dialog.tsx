@@ -19,6 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitSupport, type SupportType } from '@/lib/support-api';
 import { isValidPhoneNumber } from '@/lib/auth-api';
+import { PhoneInput } from '@/components/auth/phone-input';
 import { useSupportConfig } from '@/hooks/use-support-config';
 import {
   encodeAttachments,
@@ -130,12 +131,10 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const emailWrong = Boolean(trimmedEmail) && !EMAIL_SHAPE.test(trimmedEmail);
   const phoneWrong = Boolean(trimmedPhone) && !isValidPhoneNumber(trimmedPhone);
 
-  const invalidField = (label: string, example?: string) => {
-    const message = t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label });
-    return example
-      ? t('form.error_invalid_example', 'Invalid entry. {{message}} Example: {{example}}', { message, example })
-      : t('form.error_invalid', 'Invalid entry. {{message}}', { message });
-  };
+  const invalidField = (label: string) =>
+    t('form.error_invalid', 'Invalid entry. {{message}}', {
+      message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+    });
   const errors: Partial<Record<SupportField, string>> = {
     name:
       extraErrors.name ??
@@ -145,12 +144,12 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     email:
       extraErrors.email ??
       ((left.email || submitAttempted) && emailWrong
-        ? invalidField(t('support.label_email'), 'name@example.com')
+        ? invalidField(t('support.label_email'))
         : undefined),
     phone:
       extraErrors.phone ??
       ((left.phone || submitAttempted) && phoneWrong
-        ? invalidField(t('support.label_phone'), '9876543210')
+        ? invalidField(t('support.label_phone'))
         : undefined),
     contact: submitAttempted && !hasContact ? t('support.validation_contact_required') : undefined,
     details:
@@ -222,8 +221,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
       } else if (info.status === 400 && info.fields) {
         for (const key of ['name', 'email', 'phone', 'details'] as const) {
           if (info.fields[key]) {
-            const example = key === 'email' ? 'name@example.com' : key === 'phone' ? '9876543210' : undefined;
-            fieldErrors[key] = invalidField(labels[key], example);
+            fieldErrors[key] = invalidField(labels[key]);
           }
         }
       }
@@ -290,21 +288,17 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="support-phone">{t('support.label_phone')}</Label>
-            <Input
+            <PhoneInput
               id="support-phone"
-              type="tel"
               value={phone}
-              onChange={(e) => {
-                setPhone(e.target.value);
+              onChange={(next) => {
+                setPhone(next);
                 clearExtra('phone');
               }}
               onBlur={() => setLeft((prev) => ({ ...prev, phone: true }))}
-              maxLength={20}
               disabled={isSubmitting}
-              {...fieldErrorAria(
-                errors.phone ? 'support-phone-error' : 'support-contact-error',
-                errors.phone ?? errors.contact,
-              )}
+              invalid={Boolean(errors.phone ?? errors.contact)}
+              describedBy={errors.phone ? 'support-phone-error' : 'support-contact-error'}
             />
             <InlineFieldError id="support-phone-error" message={errors.phone} />
             <InlineFieldError id="support-contact-error" message={errors.contact} />

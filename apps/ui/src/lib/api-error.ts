@@ -18,7 +18,10 @@ export interface ApiErrorInfo {
 export function readApiError(err: unknown): ApiErrorInfo {
   const response = (err as { response?: { status?: number; data?: unknown } } | null)?.response;
   if (!response) {
-    const network = axios.isAxiosError(err) || (err instanceof TypeError && /fetch|network/i.test(err.message));
+    // A cancelled request (closed dialog, aborted query) is not a connection problem.
+    const cancelled = axios.isCancel(err) || (axios.isAxiosError(err) && err.code === 'ERR_CANCELED');
+    const network =
+      !cancelled && (axios.isAxiosError(err) || (err instanceof TypeError && /fetch|network/i.test(err.message)));
     return { network };
   }
   const data = (response.data ?? {}) as Record<string, unknown>;
