@@ -247,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Same precedence claim as the OIDC path (see authEpochRef).
     authEpochRef.current += 1;
     setUser(response.user);
+    setIsLoading(false);
   }, []);
 
   const startKeycloakLogin = useCallback(

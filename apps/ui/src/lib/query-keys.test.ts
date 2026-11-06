@@ -26,7 +26,7 @@ describe('queryKeys', () => {
   });
 
   it('defines the profile-form keys (2b-iii)', () => {
-    expect(queryKeys.networkConfigs()).toEqual(['network-configs']);
+    expect(queryKeys.networkSchemas()).toEqual(['network-schemas']);
     expect(queryKeys.resolvedNetwork('blue_dot', 'https://api.example')).toEqual([
       'resolved-network',
       'blue_dot',

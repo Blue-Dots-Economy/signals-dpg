@@ -16,8 +16,8 @@ const actions = {
 
 export const queryKeys = {
   networkConfig: (networkId: string) => ['network-config', networkId] as const,
-  // All network configs (GET /network/schemas, no `network` param).
-  networkConfigs: () => ['network-configs'] as const,
+  // Every entry of GET /network/schemas (no `network` param).
+  networkSchemas: () => ['network-schemas'] as const,
   // Network config with `$ref`s resolved against an API base URL. The base URL
   // is in the key so a future instance switch cannot serve a resolution built
   // against the old host.

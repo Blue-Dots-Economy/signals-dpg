@@ -208,6 +208,8 @@ const state = {
   browserSupported: false,
   browserStatus: 'idle' as 'idle' | 'loading' | 'error' | 'success',
   isMobile: false,
+  authLoading: false,
+  myItemsFetched: true,
 };
 
 const browseCalls: BrowseCall[] = [];
@@ -217,6 +219,7 @@ const browsedDomains = () =>
     browseCalls.filter((c) => c.enabled && c.domainId !== null).map((c) => c.domainId as string),
   );
 const markerCalls: MarkerCall[] = [];
+const totalsCalls: { domainIds: string[]; enabled: boolean; anchors: (string | undefined)[] }[] = [];
 const requestBrowserLocation = vi.fn();
 const fetchNextPage = vi.fn();
 const preferredSources: string[] = [];
@@ -235,7 +238,7 @@ vi.mock('@/hooks/use-network-config', () => ({
 }));
 
 vi.mock('@/hooks/use-my-items', () => ({
-  useMyItems: () => ({ data: state.myItems, isFetched: true, isLoading: false }),
+  useMyItems: () => ({ data: state.myItems, isFetched: state.myItemsFetched, isLoading: false }),
 }));
 
 vi.mock('@/hooks/use-profile-consent-status', () => ({
@@ -353,6 +356,24 @@ vi.mock('@/hooks/use-map-markers', () => ({
   },
 }));
 
+vi.mock('@/hooks/use-browse-totals', () => ({
+  useBrowseTotals: (
+    _network: DotNetworkSchema | null,
+    domains: DotNetworkDomain[],
+    _filters: Record<string, unknown>,
+    _search: string,
+    enabled: boolean,
+    anchorFor?: (domain: string) => string | undefined,
+  ) => {
+    totalsCalls.push({
+      domainIds: domains.map((d) => d.id),
+      enabled,
+      anchors: domains.map((d) => anchorFor?.(d.id)),
+    });
+    return { total: 0, mappable: 0, notMappable: 0, isLoading: false };
+  },
+}));
+
 vi.mock('@/hooks/use-item-detail', () => ({
   useItemDetail: () => ({ item: state.detail.item, isLoading: state.detail.isLoading }),
 }));
@@ -361,7 +382,7 @@ vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({
     user: state.user,
     isAuthenticated: !!state.user,
-    isLoading: false,
+    isLoading: state.authLoading,
     checkUser: vi.fn(),
     requestOtp: vi.fn(),
     verifyOtp: vi.fn(),
@@ -396,6 +417,7 @@ interface MapViewStubProps {
   onSpotGroupSelect?: (group: OpenSpotGroup) => void;
   focusPoint?: { lat: number; lng: number } | null;
   focusZoom?: number;
+  heightClassName?: string;
 }
 
 let stubSpotGroup: OpenSpotGroup = {
@@ -421,6 +443,7 @@ function MapViewStub({
   onSpotGroupSelect,
   focusPoint,
   focusZoom,
+  heightClassName,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [spotOpen, setSpotOpen] = React.useState(false);
@@ -436,7 +459,7 @@ function MapViewStub({
     domain: item.domain,
   });
   return (
-    <div data-testid="map-view">
+    <div data-testid="map-view" className={heightClassName}>
       <p>{`focus: ${focusPoint ? `${focusPoint.lat},${focusPoint.lng}` : 'none'} @ ${focusZoom ?? 'default'}`}</p>
       {filtersSlot}
       <button
@@ -596,6 +619,7 @@ beforeEach(() => {
   localStorage.clear();
   browseCalls.length = 0;
   markerCalls.length = 0;
+  totalsCalls.length = 0;
   preferredSources.length = 0;
   state.networks = [networkFixture];
   state.network = networkFixture;
@@ -613,6 +637,8 @@ beforeEach(() => {
   state.browserSupported = false;
   state.browserStatus = 'idle';
   state.isMobile = false;
+  state.authLoading = false;
+  state.myItemsFetched = true;
 });
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -625,6 +651,80 @@ describe('HomePage — network config gate', () => {
 
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Browse All' })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+  });
+});
+
+describe('HomePage — no listing request before sign-in is known', () => {
+  const requested = () => ({
+    list: browseCalls.filter((c) => c.enabled && c.domainId !== null).length,
+    totals: totalsCalls.filter((c) => c.enabled && c.domainIds.length > 0).length,
+    markers: markerCalls.filter((c) => c.domainIds.length > 0).length,
+  });
+
+  it('waits while the session check is still running', () => {
+    state.authLoading = true;
+    state.user = null;
+    renderHome('/?view=map');
+    expect(requested()).toEqual({ list: 0, totals: 0, markers: 0 });
+  });
+
+  it("waits for a signed-in user's own profiles", () => {
+    signedInSeeker();
+    state.myItemsFetched = false;
+    renderHome('/?view=map');
+    expect(requested()).toEqual({ list: 0, totals: 0, markers: 0 });
+  });
+
+  it("asks only for the signed-in user's domains once their profiles are known", () => {
+    signedInSeeker();
+    renderHome('/?view=map');
+    const counts = requested();
+    expect(counts.totals).toBeGreaterThan(0);
+    expect(counts.markers).toBeGreaterThan(0);
+    const asked = new Set([
+      ...totalsCalls.filter((c) => c.enabled).flatMap((c) => c.domainIds),
+      ...markerCalls.flatMap((c) => c.domainIds),
+    ]);
+    expect(asked.has('seeker')).toBe(false);
+    expect(asked.size).toBeGreaterThan(0);
+  });
+
+  it('sends no listing request before the active profile is picked on a fresh sign-in', async () => {
+    signedInSeeker();
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
+    const providerTotals = totalsCalls
+      .filter((c) => c.enabled)
+      .flatMap((c) => c.domainIds.map((id, i) => ({ id, anchor: c.anchors[i] })))
+      .filter((c) => c.id === 'provider');
+    expect(providerTotals.length).toBeGreaterThan(0);
+    expect(providerTotals.every((c) => c.anchor === 'me-1')).toBe(true);
+    const providerList = browseCalls.filter((c) => c.enabled && c.domainId === 'provider');
+    expect(providerList.every((c) => c.opts?.anchorItemId === 'me-1')).toBe(true);
+  });
+
+  it('does not wait forever for a signed-in user with no profiles', async () => {
+    state.myItems = [];
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
+  });
+
+  it('starts at once for a visitor, without waiting on own profiles', () => {
+    state.user = null;
+    state.myItemsFetched = false;
+    renderHome('/?view=map');
+    const counts = requested();
+    expect(counts.totals).toBeGreaterThan(0);
+    expect(counts.markers).toBeGreaterThan(0);
+  });
+
+  it('shows the list as loading, not empty, while it waits', async () => {
+    state.user = null;
+    state.authLoading = true;
+    renderHome('/?view=list');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('No listings in this network yet.')).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
   });
 });
@@ -885,6 +985,17 @@ describe('HomePage — map→list domain collapse (spec D27)', () => {
 });
 
 describe('HomePage — map view', () => {
+  it('fills the height left below the sign-in banner instead of a fixed screen height', () => {
+    state.user = null;
+    renderHome('/?view=map');
+
+    const map = screen.getByTestId('map-view');
+    expect(map).toHaveClass('h-full');
+    const column = map.closest('.flex-col');
+    expect(column).not.toBeNull();
+    expect(column).toContainElement(screen.getByText('Sign in to connect'));
+  });
+
   it('fetches no markers until the map reports its first viewport', async () => {
     signedInSeeker();
     state.markers = [

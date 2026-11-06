@@ -129,6 +129,9 @@ type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['chil
  */
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
 
+const NO_DOMAINS: DotNetworkDomain[] = [];
+const MAP_FILL_HEIGHT = 'h-full min-h-[400px]';
+
 export function isWideViewport(viewport: MapViewport | null): boolean {
   if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
   return viewport.maxLng - viewport.minLng >= WIDE_VIEWPORT_LNG_SPAN_DEGREES;
@@ -560,7 +563,7 @@ function resolveRelevanceApplied(
 
 export function HomePage() {
   const { t } = useTranslation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isLoading: authLoading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
@@ -683,6 +686,7 @@ export function HomePage() {
   // my-profiles settle. The ref stops a background refetch from resetting a
   // manual selection.
   const restoredForNetwork = React.useRef<string | null>(null);
+  const [profileRestoredFor, setProfileRestoredFor] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!user) {
       // Signed out: clear selection and any open consent gate; allow restore
@@ -690,11 +694,13 @@ export function HomePage() {
       setActiveProfileId(null);
       setPendingConsentProfileId(null);
       restoredForNetwork.current = null;
+      setProfileRestoredFor(null);
       return;
     }
     if (!network || !myItemsFetched) return;
     if (restoredForNetwork.current === network.id) return;
     restoredForNetwork.current = network.id;
+    setProfileRestoredFor(network.id);
 
     const storedId = getStoredActiveProfileId(network.id);
     if (storedId && myItems.some((p) => p.item_id === storedId)) {
@@ -707,6 +713,9 @@ export function HomePage() {
       clearStoredActiveProfileId(network.id);
     }
   }, [user, network, myItemsFetched, myItems]);
+
+  const browseReady =
+    !authLoading && (!user || (myItemsFetched && profileRestoredFor === network?.id));
 
   const myItem = React.useMemo(() => {
     if (!myItems.length) return null;
@@ -1003,7 +1012,13 @@ export function HomePage() {
   // The map fetches slim viewport markers per selected domain (empty selection
   // = all visible) and clusters them; free-text `search` and the facets are
   // applied server-side.
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
+  const mapMarkers = useMapMarkers(
+    network,
+    browseReady ? mapDomains : NO_DOMAINS,
+    mapViewport,
+    activeFieldFilters,
+    search,
+  );
 
   // Per-target-domain profile anchor: `anchorItemIdForTarget` consults the
   // interaction matrix to decide whether the active profile may anchor
@@ -1026,7 +1041,7 @@ export function HomePage() {
     mapDomains,
     activeFieldFilters,
     search,
-    viewMode === 'map',
+    viewMode === 'map' && browseReady,
     // The list's anchor too, or a typed query does not narrow this count.
     anchorFor,
   );
@@ -1119,7 +1134,9 @@ export function HomePage() {
       // `?domain=`, and fetching it wastes a request (or draws a 403 on the
       // anchor for a non-interacting domain).
       enabled:
-        selectedDomain !== null && visibleDomains.some((d) => d.id === selectedDomain),
+        browseReady &&
+        selectedDomain !== null &&
+        visibleDomains.some((d) => d.id === selectedDomain),
       ...browseHookOpts,
       anchorItemId: resolveSingleDomainAnchor(selectedDomain, anchorFor),
     },
@@ -1799,7 +1816,7 @@ export function HomePage() {
   // viewport count lives in its own pill.
   const contentCount = viewMode === 'map' ? browseTotals.total : singleDomainList.total;
   const contentLoading =
-    viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading;
+    !browseReady || (viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading);
 
   // Suppressed on an empty or loading list, where `BrowseEmptyState` or the
   // skeleton explains instead.
@@ -2024,6 +2041,7 @@ export function HomePage() {
         renderBrowseToolbar()
       }
     >
+      <div className={viewMode === 'map' ? 'flex h-full flex-col' : undefined}>
       {renderPageHeader()}
       {showLocationBanner && (
         <EnableLocationBanner
@@ -2156,7 +2174,7 @@ export function HomePage() {
                   // `selectedDomain === null` is the transient state before the
                   // default domain resolves; the feed is disabled, so show
                   // loading rather than "no listings".
-                  loading={singleDomainList.isLoading || selectedDomain === null}
+                  loading={!browseReady || singleDomainList.isLoading || selectedDomain === null}
                   emptyState={
                     <BrowseEmptyState
                       search={search}
@@ -2214,13 +2232,14 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <div data-tour="map" className="relative h-full">
-                <MapErrorBoundary>
+              <div data-tour="map" className="relative min-h-0 flex-1">
+                <MapErrorBoundary heightClassName={MAP_FILL_HEIGHT}>
                 <MapView
+                  heightClassName={MAP_FILL_HEIGHT}
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
-                  loading={mapMarkers.isLoading}
+                  loading={!browseReady || mapMarkers.isLoading}
                   focusPoint={spotReturnView ?? userLocation}
                   focusZoom={spotReturnView?.zoom}
                   focusNonce={recenterNonce}
@@ -2336,6 +2355,7 @@ export function HomePage() {
             )
           }
         </ActionHandler>
+      </div>
     </PageShell>
     {renderU18GuardianFlowModal()}
     {profileConsentModal}
