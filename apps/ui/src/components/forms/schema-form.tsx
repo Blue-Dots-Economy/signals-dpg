@@ -14,6 +14,7 @@ import type {
 import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { PhoneWidget } from './custom-widgets/phone-widget';
+import { isPhoneFieldName } from '@/components/auth/phone-input';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
@@ -33,8 +34,6 @@ import {
 } from './field-error-message';
 import { cn } from '@/lib/utils';
 
-/** Field names that hold a phone number. */
-const PHONE_FIELD_NAME = /(phone|mobile)/i;
 
 const ShadcnBaseInputTemplate = ShadcnTemplates.BaseInputTemplate!;
 
@@ -288,7 +287,7 @@ function generateUiSchema(
       uiSchema[key] = { 'ui:widget': 'date' };
     }
 
-    if (typed.type === 'string' && PHONE_FIELD_NAME.test(key)) {
+    if (typed.type === 'string' && isPhoneFieldName(key)) {
       uiSchema[key] = { 'ui:widget': 'phone' };
     }
 

@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as bffSession from './bff-session';
 import type { TFunction } from 'i18next';
 import { AxiosError, CanceledError } from 'axios';
 import { apiErrorMessage, isReadableServerMessage, readApiError, thrownErrorMessage } from './api-error';
@@ -43,6 +44,15 @@ describe('readApiError', () => {
 });
 
 describe('apiErrorMessage', () => {
+  it('says the session ended only when this browser held one', () => {
+    const spy = vi.spyOn(bffSession, 'getCsrfToken');
+    spy.mockReturnValue('csrf');
+    expect(apiErrorMessage(httpError(401, {}), t)).toMatch(/session has ended/);
+    spy.mockReturnValue(null);
+    expect(apiErrorMessage(httpError(401, {}), t, 'Could not send the code.')).toBe('Could not send the code.');
+    spy.mockRestore();
+  });
+
   it('never returns raw axios, HTTP or JSON text', () => {
     expect(apiErrorMessage(httpError(403, 'Forbidden'), t)).toBe("You don't have permission to do this.");
     expect(apiErrorMessage(httpError(429, {}), t)).toMatch(/^Too many attempts/);

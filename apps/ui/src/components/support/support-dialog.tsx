@@ -18,8 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitSupport, type SupportType } from '@/lib/support-api';
-import { isValidPhoneNumber } from '@/lib/auth-api';
-import { PhoneInput } from '@/components/auth/phone-input';
+import { PhoneInput, isAcceptedPhone } from '@/components/auth/phone-input';
 import { useSupportConfig } from '@/hooks/use-support-config';
 import {
   encodeAttachments,
@@ -129,7 +128,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const trimmedPhone = phone.trim();
   const hasContact = Boolean(trimmedEmail || trimmedPhone);
   const emailWrong = Boolean(trimmedEmail) && !EMAIL_SHAPE.test(trimmedEmail);
-  const phoneWrong = Boolean(trimmedPhone) && !isValidPhoneNumber(trimmedPhone);
+  const phoneWrong = Boolean(trimmedPhone) && !isAcceptedPhone(trimmedPhone);
 
   const invalidField = (label: string) =>
     t('form.error_invalid', 'Invalid entry. {{message}}', {
