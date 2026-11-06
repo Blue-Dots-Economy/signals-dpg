@@ -36,7 +36,7 @@ const schema = {
   required: ['name'],
   properties: {
     name: { type: 'string', title: 'Name' },
-    phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+    phone: { type: 'string', title: 'Phone', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+(?!91)[1-9][0-9]{7,14})$' },
   },
 } as RJSFSchema;
 
@@ -100,12 +100,12 @@ describe('SchemaForm inline errors are gated on blur', () => {
     );
     const phone = screen.getByLabelText(/Phone/);
     await user.click(phone);
-    await user.type(phone, '123');
+    await user.type(phone, '981');
     await user.tab();
     expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
 
     await user.click(phone);
-    await user.type(phone, '4567890');
+    await user.type(phone, '2345670');
     expect(screen.queryByText(/Please enter a valid Phone/i)).toBeNull();
   });
 
@@ -133,7 +133,7 @@ describe('SchemaForm inline errors are gated on blur', () => {
       properties: {
         name: { type: 'string', title: 'Name' },
         age: { type: 'integer', title: 'Age' },
-        phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+        phone: { type: 'string', title: 'Phone', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+(?!91)[1-9][0-9]{7,14})$' },
       },
     } as RJSFSchema;
     const { container } = render(

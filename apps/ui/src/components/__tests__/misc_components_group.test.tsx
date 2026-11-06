@@ -352,7 +352,7 @@ describe('SupportDialog', () => {
     expect(screen.getByLabelText('Phone')).toHaveValue('');
 
     await userEvent.type(screen.getByLabelText('Name'), '  Ravi  ');
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), '  App keeps logging me out  ');
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -406,7 +406,7 @@ describe('SupportDialog', () => {
     renderSupportDialog(onOpenChange);
 
     await userEvent.type(screen.getByLabelText('Name'), 'Ravi');
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), 'Still broken');
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -440,7 +440,7 @@ describe('SupportDialog', () => {
 
   it('guards a submit that bypasses the disabled button: consent not given', async () => {
     renderSupportDialog();
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), 'Reachable but no consent');
 
     fireEvent.submit(supportForm());

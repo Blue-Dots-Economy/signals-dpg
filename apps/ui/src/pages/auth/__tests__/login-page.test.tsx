@@ -168,7 +168,7 @@ describe('LoginPage', () => {
     expect(requestOtp).not.toHaveBeenCalled();
   });
 
-  it('mobile field takes only the 10-digit national number (+91 is a fixed prefix)', async () => {
+  it('mobile field takes at most 10 digits after the +91 code', async () => {
     fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
     await renderPage();
     await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
@@ -180,7 +180,7 @@ describe('LoginPage', () => {
     await userEvent.type(input, '96204');
     expect(cta).toBeEnabled();
     await userEvent.tab();
-    expect(screen.getByText(/^Invalid entry\..*Example: 9876543210$/)).toBeInTheDocument();
+    expect(screen.getByText(/^Invalid entry\./)).toBeInTheDocument();
     expect(input).toHaveAttribute('aria-invalid', 'true');
     expect(input).toHaveAttribute('aria-describedby', 'contact-error');
 

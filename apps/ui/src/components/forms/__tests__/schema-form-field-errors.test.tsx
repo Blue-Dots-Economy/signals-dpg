@@ -28,16 +28,16 @@ const schema = {
   required: ['name', 'phone'],
   properties: {
     name: { type: 'string', title: 'Name' },
-    phone: { type: 'string', title: 'Mobile', pattern: '^[0-9]{10}$', examples: ['9876543210'] },
+    phone: { type: 'string', title: 'Mobile', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+(?!91)[1-9][0-9]{7,14})$' },
   },
 } as RJSFSchema;
 
 const REQUIRED = 'Mobile is required.';
-const INVALID = 'Invalid entry. Please enter a valid Mobile. Example: 9876543210';
+const INVALID = 'Invalid entry. Please enter a valid Mobile.';
 
 const copy: FieldErrorCopy = {
   required: (label) => `${label} is required.`,
-  invalid: (message, ex) => `Invalid entry. ${message}${ex ? ` Example: ${ex}` : ''}`,
+  invalid: (message) => `Invalid entry. ${message}`,
   validValue: (label) => `Please enter a valid ${label}.`,
 };
 
@@ -90,6 +90,16 @@ describe('formStandardMessage', () => {
     );
     expect(msg).toBe('Invalid entry. minLength:Mobile:12.');
     expect(msg).not.toContain('must NOT');
+  });
+
+  it('names the list, not the index, for an error on an array item', () => {
+    const msg = formStandardMessage(
+      { name: 'minLength', property: '.cities.0', params: { limit: 1 } },
+      { type: 'object', properties: { cities: { type: 'array', title: 'Cities', items: { type: 'string', minLength: 1 } } } },
+      copy,
+      pattern,
+    );
+    expect(msg).toBe('Cities is required.');
   });
 
   it('falls back to the field key when the schema has no title', () => {
@@ -152,6 +162,19 @@ describe('SchemaForm form standard', () => {
     await user.type(mobile, '9876543210');
     await waitFor(() => expect(mobile).not.toHaveAttribute('aria-invalid'));
     expect(screen.queryByText(REQUIRED)).toBeNull();
+  });
+});
+
+describe('serverFieldMessage bounds', () => {
+  const ruleCopy: FieldErrorCopy = {
+    ...copy,
+    rule: (kind, label, limit) => `${kind}:${label}:${limit}`,
+  };
+
+  it('keeps inclusive and exclusive bounds apart', () => {
+    expect(serverFieldMessage('name', 'must be >= 14', schema, ruleCopy)).toBe('Invalid entry. minimum:Name:14.');
+    expect(serverFieldMessage('name', 'must be > 0', schema, ruleCopy)).toBe('Invalid entry. exclusiveMinimum:Name:0.');
+    expect(serverFieldMessage('name', 'must be < 100', schema, ruleCopy)).toBe('Invalid entry. exclusiveMaximum:Name:100.');
   });
 });
 

@@ -24,7 +24,11 @@ import type { CreateItemPayload, Item, UpdateItemPayload } from '@/lib/item-api'
 
 const SCHEMA: RJSFSchema = {
   type: 'object',
-  properties: { 'Full Name': { type: 'string' } },
+  properties: {
+    'Full Name': { type: 'string' },
+    // Hidden unless Full Name is "show": a server error on it has nowhere to render.
+    Licence: { type: 'string', 'x-show-if': { 'Full Name': ['show'] } } as RJSFSchema,
+  },
   required: ['Full Name'],
 };
 
@@ -682,6 +686,23 @@ describe('ProfileFormPage submit failures', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Couldn't create your profile");
     expect(alert).toHaveTextContent('Some saved details cannot be changed in this form (email).');
+  });
+
+  it('a server error on a field its show-if rule hides goes to the banner', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: Licence: is required',
+        fields: { Licence: 'is required' },
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Some saved details cannot be changed in this form (Licence).',
+    );
   });
 
   it('a failing edit shows the update-failed title with the generic description', async () => {
