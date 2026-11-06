@@ -8,6 +8,7 @@ import {
 } from '@/lib/consent-gate';
 import { useConsentConfig } from './use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { useAuth } from '@/contexts/auth-context';
 
 type ConsentCategory = 'terms' | 'privacy';
 
@@ -31,6 +32,7 @@ interface UseConsentGateResult {
 
 export function useConsentGate(): UseConsentGateResult {
   const { themeId } = useNetworkTheme();
+  const { isAuthenticated } = useAuth();
   const { config, isLoading: configLoading } = useConsentConfig();
 
   const {
@@ -40,7 +42,7 @@ export function useConsentGate(): UseConsentGateResult {
   } = useQuery({
     queryKey: ['consent-status', themeId],
     queryFn: () => getConsentStatus(themeId),
-    enabled: !!themeId,
+    enabled: !!themeId && isAuthenticated,
     staleTime: 0,
   });
 

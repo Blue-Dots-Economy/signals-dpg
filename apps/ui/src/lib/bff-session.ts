@@ -23,12 +23,15 @@ export interface BffSession {
 /** In-memory only. A reload re-reads it from the API; nothing is persisted. */
 let csrfToken: string | null = null;
 
+let latestCheck: Promise<BffSession> | null = null;
+
 export function getCsrfToken(): string | null {
   return csrfToken;
 }
 
 export function clearCsrfToken(): void {
   csrfToken = null;
+  latestCheck = null;
 }
 
 function url(path: string): string {
@@ -36,10 +39,28 @@ function url(path: string): string {
 }
 
 /**
- * Asks the API whether this browser has a session. `credentials: 'include'` is
- * needed because in local development the UI and API are on different origins.
+ * Asks the API whether this browser has a session, and remembers the check for
+ * `currentBffSession`. An answer the server could not give is not remembered.
  */
-export async function fetchBffSession(): Promise<BffSession> {
+export function fetchBffSession(): Promise<BffSession> {
+  const check = requestBffSession();
+  latestCheck = check;
+  void check.then((session) => {
+    if (session.unknown && latestCheck === check) latestCheck = null;
+  });
+  return check;
+}
+
+/** The page's latest session check, running or finished, or a new one when there is none. */
+export function currentBffSession(): Promise<BffSession> {
+  return latestCheck ?? fetchBffSession();
+}
+
+/**
+ * `credentials: 'include'` is needed because in local development the UI and
+ * API are on different origins.
+ */
+async function requestBffSession(): Promise<BffSession> {
   try {
     const response = await fetch(url('/api/v1/auth/session'), {
       credentials: 'include',
@@ -106,7 +127,7 @@ export async function endBffSession(): Promise<boolean> {
     // Reported via the `false` return: the cookie, Redis session and SSO session
     // are still alive, and a reload would restore the previous user.
   }
-  csrfToken = null;
+  clearCsrfToken();
   if (endSessionUrl) window.location.href = endSessionUrl;
   return ended;
 }

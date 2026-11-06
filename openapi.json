@@ -5045,7 +5045,7 @@
               "default": 200,
               "type": "integer",
               "minimum": 1,
-              "maximum": 25000
+              "maximum": 9007199254740991
             },
             "in": "query",
             "name": "limit",
@@ -5278,7 +5278,7 @@
                   "limit": {
                     "type": "integer",
                     "minimum": 1,
-                    "maximum": 25000
+                    "maximum": 9007199254740991
                   },
                   "offset": {
                     "type": "integer",

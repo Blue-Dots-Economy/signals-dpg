@@ -1,12 +1,12 @@
 import * as React from 'react';
 import { useQueries } from '@tanstack/react-query';
 import { fetchNetworkMarkers, MAP_FETCH_LIMIT } from '@/lib/network-api';
-import type { Marker } from '@/lib/network-api';
+import type { Marker, MarkersResponse } from '@/lib/network-api';
 import type { DotNetworkSchema, DotNetworkDomain, MapViewport } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
-import { snapViewportForKey, padBbox, shouldRefetch, zoomBand, clampBbox, bboxContains } from '@/lib/map-viewport-snap';
-import type { RawBbox, ZoomBand } from '@/lib/map-viewport-snap';
-import { capForZoom } from '@/lib/map-caps';
+import { snapViewportForKey, shouldRefetch, clampBbox, expandBboxForFetch } from '@/lib/map-viewport-snap';
+import type { RawBbox } from '@/lib/map-viewport-snap';
+import { MARKER_CAP } from '@/lib/map-caps';
 import { resolveFacetFieldLabels } from '@/lib/facet-fields';
 
 // Design: docs/architecture/ui-map-markers-refetch.md
@@ -19,12 +19,14 @@ function markerInBbox(
   m: Marker,
   bbox: { minLat: number; minLng: number; maxLat: number; maxLng: number },
 ): boolean {
+  const crossesMeridian = bbox.minLng > bbox.maxLng;
   return (m.item_locations ?? []).some(
     (l) =>
       l.lat >= bbox.minLat &&
       l.lat <= bbox.maxLat &&
-      l.lng >= bbox.minLng &&
-      l.lng <= bbox.maxLng,
+      (crossesMeridian
+        ? l.lng >= bbox.minLng || l.lng <= bbox.maxLng
+        : l.lng >= bbox.minLng && l.lng <= bbox.maxLng),
   );
 }
 const MAP_CACHE_TTL_SECONDS = 90;
@@ -66,9 +68,8 @@ interface UseMapMarkersResult {
   total: number;
   partial: boolean;
   /**
-   * Whether any active domain's `meta.total` exceeds the zoom-band cap
-   * (`capForZoom`). Drives the refetch decision and the over-dense
-   * "N+ in this area" indicator.
+   * Whether any active domain sent fewer markers than its `meta.total`. Drives
+   * the refetch decision and the over-dense "N+ in this area" indicator.
    */
   truncated: boolean;
   isLoading: boolean;
@@ -78,11 +79,9 @@ interface UseMapMarkersResult {
 
 /** Outcome of the last completed bbox fetch. */
 interface HeldBboxState {
-  /** The raw (unsnapped) bbox used for the last fetch's key and request. */
+  /** The area the last fetch requested (the view padded by `expandBboxForFetch`). */
   bbox: RawBbox;
-  /** That bbox inflated 25%; a new bbox inside it may skip the refetch. */
-  paddedBbox: RawBbox;
-  /** Whether any domain's last fetch reported `meta.total > capForZoom(zoom)`. */
+  /** Whether any domain's last fetch sent fewer markers than its `meta.total`. */
   truncated: boolean;
   /**
    * Whether that fetch returned no markers. An empty held result is always
@@ -90,8 +89,6 @@ interface HeldBboxState {
    * empty set would strand the map blank until a reload.
    */
   empty: boolean;
-  /** Zoom band of the last fetch; crossing it forces a refetch at the current bbox. */
-  zoomBand: ZoomBand;
 }
 
 /**
@@ -151,30 +148,22 @@ export function useMapMarkers(
 
   // Written only from the effect below, so it reflects the last completed fetch.
   const heldRef = React.useRef<HeldBboxState | null>(null);
-  // The current zoom band, not the held one: the key advances on a band change,
-  // so the bbox must advance too or the fetch would use the stale wide bbox.
-  const currentZoomBand = zoomBand(viewport?.zoom ?? 0);
-  const bandChanged = heldRef.current !== null && currentZoomBand !== heldRef.current.zoomBand;
   const needsRefetch = !rawBbox
     ? false
     : !heldRef.current
       ? true // no prior fetch to compare against — must fetch
-      : bandChanged ||
-        heldRef.current.empty ||
+      : heldRef.current.empty ||
         shouldRefetch({
           newBbox: rawBbox,
-          paddedBbox: heldRef.current.paddedBbox,
+          paddedBbox: heldRef.current.bbox,
           lastTruncated: heldRef.current.truncated,
         });
-  // The bbox for this render's key and request: the real bbox when refetching,
-  // otherwise the held one, so React Query serves the held set and the provider
-  // re-clusters it locally.
-  const effectiveBbox: RawBbox | null = !rawBbox ? null : needsRefetch ? rawBbox : heldRef.current!.bbox;
+  let effectiveBbox: RawBbox | null = null;
+  if (rawBbox && !needsRefetch) effectiveBbox = heldRef.current!.bbox;
+  else if (rawBbox) effectiveBbox = heldRef.current?.truncated ? rawBbox : expandBboxForFetch(rawBbox);
+  const effectiveIsPadded = rawBbox !== null && effectiveBbox !== rawBbox;
 
-  // The bbox path fetches `cap + 1`, so a total exactly equal to the cap still
-  // reads as complete. The radius path keeps the flat `MAP_FETCH_LIMIT`.
-  const cap = capForZoom(viewport?.zoom ?? 0);
-  const limit = effectiveBbox ? cap + 1 : MAP_FETCH_LIMIT;
+  const limit = effectiveBbox ? MARKER_CAP : MAP_FETCH_LIMIT;
 
   // A contained zoom-in can snap to the same grid cell as the held bbox and
   // leave the key unchanged. `bboxToken` is bumped once per new raw bbox while
@@ -193,9 +182,7 @@ export function useMapMarkers(
     }
   }
 
-  // Uses the real current zoom so a band crossing changes the key even when the
-  // bbox is held.
-  const snappedKey = effectiveBbox ? snapViewportForKey({ ...effectiveBbox, zoom: viewport?.zoom }) : null;
+  const snappedKey = effectiveBbox ? snapViewportForKey(effectiveBbox) : null;
   // Radius-bucket key for radius-only viewports.
   const buckets = viewport && !snappedKey ? viewportBuckets(viewport) : null;
   const latBucket = buckets?.latBucket ?? null;
@@ -212,7 +199,6 @@ export function useMapMarkers(
       const keyFilters = snappedKey
         ? {
             snappedBbox: snappedKey.snappedBbox,
-            zoomBand: snappedKey.zoomBand,
             bboxToken: bboxTokenRef.current,
             filters: domainFilters,
             satisfiable: routed.satisfiable,
@@ -258,6 +244,7 @@ export function useMapMarkers(
             signal,
           ),
         staleTime: MAP_STALE_TIME_MS,
+        structuralSharing: false,
         // Skipped rather than sent, because the server would drop the facet
         // and return this domain's pins unfiltered.
         enabled: routed.satisfiable,
@@ -265,9 +252,30 @@ export function useMapMarkers(
     }),
   });
 
-  // Keeps the `markers` array reference stable across re-renders that don't
-  // change any query's data, so the map does not re-plot every pin.
+  // useQueries starts a new observer per key, so placeholderData cannot carry the last answer across a pan.
+  const lastDataRef = React.useRef(new Map<string, { search: string; data: MarkersResponse }>());
+  const dataList = results.map((r, i) => {
+    const domainId = active[i].id;
+    const routed = facetRouting.get(domainId) ?? { filters: {}, satisfiable: true };
+    const search = JSON.stringify([routed.filters, q, routed.satisfiable]);
+    if (r.data) {
+      lastDataRef.current.set(domainId, { search, data: r.data });
+      return r.data;
+    }
+    const last = lastDataRef.current.get(domainId);
+    return !r.isError && last?.search === search ? last.data : undefined;
+  });
+  const markersRef = React.useRef<{ data: Array<MarkersResponse | undefined>; markers: Marker[] } | null>(null);
+  const dataChanged =
+    markersRef.current === null ||
+    markersRef.current.data.length !== dataList.length ||
+    dataList.some((d, i) => d !== markersRef.current!.data[i]);
+  if (dataChanged) {
+    markersRef.current = { data: dataList, markers: dataList.flatMap((d) => d?.markers ?? []) };
+  }
+  const markers = markersRef.current!.markers;
   const dataSignature = results.map((r) => `${r.status}:${r.dataUpdatedAt}`).join('|');
+
   // The bbox the user is looking at, which can differ from the one last fetched.
   const shownBbox =
     viewport?.minLat !== undefined &&
@@ -285,66 +293,45 @@ export function useMapMarkers(
     ? `${shownBbox.minLat},${shownBbox.minLng},${shownBbox.maxLat},${shownBbox.maxLng}`
     : null;
 
-  // Recounting from the markers is only sound when the fetch covers the whole
-  // visible bbox. After a zoom-out, before the wider fetch lands, it does not,
-  // so `meta.total` is used instead.
-  const canRecount =
-    shownBbox !== null &&
-    effectiveBbox !== null &&
-    bboxContains(effectiveBbox, {
-      minLat: shownBbox.minLat,
-      minLng: shownBbox.minLng,
-      maxLat: shownBbox.maxLat,
-      maxLng: shownBbox.maxLng,
-    });
-
-  const aggregated = React.useMemo(() => {
-    const markers: Marker[] = [];
+  const summary = React.useMemo(() => {
     let total = 0;
     let partial = false;
     let truncated = false;
-    for (const result of results) {
-      if (result.data) {
-        markers.push(...result.data.markers);
-        const serverTotal = result.data.meta.total;
-        const domainTruncated = serverTotal > cap;
-        partial = partial || result.data.meta.partial;
-        truncated = truncated || domainTruncated;
-
-        // Count what is on screen: a held result can describe a larger area than
-        // the visible bbox. A non-truncated domain holds the complete set, so
-        // filtering it gives the exact count; a truncated one keeps the server
-        // total (the caller shows "N+" anyway).
-        total +=
-          canRecount && shownBbox && !domainTruncated
-            ? result.data.markers.filter((m) => markerInBbox(m, shownBbox)).length
-            : serverTotal;
-      }
+    for (const data of dataList) {
+      if (!data) continue;
+      partial = partial || data.meta.partial;
+      // The server may cap below `limit`, so compare with what actually arrived.
+      truncated = truncated || data.meta.total > data.markers.length;
+      // For a capped answer this on-screen count is a lower bound; the caller shows it as "N+".
+      total += shownBbox
+        ? data.markers.filter((m) => markerInBbox(m, shownBbox)).length
+        : data.meta.total;
     }
-    return { markers, total, partial, truncated };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dataSignature captures the results' data identity; cap, shownBboxSignature and canRecount are cheap derived primitives listed explicitly
-  }, [dataSignature, cap, shownBboxSignature, canRecount]);
+    return { total, partial, truncated };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markers identity tracks the data; shownBboxSignature is the other input
+  }, [markers, shownBboxSignature]);
 
-  // Record the outcome once every active domain's query has settled.
   const effectiveBboxSignature = effectiveBbox
     ? `${effectiveBbox.minLat},${effectiveBbox.minLng},${effectiveBbox.maxLat},${effectiveBbox.maxLng}`
     : null;
+  const [, rerenderForUnpaddedFetch] = React.useReducer((n: number) => n + 1, 0);
   React.useEffect(() => {
     if (!effectiveBbox || results.length === 0) return;
-    if (results.some((r) => r.isLoading)) return;
+    if (results.some((r) => r.isLoading || r.isError)) return;
     if (!results.some((r) => r.data)) return;
     heldRef.current = {
       bbox: effectiveBbox,
-      paddedBbox: padBbox(effectiveBbox),
-      truncated: aggregated.truncated,
-      empty: aggregated.markers.length === 0,
-      zoomBand: currentZoomBand,
+      truncated: summary.truncated,
+      empty: markers.length === 0,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature (+ currentZoomBand, captured via closure) capture the relevant identity of effectiveBbox/results for this effect
-  }, [effectiveBboxSignature, dataSignature, aggregated.truncated]);
+    // A capped answer for the padded area may have left out listings on screen; fetch the view alone.
+    if (summary.truncated && effectiveIsPadded) rerenderForUnpaddedFetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- effectiveBboxSignature + dataSignature capture the identity of effectiveBbox/results for this effect
+  }, [effectiveBboxSignature, dataSignature, summary.truncated]);
 
   return {
-    ...aggregated,
+    markers,
+    ...summary,
     isLoading: results.some((r) => r.isLoading),
     isError: results.some((r) => r.isError),
   };

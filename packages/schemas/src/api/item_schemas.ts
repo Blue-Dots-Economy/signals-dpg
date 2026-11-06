@@ -159,8 +159,8 @@ export const FetchItemsBodySchema = withGeoSearchRefinement(FetchItemsSchemaBase
 }));
 
 const MarkersSchemaBase = FetchItemsSchemaBase.extend({
-  // Coords are cheap — allow a much higher cap than the 1000 full-fetch cap.
-  limit: z.coerce.number().int().min(1).max(25000).default(200),
+  // No max here: the route caps it at the instance's MARKERS_MAX_LIMIT instead of rejecting it.
+  limit: z.coerce.number().int().min(1).default(200),
 
   // Free-text match against non-private item_state values
   // (`resolveAllowedFacetFields`), AND-ed with the request's viewport. Only the
@@ -171,7 +171,7 @@ const MarkersSchemaBase = FetchItemsSchemaBase.extend({
 export const MarkersQuerySchema = withGeoSearchRefinement(MarkersSchemaBase);
 export const MarkersBodySchema = withGeoSearchRefinement(
   MarkersSchemaBase.extend({
-    limit: z.number().int().min(1).max(25000),
+    limit: z.number().int().min(1),
     offset: z.number().int().min(0),
     cache_ttl_seconds: z.number().int().positive().optional(),
   })

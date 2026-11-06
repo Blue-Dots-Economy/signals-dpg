@@ -16,8 +16,8 @@ const actions = {
 
 export const queryKeys = {
   networkConfig: (networkId: string) => ['network-config', networkId] as const,
-  // All network configs (GET /network/schemas, no `network` param).
-  networkConfigs: () => ['network-configs'] as const,
+  // Every entry of GET /network/schemas (no `network` param).
+  networkSchemas: () => ['network-schemas'] as const,
   // Network config with `$ref`s resolved against an API base URL. The base URL
   // is in the key so a future instance switch cannot serve a resolution built
   // against the old host.
@@ -56,9 +56,8 @@ export const queryKeys = {
   /**
    * Map markers for one domain within a viewport. `filters` is built by
    * `useMapMarkers` and carries:
-   * - `snappedBbox` + `zoomBand` (see `lib/map-viewport-snap.ts`) when the
-   *   viewport has a bbox, so a pan/zoom within the same grid cell and band
-   *   reuses the entry.
+   * - `snappedBbox` (see `lib/map-viewport-snap.ts`) when the viewport has a
+   *   bbox, so a pan/zoom within the same grid cell reuses the entry.
    * - `bboxToken` (bbox path only): bumped to force a new key when a
    *   contained zoom-in must refetch because the held result was truncated,
    *   even if the snapped bbox rounds to the same cell.

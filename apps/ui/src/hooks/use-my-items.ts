@@ -4,6 +4,8 @@ import { useAuth } from '@/contexts/auth-context';
 import type { DotNetworkSchema } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
 
+const NO_ITEMS: Item[] = [];
+
 interface UseMyItemsResult {
   data: Item[];
   isLoading: boolean;
@@ -46,5 +48,5 @@ export function useMyItems(network: DotNetworkSchema | null): UseMyItemsResult {
     staleTime: 60 * 1000,
   });
 
-  return { data: data ?? [], isLoading, isFetched };
+  return { data: data ?? NO_ITEMS, isLoading, isFetched };
 }

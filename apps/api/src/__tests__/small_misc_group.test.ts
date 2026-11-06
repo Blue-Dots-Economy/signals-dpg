@@ -209,6 +209,7 @@ vi.mock('@/config', () => ({
   instance: cfgInstance,
   notification: cfgNotification,
   uiHostBindings: cfgUiHostBindings,
+  apiConfig: { markers_max_limit: 25000 },
 }));
 vi.mock('@/utils/notificationClient', () => ({
   getNotificationClient: () => getNotificationClient(),

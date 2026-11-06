@@ -185,6 +185,16 @@ export interface MapMarker {
   domain?: string;
 }
 
+/** A bubble that zooming in can never split, as opened by a click. */
+export interface OpenSpotGroup {
+  key: string;
+  count: number;
+  breakdown: Array<{ domain: string; count: number }>;
+  /** Every listing shares one coordinate. */
+  exact: boolean;
+  bounds: { minLat: number; minLng: number; maxLat: number; maxLng: number };
+}
+
 export interface MapProviderProps {
   center: [number, number];
   zoom: number;
@@ -232,6 +242,10 @@ export interface MapProviderProps {
    * unset (e.g. the tourist app) the provider attaches no listener.
    */
   onViewportChange?: (viewport: MapViewport) => void;
+  /** Card content for a same-spot bubble when the provider draws its own popups; falls back to the plain `SpotGroupCard`. */
+  renderSpotGroup?: (group: OpenSpotGroup, close: () => void) => React.ReactNode;
+  /** Called on a same-spot bubble click when `showPopup` is off, so the page shows the card in its bottom sheet. */
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void;
 }
 
 export interface MapProvider {

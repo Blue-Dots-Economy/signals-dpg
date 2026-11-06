@@ -35,6 +35,7 @@ import {
 import { getEmailMessages } from '@/notifications/email/messages';
 import { getSmsTemplates } from '@/notifications/sms/templates';
 import { registerRawBodyCapture } from '@/plugins/raw_body';
+import { registerCompression } from '@/plugins/compression';
 
 const pkg = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -209,6 +210,7 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // Capture raw JSON bytes for peer_instance_guard (see plugins/raw_body.ts).
   registerRawBodyCapture(app);
+  await registerCompression(app);
 
   // Responses for a resolved user carry PII or session state, so they get
   // no-store, as do NO_STORE_PUBLIC_URLS. Other public responses keep their own

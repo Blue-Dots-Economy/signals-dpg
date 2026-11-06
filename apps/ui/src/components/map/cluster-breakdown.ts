@@ -13,3 +13,11 @@ export function tallyDomains(domains: string[]): DomainCount[] {
     .map(([domain, count]) => ({ domain, count }))
     .sort((a, b) => b.count - a.count);
 }
+
+/** Per-domain counts from a domain → count record, largest first; an unknown ('') domain is dropped. */
+export function breakdownFromCounts(counts: Record<string, number>): DomainCount[] {
+  return Object.entries(counts)
+    .filter(([domain]) => domain !== '')
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count);
+}

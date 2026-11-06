@@ -21,6 +21,7 @@ interface ConsentAcceptResponse {
 
 interface RawSchemaEntry {
   kind: string;
+  network?: string;
   brand?: string;
   schema: unknown;
 }
@@ -35,8 +36,15 @@ export async function fetchConsentConfigs(networkId: string): Promise<ConsentCon
   const response = await apiClient.get<RawSchemaEntry[]>('/api/v1/network/schemas', {
     params: { network: networkId },
   });
-  return response.data
-    .filter((e) => e.kind === 'consent_config')
+  return consentConfigsIn(response.data, networkId);
+}
+
+export function consentConfigsIn(
+  entries: RawSchemaEntry[],
+  networkId: string,
+): ConsentConfigEntry[] {
+  return entries
+    .filter((e) => e.kind === 'consent_config' && e.network === networkId)
     .map((e) => ({ brand: e.brand ?? null, schema: e.schema as ConsentConfigDocument }));
 }
 

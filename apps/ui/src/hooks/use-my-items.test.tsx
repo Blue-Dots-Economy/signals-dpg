@@ -48,4 +48,11 @@ describe('useMyItems', () => {
     renderHook(() => useMyItems(null), { wrapper });
     expect(fetchItems).not.toHaveBeenCalled();
   });
+
+  it('returns the same empty list on every render while there are no items', () => {
+    const { result, rerender } = renderHook(() => useMyItems(null), { wrapper });
+    const first = result.current.data;
+    rerender();
+    expect(result.current.data).toBe(first);
+  });
 });
