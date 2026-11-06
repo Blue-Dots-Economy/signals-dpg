@@ -130,6 +130,7 @@ type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['chil
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
 
 const NO_DOMAINS: DotNetworkDomain[] = [];
+const MAP_FILL_HEIGHT = 'h-full min-h-[400px]';
 
 export function isWideViewport(viewport: MapViewport | null): boolean {
   if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
@@ -2040,6 +2041,7 @@ export function HomePage() {
         renderBrowseToolbar()
       }
     >
+      <div className={viewMode === 'map' ? 'flex h-full flex-col' : undefined}>
       {renderPageHeader()}
       {showLocationBanner && (
         <EnableLocationBanner
@@ -2230,9 +2232,10 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <div data-tour="map" className="relative h-full">
-                <MapErrorBoundary>
+              <div data-tour="map" className="relative min-h-0 flex-1">
+                <MapErrorBoundary heightClassName={MAP_FILL_HEIGHT}>
                 <MapView
+                  heightClassName={MAP_FILL_HEIGHT}
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
@@ -2352,6 +2355,7 @@ export function HomePage() {
             )
           }
         </ActionHandler>
+      </div>
     </PageShell>
     {renderU18GuardianFlowModal()}
     {profileConsentModal}

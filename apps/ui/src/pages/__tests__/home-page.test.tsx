@@ -417,6 +417,7 @@ interface MapViewStubProps {
   onSpotGroupSelect?: (group: OpenSpotGroup) => void;
   focusPoint?: { lat: number; lng: number } | null;
   focusZoom?: number;
+  heightClassName?: string;
 }
 
 let stubSpotGroup: OpenSpotGroup = {
@@ -442,6 +443,7 @@ function MapViewStub({
   onSpotGroupSelect,
   focusPoint,
   focusZoom,
+  heightClassName,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [spotOpen, setSpotOpen] = React.useState(false);
@@ -457,7 +459,7 @@ function MapViewStub({
     domain: item.domain,
   });
   return (
-    <div data-testid="map-view">
+    <div data-testid="map-view" className={heightClassName}>
       <p>{`focus: ${focusPoint ? `${focusPoint.lat},${focusPoint.lng}` : 'none'} @ ${focusZoom ?? 'default'}`}</p>
       {filtersSlot}
       <button
@@ -983,6 +985,17 @@ describe('HomePage — map→list domain collapse (spec D27)', () => {
 });
 
 describe('HomePage — map view', () => {
+  it('fills the height left below the sign-in banner instead of a fixed screen height', () => {
+    state.user = null;
+    renderHome('/?view=map');
+
+    const map = screen.getByTestId('map-view');
+    expect(map).toHaveClass('h-full');
+    const column = map.closest('.flex-col');
+    expect(column).not.toBeNull();
+    expect(column).toContainElement(screen.getByText('Sign in to connect'));
+  });
+
   it('fetches no markers until the map reports its first viewport', async () => {
     signedInSeeker();
     state.markers = [
