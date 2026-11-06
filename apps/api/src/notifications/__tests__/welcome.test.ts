@@ -54,6 +54,13 @@ vi.mock('../email/dispatch_email', () => ({
   getDefaultEmailSender: () => (clientConfigured ? { dispatchEmail } : null),
 }));
 
+const dispatchSms = vi.fn(async (_args: Record<string, unknown>) => ({ ok: true }));
+
+vi.mock('../sms/default_sms_sender', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sms/default_sms_sender')>()),
+  getDefaultSmsSender: () => (clientConfigured ? { dispatchSms } : null),
+}));
+
 const { sendWelcomeNotifications } = await import('../welcome.js');
 
 const makeLog = () => ({ error: vi.fn() });
@@ -71,6 +78,8 @@ beforeEach(() => {
   notify.mockImplementation(async () => ({}));
   dispatchEmail.mockClear();
   dispatchEmail.mockImplementation(async () => ({ ok: true }));
+  dispatchSms.mockClear();
+  dispatchSms.mockImplementation(async () => ({ ok: true }));
   clientConfigured = true;
   mockNotification.FRONTEND_BASE_URL = 'https://blue.example';
   mockUiHostBindings.byDomain = {};
@@ -228,5 +237,32 @@ describe('per-domain CTA (#569)', () => {
       | { variables?: Record<string, unknown> }
       | undefined;
     expect(dispatched?.variables).not.toHaveProperty('siteUrl');
+  });
+});
+
+describe('welcome SMS', () => {
+  const VERIFIED = { ...BOTH, phoneNumberVerified: true };
+
+  it('texts a verified phone with the case and the portal origin', async () => {
+    mockUiHostBindings.byDomain = { seeker: 'https://seekers-purpledots.example/' };
+    await sendWelcomeNotifications(VERIFIED, makeLog(), 'seeker');
+    expect(dispatchSms).toHaveBeenCalledWith({
+      caseId: 'welcome.seeker',
+      to: '+911234567890',
+      variables: { url: 'https://seekers-purpledots.example' },
+    });
+  });
+
+  it('sends no SMS to an unverified phone', async () => {
+    await sendWelcomeNotifications(BOTH, makeLog(), 'seeker');
+    expect(dispatchSms).not.toHaveBeenCalled();
+  });
+
+  it('still sends email and WhatsApp when the SMS send rejects', async () => {
+    dispatchSms.mockRejectedValueOnce(new Error('down'));
+    const log = makeLog();
+    await sendWelcomeNotifications(VERIFIED, log);
+    expect(attempted()).toEqual(['email', 'whatsapp']);
+    expect(log.error).toHaveBeenCalledWith(expect.anything(), 'welcome: could not send the welcome SMS');
   });
 });

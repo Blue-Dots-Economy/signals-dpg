@@ -18,7 +18,13 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
 }));
 
 vi.mock('@api/db/postgres/schema/auth', () => ({
-  user: { id: 'user.id', email: 'user.email', name: 'user.name' },
+  user: {
+    id: 'user.id',
+    email: 'user.email',
+    name: 'user.name',
+    phoneNumber: 'user.phone_number',
+    phoneNumberVerified: 'user.phone_number_verified',
+  },
   organization: { id: 'organization.id', name: 'organization.name' },
 }));
 
@@ -44,18 +50,25 @@ describe('resolveOwnerNameEmail', () => {
 
   it('returns name + email for a known user', async () => {
     rowQueue.push([{ name: 'Asha', email: 'a@b.com' }]);
-    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: 'a@b.com' });
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: 'a@b.com', phone: null, phoneVerified: false });
   });
 
   it('returns nulls for an unknown user', async () => {
-    expect(await resolveOwnerNameEmail('missing')).toEqual({ found: false, name: null, email: null });
+    expect(await resolveOwnerNameEmail('missing')).toEqual({ found: false, name: null, email: null, phone: null, phoneVerified: false });
   });
 
   it('folds a synthetic @no-email.local address to null (found stays true) (#592 Blocker 2)', async () => {
     rowQueue.push([{ name: 'Asha', email: 'abc-123@no-email.local' }]);
     // Phone-only signup: better-auth persisted a synthetic address. It is
     // deliverable to nobody, so the owner reads as no-email (found still true).
-    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: null });
+    expect(await resolveOwnerNameEmail('u1')).toEqual({ found: true, name: 'Asha', email: null, phone: null, phoneVerified: false });
+  });
+
+  it('returns the phone with whether it is verified (null counts as not verified)', async () => {
+    rowQueue.push([{ name: 'Asha', email: null, phone: '+919000000001', phoneVerified: true }]);
+    expect(await resolveOwnerNameEmail('u1')).toMatchObject({ phone: '+919000000001', phoneVerified: true });
+    rowQueue.push([{ name: 'Asha', email: null, phone: '+919000000001', phoneVerified: null }]);
+    expect(await resolveOwnerNameEmail('u1')).toMatchObject({ phone: '+919000000001', phoneVerified: false });
   });
 });
 
