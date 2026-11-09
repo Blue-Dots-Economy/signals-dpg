@@ -1,8 +1,7 @@
 import { buildNotifications } from './build_notifications';
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
 import type { DispatchEmailArgs } from './email/dispatch_email';
-import { smsLink } from './sms/default_sms_sender';
-import type { SmsDispatchArgs } from './sms/dispatch_sms';
+import { smsLink, type SmsDispatchArgs } from './sms/dispatch_sms';
 import {
   FALLBACK_SERVICE_NAME,
   resolveCopyGroup,

@@ -26,7 +26,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { createCtaUrlResolver } from './brand';
 import { getDefaultEmailSender } from './email/dispatch_email';
 import { resolveRecipientRole } from './action_copy';
-import { getDefaultSmsSender, smsLink } from './sms/default_sms_sender';
+import { getDefaultSmsSender, smsLink } from './sms/dispatch_sms';
 
 /**
  * The WhatsApp template this uses is a pre-approved Twilio content template;

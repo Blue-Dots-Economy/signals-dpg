@@ -29,7 +29,7 @@ function mockDeps(cfg: {
     getDefaultEmailSender: () =>
       cfg.client === false ? null : { dispatchEmail: dispatchEmailMock },
   }));
-  vi.doMock('@/notifications/sms/default_sms_sender', () => ({
+  vi.doMock('@/notifications/sms/dispatch_sms', () => ({
     getDefaultSmsSender: () => (cfg.client === false ? null : { dispatchSms: dispatchSmsMock }),
   }));
   vi.doMock('@/config', () => ({

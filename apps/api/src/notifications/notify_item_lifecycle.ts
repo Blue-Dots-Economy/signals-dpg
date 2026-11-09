@@ -3,7 +3,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import { resolveRecipientRole } from './action_copy';
 import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions';
 import { resolveOwnerNameEmail } from './resolve_owner';
-import { getDefaultSmsSender, smsLink } from './sms/default_sms_sender';
+import { getDefaultSmsSender, smsLink } from './sms/dispatch_sms';
 
 /**
  * Owner-facing item-lifecycle emails and SMS: profile/offer create, update,

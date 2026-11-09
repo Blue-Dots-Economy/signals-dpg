@@ -4,7 +4,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
 import { renderOrgList } from '@/notifications/email/shells';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-import { getDefaultSmsSender } from '@/notifications/sms/default_sms_sender';
+import { getDefaultSmsSender } from '@/notifications/sms/dispatch_sms';
 // The fixed-window counter used by the send rate-limit and the verify throttle
 // below; shared with the support route since #551.
 import { incrWithinWindow } from '@/utils/rate_window';

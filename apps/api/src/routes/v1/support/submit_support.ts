@@ -7,7 +7,7 @@ import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { instance, supportConfig } from '@/config';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
-import { getDefaultSmsSender } from '@/notifications/sms/default_sms_sender';
+import { getDefaultSmsSender } from '@/notifications/sms/dispatch_sms';
 import {
   buildSupportDetailsTable,
   generateSupportReference,

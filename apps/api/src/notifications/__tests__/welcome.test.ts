@@ -56,8 +56,8 @@ vi.mock('../email/dispatch_email', () => ({
 
 const dispatchSms = vi.fn(async (_args: Record<string, unknown>) => ({ ok: true }));
 
-vi.mock('../sms/default_sms_sender', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../sms/default_sms_sender')>()),
+vi.mock('../sms/dispatch_sms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sms/dispatch_sms')>()),
   getDefaultSmsSender: () => (clientConfigured ? { dispatchSms } : null),
 }));
 

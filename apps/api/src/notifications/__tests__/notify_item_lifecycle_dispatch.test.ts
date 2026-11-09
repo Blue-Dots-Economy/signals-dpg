@@ -11,8 +11,8 @@ const { dispatchEmail, dispatchSms, resolveNotifierConfig, resolveNetworkBrandNa
     resolveOwnerNameEmail: vi.fn(),
   }));
 
-vi.mock('../sms/default_sms_sender', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../sms/default_sms_sender')>()),
+vi.mock('../sms/dispatch_sms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sms/dispatch_sms')>()),
   getDefaultSmsSender: () => ({ dispatchSms }),
 }));
 

@@ -12,7 +12,7 @@ import { createEmailSender, getInstanceDefaultNetwork } from './email/dispatch_e
 import type { EmailSender } from './email/dispatch_email';
 import { getEmailMessages } from './email/messages';
 import { resolveOwnerEmail, resolveOwnerNameEmail, resolveProviderServiceName } from './resolve_owner';
-import { getDefaultSmsSender } from './sms/default_sms_sender';
+import { getDefaultSmsSender } from './sms/dispatch_sms';
 
 export interface NotifierConfig {
   sender: EmailSender;

@@ -43,7 +43,7 @@ const dispatchSms = vi.fn(async (_args: unknown): Promise<{ ok: boolean; skipped
   ok: false,
   skipped: true,
 }));
-vi.mock('@/notifications/sms/default_sms_sender', () => ({
+vi.mock('@/notifications/sms/dispatch_sms', () => ({
   getDefaultSmsSender: () => ({ dispatchSms }),
 }));
 
