@@ -4,6 +4,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
 import { renderOrgList } from '@/notifications/email/shells';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import { getDefaultSmsSender } from '@/notifications/sms/default_sms_sender';
 // The fixed-window counter used by the send rate-limit and the verify throttle
 // below; shared with the support route since #551.
 import { incrWithinWindow } from '@/utils/rate_window';
@@ -19,14 +20,11 @@ export class GuardianOtpError extends Error {
 export type GuardianContactType = 'phone' | 'email';
 
 /**
- * The parent-facing scenario a guardian OTP is issued for (#294). Selects the
- * notification template + the copy the guardian sees. Distinct from the OTP
- * mechanics — the code/TTL/throttles are identical across scenarios.
- *
- * For actions, `actionType` is taken straight from `network.json` (the gate
- * passes the interaction's own action type) — NOT hardcoded — so any action a
- * network defines derives its template automatically:
- *   `guardian_otp_<actionType>[_accept]_sms`.
+ * The parent-facing scenario a guardian OTP is issued for. Selects the email
+ * case (`guardian.<kind>`) and its copy; the code, TTL and throttles are the
+ * same for every scenario. SMS uses the scenario's own template where the
+ * instance maps one (`guardian.<kind>[.<stage>]`), else the generic OTP template.
+ * For actions, `actionType` comes from the interaction in `network.json`.
  */
 export type GuardianOtpScenario =
   | { kind: 'account' } // ward wants to create an account (pre-auth signup)
@@ -193,6 +191,12 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
 // — that lives in the email. Variable is `{ message: otp }`, matching login.
 const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
+/** SMS case id for a scenario; bulk has no case of its own and uses the generic OTP. */
+export function guardianSmsCaseId(scenario?: GuardianOtpScenario): string | null {
+  if (!scenario || scenario.kind === 'action_bulk') return null;
+  return scenario.kind === 'action' ? `guardian.action.${scenario.stage}` : `guardian.${scenario.kind}`;
+}
+
 /**
  * Maps a guardian OTP scenario to its email case + variables (#529). Pure —
  * fallback values are supplied here because the copy file has no
@@ -227,12 +231,10 @@ export function buildGuardianEmailDispatch(args: {
  * via the shared notification client. Hard-fails when no provider is
  * configured — a guardian-required domain must not silently skip verification.
  *
- * Email: the case + variables are mapped by `buildGuardianEmailDispatch` and
- * shipped through the central `dispatchEmail` sender (#529) — same convention
- * as the login OTP + action emails, so the copy lives in the properties file,
- * not in-repo HTML. SMS: the DLT-approved body lives in the notification
- * service, so we send a per-scenario `template_id` plus variables and let it
- * render.
+ * Email goes through `dispatchEmail` with the case from
+ * `buildGuardianEmailDispatch` (copy lives in the email messages file). SMS
+ * sends the scenario's template if mapped, else the generic OTP template;
+ * notification-service renders the body.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
@@ -262,6 +264,19 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
       variables: dispatch.variables,
     });
     return;
+  }
+
+  // A scenario's own template where the instance maps one, else the generic OTP.
+  const caseId = guardianSmsCaseId(scenario);
+  if (caseId) {
+    const sent = await getDefaultSmsSender()?.dispatchSms({
+      caseId,
+      to: contact,
+      priority: 'realtime',
+      critical: true,
+      variables: { otp, org: variables?.providerOrgName || 'the organisation' },
+    });
+    if (sent?.ok) return;
   }
 
   await client.notify({

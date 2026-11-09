@@ -119,4 +119,21 @@ describe('dispatchSms', () => {
       error: 'boom',
     });
   });
+
+  it('rethrows a notify failure when the send is critical, after logging it', async () => {
+    const index = loadSmsTemplateIndex([CONFIGURED]);
+    const notify = vi.fn(async () => {
+      throw new Error('boom');
+    });
+    const log = vi.fn();
+    const sender = createSmsSender({ notify, getTemplates: () => index, defaultNetwork: null, log });
+    await expect(sender.dispatchSms({ caseId: 'profile.create', to: '+91900', critical: true })).rejects.toThrow('boom');
+    expect(log).toHaveBeenCalledWith('sms dispatch failed', { caseId: 'profile.create', error: 'boom' });
+  });
+
+  it('still skips an unconfigured case when the send is critical', async () => {
+    const { sender, notify } = senderWith(CONFIGURED);
+    expect(await sender.dispatchSms({ caseId: 'nope', to: '+91900', critical: true })).toEqual({ ok: false, skipped: true });
+    expect(notify).not.toHaveBeenCalled();
+  });
 });

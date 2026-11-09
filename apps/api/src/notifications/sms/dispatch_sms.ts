@@ -63,6 +63,8 @@ export interface SmsDispatchArgs {
   network?: string | null;
   variables?: Record<string, string>;
   priority?: SmsPriority;
+  /** Rethrow a failed send instead of logging it (OTP sends must not fail silently). */
+  critical?: boolean;
 }
 
 export interface SmsSenderDeps {
@@ -122,6 +124,7 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
           caseId: args.caseId,
           error: err instanceof Error ? err.message : String(err),
         });
+        if (args.critical) throw err;
         return { ok: false };
       }
     },

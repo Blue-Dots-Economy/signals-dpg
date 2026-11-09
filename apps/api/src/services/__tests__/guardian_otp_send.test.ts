@@ -39,7 +39,15 @@ vi.mock('@/notifications/email/dispatch_email', () => ({
   getDefaultEmailSender: () => getDefaultEmailSender(),
 }));
 
-import { defaultGuardianOtpSend, GuardianOtpError } from '@/services/guardian_otp';
+const dispatchSms = vi.fn(async (_args: unknown): Promise<{ ok: boolean; skipped?: boolean }> => ({
+  ok: false,
+  skipped: true,
+}));
+vi.mock('@/notifications/sms/default_sms_sender', () => ({
+  getDefaultSmsSender: () => ({ dispatchSms }),
+}));
+
+import { defaultGuardianOtpSend, GuardianOtpError, guardianSmsCaseId } from '@/services/guardian_otp';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -59,7 +67,7 @@ describe('defaultGuardianOtpSend', () => {
     expect(payload.variables.message).toBe('123456');
   });
 
-  it('SMS always uses the single generic OTP template (code only), ignoring scenario/vars', async () => {
+  it('SMS falls back to the single generic OTP template (code only) when the scenario has no template', async () => {
     await defaultGuardianOtpSend({
       contact: '+911',
       contactType: 'phone',
@@ -72,6 +80,46 @@ describe('defaultGuardianOtpSend', () => {
     expect(payload.template_id).toBe('login_otp');
     // Only the code goes to SMS — no parent-facing vars (DLT template is fixed).
     expect(payload.variables).toEqual({ message: '000111' });
+  });
+
+  it("SMS uses the scenario's own template where the instance maps one", async () => {
+    dispatchSms.mockResolvedValueOnce({ ok: true });
+    await defaultGuardianOtpSend({
+      contact: '+911',
+      contactType: 'phone',
+      otp: '000111',
+      scenario: { kind: 'action', actionType: 'connect', stage: 'accept' },
+      variables: { providerOrgName: 'Acme' },
+    });
+    expect(dispatchSms).toHaveBeenCalledWith(
+      expect.objectContaining({
+        caseId: 'guardian.action.accept',
+        to: '+911',
+        critical: true,
+        variables: { otp: '000111', org: 'Acme' },
+      }),
+    );
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('a failed scenario SMS fails the OTP send rather than falling back', async () => {
+    dispatchSms.mockRejectedValueOnce(new Error('provider down'));
+    await expect(
+      defaultGuardianOtpSend({ contact: '+911', contactType: 'phone', otp: '1', scenario: { kind: 'profile' } }),
+    ).rejects.toThrow('provider down');
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('maps each scenario to its SMS case; bulk and no scenario have none', () => {
+    expect(guardianSmsCaseId({ kind: 'account' })).toBe('guardian.account');
+    expect(guardianSmsCaseId({ kind: 'profile' })).toBe('guardian.profile');
+    expect(guardianSmsCaseId({ kind: 'action', actionType: 'connect', stage: 'initiate' })).toBe(
+      'guardian.action.initiate',
+    );
+    expect(
+      guardianSmsCaseId({ kind: 'action_bulk', actionType: 'connect', stage: 'initiate', providerOrgNames: [], jobs: false }),
+    ).toBeNull();
+    expect(guardianSmsCaseId(undefined)).toBeNull();
   });
 
   it('hard-fails with NO_OTP_PROVIDER when no notification client is configured (sms)', async () => {

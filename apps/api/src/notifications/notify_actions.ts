@@ -11,7 +11,8 @@ import { resolveRecipientRole } from './action_copy';
 import { createEmailSender, getInstanceDefaultNetwork } from './email/dispatch_email';
 import type { EmailSender } from './email/dispatch_email';
 import { getEmailMessages } from './email/messages';
-import { resolveOwnerEmail, resolveProviderServiceName } from './resolve_owner';
+import { resolveOwnerEmail, resolveOwnerNameEmail, resolveProviderServiceName } from './resolve_owner';
+import { getDefaultSmsSender } from './sms/default_sms_sender';
 
 export interface NotifierConfig {
   sender: EmailSender;
@@ -115,6 +116,11 @@ export async function dispatchActionNotifications(
     resolveCtaUrl: config.resolveCtaUrl,
     log: (message, meta) => log.warn(meta ?? {}, message),
     onSkip: (reason) => log.info({ reason }, 'action notification skipped'),
+    sendSms: (args) => getDefaultSmsSender()?.dispatchSms(args) ?? Promise.resolve(),
+    resolvePhone: async (userId) => {
+      const owner = await resolveOwnerNameEmail(userId);
+      return owner.phoneVerified ? owner.phone : null;
+    },
   });
 
   await dispatcher.dispatch(event);
