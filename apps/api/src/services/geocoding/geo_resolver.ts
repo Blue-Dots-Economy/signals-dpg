@@ -23,7 +23,13 @@ export function parsePhotonFeatures(json: unknown): Coordinates | null {
 
 interface PhotonFeature {
   geometry?: { coordinates?: [number, number] };
-  properties?: { countrycode?: string; type?: string };
+  properties?: {
+    countrycode?: string;
+    type?: string;
+    name?: string;
+    city?: string;
+    state?: string;
+  };
 }
 
 /**
@@ -77,6 +83,7 @@ export function parseGoogleGeocode(json: unknown): Coordinates | null {
 }
 
 interface GoogleGeocodeResult {
+  formatted_address?: string;
   geometry?: { location?: { lat: number; lng: number } };
   types?: string[];
   address_components?: Array<{ short_name?: string; types?: string[] }>;
@@ -207,4 +214,72 @@ export async function resolveCoordinates(query: string): Promise<Coordinates | n
   const q = query.trim();
   if (!q) return null;
   return getCachedCoordinates(q, () => resolveFromProviderWithRetry(q), geocodingConfig.country);
+}
+
+export type PlacePrecision = 'postal_code' | 'locality' | 'city' | 'district';
+
+export interface ResolvedPlace {
+  point: Coordinates;
+  label: string;
+  precision: PlacePrecision;
+}
+
+/** Pure: how precisely a Google result's types pin a place. */
+export function googlePrecision(types: string[]): PlacePrecision {
+  if (types.includes('postal_code')) return 'postal_code';
+  if (types.includes('locality')) return 'city';
+  if (types.includes('administrative_area_level_2') || types.includes('administrative_area_level_3')) {
+    return 'district';
+  }
+  return 'locality';
+}
+
+/** Pure: how precisely a Photon feature type (or a postcode query) pins a place. */
+export function photonPrecision(type: string | undefined, query: string): PlacePrecision {
+  if (/^\s*\d{4,6}\s*$/.test(query)) return 'postal_code';
+  if (type === 'city') return 'city';
+  if (type === 'county') return 'district';
+  return 'locality';
+}
+
+/**
+ * Pure: the result `pickGoogleResult` would choose, with label and precision.
+ * Without a country only the first result counts, as in `parseGoogleGeocode`.
+ */
+export function pickGooglePlace(json: unknown, country?: string): ResolvedPlace | null {
+  const data = json as { status?: string; results?: GoogleGeocodeResult[] };
+  const candidates = country ? (data?.results ?? []) : (data?.results ?? []).slice(0, 1);
+  for (const r of candidates) {
+    const point = pickGoogleResult({ status: data?.status, results: [r] }, country);
+    if (!point) continue;
+    return {
+      point,
+      label: r.formatted_address?.trim() ?? '',
+      precision: googlePrecision(r.types ?? []),
+    };
+  }
+  return null;
+}
+
+/** Pure: the feature `pickPhotonFeature` would choose, with label and precision. */
+export function pickPhotonPlace(
+  json: unknown,
+  query: string,
+  country?: string,
+): ResolvedPlace | null {
+  const features = (json as { features?: PhotonFeature[] })?.features ?? [];
+  for (const f of features) {
+    const point = pickPhotonFeature({ features: [f] }, country);
+    if (!point) continue;
+    const p = f.properties ?? {};
+    const parts = [p.name, p.city, p.state]
+      .map((v) => v?.trim() ?? '')
+      .filter((v, i, all) => v && v !== all.slice(0, i).reverse().find(Boolean));
+    return {
+      point,
+      label: parts.join(', ') || query.trim(),
+      precision: photonPrecision(p.type, query),
+    };
+  }
+  return null;
 }
