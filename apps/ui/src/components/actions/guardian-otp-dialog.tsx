@@ -87,7 +87,7 @@ function messageForCode(
   }
 }
 
-export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, purpose, sentTo }: GuardianOtpDialogProps) {
+export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, purpose, sentTo }: Readonly<GuardianOtpDialogProps>) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
