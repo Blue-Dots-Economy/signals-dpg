@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { Wallet, OctagonX } from 'lucide-react';
+import { OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,11 +26,7 @@ import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
-import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
-import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
-import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
 import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { useEditItem } from '@/hooks/use-edit-item';
@@ -99,7 +95,6 @@ export function ProfileFormPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   // Lifecycle controls (pause/resume/retire) live on the sidebar's "My
   // Profiles" rows, not in this editor.
-  const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
@@ -427,67 +422,11 @@ export function ProfileFormPage() {
     if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
   }, [network, queryClient]);
 
-  const canImportCredentials = React.useMemo(
-    () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
-    [profileSchema]
-  );
-
   // Network-level instance URL and schema URL for the selected domain.
   const domainInstance = React.useMemo(() => {
     if (!selectedDomain || !network) return null;
     return network.instances?.find((i) => i.domain_id === selectedDomain) ?? null;
   }, [selectedDomain, network]);
-
-  const walletImportContext = React.useMemo(
-    () => ({
-      user: {
-        email: user?.email ?? null,
-        phoneNumber: user?.phoneNumber ?? null,
-        name: user?.name ?? 'User',
-      },
-      networkId: network?.id ?? null,
-      domainId: selectedDomain,
-      schema: profileSchema,
-      formData: initialData,
-    }),
-    [initialData, network?.id, profileSchema, selectedDomain, user?.email, user?.name, user?.phoneNumber]
-  );
-
-  const handleImportedCredentials = React.useCallback(
-    (result: WalletImportResult) => {
-      if (!profileSchema) {
-        toast.error(t('profile.toast_no_schema'), {
-          description: t('profile.toast_no_schema_desc'),
-        });
-        return;
-      }
-
-      const { mergedData, mappedCount, skippedKeys } = mergeImportedDataIntoSchema(
-        profileSchema,
-        initialData,
-        result
-      );
-
-      if (mappedCount === 0) {
-        toast.error(t('profile.toast_import_no_match', { provider: result.providerLabel }));
-        return;
-      }
-
-      setInitialData(mergedData);
-
-      if (skippedKeys.length > 0) {
-        toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-          description: t('profile.toast_import_skipped', { count: skippedKeys.length }),
-        });
-        return;
-      }
-
-      toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-        description: result.summary,
-      });
-    },
-    [initialData, profileSchema]
-  );
 
   const handleSubmit = async (data: Record<string, unknown>) => {
     if (!selectedDomain || !network) return;
@@ -906,15 +845,6 @@ export function ProfileFormPage() {
               </div>
             )}
 
-            {canImportCredentials && (
-              <div className="mb-4">
-                <Button data-tour="import-credentials" variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
-                  <Wallet className="h-4 w-4" />
-                  {t('profile.import_credentials')}
-                </Button>
-              </div>
-            )}
-
             {formError && (
               <Alert variant="destructive" className="mb-4">
                 <OctagonX className="h-4 w-4" />
@@ -950,13 +880,6 @@ export function ProfileFormPage() {
 
           </CardContent>
         </Card>
-
-        <WalletImportModal
-          open={isWalletModalOpen}
-          onOpenChange={setIsWalletModalOpen}
-          context={walletImportContext}
-          onImported={handleImportedCredentials}
-        />
 
         {/* Interstitial: tells the minor what happens before any code is
             sent. Confirming issues the guardian OTP. */}
