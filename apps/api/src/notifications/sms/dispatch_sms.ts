@@ -108,9 +108,9 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
           deps.log('sms missing declared variables', { caseId: args.caseId, missing }),
         );
 
-        // Dev preview only — the real text is rendered provider-side from the
-        // DLT template; this shows what that will say. Never in prod.
-        deps.previewLog?.(
+        // Dev preview only, never in prod. Skipped for critical sends: those
+        // carry an OTP, which must not reach a log even outside production.
+        if (!args.critical) deps.previewLog?.(
           `[sms:${args.caseId}] to=${maskPhone(args.to)} template_id=${entry.templateId}  ${renderSmsPreview(entry.body, variables)}`,
         );
 

@@ -118,6 +118,20 @@ describe('dispatchSms', () => {
     expect(line).not.toContain('919812345678');
   });
 
+  it('keeps a critical (OTP) send out of the preview log but still sends it', async () => {
+    const previewLog = vi.fn();
+    const { sender, notify } = senderWith(CONFIGURED, { previewLog });
+    const res = await sender.dispatchSms({
+      caseId: 'profile.create',
+      to: '+919812345678',
+      critical: true,
+      variables: { name: 'Asha', link: 'L' },
+    });
+    expect(res).toEqual({ ok: true });
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(previewLog).not.toHaveBeenCalled();
+  });
+
   it('never throws — a notify failure is swallowed and reported as not-ok', async () => {
     const index = loadSmsTemplateIndex([CONFIGURED]);
     const notify = vi.fn(async () => {
