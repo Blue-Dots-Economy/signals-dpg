@@ -39,7 +39,9 @@ vi.mock('@dpg/database', () => ({
 }));
 
 vi.mock('@/network_configs', () => ({
-  getNetworkConfigById: vi.fn(async (network: string) => ({
+  getNetworkConfigById: vi.fn(async (network: string) => {
+    if (network === 'unknown_dot') throw new Error('Network "unknown_dot" is not configured.');
+    return {
     domains: [
       {
         id: 'provider',
@@ -51,7 +53,8 @@ vi.mock('@/network_configs', () => ({
         },
       },
     ],
-  })),
+    };
+  }),
 }));
 
 import {
@@ -168,6 +171,11 @@ describe('resolveProviderServiceName', () => {
   it('returns null when the schema declares no display_name_field', async () => {
     rowQueue.push(row({ jobProviderName: 'Acme Corp' }, 'no_name_1.0'));
     await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
+  });
+
+  it('returns null instead of throwing when the network config cannot be loaded', async () => {
+    rowQueue.push(row({ jobProviderName: 'Acme Corp' }));
+    await expect(resolveProviderServiceName('i1', 'unknown_dot')).resolves.toBeNull();
   });
 
   it('returns null when the item is unknown', async () => {

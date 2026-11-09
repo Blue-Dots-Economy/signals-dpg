@@ -99,7 +99,9 @@ export async function resolveProviderServiceName(
     .limit(1);
   const row = rows[0];
   if (!row) return null;
-  const config = await getNetworkConfigById(network);
+  // Best-effort like the DB lookup: callers fall back to generic copy on null.
+  const config = await getNetworkConfigById(network).catch(() => null);
+  if (!config) return null;
   const schema = config.domains.find((d) => d.id === row.domain)?.item_schemas?.[row.type] as
     | { display_name_field?: unknown }
     | undefined;
