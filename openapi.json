@@ -1736,6 +1736,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -1862,6 +1865,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2021,6 +2027,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -2147,6 +2156,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2297,6 +2309,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2448,6 +2463,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -2566,6 +2584,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2708,6 +2729,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
