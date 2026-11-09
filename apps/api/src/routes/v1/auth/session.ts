@@ -357,4 +357,57 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       });
     },
   });
+
+  /**
+   * Ends the Keycloak session from Keycloak's own error page so a different
+   * account can sign in, and returns the browser to the app's sign-in screen.
+   *
+   * Keycloak refuses a second sign-in in a browser that already holds another
+   * account's session, and its error page can only link here. The `flow`
+   * value is the `state` of the sign-in that was refused. It must name a
+   * sign-in still in flight before the local session is touched: `state` is
+   * random and only appears in this browser's Keycloak URLs, so another site
+   * cannot sign a user out by linking here. The flow cookie cannot be the
+   * proof, because a second sign-in started in the same browser replaces it.
+   * With that proof, the local session is ended and its ID token names the
+   * Keycloak session, so Keycloak signs out without asking. Without it,
+   * nothing local changes and Keycloak asks the user to confirm.
+   */
+  fastify.route({
+    url: '/session/switch',
+    method: 'GET',
+    preHandler: public_rate_limit('auth_session_switch', 60),
+    schema: {
+      tags: ['auth'],
+      querystring: z.object({
+        /** `state` of the refused sign-in, read from Keycloak's error page URL. */
+        flow: z.string().optional(),
+      }),
+      response: { 302: RedirectResponse, 404: ErrorResponseSchema },
+    },
+    handler: async (request, reply) => {
+      if (!authConfig.keycloak_enabled) return notEnabled(reply);
+      const { flow } = request.query;
+      // The refused sign-in cannot finish, so its single-use state goes now.
+      const flowState = flow ? await consumeFlowState(flow) : null;
+
+      let idToken: string | undefined;
+      let appOrigin = flowState?.appOrigin;
+      const sessionId = request.cookies?.[SESSION_COOKIE];
+      if (flowState && sessionId) {
+        const session = await readSession(sessionId);
+        idToken = session?.idToken;
+        appOrigin = appOrigin ?? session?.appOrigin;
+        await destroySession(sessionId);
+        clearSessionCookie(reply);
+      }
+
+      return reply.redirect(
+        buildEndSessionUrl({
+          idToken,
+          postLogoutRedirectUri: `${appOrigin ?? requestOrigin(request)}/auth/login`,
+        })
+      );
+    },
+  });
 };

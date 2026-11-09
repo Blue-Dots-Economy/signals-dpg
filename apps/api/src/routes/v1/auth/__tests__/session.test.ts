@@ -606,3 +606,77 @@ describe('POST /auth/session/logout', () => {
     expect(res.cookies[0]).toMatchObject({ name: 'sid', value: '' });
   });
 });
+
+describe('GET /auth/session/switch', () => {
+  const switchTo = (opts: Partial<InjectOptions> = {}) =>
+    inject({ method: 'GET', url: '/api/v1/auth/session/switch?flow=the-state', ...opts });
+
+  it('ends the session and names it to Keycloak when the refused sign-in is still in flight', async () => {
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
+
+    const res = await switchTo({ cookies: { sid: 'the-session-id' } });
+
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toContain('kc.example.org/logout');
+    expect(consumeFlowState).toHaveBeenCalledWith('the-state');
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    // The hint is what lets Keycloak sign out without a confirmation page.
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: 'the-id-token',
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+    expect(res.cookies.find((c) => c.name === 'sid')).toMatchObject({ value: '' });
+  });
+
+  it('still works after another sign-in in the same browser replaced the flow cookie', async () => {
+    // Two accounts signing in to signals in one browser: the second sign-in
+    // overwrites the single flow cookie, so the cookie cannot be the proof.
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
+
+    await switchTo({ cookies: { oidc_flow: 'another-state', sid: 'the-session-id' } });
+
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ idToken: 'the-id-token' }),
+    );
+  });
+
+  it('returns to the app the refused sign-in started from when there is no session', async () => {
+    // The browser's Keycloak session belongs to the other app, so signals holds
+    // no session. The flow still names the signals UI origin, which differs
+    // from the API's own origin when they are split.
+    await switchTo();
+
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: undefined,
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+    expect(destroySession).not.toHaveBeenCalled();
+  });
+
+  it('leaves the session alone when the flow is unknown or expired', async () => {
+    // A link from another site cannot name a live flow, so it must not be able
+    // to sign the user out; Keycloak's confirmation page still guards.
+    consumeFlowState.mockResolvedValue(null);
+
+    const res = await switchTo({ cookies: { sid: 'the-session-id' }, headers: asPortalHost });
+
+    expect(res.statusCode).toBe(302);
+    expect(readSession).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: undefined,
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+  });
+
+  it('leaves the session alone when no flow is given', async () => {
+    await switchTo({ url: '/api/v1/auth/session/switch', cookies: { sid: 'the-session-id' } });
+
+    expect(consumeFlowState).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ idToken: undefined }),
+    );
+  });
+});
