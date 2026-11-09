@@ -404,6 +404,8 @@
   "profile.toast_sign_in_desc": "ನಿಮ್ಮ ಸೆಶನ್ ಮುಕ್ತಾಯವಾಗಿದೆ ಅಥವಾ ನೀವು ಸೈನ್ ಇನ್ ಆಗಿಲ್ಲ.",
   "profile.toast_updated": "ಪ್ರೊಫೈಲ್ ನವೀಕರಿಸಲಾಗಿದೆ!",
   "profile.toast_updated_desc": "ನಿಮ್ಮ ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಲಾಗಿದೆ ಮತ್ತು ಈಗ ನೆಟ್‌ವರ್ಕ್‌ನಲ್ಲಿ ಗೋಚರವಾಗಿದೆ.",
+  "profile.toast_no_changes": "ಉಳಿಸಲು ಯಾವುದೇ ಬದಲಾವಣೆಗಳಿಲ್ಲ",
+  "profile.toast_no_changes_desc": "ನಿಮ್ಮ ಪ್ರೊಫೈಲ್‌ನಲ್ಲಿ ನೀವು ಏನನ್ನೂ ಬದಲಾಯಿಸಿಲ್ಲ.",
   "actions.bulk_accept": "ಸ್ವೀಕರಿಸಿ",
   "actions.bulk_reject": "ತಿರಸ್ಕರಿಸಿ",
   "actions.bulk_cancel": "ವಿನಂತಿಗಳನ್ನು ರದ್ದುಗೊಳಿಸಿ",

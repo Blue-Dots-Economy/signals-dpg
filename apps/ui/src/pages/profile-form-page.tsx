@@ -21,6 +21,7 @@ import { PageShell } from '@/components/layout/page-shell';
 import { NetworkConstellation } from '@/components/layout/network-constellation';
 import { useMyItems } from '@/hooks/use-my-items';
 import { getStoredActiveProfileId, setStoredActiveProfileId } from '@/lib/active-profile';
+import { hasProfileChanges } from '@/lib/profile-changes';
 import type { DotNetworkSchema } from '@/engine/types';
 import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
@@ -517,6 +518,20 @@ export function ProfileFormPage() {
 
   const handleSubmit = async (data: Record<string, unknown>) => {
     if (!selectedDomain || !network) return;
+
+    // A no-change save would still send the owner a "profile updated" email/SMS.
+    // Publishing a draft (needsConsent) goes through: the consent is the change.
+    if (
+      isEdit &&
+      !needsConsent &&
+      resolvedLocations.length === 0 &&
+      !hasProfileChanges(data, initialData)
+    ) {
+      toast.info(t('profile.toast_no_changes'), {
+        description: t('profile.toast_no_changes_desc'),
+      });
+      return;
+    }
 
     setIsSubmitting(true);
     setFormError(null);

@@ -450,6 +450,8 @@
   "profile.toast_sign_in_desc": "Your session has expired or you are not signed in.",
   "profile.toast_updated": "Profile updated!",
   "profile.toast_updated_desc": "Your changes have been saved and are now visible on the network.",
+  "profile.toast_no_changes": "No changes to save",
+  "profile.toast_no_changes_desc": "You have not changed anything in your profile.",
   "actions.bulk_accept": "Accept",
   "actions.bulk_reject": "Reject",
   "actions.bulk_cancel": "Cancel requests",
