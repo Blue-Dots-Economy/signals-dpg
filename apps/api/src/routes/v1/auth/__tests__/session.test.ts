@@ -642,9 +642,7 @@ describe('GET /auth/session/switch', () => {
   });
 
   it('returns to the app the refused sign-in started from when there is no session', async () => {
-    // The browser's Keycloak session belongs to the other app, so signals holds
-    // no session. The flow still names the signals UI origin, which differs
-    // from the API's own origin when they are split.
+    // The flow names the UI origin, which can differ from the API's own.
     await switchTo();
 
     expect(buildEndSessionUrl).toHaveBeenCalledWith({

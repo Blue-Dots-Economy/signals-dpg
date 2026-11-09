@@ -359,19 +359,13 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
   });
 
   /**
-   * Ends the Keycloak session from Keycloak's own error page so a different
-   * account can sign in, and returns the browser to the app's sign-in screen.
+   * Signs out from Keycloak's error page so a different account can sign in,
+   * then returns the browser to the app's sign-in screen.
    *
-   * Keycloak refuses a second sign-in in a browser that already holds another
-   * account's session, and its error page can only link here. The `flow`
-   * value is the `state` of the sign-in that was refused. It must name a
-   * sign-in still in flight before the local session is touched: `state` is
-   * random and only appears in this browser's Keycloak URLs, so another site
-   * cannot sign a user out by linking here. The flow cookie cannot be the
-   * proof, because a second sign-in started in the same browser replaces it.
-   * With that proof, the local session is ended and its ID token names the
-   * Keycloak session, so Keycloak signs out without asking. Without it,
-   * nothing local changes and Keycloak asks the user to confirm.
+   * `flow` is the `state` of the refused sign-in. Only a live flow ends the
+   * local session: `state` is random and only appears in this browser's
+   * Keycloak URLs, so another site cannot trigger it. The flow cookie is not
+   * checked, because a second sign-in in the same browser replaces it.
    */
   fastify.route({
     url: '/session/switch',
