@@ -404,6 +404,8 @@
   "profile.toast_sign_in_desc": "आपका सत्र समाप्त हो गया है या आप साइन इन नहीं हैं।",
   "profile.toast_updated": "प्रोफ़ाइल अपडेट हो गई!",
   "profile.toast_updated_desc": "आपके बदलाव सहेज लिए गए हैं और अब नेटवर्क पर दिखाई दे रहे हैं।",
+  "profile.toast_no_changes": "सहेजने के लिए कोई बदलाव नहीं",
+  "profile.toast_no_changes_desc": "आपने अपनी प्रोफ़ाइल में कुछ भी नहीं बदला है।",
   "actions.bulk_accept": "स्वीकारें",
   "actions.bulk_reject": "अस्वीकारें",
   "actions.bulk_cancel": "अनुरोध रद्द करें",
