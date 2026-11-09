@@ -33,7 +33,25 @@ vi.mock('@dpg/database', () => ({
     item_state: 'items.item_state',
     item_network: 'items.item_network',
     item_id: 'items.item_id',
+    item_domain: 'items.item_domain',
+    item_type: 'items.item_type',
   },
+}));
+
+vi.mock('@/network_configs', () => ({
+  getNetworkConfigById: vi.fn(async (network: string) => ({
+    domains: [
+      {
+        id: 'provider',
+        item_schemas: {
+          'profile_1.0': {
+            display_name_field: network === 'purple_dot' ? 'organisation_name' : 'jobProviderName',
+          },
+          'no_name_1.0': {},
+        },
+      },
+    ],
+  })),
 }));
 
 import {
@@ -135,51 +153,45 @@ describe('resolveProviderServiceName', () => {
     rowQueue.length = 0;
   });
 
-  it('returns jobProviderName from the item state', async () => {
-    rowQueue.push([{ state: { jobProviderName: 'Acme Corp' } }]);
+  const row = (state: unknown, type = 'profile_1.0') => [{ state, domain: 'provider', type }];
 
-    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBe(
-      'Acme Corp',
-    );
+  it('reads the display_name_field of the blue_dot schema (jobProviderName)', async () => {
+    rowQueue.push(row({ jobProviderName: 'Acme Corp' }));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBe('Acme Corp');
+  });
+
+  it('reads the display_name_field of the purple_dot schema (organisation_name)', async () => {
+    rowQueue.push(row({ organisation_name: 'Asha Rehab Centre', jobProviderName: 'ignored' }));
+    await expect(resolveProviderServiceName('i1', 'purple_dot')).resolves.toBe('Asha Rehab Centre');
+  });
+
+  it('returns null when the schema declares no display_name_field', async () => {
+    rowQueue.push(row({ jobProviderName: 'Acme Corp' }, 'no_name_1.0'));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
   it('returns null when the item is unknown', async () => {
     rowQueue.push([]);
-
-    await expect(
-      resolveProviderServiceName('missing', 'blue_dot'),
-    ).resolves.toBeNull();
+    await expect(resolveProviderServiceName('missing', 'blue_dot')).resolves.toBeNull();
   });
 
-  it('returns null when item_state has no jobProviderName', async () => {
-    rowQueue.push([{ state: { somethingElse: 'x' } }]);
-
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+  it('returns null when item_state has no value for the field', async () => {
+    rowQueue.push(row({ somethingElse: 'x' }));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
   it('treats a whitespace-only name as absent', async () => {
-    rowQueue.push([{ state: { jobProviderName: '   ' } }]);
-
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    rowQueue.push(row({ jobProviderName: '   ' }));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
-  it('ignores a non-string jobProviderName', async () => {
-    rowQueue.push([{ state: { jobProviderName: 42 } }]);
-
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+  it('ignores a non-string value', async () => {
+    rowQueue.push(row({ jobProviderName: 42 }));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 
   it('returns null when item_state itself is missing', async () => {
-    rowQueue.push([{ state: undefined }]);
-
-    await expect(
-      resolveProviderServiceName('i1', 'blue_dot'),
-    ).resolves.toBeNull();
+    rowQueue.push(row(undefined));
+    await expect(resolveProviderServiceName('i1', 'blue_dot')).resolves.toBeNull();
   });
 });

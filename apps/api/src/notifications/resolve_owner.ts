@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { organization, user } from '@api/db/postgres/schema/auth';
 import { items } from '@dpg/database';
+import { getNetworkConfigById } from '@/network_configs';
 
 /**
  * Suffix of the synthetic address `/participant` (`participant.ts`) mints for a
@@ -84,23 +85,26 @@ export async function resolveOrgName(orgId: string): Promise<string | null> {
 }
 
 /**
- * Resolves a provider item's public service name (`jobProviderName`) by item id.
- * Used to substitute `{name}` in seeker-facing action emails. Returns null when
- * unknown. The field is public (not a masked PII field).
- *
- * `network` is the item's partition key — filtering on it lets the planner
- * prune to the right partition instead of scanning every network's items.
+ * A provider item's name from its schema's `display_name_field`, or null.
+ * The config loader rejects a private `display_name_field`, so the value is public.
  */
 export async function resolveProviderServiceName(
   itemId: string,
   network: string,
 ): Promise<string | null> {
   const rows = await db
-    .select({ state: items.item_state })
+    .select({ state: items.item_state, domain: items.item_domain, type: items.item_type })
     .from(items)
     .where(and(eq(items.item_network, network), eq(items.item_id, itemId)))
     .limit(1);
-  const state = rows[0]?.state as Record<string, unknown> | undefined;
-  const name = state?.jobProviderName;
+  const row = rows[0];
+  if (!row) return null;
+  const config = await getNetworkConfigById(network);
+  const schema = config.domains.find((d) => d.id === row.domain)?.item_schemas?.[row.type] as
+    | { display_name_field?: unknown }
+    | undefined;
+  const field = schema?.display_name_field;
+  if (typeof field !== 'string') return null;
+  const name = (row.state as Record<string, unknown> | null | undefined)?.[field];
   return typeof name === 'string' && name.trim() ? name : null;
 }
