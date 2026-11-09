@@ -97,11 +97,11 @@ describe('guardianActionGate', () => {
   it('issues an OTP and returns challenge_issued for a gated minor with no otp supplied', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: '+911234', contactType: 'phone' });
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const result = await guardianActionGate(baseInput);
 
-    expect(result).toEqual({ status: 'challenge_issued' });
+    expect(result).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
     expect(issueGuardianOtp).toHaveBeenCalledWith({
       scope: EXPECTED_SCOPE,
       contact: '+911234',
@@ -114,7 +114,7 @@ describe('guardianActionGate', () => {
   it('passes the network.json action type + stage through as the scenario', async () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianActionGate({ ...baseInput, actionType: 'connect', stage: 'accept' });
 
@@ -256,7 +256,7 @@ describe('guardianBulkActionGate (#393)', () => {
     resolveProviderServiceName.mockImplementation((id: string) =>
       Promise.resolve(id === 'tgt-a' ? 'Acme' : 'Globex'),
     );
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const map = await guardianBulkActionGate({ items: bulkItems });
 
@@ -269,8 +269,8 @@ describe('guardianBulkActionGate (#393)', () => {
       providerOrgNames: ['Acme', 'Globex'],
       jobs: true,
     });
-    expect(map.get(0)).toEqual({ status: 'challenge_issued' });
-    expect(map.get(1)).toEqual({ status: 'challenge_issued' });
+    expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
+    expect(map.get(1)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
   });
 
   it('verifies the single OTP once and marks every gated item verified', async () => {
@@ -303,7 +303,7 @@ describe('guardianBulkActionGate (#393)', () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
     resolveProviderServiceName.mockResolvedValue('Acme');
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianBulkActionGate({ items: bulkItems, stage: 'accept' });
 
@@ -318,7 +318,7 @@ describe('guardianBulkActionGate (#393)', () => {
     getWardAge.mockResolvedValue(11);
     getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
     resolveProviderServiceName.mockResolvedValue('Acme');
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const map = await guardianBulkActionGate({
       items: [

@@ -55,8 +55,8 @@ export type OtpSend = (args: {
 }) => Promise<void>;
 
 export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min — matches template copy, #294)
-export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
-export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
+export const GUARDIAN_OTP_MAX_PER_WINDOW = 10; // sends allowed per scope per window
+export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 10; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
 export const GUARDIAN_OTP_VERIFY_MAX = 5; // verify attempts per window
 export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
@@ -114,7 +114,7 @@ export async function issueGuardianOtp(args: {
   scenario?: GuardianOtpScenario;
   variables?: GuardianOtpVariables;
   send?: OtpSend;
-}): Promise<void> {
+}): Promise<{ sentTo: string }> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
   if (count > GUARDIAN_OTP_MAX_PER_WINDOW) {
     throw new GuardianOtpError('RATE_LIMITED');
@@ -135,7 +135,8 @@ export async function issueGuardianOtp(args: {
   await redis.set(codeKey(args.scope), hashOtp(otp), 'EX', GUARDIAN_OTP_TTL_SEC);
   // In test-OTP mode skip the real dispatch — no notifier is required and the
   // fixed code is already known to the tester.
-  if (authConfig.create_test_otp) return;
+  const sentTo = maskGuardianContact(args.contact, args.contactType);
+  if (authConfig.create_test_otp) return { sentTo };
   const send = args.send ?? defaultGuardianOtpSend;
   await send({
     contact: args.contact,
@@ -144,6 +145,15 @@ export async function issueGuardianOtp(args: {
     scenario: args.scenario,
     variables: args.variables,
   });
+  return { sentTo };
+}
+
+/** Masked guardian contact shown to the ward: `******7347`, `ab***@gmail.com`. */
+export function maskGuardianContact(contact: string, contactType: GuardianContactType): string {
+  if (contactType === 'phone') return `******${contact.replace(/\D/g, '').slice(-4)}`;
+  const at = contact.lastIndexOf('@');
+  if (at < 1) return '***';
+  return `${contact.slice(0, Math.min(2, at))}***${contact.slice(at)}`;
 }
 
 /**

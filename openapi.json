@@ -7891,6 +7891,9 @@
                   "properties": {
                     "otpSent": {
                       "type": "boolean"
+                    },
+                    "sent_to": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -8026,6 +8029,9 @@
                   "properties": {
                     "otpSent": {
                       "type": "boolean"
+                    },
+                    "sent_to": {
+                      "type": "string"
                     }
                   },
                   "required": [

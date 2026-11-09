@@ -29,7 +29,7 @@ export type GateInput = {
 
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
-  | { status: 'challenge_issued' } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
+  | { status: 'challenge_issued'; sentTo: string } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
   | { status: 'verified' } // OTP ok; caller writes guardian action row + proceeds
   | { status: 'invalid_otp' }
   | { status: 'throttled' }
@@ -85,7 +85,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
         getGuardianNamePlaintext(input.wardUserId),
         resolveProviderServiceName(input.targetItemId, input.network),
       ]);
-      await issueGuardianOtp({
+      const { sentTo } = await issueGuardianOtp({
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
@@ -97,7 +97,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
           ...(providerOrgName ? { providerOrgName } : {}),
         },
       });
-      return { status: 'challenge_issued' };
+      return { status: 'challenge_issued', sentTo };
     } catch (err) {
       if (err instanceof GuardianOtpError) {
         if (err.code === 'RATE_LIMITED') return { status: 'rate_limited' };
@@ -225,7 +225,7 @@ export async function guardianBulkActionGate(args: {
             names.push(name);
           }
         }
-        await issueGuardianOtp({
+        const { sentTo } = await issueGuardianOtp({
           scope,
           contact: contact.contact,
           contactType: contact.contactType,
@@ -240,7 +240,7 @@ export async function guardianBulkActionGate(args: {
           },
           variables: parentName ? { parentName } : {},
         });
-        assign({ status: 'challenge_issued' });
+        assign({ status: 'challenge_issued', sentTo });
       } catch (err) {
         if (err instanceof GuardianOtpError) {
           if (err.code === 'RATE_LIMITED') { assign({ status: 'rate_limited' }); continue; }
@@ -282,6 +282,7 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'GUARDIAN_OTP_REQUIRED',
         'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        { sent_to: gate.sentTo },
       );
     case 'invalid_otp':
       return new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');

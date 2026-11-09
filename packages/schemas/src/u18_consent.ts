@@ -61,7 +61,7 @@ export const U18ProfileConsentBodySchema = z.object({
   item_type: z.string().min(1),
   item_id: z.string().uuid(),
 });
-export const U18ProfileConsentResponseSchema = z.object({ otpSent: z.boolean() });
+export const U18ProfileConsentResponseSchema = z.object({ otpSent: z.boolean(), sent_to: z.string().optional() });
 
 export const U18ProfileConsentVerifyBodySchema = U18ProfileConsentBodySchema.extend({
   otp: z.string().length(6),
@@ -84,7 +84,7 @@ export const U18ProfilePrecreateBodySchema = z.object({
   brand: z.string().min(1).nullish(),
   item_domain: z.string().min(1),
 });
-export const U18ProfilePrecreateResponseSchema = z.object({ otpSent: z.boolean() });
+export const U18ProfilePrecreateResponseSchema = z.object({ otpSent: z.boolean(), sent_to: z.string().optional() });
 
 export const U18ProfilePrecreateVerifyBodySchema = U18ProfilePrecreateBodySchema.extend({
   otp: z.string().length(6),
