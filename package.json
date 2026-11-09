@@ -34,7 +34,7 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "Dhiway",
+  "author": "Blue Dots Economy",
   "license": "MIT",
   "engines": {
     "node": ">=24"

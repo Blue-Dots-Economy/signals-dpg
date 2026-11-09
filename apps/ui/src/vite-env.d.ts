@@ -48,10 +48,6 @@ interface ImportMetaEnv {
   // Max profiles fetched per network request; set per deployment via the
   // chart's ui.runtimeConfig. Read through getRuntimeEnv (network-api.ts).
   readonly VITE_PROFILE_FETCH_LIMIT?: string;
-  readonly VITE_VC_WALLET_URL: string;
-  readonly VITE_VC_WALLET_API_KEY: string;
-  readonly VITE_AGENT_URL: string;
-  readonly VITE_AGENT_TOKEN: string;
   readonly VITE_ENABLED_LANGUAGES: string;
   /** Browser tab title override for the tourist app. Falls back to the resolved brand title, else "Signals". */
   readonly VITE_TOURIST_APP_TITLE?: string;
