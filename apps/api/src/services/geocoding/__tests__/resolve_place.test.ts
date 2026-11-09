@@ -145,6 +145,46 @@ describe('resolvePlace', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('does not share a flight between a capped and an uncapped caller', async () => {
+    store.set(`geo:spend:resolve:${new Date().toISOString().slice(0, 10)}`, '1');
+    let release!: (v: unknown) => void;
+    const gate = new Promise((r) => (release = r));
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      await gate;
+      return ok(googleBody());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const capped = resolvePlace('Dharwad', { dailyCap: 1 });
+    const uncapped = resolveCoordinates('Dharwad');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    release(undefined);
+
+    expect(await capped).toEqual({ kind: 'unavailable', reason: 'spend_cap' });
+    expect(await uncapped).toEqual({ lat: 15.45, lng: 75.0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares one flight between concurrent calls with identical options', async () => {
+    let release!: (v: unknown) => void;
+    const gate = new Promise((r) => (release = r));
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      await gate;
+      return ok(googleBody());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const opts = { timeoutMs: 1500, retryAttempts: 1, dailyCap: 10 };
+
+    const a = resolvePlace('Dharwad', opts);
+    const b = resolvePlace('Dharwad', { ...opts });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    release(undefined);
+
+    expect((await a).kind).toBe('found');
+    expect((await b).kind).toBe('found');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('caps live provider calls per day, still serving cached queries', async () => {
     const fetchMock = vi.fn().mockResolvedValue(ok(googleBody()));
     vi.stubGlobal('fetch', fetchMock);

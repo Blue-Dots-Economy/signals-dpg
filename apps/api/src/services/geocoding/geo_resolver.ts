@@ -263,7 +263,7 @@ const inFlight = new Map<string, Promise<PlaceResolution>>();
  * Resolves an address string to a place, cached in Redis. Uses Google
  * Geocoding when a key is configured, else Photon. Never throws: a provider
  * failure is an `unavailable` outcome and is not cached. Concurrent misses for
- * the same query share one provider call.
+ * the same query and options share one provider call.
  */
 export async function resolvePlace(
   query: string,
@@ -271,7 +271,9 @@ export async function resolvePlace(
 ): Promise<PlaceResolution> {
   const q = query.trim();
   if (!q) return { kind: 'not_found' };
-  const key = buildPlaceCacheKey(q, geocodingConfig.country);
+  // Options are part of the key: callers with different cap, timeout or retry
+  // settings must not share one provider call and its outcome.
+  const key = `${buildPlaceCacheKey(q, geocodingConfig.country)}|${opts.dailyCap ?? ''}|${opts.timeoutMs ?? ''}|${opts.retryAttempts ?? ''}`;
   const existing = inFlight.get(key);
   if (existing) return existing;
   const pending = getCachedPlace(q, () => lookupLive(q, opts), geocodingConfig.country).finally(() =>
