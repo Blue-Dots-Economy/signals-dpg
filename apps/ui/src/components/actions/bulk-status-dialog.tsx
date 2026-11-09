@@ -56,6 +56,7 @@ export function BulkStatusDialog({
     // Non-guardian failures from a mixed batch, reselected once the OTP dialog
     // resolves (they still need a retry).
     otherFailedIds?: string[];
+    sentTo?: string;
   } | null>(null);
 
   React.useEffect(() => {
@@ -155,6 +156,7 @@ export function BulkStatusDialog({
         setBulkGuardianChallenge({
           payloads: guardianResults.map((r) => payloads[r.index]),
           otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+          sentTo: (guardianResults[0] as { sent_to?: string }).sent_to,
         });
         onOpenChange(false); // the guardian OTP dialog owns the resubmit
         return;
@@ -188,6 +190,7 @@ export function BulkStatusDialog({
       onOpenChange={(next) => {
         if (!next) setBulkGuardianChallenge(null);
       }}
+      sentTo={bulkGuardianChallenge?.sentTo}
       onLogout={() => {
         void signOut();
       }}

@@ -473,6 +473,7 @@
   "actions.bulk_failed": "Could not update requests",
   "actions.guardian_otp_title": "This requires your guardian's confirmation via OTP",
   "actions.guardian_otp_desc": "We sent a code to your guardian. Ask them for it and enter it below.",
+  "actions.guardian_otp_desc_sent_to": "We sent a code to your guardian at {{sentTo}}. Ask them for it and enter it below.",
   "actions.guardian_otp_error_invalid_title": "Incorrect code",
   "actions.guardian_otp_error_invalid_desc": "That code is invalid or expired. Please try again.",
   "actions.guardian_otp_error_throttled_title": "Too many attempts",

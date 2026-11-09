@@ -124,6 +124,7 @@ export function ProfileFormPage() {
   // is told what's about to happen (a code goes to their guardian).
   const [guardianConfirmOpen, setGuardianConfirmOpen] = React.useState(false);
   const [guardianOtpOpen, setGuardianOtpOpen] = React.useState(false);
+  const [guardianSentTo, setGuardianSentTo] = React.useState<string | undefined>(undefined);
   const [guardianSetupOpen, setGuardianSetupOpen] = React.useState(false);
   const [guardianVerifiedForCreate, setGuardianVerifiedForCreate] = React.useState(false);
 
@@ -369,8 +370,11 @@ export function ProfileFormPage() {
   // on file yet (409 GUARDIAN_REQUIRED), run the capture flow first, then retry.
   const beginGuardianPrecreate = React.useCallback(async () => {
     try {
-      const { otpSent } = await issueProfilePrecreateOtp(precreateRef());
-      if (otpSent) setGuardianOtpOpen(true);
+      const { otpSent, sent_to } = await issueProfilePrecreateOtp(precreateRef());
+      if (otpSent) {
+        setGuardianSentTo(sent_to);
+        setGuardianOtpOpen(true);
+      }
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       const code = axios.isAxiosError(err)
@@ -1089,6 +1093,7 @@ export function ProfileFormPage() {
         <GuardianOtpDialog
           open={guardianOtpOpen}
           purpose={{ kind: 'profile' }}
+          sentTo={guardianSentTo}
           onOpenChange={(open) => {
             if (open) return;
             setGuardianOtpOpen(false);

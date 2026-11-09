@@ -16,7 +16,7 @@ import { guardianOtpErrorOf, type PerformActionPayload } from './action-api';
  */
 export type BulkOutcome =
   | { kind: 'all'; succeeded: number }
-  | { kind: 'guardian'; payloads: PerformActionPayload[]; otherFailedIds?: string[] }
+  | { kind: 'guardian'; payloads: PerformActionPayload[]; otherFailedIds?: string[]; sentTo?: string }
   | {
       kind: 'partial';
       failedIds: string[];
@@ -51,10 +51,12 @@ export function resolveBulkOutcome<T>(
     const otherFailedIds = failedResults
       .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
       .map((r) => targets[r.index].item_id);
+    const sentTo = (guardianResults[0] as { sent_to?: string }).sent_to;
     return {
       kind: 'guardian',
       payloads: guardianResults.map((r) => payloads[r.index]),
       otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+      ...(sentTo ? { sentTo } : {}),
     };
   }
 

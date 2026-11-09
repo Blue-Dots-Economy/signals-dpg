@@ -615,6 +615,7 @@
   "actions": {
     "guardian_otp_title": "इसके लिए OTP के माध्यम से आपके अभिभावक की पुष्टि आवश्यक है",
     "guardian_otp_desc": "हमने आपके अभिभावक को एक कोड भेजा है। उनसे पूछें और इसे नीचे दर्ज करें।",
+    "guardian_otp_desc_sent_to": "हमने आपके अभिभावक को {{sentTo}} पर एक कोड भेजा है। उनसे पूछें और इसे नीचे दर्ज करें।",
     "guardian_otp_error_invalid_title": "गलत कोड",
     "guardian_otp_error_invalid_desc": "वह कोड अमान्य या समाप्त हो गया है। कृपया पुनः प्रयास करें।",
     "guardian_otp_error_throttled_title": "बहुत अधिक प्रयास",

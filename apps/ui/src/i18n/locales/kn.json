@@ -615,6 +615,7 @@
   "actions": {
     "guardian_otp_title": "ಇದಕ್ಕೆ OTP ಮೂಲಕ ನಿಮ್ಮ ರಕ್ಷಕರ ದೃಢೀಕರಣ ಅಗತ್ಯವಿದೆ",
     "guardian_otp_desc": "ನಾವು ನಿಮ್ಮ ರಕ್ಷಕರಿಗೆ ಕೋಡ್ ಕಳುಹಿಸಿದ್ದೇವೆ. ಅವರನ್ನು ಕೇಳಿ ಅದನ್ನು ಕೆಳಗೆ ನಮೂದಿಸಿ.",
+    "guardian_otp_desc_sent_to": "ನಾವು ನಿಮ್ಮ ರಕ್ಷಕರಿಗೆ {{sentTo}} ಗೆ ಕೋಡ್ ಕಳುಹಿಸಿದ್ದೇವೆ. ಅವರನ್ನು ಕೇಳಿ ಅದನ್ನು ಕೆಳಗೆ ನಮೂದಿಸಿ.",
     "guardian_otp_error_invalid_title": "ತಪ್ಪಾದ ಕೋಡ್",
     "guardian_otp_error_invalid_desc": "ಆ ಕೋಡ್ ಅಮಾನ್ಯ ಅಥವಾ ಅವಧಿ ಮೀರಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
     "guardian_otp_error_throttled_title": "ಹಲವು ಪ್ರಯತ್ನಗಳು",
