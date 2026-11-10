@@ -250,7 +250,7 @@ describe('GET /auth/session/login', () => {
     });
     // Lax, not Strict: the callback is a top-level cross-site GET from Keycloak
     // and Strict would withhold the cookie on exactly that navigation.
-    expect(flow?.maxAge).toBe(300);
+    expect(flow?.maxAge).toBe(1800);
   });
 
   it.each([

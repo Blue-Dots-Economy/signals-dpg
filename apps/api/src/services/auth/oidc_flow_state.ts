@@ -22,12 +22,15 @@ export function setBrowserAllowedOrigins(origins: readonly string[]): void {
  *
  * Held server-side keyed by `state`, so the PKCE verifier never reaches the
  * browser. Single-use: `consumeFlowState` deletes as it reads, so a replayed
- * callback is rejected. Short TTL: it only has to survive one Keycloak
- * round-trip.
+ * callback is rejected.
  */
 
 const FLOW_PREFIX = 'oidcflow:';
-export const FLOW_TTL_SECONDS = 5 * 60;
+/**
+ * Matches Keycloak's login timeout (30 minutes by default), so a sign-in that
+ * Keycloak still accepts is not refused here. The flow cookie lasts as long.
+ */
+export const FLOW_TTL_SECONDS = 30 * 60;
 
 export interface OidcFlowState {
   verifier: string;
