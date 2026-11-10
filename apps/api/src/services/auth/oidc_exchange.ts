@@ -143,23 +143,34 @@ async function postToken(body: URLSearchParams): Promise<OidcTokens> {
 }
 
 /**
- * The `nonce` claim carried by an id token, or null when there is none.
+ * A string claim from an id token, or null when it is absent.
  *
  * The token comes straight from Keycloak's token endpoint over TLS, so this
  * reads the claim without re-verifying the signature.
  */
-export function idTokenNonce(idToken: string | undefined): string | null {
+function idTokenStringClaim(idToken: string | undefined, name: string): string | null {
   if (!idToken) return null;
   const payload = idToken.split('.')[1];
   if (!payload) return null;
   try {
     const claims = JSON.parse(
       Buffer.from(payload, 'base64url').toString('utf8')
-    ) as { nonce?: unknown };
-    return typeof claims.nonce === 'string' ? claims.nonce : null;
+    ) as Record<string, unknown>;
+    const value = claims[name];
+    return typeof value === 'string' ? value : null;
   } catch {
     return null;
   }
+}
+
+/** The `nonce` claim carried by an id token, or null when there is none. */
+export function idTokenNonce(idToken: string | undefined): string | null {
+  return idTokenStringClaim(idToken, 'nonce');
+}
+
+/** Keycloak's session id (`sid`) carried by an id token, or null when there is none. */
+export function idTokenSid(idToken: string | undefined): string | null {
+  return idTokenStringClaim(idToken, 'sid');
 }
 
 /**

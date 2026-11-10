@@ -14,6 +14,9 @@ import { redis } from '@api/db/secondary/redis';
 
 const SESSION_PREFIX = 'bsess:';
 
+/** Keycloak session id → the keys of this app's sessions opened under it. */
+const IDP_SESSION_PREFIX = 'bsessidp:';
+
 /** Opaque id length. 32 bytes = 256 bits, well past guessability. */
 const SESSION_ID_BYTES = 32;
 
@@ -60,6 +63,13 @@ export const BrowserSessionSchema = z.object({
    * Optional: absent until decided, and on rows written before it existed.
    */
   firstLogin: z.boolean().optional(),
+  /**
+   * Keycloak's session id (`sid` in the id token). Keycloak's back-channel
+   * logout names this session, and `destroySessionsForIdpSession` ends every
+   * app session opened under it. Optional: rows written before it existed,
+   * and an id token without `sid`, have none.
+   */
+  idpSid: z.string().optional(),
 });
 
 export type BrowserSession = z.infer<typeof BrowserSessionSchema>;
@@ -67,6 +77,11 @@ export type BrowserSession = z.infer<typeof BrowserSessionSchema>;
 /** Never let a raw session id become a Redis key. */
 function storeKey(sessionId: string): string {
   return SESSION_PREFIX + createHash('sha256').update(sessionId).digest('hex');
+}
+
+/** Hashed like the session keys, so a key listing does not reveal Keycloak session ids. */
+function idpIndexKey(idpSid: string): string {
+  return IDP_SESSION_PREFIX + createHash('sha256').update(idpSid).digest('hex');
 }
 
 export function newSessionId(): string {
@@ -100,6 +115,12 @@ export async function createSession(
     'EX',
     ttlFor(data)
   );
+  if (data.idpSid) {
+    const index = idpIndexKey(data.idpSid);
+    await redis.sadd(index, storeKey(sessionId));
+    // No session outlives SESSION_TTL_SECONDS, so neither need the index.
+    await redis.expire(index, SESSION_TTL_SECONDS);
+  }
 }
 
 export async function readSession(
@@ -131,6 +152,20 @@ export async function updateSession(
 
 export async function destroySession(sessionId: string): Promise<void> {
   await redis.del(storeKey(sessionId));
+}
+
+/**
+ * Ends every app session opened under a Keycloak session, for Keycloak's
+ * back-channel logout.
+ *
+ * @param idpSid - Keycloak's session id, from a verified logout token.
+ * @returns How many app sessions the index named.
+ */
+export async function destroySessionsForIdpSession(idpSid: string): Promise<number> {
+  const index = idpIndexKey(idpSid);
+  const keys = await redis.smembers(index);
+  await redis.del(...keys, index);
+  return keys.length;
 }
 
 /**

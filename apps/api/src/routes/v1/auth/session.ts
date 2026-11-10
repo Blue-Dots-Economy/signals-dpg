@@ -8,6 +8,7 @@ import {
   buildEndSessionUrl,
   exchangeCode,
   idTokenNonce,
+  idTokenSid,
   newPkcePair,
   newStateValue,
   OidcExchangeError,
@@ -22,6 +23,7 @@ import {
 import {
   createSession,
   destroySession,
+  destroySessionsForIdpSession,
   newCsrfToken,
   newSessionId,
   readSession,
@@ -33,6 +35,7 @@ import {
   SESSION_COOKIE,
 } from '@api/plugins/auth/resolve_browser_session';
 import { public_rate_limit } from '@/middleware/public_rate_limit';
+import { verifyKeycloakLogoutToken } from '@/utils/keycloak_token';
 
 /**
  * Browser login, run server-side (AUTH-VULN-03/04).
@@ -164,6 +167,15 @@ function cookieOptions() {
 }
 
 export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
+  // Keycloak posts the back-channel logout token as a form, not JSON.
+  fastify.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      done(null, Object.fromEntries(new URLSearchParams(String(body))));
+    }
+  );
+
   /**
    * Starts a login. Redirects to Keycloak; the PKCE verifier stays server-side.
    */
@@ -294,6 +306,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       }
 
       const sessionId = newSessionId();
+      const idpSid = idTokenSid(tokens.idToken);
       await createSession(sessionId, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -303,6 +316,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         csrfToken: newCsrfToken(),
         appOrigin: flow.appOrigin,
         createdAt: Date.now(),
+        ...(idpSid ? { idpSid } : {}),
       });
 
       reply.setCookie(SESSION_COOKIE, sessionId, cookieOptions());
@@ -440,6 +454,49 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
           postLogoutRedirectUri: `${appOrigin ?? requestOrigin(request)}/auth/login`,
         })
       );
+    },
+  });
+
+  /**
+   * Keycloak's back-channel logout: called server to server when a Keycloak
+   * session ends, so the browser sessions opened under it end at once rather
+   * than when their access token runs out.
+   *
+   * Not rate-limited: Keycloak calls it from one address in bursts when many
+   * sessions end, and nothing happens without a correctly signed token.
+   */
+  fastify.route({
+    url: '/session/backchannel-logout',
+    method: 'POST',
+    schema: {
+      tags: ['auth'],
+      body: z.object({ logout_token: z.string().min(1) }),
+      response: {
+        200: z.null().describe('The sessions were ended.'),
+        400: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        503: ErrorResponseSchema,
+      },
+    },
+    handler: async (request, reply) => {
+      if (!authConfig.keycloak_enabled) return notEnabled(reply);
+      reply.header('cache-control', 'no-store');
+
+      const verified = await verifyKeycloakLogoutToken(request.body.logout_token);
+      if (!verified.ok) {
+        request.log.warn(
+          { code: verified.code, reason: verified.message },
+          'Back-channel logout rejected'
+        );
+        return reply.code(verified.code === 'TOKEN_INVALID' ? 400 : 503).send({
+          error: verified.code,
+          message: 'The logout token was not accepted',
+        });
+      }
+
+      const ended = await destroySessionsForIdpSession(verified.sid);
+      request.log.info({ ended }, 'Back-channel logout ended browser sessions');
+      return reply.code(200).send(null);
     },
   });
 };
