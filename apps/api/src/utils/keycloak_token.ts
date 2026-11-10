@@ -234,7 +234,7 @@ export async function verifyKeycloakToken(
 }
 
 /** The `events` member that marks a back-channel logout token (OIDC Back-Channel Logout 1.0, §2.4). */
-const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
+const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'; // NOSONAR typescript:S5332 — an event name fixed by the OIDC spec, never fetched
 
 /**
  * Oldest logout token accepted, by its `iat`. Keycloak sends the token the
