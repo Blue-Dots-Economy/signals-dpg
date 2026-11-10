@@ -130,6 +130,24 @@ function clearFlowCookie(reply: FastifyReply): void {
   reply.clearCookie(FLOW_COOKIE, { path: FLOW_COOKIE_PATH });
 }
 
+/**
+ * Identifies the browser across its sign-ins, so `/session/switch` can tell a
+ * flow this browser started from one started elsewhere. Unlike the flow
+ * cookie, a second sign-in in the same browser keeps it.
+ */
+const BROWSER_COOKIE = 'signin_browser';
+
+/** A session cookie (no `maxAge`): it only has to outlive the sign-ins in progress. */
+function browserCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: instance.INSTANCE_ENV !== 'development',
+    // Lax: `/session/switch` is a top-level GET from Keycloak's error page.
+    sameSite: 'lax' as const,
+    path: FLOW_COOKIE_PATH,
+  };
+}
+
 function cookieOptions() {
   return {
     httpOnly: true,
@@ -176,6 +194,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       const self = requestOrigin(request);
       const redirectUri = `${self}/api/v1/auth/session/callback`;
 
+      const browser = request.cookies?.[BROWSER_COOKIE] || randomBytes(32).toString('base64url');
       await saveFlowState(state, {
         verifier,
         nonce,
@@ -183,10 +202,12 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         consentAttempt: request.query.consentAttempt,
         redirectUri,
         appOrigin: safeAppOrigin(request.query.appOrigin, self),
+        browser,
       });
 
       // The browser's half of the binding checked at the callback.
       reply.setCookie(FLOW_COOKIE, state, flowCookieOptions());
+      reply.setCookie(BROWSER_COOKIE, browser, browserCookieOptions());
 
       return reply.redirect(
         buildAuthorizeUrl({ redirectUri, state, nonce, challenge })
@@ -372,10 +393,12 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
    * Signs out from Keycloak's error page so a different account can sign in,
    * then returns the browser to the app's sign-in screen.
    *
-   * `flow` is the `state` of the refused sign-in. Only a live flow ends the
-   * local session: `state` is random and only appears in this browser's
-   * Keycloak URLs, so another site cannot trigger it. The flow cookie is not
-   * checked, because a second sign-in in the same browser replaces it.
+   * `flow` is the `state` of the refused sign-in. The local session is only
+   * ended when that flow is live and was started by this browser: its stored
+   * browser value must match this request's browser cookie. A link from
+   * another site can name a flow, but only one started in another browser.
+   * The flow cookie cannot be the proof, because a second sign-in in the same
+   * browser replaces it.
    */
   fastify.route({
     url: '/session/switch',
@@ -395,10 +418,15 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       // The refused sign-in cannot finish, so its single-use state goes now.
       const flowState = flow ? await consumeFlowState(flow) : null;
 
+      const browserCookie = request.cookies?.[BROWSER_COOKIE];
+      const ownFlow = Boolean(
+        flowState?.browser && browserCookie && safeEqual(flowState.browser, browserCookie)
+      );
+
       let idToken: string | undefined;
       let appOrigin = flowState?.appOrigin;
       const sessionId = request.cookies?.[SESSION_COOKIE];
-      if (flowState && sessionId) {
+      if (ownFlow && sessionId) {
         const session = await readSession(sessionId);
         idToken = session?.idToken;
         appOrigin = appOrigin ?? session?.appOrigin;

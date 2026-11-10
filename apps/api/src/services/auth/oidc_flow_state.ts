@@ -45,6 +45,11 @@ export interface OidcFlowState {
   redirectUri: string;
   /** Browser origin to hand the user back to. See `safeAppOrigin`. */
   appOrigin: string;
+  /**
+   * The browser cookie of the browser that started the flow, so a request can
+   * prove the flow is its own. Optional: flows saved before it existed.
+   */
+  browser?: string;
 }
 
 /** `state` is a credential for this flow; keep it out of Redis keys in the clear. */

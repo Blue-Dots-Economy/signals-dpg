@@ -166,6 +166,27 @@ describe('GET /auth/session/login', () => {
     expect(everythingSentBack(res)).not.toContain('the-verifier');
   });
 
+  it('ties the flow to this browser with a browser cookie, kept across sign-ins', async () => {
+    const first = await inject({ method: 'GET', url: '/api/v1/auth/session/login' });
+    const cookie = first.cookies.find((c) => c.name === 'signin_browser');
+    expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Lax', path: '/api/v1/auth/session' });
+    expect(saveFlowState).toHaveBeenLastCalledWith(
+      'the-state',
+      expect.objectContaining({ browser: cookie?.value }),
+    );
+
+    // A second sign-in in the same browser keeps the same browser value.
+    await inject({
+      method: 'GET',
+      url: '/api/v1/auth/session/login',
+      cookies: { signin_browser: 'this-browser' },
+    });
+    expect(saveFlowState).toHaveBeenLastCalledWith(
+      'the-state',
+      expect.objectContaining({ browser: 'this-browser' }),
+    );
+  });
+
   it('names the API — not the UI — as the OIDC redirect target', async () => {
     // Keycloak has to send the code back to the server that holds the verifier.
     await inject({ method: 'GET', url: '/api/v1/auth/session/login' });
@@ -646,11 +667,22 @@ describe('POST /auth/session/logout', () => {
 describe('GET /auth/session/switch', () => {
   const switchTo = (opts: Partial<InjectOptions> = {}) =>
     inject({ method: 'GET', url: '/api/v1/auth/session/switch?flow=the-state', ...opts });
+  /** The flow was started by the browser holding this cookie. */
+  const ownFlow = () =>
+    consumeFlowState.mockResolvedValue({
+      verifier: 'v',
+      nonce: 'n',
+      returnTo: '/',
+      redirectUri: 'https://api.example.org/api/v1/auth/session/callback',
+      appOrigin: 'https://app.example.org',
+      browser: 'this-browser',
+    });
 
-  it('ends the session and names it to Keycloak when the refused sign-in is still in flight', async () => {
+  it('ends the session and names it to Keycloak when the refused sign-in is this browser\'s', async () => {
+    ownFlow();
     readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
-    const res = await switchTo({ cookies: { sid: 'the-session-id' } });
+    const res = await switchTo({ cookies: { sid: 'the-session-id', signin_browser: 'this-browser' } });
 
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toContain('kc.example.org/logout');
@@ -666,10 +698,13 @@ describe('GET /auth/session/switch', () => {
 
   it('still works after another sign-in in the same browser replaced the flow cookie', async () => {
     // Two accounts signing in to signals in one browser: the second sign-in
-    // overwrites the single flow cookie, so the cookie cannot be the proof.
+    // overwrites the single flow cookie but keeps the browser cookie.
+    ownFlow();
     readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
-    await switchTo({ cookies: { oidc_flow: 'another-state', sid: 'the-session-id' } });
+    await switchTo({
+      cookies: { oidc_flow: 'another-state', sid: 'the-session-id', signin_browser: 'this-browser' },
+    });
 
     expect(destroySession).toHaveBeenCalledWith('the-session-id');
     expect(buildEndSessionUrl).toHaveBeenCalledWith(
@@ -677,9 +712,30 @@ describe('GET /auth/session/switch', () => {
     );
   });
 
+  it('leaves the session alone when the flow was started in another browser', async () => {
+    // An attacker can start their own sign-in and send its `state` in a link;
+    // the flow is live, but it carries the attacker's browser value.
+    ownFlow();
+
+    await switchTo({ cookies: { sid: 'the-session-id', signin_browser: 'victim-browser' } });
+
+    expect(readSession).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(expect.objectContaining({ idToken: undefined }));
+  });
+
+  it('leaves the session alone when the browser has no browser cookie', async () => {
+    ownFlow();
+
+    await switchTo({ cookies: { sid: 'the-session-id' } });
+
+    expect(destroySession).not.toHaveBeenCalled();
+  });
+
   it('returns to the app the refused sign-in started from when there is no session', async () => {
     // The flow names the UI origin, which can differ from the API's own.
-    await switchTo();
+    ownFlow();
+    await switchTo({ cookies: { signin_browser: 'this-browser' } });
 
     expect(buildEndSessionUrl).toHaveBeenCalledWith({
       idToken: undefined,
@@ -689,11 +745,12 @@ describe('GET /auth/session/switch', () => {
   });
 
   it('leaves the session alone when the flow is unknown or expired', async () => {
-    // A link from another site cannot name a live flow, so it must not be able
-    // to sign the user out; Keycloak's confirmation page still guards.
     consumeFlowState.mockResolvedValue(null);
 
-    const res = await switchTo({ cookies: { sid: 'the-session-id' }, headers: asPortalHost });
+    const res = await switchTo({
+      cookies: { sid: 'the-session-id', signin_browser: 'this-browser' },
+      headers: asPortalHost,
+    });
 
     expect(res.statusCode).toBe(302);
     expect(readSession).not.toHaveBeenCalled();
