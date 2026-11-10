@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as bffSession from './bff-session';
 import type { TFunction } from 'i18next';
 import { AxiosError, CanceledError } from 'axios';
-import { apiErrorMessage, isReadableServerMessage, readApiError, thrownErrorMessage } from './api-error';
+import { apiErrorMessage, isReadableServerMessage, readApiError } from './api-error';
 
 const t = ((key: string, def?: string) => def ?? key) as unknown as TFunction;
 
@@ -78,10 +78,3 @@ describe('isReadableServerMessage', () => {
   });
 });
 
-describe('thrownErrorMessage', () => {
-  it('keeps a readable plain Error message but not a network failure', () => {
-    expect(thrownErrorMessage(new Error('That code has expired'), t, 'F')).toBe('That code has expired');
-    expect(thrownErrorMessage(new Error('HTTP error 401'), t, 'F')).toBe('F');
-    expect(thrownErrorMessage(new TypeError('Failed to fetch'), t, 'F')).toMatch(/^Couldn't reach the server/);
-  });
-});

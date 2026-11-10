@@ -825,8 +825,5 @@
   "home.bulk_partial_reselected": "The ones that failed are still selected so you can try again.",
   "auth.otp_verify_failed_title": "Couldn't check your code",
   "auth.post_verify_failed_title": "Couldn't finish signing in",
-  "consent.agree_required_error": "Tick the box to agree before you continue.",
-  "wallet.dhiway_code_label": "Verification code",
-  "wallet.dhiway_identifier_required": "Choose an email or phone number to receive the code.",
-  "wallet.digilocker_code_invalid": "Paste the code or the full link DigiLocker gave you."
+  "consent.agree_required_error": "Tick the box to agree before you continue."
 }

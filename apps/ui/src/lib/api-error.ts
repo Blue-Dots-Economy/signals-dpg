@@ -91,14 +91,3 @@ export function apiErrorMessage(err: unknown, t: TFunction, fallback?: string): 
   if (status >= 500) return t('errors.server', 'Something went wrong on our side. Please try again in a moment.');
   return isReadableServerMessage(info.message) ? info.message : generic;
 }
-
-/**
- * `apiErrorMessage` for clients that throw a plain `Error(serverMessage)`
- * (the wallet providers' fetch wrappers): a readable message is kept.
- */
-export function thrownErrorMessage(err: unknown, t: TFunction, fallback: string): string {
-  if (!readApiError(err).network && err instanceof Error && !('response' in err) && isReadableServerMessage(err.message)) {
-    return err.message;
-  }
-  return apiErrorMessage(err, t, fallback);
-}
