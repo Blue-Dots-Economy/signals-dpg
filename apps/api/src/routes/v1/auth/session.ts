@@ -470,6 +470,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
     method: 'POST',
     schema: {
       tags: ['auth'],
+      consumes: ['application/x-www-form-urlencoded'],
       body: z.object({ logout_token: z.string().min(1) }),
       response: {
         200: z.null().describe('The sessions were ended.'),

@@ -315,9 +315,15 @@ const LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
 
 /** Mint a back-channel logout token shaped the way Keycloak sends one. */
 async function mintLogoutToken(
-  overrides: { aud?: string; claims?: Record<string, unknown>; omit?: string[]; key?: CryptoKey } = {}
+  overrides: {
+    aud?: string;
+    claims?: Record<string, unknown>;
+    omit?: string[];
+    key?: CryptoKey;
+    issuedAt?: number;
+  } = {}
 ): Promise<string> {
-  const { aud = 'signals-ui', claims = {}, omit = [], key = privateKey } = overrides;
+  const { aud = 'signals-ui', claims = {}, omit = [], key = privateKey, issuedAt } = overrides;
   const payload: Record<string, unknown> = {
     sid: 'kc-session-1',
     events: { [LOGOUT_EVENT]: {} },
@@ -330,11 +336,17 @@ async function mintLogoutToken(
     .setIssuer(issuer)
     .setAudience(aud)
     .setSubject('11111111-2222-3333-4444-555555555555')
-    .setIssuedAt()
+    .setIssuedAt(issuedAt)
     .sign(key);
 }
 
 describe('verifyKeycloakLogoutToken', () => {
+  it('rejects a replayed logout token issued minutes ago', async () => {
+    const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600;
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ issuedAt: tenMinutesAgo }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
   it('accepts a logout token for the signals client and returns its session id', async () => {
     const result = await verifyKeycloakLogoutToken(await mintLogoutToken());
     expect(result).toEqual({ ok: true, sid: 'kc-session-1' });
