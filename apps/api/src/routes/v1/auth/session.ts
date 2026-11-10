@@ -328,6 +328,11 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
   /**
    * Ends the local session and hands back the Keycloak end-session URL, so the
    * SSO session goes too rather than silently logging the user back in.
+   *
+   * With no session there is no ID token to name a Keycloak session, and
+   * Keycloak would only ask the user to confirm, so the user goes straight to
+   * the sign-in screen. The UI's origin then comes from the request's `Origin`
+   * header, checked against the allowlist.
    */
   fastify.route({
     url: '/session/logout',
@@ -345,14 +350,19 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       if (sessionId) await destroySession(sessionId);
       clearSessionCookie(reply);
 
+      const appOrigin =
+        session?.appOrigin ?? safeAppOrigin(request.headers.origin, requestOrigin(request));
+      // Must be a post-logout URL the realm registers for `signals-ui`;
+      // Keycloak matches exactly and refuses anything else.
+      const loginUrl = `${appOrigin}/auth/login`;
+      if (!session?.idToken) return reply.send({ endSessionUrl: loginUrl });
+
       return reply.send({
         endSessionUrl: buildEndSessionUrl({
           // Names the session being ended, so Keycloak logs the user out
           // straight away instead of asking them to confirm.
-          idToken: session?.idToken,
-          // Must be a post-logout URL the realm registers for `signals-ui`;
-          // Keycloak matches exactly and refuses anything else.
-          postLogoutRedirectUri: `${session?.appOrigin ?? requestOrigin(request)}/auth/login`,
+          idToken: session.idToken,
+          postLogoutRedirectUri: loginUrl,
         }),
       });
     },

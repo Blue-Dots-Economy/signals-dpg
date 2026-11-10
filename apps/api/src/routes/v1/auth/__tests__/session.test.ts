@@ -546,7 +546,7 @@ describe('GET /auth/session', () => {
 
 describe('POST /auth/session/logout', () => {
   it('destroys the session, clears the cookie, and ends the Keycloak session too', async () => {
-    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
     const res = await inject({
       method: 'POST',
@@ -564,7 +564,7 @@ describe('POST /auth/session/logout', () => {
   it('sends the user back to the app that opened the session', async () => {
     // Not the API's own origin: Keycloak only honours post-logout URLs it has
     // registered for the client, and those name the app.
-    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
     await inject({
       method: 'POST',
@@ -604,6 +604,42 @@ describe('POST /auth/session/logout', () => {
     expect(res.statusCode).toBe(200);
     expect(destroySession).not.toHaveBeenCalled();
     expect(res.cookies[0]).toMatchObject({ name: 'sid', value: '' });
+  });
+
+  it('goes straight to the sign-in screen of the calling app when there is no session', async () => {
+    // Without an ID token Keycloak would only ask "Do you want to log out?".
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      headers: { origin: 'https://app.example.org' },
+    });
+
+    expect(res.json().endSessionUrl).toBe('https://app.example.org/auth/login');
+    expect(buildEndSessionUrl).not.toHaveBeenCalled();
+  });
+
+  it('ignores an Origin header that is not on the allowlist', async () => {
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      headers: { origin: 'https://evil.example' },
+    });
+
+    expect(res.json().endSessionUrl).toBe('https://api.example.org/auth/login');
+  });
+
+  it('goes straight to the sign-in screen when the session holds no ID token', async () => {
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      cookies: { sid: 'the-session-id' },
+    });
+
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    expect(res.json().endSessionUrl).toBe('https://app.example.org/auth/login');
+    expect(buildEndSessionUrl).not.toHaveBeenCalled();
   });
 });
 
