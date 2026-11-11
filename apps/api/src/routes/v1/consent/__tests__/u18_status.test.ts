@@ -58,7 +58,7 @@ describe('u18_status_handler', () => {
     getMinorGuardian.mockResolvedValue(null);
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ hasBirthData: false, isMinor: false, guardianVerified: false });
+    expect(reply.body).toEqual({ hasBirthData: false, isMinor: false, guardianVerified: false, guardianContactType: null });
   });
 
   it('stored minor age → hasBirthData:true, isMinor:true, carries guardianVerified', async () => {
@@ -66,7 +66,7 @@ describe('u18_status_handler', () => {
     getMinorGuardian.mockResolvedValue({ guardianContactType: 'email', guardianVerified: true });
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ hasBirthData: true, isMinor: true, guardianVerified: true });
+    expect(reply.body).toEqual({ hasBirthData: true, isMinor: true, guardianVerified: true, guardianContactType: 'email' });
   });
 
   it('stored adult age → hasBirthData:true, isMinor:false', async () => {
@@ -74,6 +74,6 @@ describe('u18_status_handler', () => {
     getMinorGuardian.mockResolvedValue(null);
     const reply = await call({ user: { id: 'u1' }, query: { network: 'blue_dot' } });
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ hasBirthData: true, isMinor: false, guardianVerified: false });
+    expect(reply.body).toEqual({ hasBirthData: true, isMinor: false, guardianVerified: false, guardianContactType: null });
   });
 });

@@ -22,8 +22,9 @@ vi.mock('@/network_configs', () => ({
 
 const getWardAge = vi.fn();
 const getGuardianContactPlaintext = vi.fn();
+const getMinorGuardian = vi.fn();
 vi.mock('@/services/minor_guardian_repo', () => ({
-  getMinorGuardian: vi.fn(),
+  getMinorGuardian: (...args: unknown[]) => getMinorGuardian(...args),
   getWardAge: (...args: unknown[]) => getWardAge(...args),
   getGuardianContactPlaintext: (...args: unknown[]) => getGuardianContactPlaintext(...args),
   getGuardianNamePlaintext: vi.fn(async () => 'Parent P'),
@@ -68,6 +69,7 @@ beforeEach(() => {
   getNetworkConfigById.mockResolvedValue(cfg);
   getWardAge.mockResolvedValue(15);
   getGuardianContactPlaintext.mockResolvedValue({ contact: '+919000000000', contactType: 'phone' });
+  getMinorGuardian.mockResolvedValue({ guardianContactType: 'phone', guardianVerified: true });
   issueGuardianOtp.mockResolvedValue({ sentTo: '******0000' });
 });
 
@@ -93,6 +95,15 @@ describe('guardianBulkActionGate with MINOR_BULK_ACTIONS_ENABLED=false (#917)', 
   it('still issues the OTP when only one gated row is in the batch', async () => {
     setting.enabled = false;
     const map = await guardianBulkActionGate({ items: [row(0)] });
+    expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******0000' });
+    expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the one-OTP batch when the guardian is on email', async () => {
+    setting.enabled = false;
+    getMinorGuardian.mockResolvedValue({ guardianContactType: 'email', guardianVerified: true });
+    getGuardianContactPlaintext.mockResolvedValue({ contact: 'g@x.co', contactType: 'email' });
+    const map = await guardianBulkActionGate({ items: [row(0), row(1)] });
     expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******0000' });
     expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
   });

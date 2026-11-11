@@ -347,8 +347,8 @@ export const NetworkRuntimeSecretsSchema = z.object({
   BULK_MAX_ITEMS: z.coerce.number().int().positive().default(100),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
-  // Off where no guardian-OTP SMS template covers a batch: a minor then sends
-  // or accepts guardian-gated requests one at a time.
+  // Off where no guardian-OTP SMS template covers a batch: a minor whose
+  // guardian is on a phone then sends or accepts requests one at a time.
   MINOR_BULK_ACTIONS_ENABLED: z
     .string()
     .default('true')
