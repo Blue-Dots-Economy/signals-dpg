@@ -6,9 +6,10 @@ import { queryKeys } from '@/lib/query-keys';
 import type { DotNetworkSchema } from '@/engine/types';
 
 /**
- * True when this user is a minor on a guardian-gated domain and the instance
- * has bulk turned off for minors (#917): the UI then asks them to act one
- * request at a time instead of sending the batch. The API refuses it anyway.
+ * True when this user is a minor on a guardian-gated domain, their guardian
+ * gets OTPs by SMS, and the instance has bulk turned off for minors (#917):
+ * the UI then asks them to act one request at a time instead of sending the
+ * batch. The API refuses it anyway. An email guardian keeps bulk.
  */
 export function useMinorBulkBlocked(
   network: DotNetworkSchema | null | undefined,
@@ -24,5 +25,5 @@ export function useMinorBulkBlocked(
     enabled: bulkOff && gated,
     staleTime: 60_000,
   });
-  return bulkOff && gated && data?.isMinor === true;
+  return bulkOff && gated && data?.isMinor === true && data.guardianContactType === 'phone';
 }

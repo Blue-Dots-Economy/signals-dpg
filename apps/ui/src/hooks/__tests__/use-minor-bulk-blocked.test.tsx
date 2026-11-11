@@ -30,7 +30,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   authConfig.value = { minorBulkActionsEnabled: false };
-  getU18Status.mockResolvedValue({ isMinor: true });
+  getU18Status.mockResolvedValue({ isMinor: true, guardianContactType: 'phone' });
 });
 
 describe('useMinorBulkBlocked', () => {
@@ -38,6 +38,13 @@ describe('useMinorBulkBlocked', () => {
     const { result } = renderHook(() => useMinorBulkBlocked(network, 'seeker'), { wrapper });
     await waitFor(() => expect(result.current).toBe(true));
     expect(getU18Status).toHaveBeenCalledWith('purple_dot');
+  });
+
+  it('is false for a minor whose guardian is on email', async () => {
+    getU18Status.mockResolvedValue({ isMinor: true, guardianContactType: 'email' });
+    const { result } = renderHook(() => useMinorBulkBlocked(network, 'seeker'), { wrapper });
+    await waitFor(() => expect(getU18Status).toHaveBeenCalled());
+    expect(result.current).toBe(false);
   });
 
   it('is false for an adult', async () => {

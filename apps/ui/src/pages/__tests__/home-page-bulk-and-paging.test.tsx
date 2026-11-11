@@ -1065,6 +1065,7 @@ describe('HomePage — bulk turned off for minors (#917)', () => {
   it('shows the one-at-a-time note instead of sending, and keeps the selection', async () => {
     const user = userEvent.setup();
     signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'phone' };
     state.minorBulkActionsEnabled = false;
     renderHome('/?view=list&domain=provider');
     await findCard('Acme Welding');
@@ -1083,9 +1084,26 @@ describe('HomePage — bulk turned off for minors (#917)', () => {
     expect(screen.getByText('2 selected')).toBeInTheDocument();
   });
 
+  it('keeps bulk for a minor whose guardian is on email', async () => {
+    const user = userEvent.setup();
+    signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'email' };
+    state.minorBulkActionsEnabled = false;
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await enterSelectMode(user);
+    await pickCards(user, 'Acme Welding', 'Globex Foundry');
+    await submitBulkConnect(user, 2);
+
+    expect(await screen.findByText('Guardian confirmation needed')).toBeInTheDocument();
+    expect(screen.queryByText('One request at a time')).not.toBeInTheDocument();
+  });
+
   it('still opens the normal form for a single request', async () => {
     const user = userEvent.setup();
     signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'phone' };
     state.minorBulkActionsEnabled = false;
     renderHome('/?view=list&domain=provider');
     await findCard('Acme Welding');
