@@ -113,6 +113,7 @@ vi.mock('@/hooks/use-actions', () => ({
 
 vi.mock('@/lib/action-api', () => ({
   ACTION_CONSENT_SENTINEL: '__consent',
+  MINOR_BULK_ACTION_BLOCKED: 'MINOR_BULK_ACTION_BLOCKED',
   // Faithful to the real classifier for the codes these components branch on.
   guardianOtpErrorOf: (entry: { error?: string } | null | undefined) =>
     entry?.error === 'GUARDIAN_OTP_REQUIRED' ? 'GUARDIAN_OTP_REQUIRED' : null,
@@ -1283,6 +1284,30 @@ describe('BulkStatusDialog', () => {
     await waitFor(() =>
       expect(screen.queryByText(/guardian's confirmation via otp/i)).not.toBeInTheDocument(),
     );
+  });
+
+  it('a minor batch refused with MINOR_BULK_ACTION_BLOCKED shows the one-at-a-time note instead of the OTP dialog', async () => {
+    const user = userEvent.setup();
+    const onSettled = vi.fn((_s: number, _t: number, _f: string[]) => {});
+    mocks.bulkMutateAsync.mockResolvedValueOnce({
+      results: [
+        { index: 0, status: 'error', error: 'MINOR_BULK_ACTION_BLOCKED', message: 'one at a time' },
+        { index: 1, status: 'error', error: 'MINOR_BULK_ACTION_BLOCKED', message: 'one at a time' },
+      ],
+      summary: { total: 2, succeeded: 0, failed: 2 },
+    });
+
+    renderWithClient(
+      <BulkHarness actions={twoActions} targetStatus="accepted" onSettled={onSettled} />,
+    );
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/as you are under 18/i)).toBeInTheDocument();
+    expect(screen.queryByText(/guardian's confirmation via otp/i)).not.toBeInTheDocument();
+    expect(onSettled).toHaveBeenCalledWith(0, 2, ['act-1', 'act-2']);
+    expect(mocks.bulkMutateAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.toast.warning).not.toHaveBeenCalled();
   });
 
   it('a mixed batch keeps the non-guardian failures selected after the guardian code succeeds', async () => {
