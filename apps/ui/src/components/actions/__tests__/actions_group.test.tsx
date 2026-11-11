@@ -116,6 +116,7 @@ vi.mock('@/lib/action-api', () => ({
   // Faithful to the real classifier for the codes these components branch on.
   guardianOtpErrorOf: (entry: { error?: string } | null | undefined) =>
     entry?.error === 'GUARDIAN_OTP_REQUIRED' ? 'GUARDIAN_OTP_REQUIRED' : null,
+  guardianSentToFromThrown: () => undefined,
   guardianOtpErrorFromThrown: (err: unknown) => {
     const code = (err as { code?: string } | null | undefined)?.code;
     const known = [

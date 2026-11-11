@@ -43,6 +43,15 @@ describe('resolveBulkOutcome', () => {
     expect(out).toEqual({ kind: 'guardian', payloads: ['pa', 'pc'], otherFailedIds: undefined });
   });
 
+  it('carries the masked guardian contact from the first guardian result', () => {
+    const out = resolveBulkOutcome(
+      envelope([{ ...err(0, 'GUARDIAN_OTP_REQUIRED'), sent_to: '******7347' } as ReturnType<typeof err>]),
+      targets,
+      payloads,
+    );
+    expect(out).toEqual({ kind: 'guardian', payloads: ['pa'], otherFailedIds: undefined, sentTo: '******7347' });
+  });
+
   it('opens the OTP dialog even in a MIXED batch, and carries the other failures along', () => {
     // A GUARDIAN_OTP_REQUIRED failure means a code has already been sent, so
     // falling through to the generic error toast would waste it. The

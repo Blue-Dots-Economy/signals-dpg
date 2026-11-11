@@ -695,6 +695,7 @@ export function HomePage() {
     // Non-guardian failures from a mixed batch, carried through so they can be
     // reselected once the guardian OTP dialog resolves (they still need a retry).
     otherFailedIds?: string[];
+    sentTo?: string;
   } | null>(null);
   // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
   // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
@@ -1545,6 +1546,7 @@ export function HomePage() {
             sourceInstanceUrl: sourceItemInstanceUrl,
             actionType,
             otherFailedIds: outcome.otherFailedIds,
+            sentTo: outcome.sentTo,
           });
         } else {
           toast.warning(
@@ -1947,6 +1949,7 @@ export function HomePage() {
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      sentTo={bulkGuardianChallenge?.sentTo}
       purpose={{
         kind: 'bulk',
         action: guardianActionKind(bulkGuardianChallenge?.actionType),

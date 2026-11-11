@@ -193,6 +193,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
         open={!!gate.challenge}
         onOpenChange={(open) => !open && gate.setChallenge(null)}
         onSubmitOtp={gate.submitOtp}
+        sentTo={gate.sentTo}
         purpose={
           gate.challenge
             ? gate.challenge.type === 'connect'
