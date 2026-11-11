@@ -15,6 +15,8 @@ import { PageShell } from '@/components/layout/page-shell';
 import { ActionList } from '@/components/actions/action-list';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
 import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
+import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
+import { useMinorBulkBlocked } from '@/hooks/use-minor-bulk-blocked';
 import {
   ACTION_STATUS_FILTERS,
   FILTER_STATUSES,
@@ -55,6 +57,7 @@ export function MyActionsPage() {
   const selection = useCardSelection();
   const [bulkOpen, setBulkOpen] = React.useState(false);
   const [bulkStatus, setBulkStatus] = React.useState<string>('');
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
   const [filtersOpen, setFiltersOpen] = React.useState(false);
 
   // ── Network resolution (mirrors profile-form-page.tsx) ──────────────────
@@ -429,6 +432,7 @@ export function MyActionsPage() {
 
   const sourceActions = activeTab === 'initiated' ? initiatedActions : receivedActions;
   const selectedActions = sourceActions.filter((a) => selection.selected.has(a.action_id));
+  const minorBulkBlocked = useMinorBulkBlocked(network, selectedActions[0]?.target_item_domain);
 
   const shellSidebarProps = {
     networks: showNetworkSelector ? allNetworks : [],
@@ -470,6 +474,10 @@ export function MyActionsPage() {
           isRefetching={isRefetching}
           selection={selection}
           onBulkAction={(targetStatus) => {
+            if (targetStatus === 'accepted' && minorBulkBlocked && selectedActions.length > 1) {
+              setMinorBulkNoteOpen(true);
+              return;
+            }
             setBulkStatus(targetStatus);
             setBulkOpen(true);
           }}
@@ -505,6 +513,7 @@ export function MyActionsPage() {
         onOpenChange={setIsStatusModalOpen}
         suggestedStatus={suggestedStatus}
       />
+      <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
       <BulkStatusDialog
         open={bulkOpen}
         onOpenChange={setBulkOpen}

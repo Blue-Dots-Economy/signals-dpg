@@ -111,6 +111,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
+import { useAuthConfig } from '@/hooks/use-auth-config';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -1442,6 +1443,15 @@ export function HomePage() {
     [network, currentDomain, myItem]
   );
 
+  const { config: authCfg } = useAuthConfig();
+  // Bulk off for minors (#917): say "one at a time" before anything is sent.
+  const minorBulkBlocked =
+    authCfg?.minorBulkActionsEnabled === false &&
+    u18Status?.isMinor === true &&
+    !!network &&
+    !!wardDomain &&
+    isGuardianConsentRequiredDomain(network, wardDomain);
+
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
@@ -2472,7 +2482,13 @@ export function HomePage() {
                         <button
                           type="button"
                           disabled={!connectAction || bulkConnectBusy}
-                          onClick={() => setBulkConnectOpen(true)}
+                          onClick={() => {
+                            if (minorBulkBlocked && browseSelection.selected.size > 1) {
+                              setMinorBulkNoteOpen(true);
+                              return;
+                            }
+                            setBulkConnectOpen(true);
+                          }}
                           className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
                         >
                           {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
