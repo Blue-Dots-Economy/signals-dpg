@@ -48,7 +48,7 @@ describe('SupportDialog', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('Asha K');
     expect(screen.getByLabelText('Email')).toHaveValue('asha@example.com');
     expect(screen.getByLabelText('Phone')).toHaveValue('9000000000');
-    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
+    expect(screen.getByLabelText('Country code')).toHaveTextContent('+91');
   });
 
   it('renders the type options and consent checkbox', async () => {

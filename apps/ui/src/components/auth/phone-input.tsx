@@ -2,8 +2,28 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
+/** A country a phone field can use. */
+export interface PhoneCountry {
+  /** Dial code with its plus, e.g. `+91`. */
+  code: string;
+  flag: string;
+  name: string;
+  /** Digits in a national number. */
+  nationalDigits: number;
+}
+
+/** Countries a phone field offers; the first is the default. Add an entry to offer another. */
+export const PHONE_COUNTRIES: readonly [PhoneCountry, ...PhoneCountry[]] = [
+  { code: '+91', flag: '🇮🇳', name: 'India', nationalDigits: 10 },
+];
+
 /** Country code a phone field starts with. */
-export const IN_DIAL_CODE = '+91';
+export const IN_DIAL_CODE = PHONE_COUNTRIES[0].code;
+
+/** The listed country for `code`, if any. */
+export function phoneCountry(code: string): PhoneCountry | undefined {
+  return PHONE_COUNTRIES.find((c) => c.code === code);
+}
 
 /** National digits for India; E.164 caps a whole number at 15 digits. */
 const IN_NATIONAL_DIGITS = 10;
@@ -42,14 +62,9 @@ export function phoneValueMode(pattern: unknown): 'international' | 'national' {
   }
 }
 
-/** Keeps `+` and up to three digits, so the code box always reads `+NNN`. */
-export function sanitizeDialCode(raw: string): string {
-  return `+${raw.replace(/\D/g, '').slice(0, 3)}`;
-}
-
 /** Most national digits the number box accepts after `code`. */
 export function nationalMaxLength(code: string): number {
-  return code === IN_DIAL_CODE ? IN_NATIONAL_DIGITS : MAX_TOTAL_DIGITS - code.replace(/\D/g, '').length;
+  return phoneCountry(code)?.nationalDigits ?? MAX_TOTAL_DIGITS - code.replace(/\D/g, '').length;
 }
 
 /**
@@ -66,8 +81,9 @@ export function splitPhone(value: string | null | undefined): { code: string; na
     }
     return { code: IN_DIAL_CODE, national: digits };
   }
-  if (digits.startsWith('91')) return { code: IN_DIAL_CODE, national: digits.slice(2) };
-  // Without a country list, keep the last 10 digits as the number.
+  const listed = PHONE_COUNTRIES.find((c) => digits.startsWith(c.code.slice(1)));
+  if (listed) return { code: listed.code, national: digits.slice(listed.code.length - 1) };
+  // An unlisted code: keep the last 10 digits as the number.
   const codeLength = Math.min(3, Math.max(1, digits.length - IN_NATIONAL_DIGITS));
   return { code: `+${digits.slice(0, codeLength)}`, national: digits.slice(codeLength) };
 }
@@ -75,11 +91,18 @@ export function splitPhone(value: string | null | undefined): { code: string; na
 /**
  * Reads what was typed or pasted into the number box. A full number (`+91 98765
  * 43210`, `919876543210`) or one with a trunk `0` (`098765 43210`) is reduced to
- * its national part instead of being cut short into a different number.
+ * its national part instead of being cut short into a different number. A number
+ * with an unlisted code keeps all its digits, so it fails validation.
  */
 export function nationalFromInput(raw: string, code: string): { code: string; national: string } {
   const trimmed = raw.trim();
-  if (trimmed.startsWith('+')) return splitPhone(trimmed);
+  if (trimmed.startsWith('+')) {
+    const parts = splitPhone(trimmed);
+    if (phoneCountry(parts.code)) {
+      return { code: parts.code, national: parts.national.slice(0, nationalMaxLength(parts.code)) };
+    }
+    return { code, national: trimmed.replace(/\D/g, '') };
+  }
   let digits = trimmed.replace(/\D/g, '');
   const codeDigits = code.replace(/\D/g, '');
   const max = nationalMaxLength(code);
@@ -91,7 +114,7 @@ export function nationalFromInput(raw: string, code: string): { code: string; na
 /** Joins code and number into the E.164 value; '' when no number was typed. */
 export function joinPhone(code: string, national: string): string {
   const digits = national.replace(/\D/g, '');
-  return digits ? `${sanitizeDialCode(code)}${digits}` : '';
+  return digits ? `${code}${digits}` : '';
 }
 
 /** True for any number the server would take as a contact (10-15 digits, landlines too). */
@@ -113,13 +136,14 @@ export interface PhoneInputProps {
   describedBy?: string;
   onBlur?: () => void;
   className?: string;
-  /** Store only the 10-digit number (fields whose pattern takes no code); +91 is shown read-only. */
+  /** Store only the 10-digit number (fields whose pattern takes no code); the code stays at the default. */
   nationalOnly?: boolean;
 }
 
 /**
- * Phone field: an editable country code that starts at +91, beside a number
- * box that takes only digits and stops at the length that code allows.
+ * Phone field: the country code, fixed to {@link PHONE_COUNTRIES} (a list only
+ * when it has more than one), beside a number box that takes only digits and
+ * stops at that country's length.
  */
 export function PhoneInput({
   id,
@@ -134,20 +158,19 @@ export function PhoneInput({
   nationalOnly = false,
 }: Readonly<PhoneInputProps>) {
   const { t } = useTranslation();
-  // The typed code is kept here, so it survives an empty number box and is not
-  // re-guessed from the stored value while the user types.
-  const [code, setCode] = React.useState(() => (value ? splitPhone(value).code : IN_DIAL_CODE));
-  // A code box emptied to "+" keeps the number on its last full code.
-  const editingCode = code.length > 1 ? code : null;
-  const parts =
-    !nationalOnly && editingCode && value.startsWith(editingCode)
-      ? { code: editingCode, national: value.slice(editingCode.length).replace(/\D/g, '') }
-      : splitPhone(value);
-  const savedCode = nationalOnly ? IN_DIAL_CODE : value ? parts.code : (editingCode ?? IN_DIAL_CODE);
-  const shownCode = code.length > 1 || nationalOnly ? savedCode : code;
-  const max = nationalMaxLength(savedCode);
+  // The picked country, kept while the number box is empty.
+  const [picked, setPicked] = React.useState(() => (value ? splitPhone(value).code : IN_DIAL_CODE));
+  const parts = splitPhone(value);
+  const code = nationalOnly ? IN_DIAL_CODE : value ? parts.code : picked;
+  const country = phoneCountry(code);
+  const apply = (raw: string) => {
+    const next = nationalFromInput(raw, code);
+    const nextCode = nationalOnly ? IN_DIAL_CODE : next.code;
+    setPicked(nextCode);
+    onChange(nationalOnly ? next.national : joinPhone(nextCode, next.national));
+  };
 
-  const leave = (e: React.FocusEvent<HTMLInputElement>) => {
+  const leave = (e: React.FocusEvent<HTMLElement>) => {
     const next = e.relatedTarget;
     if (next instanceof HTMLElement && (next.id === id || next.id === `${id}-code`)) return;
     onBlur?.();
@@ -161,55 +184,50 @@ export function PhoneInput({
         className,
       )}
     >
-      <label className="flex items-center gap-1 border-r border-input bg-muted pl-3 text-sm text-muted-foreground">
-        {shownCode === IN_DIAL_CODE && <span aria-hidden="true">🇮🇳</span>}
-        <input
+      {PHONE_COUNTRIES.length > 1 && !nationalOnly ? (
+        <select
           id={`${id}-code`}
-          type="tel"
-          inputMode="tel"
-          autoComplete="tel-country-code"
           aria-label={t('auth.label_country_code', 'Country code')}
-          value={shownCode}
-          maxLength={4}
+          value={code}
           disabled={disabled}
-          readOnly={nationalOnly}
           onChange={(e) => {
-            const nextCode = sanitizeDialCode(e.target.value);
-            setCode(nextCode);
-            // A bare "+" is not a code; keep the stored number until digits follow.
-            if (nextCode.length < 2) return;
+            const nextCode = e.target.value;
+            setPicked(nextCode);
             const digits = parts.national.slice(0, nationalMaxLength(nextCode));
             if (digits) onChange(joinPhone(nextCode, digits));
           }}
-          onBlur={(e) => {
-            if (code.length < 2) setCode(savedCode);
-            leave(e);
-          }}
-          className="w-12 bg-transparent pr-2 text-sm outline-none disabled:opacity-60"
-        />
-      </label>
+          onBlur={leave}
+          className="border-r border-input bg-muted px-2 text-sm text-muted-foreground outline-none disabled:opacity-60"
+        >
+          {PHONE_COUNTRIES.map((c) => (
+            <option key={c.code} value={c.code}>
+              {`${c.flag} ${c.code}`}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span
+          aria-label={t('auth.label_country_code', 'Country code')}
+          className="flex items-center gap-1 border-r border-input bg-muted px-3 text-sm text-muted-foreground select-none"
+        >
+          {country && <span aria-hidden="true">{country.flag}</span>}
+          {code}
+        </span>
+      )}
       <input
         id={id}
         type="tel"
         inputMode="numeric"
         autoComplete="tel-national"
-        maxLength={max}
+        maxLength={nationalMaxLength(code)}
         placeholder={placeholder}
         value={parts.national}
-        onChange={(e) => {
-          const next = nationalFromInput(e.target.value, savedCode);
-          const nextCode = nationalOnly ? IN_DIAL_CODE : next.code;
-          setCode(nextCode);
-          onChange(nationalOnly ? next.national : joinPhone(nextCode, next.national));
-        }}
+        onChange={(e) => apply(e.target.value)}
         onPaste={(e) => {
           const pasted = e.clipboardData.getData('text');
           if (!pasted) return;
           e.preventDefault();
-          const next = nationalFromInput(pasted, savedCode);
-          const nextCode = nationalOnly ? IN_DIAL_CODE : next.code;
-          setCode(nextCode);
-          onChange(nationalOnly ? next.national : joinPhone(nextCode, next.national));
+          apply(pasted);
         }}
         disabled={disabled}
         onBlur={leave}

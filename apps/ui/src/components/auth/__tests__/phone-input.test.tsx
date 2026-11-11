@@ -39,19 +39,27 @@ describe('PhoneInput', () => {
   it('starts at +91 and keeps only 10 digits for India', () => {
     const onValue = vi.fn();
     render(<Harness onValue={onValue} />);
-    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
+    expect(screen.getByLabelText('Country code')).toHaveTextContent('+91');
     const number = document.getElementById('m') as HTMLInputElement;
     fireEvent.change(number, { target: { value: '4567895678956789' } });
     expect(number.value).toBe('4567895678');
     expect(onValue).toHaveBeenLastCalledWith('+914567895678');
   });
 
-  it('lets the user type another country code', () => {
+  it('offers no way to type or change the country code', () => {
+    render(<Harness onValue={vi.fn()} />);
+    expect(screen.getByLabelText('Country code').tagName).toBe('SPAN');
+    expect(screen.queryByRole('combobox')).toBeNull();
+    expect(screen.getAllByRole('textbox')).toHaveLength(1);
+  });
+
+  it('keeps every digit of a pasted number with an unlisted code, so it fails validation', () => {
     const onValue = vi.fn();
     render(<Harness onValue={onValue} />);
-    fireEvent.change(screen.getByLabelText('Country code'), { target: { value: '+44' } });
-    fireEvent.change(document.getElementById('m') as HTMLInputElement, { target: { value: '7911123456' } });
-    expect(onValue).toHaveBeenLastCalledWith('+447911123456');
+    fireEvent.paste(document.getElementById('m') as HTMLInputElement, {
+      clipboardData: { getData: () => '+61 412 345 678' },
+    });
+    expect(onValue).toHaveBeenLastCalledWith('+9161412345678');
   });
 
   it('reads a bare 10-digit value as +91 and joins nothing for an empty number', () => {
@@ -70,20 +78,10 @@ describe('PhoneInput', () => {
     expect(nationalFromInput('098765 43210', '+91').national).toBe('9876543210');
   });
 
-  it('never saves a number under an emptied code box', () => {
-    const onValue = vi.fn();
-    render(<Harness onValue={onValue} />);
-    fireEvent.change(document.getElementById('m') as HTMLInputElement, { target: { value: '9876543210' } });
-    fireEvent.change(screen.getByLabelText('Country code'), { target: { value: '' } });
-    expect(onValue).toHaveBeenLastCalledWith('+919876543210');
-    fireEvent.blur(screen.getByLabelText('Country code'));
-    expect(screen.getByLabelText('Country code')).toHaveValue('+91');
-  });
-
   it('stores only the 10 digits when the field takes no country code', () => {
     const onValue = vi.fn();
     render(<Harness onValue={onValue} nationalOnly />);
-    expect(screen.getByLabelText('Country code')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Country code')).toHaveTextContent('+91');
     fireEvent.change(document.getElementById('m') as HTMLInputElement, { target: { value: '9876543210' } });
     expect(onValue).toHaveBeenLastCalledWith('9876543210');
   });
