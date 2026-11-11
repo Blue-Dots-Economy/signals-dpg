@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { updaterConfigMessage } from './updater-config-message';
 import { toast } from 'sonner';
 import {
   guardianOtpErrorOf,
@@ -191,12 +192,7 @@ export function BulkStatusDialog({
   };
 
   const confirmDisabled = isPending || actions.length === 0;
-  const configMessage =
-    attempted && !networkConfig
-      ? networkConfigFailed
-        ? t('actions.updater_config_error', "Couldn't load the details for this request. Check your connection, then close and try again.")
-        : t('actions.updater_config_loading', 'Still loading. Please try again in a moment.')
-      : undefined;
+  const configMessage = updaterConfigMessage(attempted, Boolean(networkConfig), networkConfigFailed, t);
 
   // The guardian code resubmits the stashed payloads via
   // updateActionStatusBulk.

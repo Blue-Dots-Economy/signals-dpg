@@ -381,15 +381,13 @@ function OtpLoginPage() {
   const contactWellFormed =
     mode === 'phone' ? isValidPhoneNumber(fullPhone) : /^[^\s@]+@[^\s.@]+\.[^\s@]+$/.test(email.trim());
   // Wrong value: on leaving the field; empty: only after Continue.
-  const contactError = !contactValue.trim()
-    ? submitAttempted
-      ? t('form.error_required', '{{label}} is required.', { label: contactFieldLabel })
-      : null
-    : !contactWellFormed && (contactTouched || submitAttempted)
-      ? mode === 'phone'
-        ? t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_phone_desc') })
-        : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
-      : null;
+  let contactError: string | null = null;
+  if (!contactValue.trim()) {
+    if (submitAttempted) contactError = t('form.error_required', '{{label}} is required.', { label: contactFieldLabel });
+  } else if (!contactWellFormed && (contactTouched || submitAttempted)) {
+    const reason = mode === 'phone' ? 'auth.toast_invalid_phone_desc' : 'auth.toast_invalid_email_desc';
+    contactError = t('form.error_invalid', 'Invalid entry. {{message}}', { message: t(reason) });
+  }
   const nameError =
     submitAttempted && userExists === false && !name.trim()
       ? t('form.error_required', '{{label}} is required.', { label: t('auth.label_name') })

@@ -25,7 +25,9 @@ import {
   formatBytes,
   pickerAccept,
   validateAttachmentSelection,
+  type AttachmentRejection,
 } from '@/lib/support-attachments';
+import type { SupportConfig } from '@/lib/support-api';
 
 interface SupportDialogProps {
   open: boolean;
@@ -55,6 +57,84 @@ function resolveSubmitErrorToast(
 type SupportField = 'name' | 'email' | 'phone' | 'details' | 'contact' | 'consent' | 'attachments';
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s.@]+\.[^\s@]+$/;
+
+/** "Invalid entry. Please enter a valid {label}." */
+function invalidFieldMessage(t: TFunction, label: string): string {
+  return t('form.error_invalid', 'Invalid entry. {{message}}', {
+    message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+  });
+}
+
+/** The message under the picker for files the client refused. */
+function attachmentRejectionMessage(rejection: AttachmentRejection, config: SupportConfig, t: TFunction): string {
+  if (rejection.reason === 'count') return t('support.validation_attachment_count', { count: config.maxFiles });
+  if (rejection.reason === 'size') {
+    return t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) });
+  }
+  return t('support.validation_attachment_type', { name: rejection.filename });
+}
+
+/** Field messages for a failed submit; empty when no field owns the failure. */
+function submitFailureFieldErrors(
+  err: unknown,
+  config: SupportConfig,
+  t: TFunction,
+): Partial<Record<SupportField, string>> {
+  const info = readApiError(err);
+  // The server's body limit, not its attachment check.
+  if (info.status === 413) {
+    return { attachments: t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) }) };
+  }
+  if (info.status !== 400) return {};
+  // Its message names the file the client check missed.
+  if (info.code?.startsWith('ATTACHMENT_')) {
+    return {
+      attachments: isReadableServerMessage(info.message) ? info.message : t('support.toast_attachment_rejected'),
+    };
+  }
+  const labels = {
+    name: t('support.label_name'),
+    email: t('support.label_email'),
+    phone: t('support.label_phone'),
+    details: t('support.label_details'),
+  };
+  const out: Partial<Record<SupportField, string>> = {};
+  for (const key of ['name', 'email', 'phone', 'details'] as const) {
+    if (info.fields?.[key]) out[key] = invalidFieldMessage(t, labels[key]);
+  }
+  return out;
+}
+
+/** What {@link supportFieldErrors} reads from the form. */
+interface SupportFormState {
+  submitAttempted: boolean;
+  left: { email?: boolean; phone?: boolean };
+  extra: Partial<Record<SupportField, string>>;
+  nameMissing: boolean;
+  emailWrong: boolean;
+  phoneWrong: boolean;
+  contactMissing: boolean;
+  detailsMissing: boolean;
+  consentMissing: boolean;
+}
+
+/** Each field's message: a server or picker message first, else the form's own check. */
+function supportFieldErrors(f: SupportFormState, t: TFunction): Partial<Record<SupportField, string>> {
+  const after = (missing: boolean, message: string) => (f.submitAttempted && missing ? message : undefined);
+  const onceLeft = (wasLeft: boolean | undefined, wrong: boolean, message: string) =>
+    (wasLeft || f.submitAttempted) && wrong ? message : undefined;
+  return {
+    name:
+      f.extra.name ??
+      after(f.nameMissing, t('form.error_required', '{{label}} is required.', { label: t('support.label_name') })),
+    email: f.extra.email ?? onceLeft(f.left.email, f.emailWrong, invalidFieldMessage(t, t('support.label_email'))),
+    phone: f.extra.phone ?? onceLeft(f.left.phone, f.phoneWrong, invalidFieldMessage(t, t('support.label_phone'))),
+    contact: after(f.contactMissing, t('support.validation_contact_required')),
+    details: f.extra.details ?? after(f.detailsMissing, t('support.validation_details_required')),
+    consent: after(f.consentMissing, t('support.validation_consent_required')),
+    attachments: f.extra.attachments,
+  };
+}
 
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const { t } = useTranslation();
@@ -103,12 +183,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
 
     const result = validateAttachmentSelection(attachments, incoming, config);
     if (!result.ok) {
-      const message =
-        result.reason === 'count'
-          ? t('support.validation_attachment_count', { count: config.maxFiles })
-          : result.reason === 'size'
-            ? t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) })
-            : t('support.validation_attachment_type', { name: result.filename });
+      const message = attachmentRejectionMessage(result, config, t);
       setExtraErrors((prev) => ({ ...prev, attachments: message }));
       return;
     }
@@ -130,33 +205,20 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const emailWrong = Boolean(trimmedEmail) && !EMAIL_SHAPE.test(trimmedEmail);
   const phoneWrong = Boolean(trimmedPhone) && !isAcceptedPhone(trimmedPhone);
 
-  const invalidField = (label: string) =>
-    t('form.error_invalid', 'Invalid entry. {{message}}', {
-      message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
-    });
-  const errors: Partial<Record<SupportField, string>> = {
-    name:
-      extraErrors.name ??
-      (submitAttempted && !trimmedName
-        ? t('form.error_required', '{{label}} is required.', { label: t('support.label_name') })
-        : undefined),
-    email:
-      extraErrors.email ??
-      ((left.email || submitAttempted) && emailWrong
-        ? invalidField(t('support.label_email'))
-        : undefined),
-    phone:
-      extraErrors.phone ??
-      ((left.phone || submitAttempted) && phoneWrong
-        ? invalidField(t('support.label_phone'))
-        : undefined),
-    contact: submitAttempted && !hasContact ? t('support.validation_contact_required') : undefined,
-    details:
-      extraErrors.details ??
-      (submitAttempted && !details.trim() ? t('support.validation_details_required') : undefined),
-    consent: submitAttempted && !consent ? t('support.validation_consent_required') : undefined,
-    attachments: extraErrors.attachments,
-  };
+  const errors = supportFieldErrors(
+    {
+      submitAttempted,
+      left,
+      extra: extraErrors,
+      nameMissing: !trimmedName,
+      emailWrong,
+      phoneWrong,
+      contactMissing: !hasContact,
+      detailsMissing: !details.trim(),
+      consentMissing: !consent,
+    },
+    t,
+  );
   const FIELD_IDS: Record<SupportField, string> = {
     name: 'support-name',
     email: 'support-email',
@@ -201,29 +263,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
       reset();
       onOpenChange(false);
     } catch (err) {
-      const info = readApiError(err);
-      const labels = {
-        name: t('support.label_name'),
-        email: t('support.label_email'),
-        phone: t('support.label_phone'),
-        details: t('support.label_details'),
-      };
-      const fieldErrors: Partial<Record<SupportField, string>> = {};
-      if (info.status === 413) {
-        // The server's body limit, not its attachment check.
-        fieldErrors.attachments = t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) });
-      } else if (info.status === 400 && info.code?.startsWith('ATTACHMENT_')) {
-        // Its message names the file the client check missed.
-        fieldErrors.attachments = isReadableServerMessage(info.message)
-          ? info.message
-          : t('support.toast_attachment_rejected');
-      } else if (info.status === 400 && info.fields) {
-        for (const key of ['name', 'email', 'phone', 'details'] as const) {
-          if (info.fields[key]) {
-            fieldErrors[key] = invalidField(labels[key]);
-          }
-        }
-      }
+      const fieldErrors = submitFailureFieldErrors(err, config, t);
       const fieldKeys = Object.keys(fieldErrors) as SupportField[];
       if (fieldKeys.length > 0) {
         setExtraErrors((prev) => ({ ...prev, ...fieldErrors }));

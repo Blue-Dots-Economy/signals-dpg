@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Loader2, LockKeyhole, OctagonX, UserPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { AuthShell } from '@/components/layout/auth-shell';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -63,6 +64,97 @@ function toSignupIdentifier(identifier: AuthIdentifier): SignupIdentifier {
     : { phoneNumber: identifier.phoneNumber }) as SignupIdentifier;
 }
 
+/** Sign-up fields the API can reject, each flagged when it did. */
+interface SignupServerErrors {
+  name?: boolean;
+  email?: boolean;
+  phone?: boolean;
+}
+
+/** The sign-up fields a `400` named, or `null` when it named none. */
+function signupFieldRejection(err: unknown): Required<SignupServerErrors> | null {
+  const { status, fields } = readApiError(err);
+  const bad = { name: Boolean(fields?.name), email: Boolean(fields?.email), phone: Boolean(fields?.phoneNumber) };
+  return status === 400 && (bad.name || bad.email || bad.phone) ? bad : null;
+}
+
+/** What {@link signupFieldErrors} reads from the sign-up form. */
+interface SignupFieldState {
+  channel: LoginChannel;
+  name: string;
+  phoneNumber: string;
+  email: string;
+  serverFieldErrors: SignupServerErrors;
+  submitAttempted: boolean;
+  contactTouched: boolean;
+  /** How many domains the sign-up offers; a single one is picked for the user. */
+  domainChoices: number;
+  domain: string;
+  /** True when the picked domain asks for a birth year. */
+  ageAsked: boolean;
+  age: number | undefined;
+}
+
+/** `message` once Submit was pressed while `missing` holds, else `null`. */
+function messageAfterSubmit(submitted: boolean, missing: boolean, message: string): string | null {
+  return submitted && missing ? message : null;
+}
+
+/** The name field's message: rejected by the API, else required after a Submit. */
+function signupNameError(
+  f: SignupFieldState,
+  required: (label: string) => string,
+  invalid: (message: string) => string,
+  t: TFunction,
+): string | null {
+  if (f.serverFieldErrors.name) {
+    return invalid(t('form.invalid_format', 'Please enter a valid {{field}}.', { field: t('auth.label_name') }));
+  }
+  return f.submitAttempted && !f.name.trim() ? required(t('auth.label_name')) : null;
+}
+
+/** The phone or email field's message: wrong (once left) or rejected, else required after a Submit. */
+function signupContactError(
+  f: SignupFieldState,
+  isPhone: boolean,
+  contactRaw: string,
+  contactValid: boolean,
+  required: (label: string) => string,
+  invalid: (message: string) => string,
+  t: TFunction,
+): string | null {
+  const serverRejected = isPhone ? f.serverFieldErrors.phone : f.serverFieldErrors.email;
+  const shownWrong = Boolean(contactRaw) && !contactValid && (f.contactTouched || f.submitAttempted);
+  if (serverRejected || shownWrong) {
+    return invalid(t(isPhone ? 'auth.toast_invalid_phone_desc' : 'auth.toast_invalid_email_desc'));
+  }
+  if (!f.submitAttempted || contactRaw) return null;
+  return required(isPhone ? t('auth.label_mobile') : t('auth.label_email'));
+}
+
+/**
+ * The sign-up form's messages: required fields after a Submit, a wrong phone
+ * or email once the field is left, and fields the API rejected.
+ */
+function signupFieldErrors(f: SignupFieldState, t: TFunction) {
+  const isPhone = f.channel === 'phone';
+  const required = (label: string) => t('form.error_required', '{{label}} is required.', { label });
+  const invalid = (message: string) => t('form.error_invalid', 'Invalid entry. {{message}}', { message });
+  const contactRaw = isPhone ? f.phoneNumber : f.email.trim();
+  const contactValid = isPhone ? isValidPhoneNumber(f.phoneNumber) : hasEmailShape(contactRaw);
+
+  const nameError = signupNameError(f, required, invalid, t);
+  const contactError = signupContactError(f, isPhone, contactRaw, contactValid, required, invalid, t);
+
+  return {
+    contactValid,
+    nameError,
+    contactError,
+    domainError: messageAfterSubmit(f.submitAttempted, f.domainChoices > 1 && !f.domain, t('auth.select_domain_required')),
+    ageError: messageAfterSubmit(f.submitAttempted, f.ageAsked && f.age === undefined, t('auth.signup_dob_required')),
+  };
+}
+
 /**
  * The login screen for deployments where the API reports `authProvider:
  * 'keycloak'`. Starts with a chooser (existing user vs. new) because identity
@@ -92,7 +184,7 @@ export function KeycloakLoginPanel() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [contactTouched, setContactTouched] = useState(false);
   // The API's per-field rejections, cleared when that field is edited.
-  const [serverFieldErrors, setServerFieldErrors] = useState<{ name?: boolean; email?: boolean; phone?: boolean }>({});
+  const [serverFieldErrors, setServerFieldErrors] = useState<SignupServerErrors>({});
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -252,31 +344,22 @@ export function KeycloakLoginPanel() {
     return null;
   };
 
-  const invalidEntry = (field: string) =>
-    t('form.error_invalid', 'Invalid entry. {{message}}', {
-      message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field }),
-    });
-  const contactRaw = signupChannel === 'phone' ? phoneNumber : email.trim();
-  const contactValid = signupChannel === 'phone' ? isValidPhoneNumber(phoneNumber) : hasEmailShape(email.trim());
-  const contactLabel = signupChannel === 'phone' ? t('auth.label_mobile') : t('auth.label_email');
-  const nameError = serverFieldErrors.name
-    ? invalidEntry(t('auth.label_name'))
-    : submitAttempted && !name.trim()
-      ? t('form.error_required', '{{label}} is required.', { label: t('auth.label_name') })
-      : null;
-  const contactError =
-    (signupChannel === 'phone' ? serverFieldErrors.phone : serverFieldErrors.email) ||
-    (contactRaw && !contactValid && (contactTouched || submitAttempted))
-      ? signupChannel === 'phone'
-        ? t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_phone_desc') })
-        : t('form.error_invalid', 'Invalid entry. {{message}}', { message: t('auth.toast_invalid_email_desc') })
-      : submitAttempted && !contactRaw
-        ? t('form.error_required', '{{label}} is required.', { label: contactLabel })
-        : null;
-  const domainError =
-    submitAttempted && domainOptions.length > 1 && !domain ? t('auth.select_domain_required') : null;
-  const ageError =
-    submitAttempted && selectedDomainIsGated && age === undefined ? t('auth.signup_dob_required') : null;
+  const { contactValid, nameError, contactError, domainError, ageError } = signupFieldErrors(
+    {
+      channel: signupChannel,
+      name,
+      phoneNumber,
+      email,
+      serverFieldErrors,
+      submitAttempted,
+      contactTouched,
+      domainChoices: domainOptions.length,
+      domain,
+      ageAsked: selectedDomainIsGated,
+      age,
+    },
+    t,
+  );
 
   const handleSignup = async () => {
     setError(null);
@@ -288,7 +371,7 @@ export function KeycloakLoginPanel() {
     }
     // The API takes `z.email()`, so catch a malformed address here.
     if (!contactValid) {
-      document.getElementById(signupChannel === 'phone' ? 'signup-phone' : 'signup-email')?.focus();
+      document.getElementById(`signup-${signupChannel}`)?.focus();
       return;
     }
     // A signup must carry a domain: `domain` is optional on POST /auth/signup,
@@ -442,9 +525,8 @@ export function KeycloakLoginPanel() {
       );
       await handleSignIn(consentAttempt);
     } catch (err) {
-      const { status, fields } = readApiError(err);
-      const bad = { name: Boolean(fields?.name), email: Boolean(fields?.email), phone: Boolean(fields?.phoneNumber) };
-      if (status === 400 && (bad.name || bad.email || bad.phone)) {
+      const bad = signupFieldRejection(err);
+      if (bad) {
         setServerFieldErrors(bad);
       } else {
         setError(apiErrorMessage(err, t, t('auth.oidc_error_desc')));
@@ -548,7 +630,7 @@ export function KeycloakLoginPanel() {
               }}
               onBlur={() => setContactTouched(true)}
               invalid={Boolean(contactError)}
-              describedBy={contactError ? 'signup-contact-error' : undefined}
+              describedBy="signup-contact-error"
             />
             <InlineFieldError id="signup-contact-error" message={contactError} />
           </div>

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { updaterConfigMessage } from './updater-config-message';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -248,12 +249,7 @@ export function ActionStatusUpdater({
     />
   );
 
-  const configMessage =
-    attempted && !networkConfig
-      ? networkConfigFailed
-        ? t('actions.updater_config_error', "Couldn't load the details for this request. Check your connection, then close and try again.")
-        : t('actions.updater_config_loading', 'Still loading. Please try again in a moment.')
-      : undefined;
+  const configMessage = updaterConfigMessage(attempted, Boolean(networkConfig), networkConfigFailed, t);
 
   const footer = (
     <div className="space-y-2">

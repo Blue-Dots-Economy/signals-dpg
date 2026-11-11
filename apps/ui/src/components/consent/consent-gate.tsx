@@ -28,6 +28,12 @@ export interface ConsentGateBodyProps {
   onAccept: () => void;
 }
 
+/** Colour of the "scroll to the end" hint: done, missed after a Continue, or neutral. */
+function scrollHintTone(allRead: boolean, attempted: boolean): string {
+  if (allRead) return 'font-semibold text-success';
+  return attempted ? 'font-semibold text-destructive' : 'text-muted-foreground';
+}
+
 export function ConsentGateBody({
   docs,
   onAccept,
@@ -88,13 +94,7 @@ export function ConsentGateBody({
         <p
           id="consent-scroll-hint"
           aria-live="polite"
-          className={`flex items-center gap-1.5 text-xs ${
-            progress.allRead
-              ? 'font-semibold text-success'
-              : attempted
-                ? 'font-semibold text-destructive'
-                : 'text-muted-foreground'
-          }`}
+          className={`flex items-center gap-1.5 text-xs ${scrollHintTone(progress.allRead, attempted)}`}
         >
           {progress.allRead ? (
             <Check className="h-3 w-3 shrink-0" aria-hidden="true" />

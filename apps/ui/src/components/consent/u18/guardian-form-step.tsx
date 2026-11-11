@@ -37,6 +37,12 @@ export interface GuardianFormStepProps {
   onBack?: () => void;
 }
 
+/** The id that explains a contact field: its own error, else the same-contact warning. */
+function contactDescribedBy(errorId: string, error: string | null, sameContact: boolean): string | undefined {
+  if (error) return errorId;
+  return sameContact ? 'u18-guardian-same-contact' : undefined;
+}
+
 function normalize(value: string): string {
   return value.trim();
 }
@@ -96,20 +102,18 @@ export function GuardianFormStep({
     });
   const partialPhone = guardianPhone.length > 0 && !phoneValid;
 
-  const nameError = serverInvalid.name
-    ? t('form.error_invalid', 'Invalid entry. {{message}}', {
-        message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: nameLabel }),
-      })
-    : submitAttempted && !guardianName.trim()
-      ? t('form.error_required', '{{label}} is required.', { label: nameLabel })
-      : null;
+  let nameError: string | null = null;
+  if (serverInvalid.name) nameError = invalidField(nameLabel);
+  else if (submitAttempted && !guardianName.trim()) {
+    nameError = t('form.error_required', '{{label}} is required.', { label: nameLabel });
+  }
   const emailError = serverInvalid.email ? invalidField(emailLabel) : null;
-  const phoneError =
-    serverInvalid.phone || (partialPhone && (phoneTouched || submitAttempted))
-      ? invalidField(phoneLabel)
-      : submitAttempted && !hasContact
-        ? t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number.")
-        : null;
+  const phoneWrong = serverInvalid.phone || (partialPhone && (phoneTouched || submitAttempted));
+  let phoneError: string | null = null;
+  if (phoneWrong) phoneError = invalidField(phoneLabel);
+  else if (submitAttempted && !hasContact) {
+    phoneError = t('u18.guardian_error_contact_required', "Enter your guardian's email or phone number.");
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -230,9 +234,7 @@ export function GuardianFormStep({
           }}
           disabled={isSubmitting}
           aria-invalid={Boolean(emailError) || sameContactBlocked || undefined}
-          aria-describedby={
-            emailError ? 'u18-guardian-email-error' : sameContactBlocked ? 'u18-guardian-same-contact' : undefined
-          }
+          aria-describedby={contactDescribedBy('u18-guardian-email-error', emailError, sameContactBlocked)}
         />
         <InlineFieldError id="u18-guardian-email-error" message={emailError} />
       </div>
@@ -252,9 +254,7 @@ export function GuardianFormStep({
           onBlur={() => setPhoneTouched(true)}
           disabled={isSubmitting}
           invalid={Boolean(phoneError) || sameContactBlocked}
-          describedBy={
-            phoneError ? 'u18-guardian-phone-error' : sameContactBlocked ? 'u18-guardian-same-contact' : undefined
-          }
+          describedBy={contactDescribedBy('u18-guardian-phone-error', phoneError, sameContactBlocked)}
         />
         <InlineFieldError id="u18-guardian-phone-error" message={phoneError} />
       </div>

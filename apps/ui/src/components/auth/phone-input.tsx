@@ -162,7 +162,8 @@ export function PhoneInput({
   // The picked country, kept while the number box is empty.
   const [picked, setPicked] = React.useState(() => (value ? splitPhone(value).code : IN_DIAL_CODE));
   const parts = splitPhone(value);
-  const code = nationalOnly ? IN_DIAL_CODE : value ? parts.code : picked;
+  const typedCode = value ? parts.code : picked;
+  const code = nationalOnly ? IN_DIAL_CODE : typedCode;
   const country = phoneCountry(code);
   const apply = (raw: string) => {
     const next = nationalFromInput(raw, code);
