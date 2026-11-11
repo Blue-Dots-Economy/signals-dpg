@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { BulkItemFailure } from '@/utils/bulk_runner';
+import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
   getWardAge,
@@ -35,7 +36,8 @@ export type GateResult =
   | { status: 'throttled' }
   | { status: 'rate_limited' }
   | { status: 'no_provider' }
-  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' }; // U18 on external channel (#395)
+  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' } // U18 on external channel (#395)
+  | { status: 'minor_bulk_blocked' }; // MINOR_BULK_ACTIONS_ENABLED=false and >1 gated row (#917)
 
 /**
  * U18 guardian-consent gate for actions (Phase 5b). Detects whether the ward
@@ -210,6 +212,11 @@ export async function guardianBulkActionGate(args: {
       for (const item of bucket) results.set(item.index, r);
     };
 
+    if (!apiConfig.minor_bulk_actions_enabled && bucket.length > 1) {
+      assign({ status: 'minor_bulk_blocked' });
+      continue;
+    }
+
     if (!args.otp) {
       try {
         const contact = await getGuardianContactPlaintext(wardUserId);
@@ -301,6 +308,11 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'MINOR_ACTION_CHANNEL_BLOCKED',
         "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+      );
+    case 'minor_bulk_blocked':
+      return new BulkItemFailure(
+        'MINOR_BULK_ACTION_BLOCKED',
+        'Under-18 accounts can send or accept one request at a time.',
       );
     default:
       return null; // not_required | verified → proceed
