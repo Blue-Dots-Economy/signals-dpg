@@ -8404,13 +8404,17 @@
                         "clientId"
                       ],
                       "additionalProperties": false
+                    },
+                    "minorBulkActionsEnabled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "selfSignupAllowed",
                     "loginChannels",
                     "authProvider",
-                    "keycloak"
+                    "keycloak",
+                    "minorBulkActionsEnabled"
                   ],
                   "additionalProperties": false
                 }
