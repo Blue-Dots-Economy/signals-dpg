@@ -1303,7 +1303,7 @@ describe('BulkStatusDialog', () => {
     await user.click(screen.getByRole('checkbox'));
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    expect(await screen.findByText(/as you are under 18/i)).toBeInTheDocument();
+    expect(await screen.findByText(/one request at a time/i)).toBeInTheDocument();
     expect(screen.queryByText(/guardian's confirmation via otp/i)).not.toBeInTheDocument();
     expect(onSettled).toHaveBeenCalledWith(0, 2, ['act-1', 'act-2']);
     expect(mocks.bulkMutateAsync).toHaveBeenCalledTimes(1);
