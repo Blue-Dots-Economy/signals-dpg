@@ -3,6 +3,7 @@ import { BulkItemFailure } from '@/utils/bulk_runner';
 import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
+  getMinorGuardian,
   getWardAge,
   getGuardianContactPlaintext,
   getGuardianNamePlaintext,
@@ -212,7 +213,12 @@ export async function guardianBulkActionGate(args: {
       for (const item of bucket) results.set(item.index, r);
     };
 
-    if (!apiConfig.minor_bulk_actions_enabled && bucket.length > 1) {
+    // Only an SMS guardian lacks a batch OTP template; email lists every org.
+    if (
+      !apiConfig.minor_bulk_actions_enabled &&
+      bucket.length > 1 &&
+      (await getMinorGuardian(wardUserId))?.guardianContactType === 'phone'
+    ) {
       assign({ status: 'minor_bulk_blocked' });
       continue;
     }
