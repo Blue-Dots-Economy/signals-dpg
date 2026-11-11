@@ -110,6 +110,7 @@ import type { Marker as NetworkMarker } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -681,6 +682,7 @@ export function HomePage() {
     otherFailedIds?: string[];
     sentTo?: string;
   } | null>(null);
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
   // Minor ward: the "a code will be sent to your guardian — proceed?" confirm
   // shown BEFORE a bulk action dispatches the OTP (mirrors the single-action
   // confirm). Holds the deferred bulk submit + its action type (for the panel).
@@ -1521,6 +1523,9 @@ export function HomePage() {
         if (outcome.kind === 'all') {
           toast.success(t('home.bulk_connected_all', { count: outcome.succeeded }));
           browseSelection.exitSelect();
+        } else if (outcome.kind === 'minor_bulk_blocked') {
+          setMinorBulkNoteOpen(true);
+          browseSelection.setSelected(outcome.failedIds);
         } else if (outcome.kind === 'guardian') {
           // A code has already gone to the guardian — the OTP dialog owns the
           // resubmit from here.
@@ -1929,6 +1934,10 @@ export function HomePage() {
     </Dialog>
   );
 
+  const minorBulkNoteModal = (
+    <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
+  );
+
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
@@ -2002,6 +2011,7 @@ export function HomePage() {
         {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
       </>
     );
   }
@@ -2633,6 +2643,7 @@ export function HomePage() {
     {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
     </>
   );
 }

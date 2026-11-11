@@ -34,6 +34,15 @@ describe('resolveBulkOutcome', () => {
     });
   });
 
+  it('a minor batch refused by the API shows the note, not the OTP dialog, and keeps every failed row', () => {
+    const out = resolveBulkOutcome(
+      envelope([err(0, 'MINOR_BULK_ACTION_BLOCKED'), err(1, 'MINOR_BULK_ACTION_BLOCKED'), ok(2)]),
+      targets,
+      payloads,
+    );
+    expect(out).toEqual({ kind: 'minor_bulk_blocked', failedIds: ['a', 'b'] });
+  });
+
   it('routes a guardian-OTP failure to the OTP dialog, carrying only those payloads', () => {
     const out = resolveBulkOutcome(
       envelope([err(0, 'GUARDIAN_OTP_REQUIRED'), err(2, 'GUARDIAN_OTP_REQUIRED')]),
