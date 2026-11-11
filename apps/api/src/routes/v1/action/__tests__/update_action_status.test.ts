@@ -672,7 +672,7 @@ describe('POST /api/v1/action/update-status (bulk, self-acted only)', () => {
         event_schema: {},
         reveals_pii_on_status: ['accepted'],
       });
-      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued' });
+      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued', sentTo: '******7347' });
       vi.mocked(guardianGateFailure).mockReturnValueOnce(
         new BulkItemFailure(
           'GUARDIAN_OTP_REQUIRED',

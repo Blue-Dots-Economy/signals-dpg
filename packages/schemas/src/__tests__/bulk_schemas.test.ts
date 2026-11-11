@@ -16,6 +16,16 @@ describe('bulk response schemas', () => {
     expect(parsed.results).toHaveLength(2);
   });
 
+  it('keeps sent_to on a GUARDIAN_OTP_REQUIRED error entry', () => {
+    const parsed = BulkUpdateActionStatusResponseSchema.parse({
+      results: [
+        { index: 0, status: 'error', error: 'GUARDIAN_OTP_REQUIRED', message: 'sent', sent_to: '******7347' },
+      ],
+      summary: { total: 1, succeeded: 0, failed: 1 },
+    });
+    expect(parsed.results[0]).toMatchObject({ sent_to: '******7347' });
+  });
+
   it('rejects a success entry missing a required field', () => {
     expect(() =>
       BulkUpdateActionStatusResponseSchema.parse({
