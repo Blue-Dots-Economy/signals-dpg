@@ -320,6 +320,12 @@ export function guardianOtpErrorOf(
   return GUARDIAN_OTP_CODE_ALIASES[code] ?? null;
 }
 
+/** Masked guardian contact (`sent_to`) carried by a thrown guardian-OTP error, if any. */
+export function guardianSentToFromThrown(err: unknown): string | undefined {
+  const sentTo = (err as { response?: { data?: { sent_to?: unknown } } } | null | undefined)?.response?.data?.sent_to;
+  return typeof sentTo === 'string' && sentTo ? sentTo : undefined;
+}
+
 /**
  * Classifies a *thrown* error as a `GuardianOtpErrorCode`, or `null` if it
  * isn't one. Single-item calls (`performAction`/`updateActionStatus`) throw a
