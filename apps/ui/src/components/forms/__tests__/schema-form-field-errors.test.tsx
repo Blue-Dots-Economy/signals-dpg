@@ -28,7 +28,7 @@ const schema = {
   required: ['name', 'phone'],
   properties: {
     name: { type: 'string', title: 'Name' },
-    phone: { type: 'string', title: 'Mobile', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-9][0-9]{9,14})$' },
+    phone: { type: 'string', title: 'Mobile', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$' },
   },
 } as RJSFSchema;
 

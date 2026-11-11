@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import * as React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
@@ -92,7 +94,26 @@ describe('PhoneInput', () => {
     expect(isPhoneFieldName('mobile_app_url')).toBe(false);
     expect(isPhoneFieldName('automobile')).toBe(false);
     expect(phoneValueMode('^[0-9]{10}$')).toBe('national');
-    expect(phoneValueMode('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-9][0-9]{9,14})$')).toBe('international');
+    expect(phoneValueMode('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$')).toBe('international');
+  });
+
+  it('blue_dot phone rule rejects a short +91 number instead of reading it as another country', () => {
+    const network = JSON.parse(
+      readFileSync(resolve(__dirname, '../../../../../../examples/schemas/blue_dot/network.json'), 'utf8'),
+    );
+    const patterns = new Set<string>();
+    JSON.stringify(network, (key, value) => {
+      if (key === 'pattern' && typeof value === 'string' && value.includes('+91')) patterns.add(value);
+      return value;
+    });
+    expect(patterns.size).toBe(1);
+    const re = new RegExp([...patterns][0]!);
+    for (const ok of ['+919353500020', '9353500020', '+447911123456', '+12025550123', '+971501234567']) {
+      expect(re.test(ok)).toBe(true);
+    }
+    for (const bad of ['+91935350002', '+915353500020', '935350002', '+9193535000201']) {
+      expect(re.test(bad)).toBe(false);
+    }
   });
 
   it('keeps +91 for a partial value and accepts landlines as contact numbers', () => {
