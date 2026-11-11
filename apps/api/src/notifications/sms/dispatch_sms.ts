@@ -1,4 +1,9 @@
+import { instance } from '@/config';
+import { getNotificationClient } from '@/utils/notificationClient';
+
+import { getInstanceDefaultNetwork } from '../email/dispatch_email';
 import { renderSmsPreview, type SmsTemplateIndex } from './sms_templates';
+import { getSmsTemplates } from './templates';
 
 /**
  * Central SMS sender (#532/#535) — the mirror of the #529 email sender, but
@@ -63,6 +68,8 @@ export interface SmsDispatchArgs {
   network?: string | null;
   variables?: Record<string, string>;
   priority?: SmsPriority;
+  /** Rethrow a failed send instead of logging it (OTP sends must not fail silently). */
+  critical?: boolean;
 }
 
 export interface SmsSenderDeps {
@@ -101,9 +108,9 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
           deps.log('sms missing declared variables', { caseId: args.caseId, missing }),
         );
 
-        // Dev preview only — the real text is rendered provider-side from the
-        // DLT template; this shows what that will say. Never in prod.
-        deps.previewLog?.(
+        // Dev preview only, never in prod. Skipped for critical sends: those
+        // carry an OTP, which must not reach a log even outside production.
+        if (!args.critical) deps.previewLog?.(
           `[sms:${args.caseId}] to=${maskPhone(args.to)} template_id=${entry.templateId}  ${renderSmsPreview(entry.body, variables)}`,
         );
 
@@ -122,8 +129,47 @@ export function createSmsSender(deps: SmsSenderDeps): SmsSender {
           caseId: args.caseId,
           error: err instanceof Error ? err.message : String(err),
         });
+        if (args.critical) throw err;
         return { ok: false };
       }
     },
   };
+}
+
+let defaultSender: SmsSender | null | undefined;
+
+/**
+ * The instance SMS sender, or null when no notification client is configured.
+ * A case sends only where the instance's SMS template file gives it a
+ * `template_id`; everywhere else `dispatchSms` skips.
+ */
+export function getDefaultSmsSender(): SmsSender | null {
+  if (defaultSender !== undefined) return defaultSender;
+  const nc = getNotificationClient();
+  defaultSender = nc
+    ? createSmsSender({
+        notify: (req) => nc.notify(req),
+        getTemplates: () => getSmsTemplates(),
+        defaultNetwork: getInstanceDefaultNetwork(),
+        // The preview line masks the phone; still kept out of production logs.
+        previewLog:
+          instance.INSTANCE_ENV === 'production' ? undefined : (line) => console.info(line),
+        log: (message, meta) => console.warn(message, meta ?? {}),
+      })
+    : null;
+  return defaultSender;
+}
+
+export function resetDefaultSmsSenderForTests(): void {
+  defaultSender = undefined;
+}
+
+/** The bare origin of an app link, the form the DLT `{#url#}` samples use. */
+export function smsLink(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
 }

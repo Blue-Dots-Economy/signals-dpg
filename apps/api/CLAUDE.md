@@ -113,15 +113,27 @@ is provider-agnostic and DLT-driven, so it renders nothing on-wire itself:
   of `dispatch_email.ts`: it looks up the case in the index, forwards **only**
   the declared vars (dropping undeclared extras keeps stray PII off the wire),
   and posts `{ channel: 'sms', template_id, to, priority, variables }` to the
-  notification service, which owns the provider (MSG91). A case with no
-  `templateId` is a **no-op skip, not an error**; the sender is best-effort and
-  never throws or blocks the triggering action, and it never logs a raw phone
-  (masked to last 4) or the raw error object (both are PII).
-- Case ids track the item-lifecycle + aggregator-onboarding events (#531/#534):
-  `profile.create` / `offer.create`, `profile.update` / `offer.update`, and
-  `account.aggregator_init` (sent when an aggregator onboards a participant).
-  `renderSmsPreview` substitutes `{{token}}`s in the reference body for the
-  non-prod dev-preview log only.
+  notification service, which owns the provider and renders the DLT text. A
+  case with no `templateId` is a **no-op skip, not an error**, so only an
+  instance whose `sms.properties` maps a case sends it. The sender is
+  best-effort: it never throws or blocks the triggering action, **except** a
+  `critical: true` send (guardian OTP), which rethrows so the ward is not told a
+  code was sent when it was not. It never logs a raw phone (masked to last 4) or
+  the raw error object (both are PII), and critical sends skip the dev-preview
+  log because they carry an OTP. `getDefaultSmsSender()` is the instance
+  sender (null without a notification client); `smsLink()` reduces an app URL
+  to the bare origin the DLT `{#url#}` samples use.
+- Callers: item lifecycle `profile.*` / `offer.*` and aggregator onboarding
+  `account.aggregator_init.<role>` (`notify_item_lifecycle.ts`), `welcome[.role]`
+  on a self-signup's first login (`welcome.ts`; aggregator-onboarded accounts
+  get the onboarding SMS instead), `support.request` (`submit_support.ts`),
+  connection steps `action.connect.<role>.<inbound|outbound>_<request|status>`
+  (`dispatcher.ts`), and guardian OTP `guardian.account` / `guardian.profile` /
+  `guardian.action.<initiate|accept>` (`guardian_otp.ts`, which falls back to
+  the generic OTP template when the scenario has no mapping). Recipient is the
+  owner's **verified** phone, except onboarding (the aggregator-supplied number)
+  and guardian OTP (the guardian's contact). `renderSmsPreview` substitutes
+  `{{token}}`s in the reference body for the non-prod dev-preview log only.
 
 > Note: `SMS_TEMPLATE_ID` (env) is a **separate** knob — the single generic
 > DLT-approved OTP template id (default `login_otp`) used by login and guardian

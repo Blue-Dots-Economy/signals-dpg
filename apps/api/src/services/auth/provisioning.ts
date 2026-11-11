@@ -473,6 +473,7 @@ async function createMirror(
         name: user.name,
         email: identity.email,
         phoneNumber: identity.phoneNumber,
+        phoneNumberVerified: identity.phoneNumberVerified,
       },
       log,
       signupDomain

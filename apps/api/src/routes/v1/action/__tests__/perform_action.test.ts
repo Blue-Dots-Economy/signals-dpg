@@ -720,7 +720,7 @@ describe('POST /api/v1/action/perform — on-behalf-of (bulk)', () => {
     });
 
     it('self-session + minor → guardian-OTP flow unchanged (channel self, GUARDIAN_OTP_REQUIRED, no relay fetch)', async () => {
-      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued' });
+      vi.mocked(guardianActionGate).mockResolvedValueOnce({ status: 'challenge_issued', sentTo: '******7347' });
       vi.mocked(guardianGateFailure).mockReturnValueOnce(
         new BulkItemFailure(
           'GUARDIAN_OTP_REQUIRED',

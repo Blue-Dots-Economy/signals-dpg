@@ -144,21 +144,22 @@ const precreate_issue_handler = async (
   if (!contact) return reply.code(409).send({ error: 'GUARDIAN_REQUIRED', message: 'Submit guardian details first' });
   const parentName = await getGuardianNamePlaintext(userId);
 
+  let sentTo: string;
   try {
-    await issueGuardianOtp({
+    ({ sentTo } = await issueGuardianOtp({
       scope: precreateScope(userId, body.network, body.item_domain),
       contact: contact.contact,
       contactType: contact.contactType,
       scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
-    });
+    }));
   } catch (err) {
     const r = guardianOtpErrorReply(err);
     if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'Failed to issue pre-create profile-consent OTP');
     return reply.code(500).send({ error: 'OTP_SEND_FAILED', message: 'Failed to send guardian OTP' });
   }
-  return reply.code(200).send({ otpSent: true });
+  return reply.code(200).send({ otpSent: true, sent_to: sentTo });
 };
 
 const precreate_verify_handler = async (
@@ -256,21 +257,22 @@ const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
   const contact = await getGuardianContactPlaintext(userId);
   if (!contact) return reply.code(409).send({ error: 'GUARDIAN_REQUIRED', message: 'Submit guardian details first' });
   const parentName = await getGuardianNamePlaintext(userId);
+  let sentTo: string;
   try {
-    await issueGuardianOtp({
+    ({ sentTo } = await issueGuardianOtp({
       scope: profileScope(userId, body.item_id),
       contact: contact.contact,
       contactType: contact.contactType,
       scenario: { kind: 'profile' },
       variables: { ...(parentName ? { parentName } : {}), domain: body.item_domain },
-    });
+    }));
   } catch (err) {
     const r = guardianOtpErrorReply(err);
     if (r) return reply.code(r.status).send({ error: r.error, message: r.message });
     request.log.error({ err }, 'Failed to issue profile-consent OTP');
     return reply.code(500).send({ error: 'OTP_SEND_FAILED', message: 'Failed to send guardian OTP' });
   }
-  return reply.code(200).send({ otpSent: true });
+  return reply.code(200).send({ otpSent: true, sent_to: sentTo });
 };
 
 const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
