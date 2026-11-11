@@ -54,6 +54,12 @@ describe('useMinorBulkBlocked', () => {
     expect(getU18Status).not.toHaveBeenCalled();
   });
 
+  it('does not block before the network has loaded', () => {
+    const { result } = renderHook(() => useMinorBulkBlocked(null, 'seeker'), { wrapper });
+    expect(result.current).toBe(false);
+    expect(getU18Status).not.toHaveBeenCalled();
+  });
+
   it('does not block on a domain without guardian consent', () => {
     const { result } = renderHook(() => useMinorBulkBlocked(network, 'provider'), { wrapper });
     expect(result.current).toBe(false);

@@ -142,6 +142,11 @@ vi.mock('@/components/actions/action-status-updater', () => ({
     return null;
   },
 }));
+const minorBulk = vi.hoisted(() => ({ blocked: false }));
+vi.mock('@/hooks/use-minor-bulk-blocked', () => ({ useMinorBulkBlocked: () => minorBulk.blocked }));
+vi.mock('@/components/actions/minor-bulk-note-dialog', () => ({
+  MinorBulkNoteDialog: (p: { open: boolean }) => (p.open ? <div data-testid="minor-bulk-note" /> : null),
+}));
 const bulkDialog = vi.fn();
 vi.mock('@/components/actions/bulk-status-dialog', () => ({
   BulkStatusDialog: (p: {
@@ -269,6 +274,32 @@ describe('MyActionsPage — revamp', () => {
     const bar = screen.getByRole('region', { name: 'Selection' });
     await userEvent.click(within(bar).getByRole('button', { name: 'Accept (1)' }));
     expect(bulkDialog).toHaveBeenCalledWith(['a1'], 'accepted');
+  });
+
+  it('bulk Accept by a minor with bulk off shows the note instead of the dialog (#917)', async () => {
+    minorBulk.blocked = true;
+    rows = [row('a1'), row('a2')];
+    total = 2;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    const bar = screen.getByRole('region', { name: 'Selection' });
+    await userEvent.click(within(bar).getByRole('button', { name: 'Accept (2)' }));
+    expect(screen.getByTestId('minor-bulk-note')).toBeInTheDocument();
+    expect(bulkDialog).not.toHaveBeenCalled();
+    minorBulk.blocked = false;
+  });
+
+  it('a minor with bulk off can still accept a single request', async () => {
+    minorBulk.blocked = true;
+    rows = [row('a1'), row('a2', { action_status: 'accepted' })];
+    total = 2;
+    renderPage();
+    await userEvent.click(screen.getByRole('button', { name: 'Select page' }));
+    const bar = screen.getByRole('region', { name: 'Selection' });
+    await userEvent.click(within(bar).getByRole('button', { name: 'Accept (1)' }));
+    expect(bulkDialog).toHaveBeenCalledWith(['a1'], 'accepted');
+    expect(screen.queryByTestId('minor-bulk-note')).toBeNull();
+    minorBulk.blocked = false;
   });
 
   it('Export sends one request per counterparty type, only exportable statuses', async () => {

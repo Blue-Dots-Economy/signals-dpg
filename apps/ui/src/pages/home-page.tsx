@@ -113,7 +113,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
 import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
-import { useAuthConfig } from '@/hooks/use-auth-config';
+import { useMinorBulkBlocked } from '@/hooks/use-minor-bulk-blocked';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -1459,14 +1459,8 @@ export function HomePage() {
     [network, currentDomain, myItem]
   );
 
-  const { config: authCfg } = useAuthConfig();
   // Bulk off for minors (#917): say "one at a time" before anything is sent.
-  const minorBulkBlocked =
-    authCfg?.minorBulkActionsEnabled === false &&
-    u18Status?.isMinor === true &&
-    !!network &&
-    !!wardDomain &&
-    isGuardianConsentRequiredDomain(network, wardDomain);
+  const minorBulkBlocked = useMinorBulkBlocked(network, wardDomain);
 
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
