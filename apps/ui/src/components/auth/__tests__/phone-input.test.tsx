@@ -118,5 +118,8 @@ describe('PhoneInput', () => {
     expect(splitPhone('+91987')).toEqual({ code: '+91', national: '987' });
     expect(isAcceptedPhone('+918023456789')).toBe(true);
     expect(isAcceptedPhone('12345')).toBe(false);
+    expect(isAcceptedPhone('+91935350600')).toBe(false);
+    expect(isAcceptedPhone('+9193535060012')).toBe(false);
+    expect(isAcceptedPhone('+447911123456')).toBe(true);
   });
 });

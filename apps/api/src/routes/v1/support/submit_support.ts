@@ -1,4 +1,4 @@
-import z from '@dpg/schemas';
+import z, { isContactPhone } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { eq } from 'drizzle-orm';
@@ -21,7 +21,11 @@ import { incrWithinWindow } from '@/utils/rate_window';
 const SubmitSupportBody = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().email().max(320).optional(),
-  phone: z.string().min(3).max(20).optional(),
+  phone: z
+    .string()
+    .max(20)
+    .refine((v) => v.trim() === '' || isContactPhone(v), 'must be a 10-15 digit phone number')
+    .optional(),
   type: z.enum(['complaint', 'support_request']),
   details: z.string().trim().min(1).max(5000),
   consent: z.literal(true),

@@ -117,10 +117,11 @@ export function joinPhone(code: string, national: string): string {
   return digits ? `${code}${digits}` : '';
 }
 
-/** True for any number the server would take as a contact (10-15 digits, landlines too). */
+/** True for any number accepted as a contact (10-15 digits, landlines too); `+91` needs exactly 10 after the code. */
 export function isAcceptedPhone(value: string): boolean {
   const raw = value.replace(/[\s\-()]/g, '');
-  return /^\+?\d{10,15}$/.test(raw);
+  if (!/^\+?\d{10,15}$/.test(raw)) return false;
+  return !raw.startsWith('+91') || raw.length === 3 + IN_NATIONAL_DIGITS;
 }
 
 export interface PhoneInputProps {

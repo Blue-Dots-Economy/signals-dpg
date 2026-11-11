@@ -6154,7 +6154,7 @@
                   },
                   "phone_number": {
                     "type": "string",
-                    "pattern": "^\\+\\d{10,15}$"
+                    "pattern": "^\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})$"
                   },
                   "name": {
                     "type": "string",
@@ -8741,7 +8741,7 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
                   },
                   "domain": {
                     "type": "string",
@@ -8921,7 +8921,7 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
                   }
                 },
                 "required": [
@@ -9064,7 +9064,6 @@
                   },
                   "phone": {
                     "type": "string",
-                    "minLength": 3,
                     "maxLength": 20
                   },
                   "type": {
