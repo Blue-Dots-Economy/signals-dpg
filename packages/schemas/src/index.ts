@@ -57,4 +57,5 @@ export {
   type LocationPoint,
 } from './location_fields';
 export * from './u18_consent';
+export * from './geo/resolve';
 export default z;

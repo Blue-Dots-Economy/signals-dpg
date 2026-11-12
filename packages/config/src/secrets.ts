@@ -396,6 +396,11 @@ export const GeocodingSecretsSchema = z
     // GEO_RETRY_BACKOFF_MS is the fixed pause between tries.
     GEO_RETRY_ATTEMPTS: z.coerce.number().int().min(1).default(2),
     GEO_RETRY_BACKOFF_MS: z.coerce.number().int().min(0).default(300),
+    // Text-address resolve endpoint: per-provider-call timeout, live provider
+    // calls allowed per UTC day, and the service clients allowed to call it.
+    GEO_RESOLVE_TIMEOUT_MS: z.coerce.number().int().min(1).default(1500),
+    GEO_RESOLVE_DAILY_CAP: z.coerce.number().int().min(1).default(5000),
+    GEO_RESOLVE_CLIENT_IDS: z.string().default('signals-search-client'),
   })
   .refine((c) => c.PII_LOCATION_JITTER_MIN_METERS <= c.PII_LOCATION_JITTER_MAX_METERS, {
     message: 'PII_LOCATION_JITTER_MIN_METERS must be <= PII_LOCATION_JITTER_MAX_METERS',

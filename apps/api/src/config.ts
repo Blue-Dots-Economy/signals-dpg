@@ -183,6 +183,9 @@ export const geocodingConfig = {
   cache_negative_ttl_seconds: geocoding.GEO_CACHE_NEGATIVE_TTL_SECONDS,
   retry_attempts: geocoding.GEO_RETRY_ATTEMPTS,
   retry_backoff_ms: geocoding.GEO_RETRY_BACKOFF_MS,
+  resolve_timeout_ms: geocoding.GEO_RESOLVE_TIMEOUT_MS,
+  resolve_daily_cap: geocoding.GEO_RESOLVE_DAILY_CAP,
+  resolve_client_ids: parseKeycloakAcceptedClientIds(geocoding.GEO_RESOLVE_CLIENT_IDS),
 };
 
 export const matchScoreConfig = {
