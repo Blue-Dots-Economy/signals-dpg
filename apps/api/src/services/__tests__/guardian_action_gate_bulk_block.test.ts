@@ -92,11 +92,13 @@ describe('guardianBulkActionGate with MINOR_BULK_ACTIONS_ENABLED=false (#917)', 
     expect(verifyGuardianOtp).not.toHaveBeenCalled();
   });
 
-  it('still issues the OTP when only one gated row is in the batch', async () => {
-    setting.enabled = false;
-    const map = await guardianBulkActionGate({ items: [row(0)] });
-    expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******0000' });
-    expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
+  it('leaves a lone gated row to the per-action gate', async () => {
+    for (const enabled of [false, true]) {
+      setting.enabled = enabled;
+      const map = await guardianBulkActionGate({ items: [row(0)] });
+      expect(map.size).toBe(0);
+    }
+    expect(issueGuardianOtp).not.toHaveBeenCalled();
   });
 
   it('keeps the one-OTP batch when the guardian is on email', async () => {

@@ -260,11 +260,17 @@ describe('guardianBulkActionGate — batch scope (#393)', () => {
     getWardAge.mockResolvedValue(11);
     issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
-    await guardianBulkActionGate({ items: [bulkItem({ index: 0, targetItemId: 'tgt-a' })] });
     await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, targetItemId: 'tgt-a' }),
         bulkItem({ index: 1, targetItemId: 'tgt-b' }),
+      ],
+    });
+    await guardianBulkActionGate({
+      items: [
+        bulkItem({ index: 0, targetItemId: 'tgt-a' }),
+        bulkItem({ index: 1, targetItemId: 'tgt-b' }),
+        bulkItem({ index: 2, targetItemId: 'tgt-c' }),
       ],
     });
 
@@ -284,15 +290,18 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
         bulkItem({ index: 0, wardUserId: 'ward-1', targetItemId: 'tgt-a' }),
         bulkItem({ index: 1, wardUserId: 'ward-2', targetItemId: 'tgt-b' }),
         bulkItem({ index: 2, wardUserId: 'ward-1', network: 'yellow_dot', targetItemId: 'tgt-c' }),
+        bulkItem({ index: 3, wardUserId: 'ward-1', targetItemId: 'tgt-d' }),
+        bulkItem({ index: 4, wardUserId: 'ward-2', targetItemId: 'tgt-e' }),
+        bulkItem({ index: 5, wardUserId: 'ward-1', network: 'yellow_dot', targetItemId: 'tgt-f' }),
       ],
     });
 
     expect(issueGuardianOtp).toHaveBeenCalledTimes(3);
     const scopes = issueGuardianOtp.mock.calls.map((c) => c[0].scope);
-    expect(scopes).toContain(expectedBulkScope('ward-1', 'blue_dot', ['apply|src|tgt-a']));
-    expect(scopes).toContain(expectedBulkScope('ward-2', 'blue_dot', ['apply|src|tgt-b']));
-    expect(scopes).toContain(expectedBulkScope('ward-1', 'yellow_dot', ['apply|src|tgt-c']));
-    expect([...map.keys()].sort()).toEqual([0, 1, 2]);
+    expect(scopes).toContain(expectedBulkScope('ward-1', 'blue_dot', ['apply|src|tgt-a', 'apply|src|tgt-d']));
+    expect(scopes).toContain(expectedBulkScope('ward-2', 'blue_dot', ['apply|src|tgt-b', 'apply|src|tgt-e']));
+    expect(scopes).toContain(expectedBulkScope('ward-1', 'yellow_dot', ['apply|src|tgt-c', 'apply|src|tgt-f']));
+    expect([...map.keys()].sort()).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   it('resolves the network config once per network and the age once per ward', async () => {
@@ -334,10 +343,12 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
         bulkItem({ index: 0, wardUserId: 'minor' }),
         bulkItem({ index: 1, wardUserId: 'adult' }),
         bulkItem({ index: 2, wardUserId: 'unknown' }),
+        bulkItem({ index: 3, wardUserId: 'minor', targetItemId: 'tgt-2' }),
       ],
     });
 
     expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
+    expect(map.get(3)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
     expect(map.has(1)).toBe(false);
     expect(map.has(2)).toBe(false);
     expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
@@ -369,7 +380,12 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
     getWardAge.mockResolvedValue(11);
     issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
-    await guardianBulkActionGate({ items: [bulkItem({ index: 0, network: 'yellow_dot' })] });
+    await guardianBulkActionGate({
+      items: [
+        bulkItem({ index: 0, network: 'yellow_dot' }),
+        bulkItem({ index: 1, network: 'yellow_dot', targetItemId: 'tgt-2' }),
+      ],
+    });
 
     expect(issueGuardianOtp.mock.calls[0][0].scenario).toMatchObject({
       kind: 'action_bulk',
@@ -405,6 +421,8 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
     });
 
@@ -424,6 +442,8 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
     });
 
@@ -435,7 +455,8 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     getWardAge.mockResolvedValue(11);
     issueGuardianOtp.mockRejectedValue(new Error('notifier exploded'));
 
-    await expect(guardianBulkActionGate({ items: [bulkItem({ index: 0 })] })).rejects.toThrow(
+    const items = [bulkItem({ index: 0 }), bulkItem({ index: 1, targetItemId: 'tgt-2' })];
+    await expect(guardianBulkActionGate({ items })).rejects.toThrow(
       'notifier exploded',
     );
   });
@@ -453,6 +474,8 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
       otp: '123456',
     });
@@ -468,7 +491,10 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     assertVerifyAttemptAllowed.mockRejectedValue(new GuardianOtpError('RATE_LIMITED'));
 
     await expect(
-      guardianBulkActionGate({ items: [bulkItem({ index: 0 })], otp: '123456' }),
+      guardianBulkActionGate({
+        items: [bulkItem({ index: 0 }), bulkItem({ index: 1, targetItemId: 'tgt-2' })],
+        otp: '123456',
+      }),
     ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
     expect(verifyGuardianOtp).not.toHaveBeenCalled();
   });
