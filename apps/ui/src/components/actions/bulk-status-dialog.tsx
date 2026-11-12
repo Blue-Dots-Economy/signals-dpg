@@ -7,7 +7,10 @@ import {
   type Action,
   type UpdateActionStatusPayload,
 } from '@/lib/action-api';
-import { BulkSingleError, firstBulkError } from '@/lib/bulk';
+import { BulkSingleError, bulkErrorMessages } from '@/lib/bulk';
+
+/** Distinct failure reasons a partial bulk result lists. */
+const MAX_REASONS_SHOWN = 3;
 import { apiErrorMessage, isReadableServerMessage } from '@/lib/api-error';
 import { useAuth } from '@/contexts/auth-context';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
@@ -117,7 +120,8 @@ export function BulkStatusDialog({
 
   const handleConfirm = async () => {
     setAttempted(true);
-    if (!networkConfig) return;
+    // Only accepting needs the network config: it says whether consent is asked.
+    if (!networkConfig && targetStatus === 'accepted') return;
     if (requiresConsent && !consentChecked) {
       document.getElementById('consent-acknowledge')?.focus();
       return;
@@ -170,16 +174,17 @@ export function BulkStatusDialog({
       const failedIds = ids.filter((_, i) =>
         failedResults.some((r) => r.index === i),
       );
-      const reason = firstBulkError(env) ?? undefined;
+      const reasons = bulkErrorMessages(env, MAX_REASONS_SHOWN).filter(isReadableServerMessage);
       toast.warning(
         t('actions.bulk_done_partial', {
           succeeded: env.summary.succeeded,
           total: env.summary.total,
         }),
         {
-          description: isReadableServerMessage(reason)
-            ? t('actions.bulk_first_error', 'First error: {{message}}', { message: reason })
-            : t('actions.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.'),
+          description:
+            reasons.length > 0
+              ? t('actions.bulk_failed_reasons', 'Why some failed: {{reasons}}', { reasons: reasons.join('; ') })
+              : t('actions.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.'),
         },
       );
       onOpenChange(false);
@@ -192,7 +197,12 @@ export function BulkStatusDialog({
   };
 
   const confirmDisabled = isPending || actions.length === 0;
-  const configMessage = updaterConfigMessage(attempted, Boolean(networkConfig), networkConfigFailed, t);
+  const configMessage = updaterConfigMessage(
+    attempted && targetStatus === 'accepted',
+    Boolean(networkConfig),
+    networkConfigFailed,
+    t,
+  );
 
   // The guardian code resubmits the stashed payloads via
   // updateActionStatusBulk.

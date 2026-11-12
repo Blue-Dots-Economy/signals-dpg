@@ -6,6 +6,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import {
   PhoneInput,
   isAcceptedPhone,
+  isIndianPhonePattern,
   isPhoneFieldName,
   joinPhone,
   nationalFromInput,
@@ -95,23 +96,36 @@ describe('PhoneInput', () => {
     expect(phoneValueMode('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$')).toBe('international');
   });
 
-  it('blue_dot phone rule rejects a short +91 number instead of reading it as another country', () => {
+  it('blue_dot phone rules: a seeker phone is a mobile, a hiring-manager phone may be a landline', () => {
     const network = JSON.parse(
       readFileSync(resolve(__dirname, '../../../../../../examples/schemas/blue_dot/network.json'), 'utf8'),
     );
-    const patterns = new Set<string>();
-    JSON.stringify(network, (key, value) => {
-      if (key === 'pattern' && typeof value === 'string' && value.includes('+91')) patterns.add(value);
-      return value;
-    });
-    expect(patterns.size).toBe(1);
-    const re = new RegExp([...patterns][0]!);
+    const patternOf = (field: string): RegExp => {
+      let found: string | undefined;
+      JSON.stringify(network, (key, value) => {
+        if (key === field && typeof value?.pattern === 'string') found = value.pattern;
+        return value;
+      });
+      expect(found).toBeDefined();
+      return new RegExp(found!);
+    };
+    const mobile = patternOf('phone');
     for (const ok of ['+919353500020', '9353500020', '+447911123456', '+12025550123', '+971501234567']) {
-      expect(re.test(ok)).toBe(true);
+      expect(mobile.test(ok)).toBe(true);
     }
-    for (const bad of ['+91935350002', '+915353500020', '935350002', '+9193535000201']) {
-      expect(re.test(bad)).toBe(false);
+    for (const bad of ['+91935350002', '+915353500020', '935350002', '+9193535000201', '+911123456789']) {
+      expect(mobile.test(bad)).toBe(false);
     }
+    const contact = patternOf('hiringManagerPhoneNumber');
+    for (const ok of ['+911123456789', '01123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
+    for (const bad of ['+91935350002', '12345']) expect(contact.test(bad)).toBe(false);
+  });
+
+  it('gives the +91 box only to fields whose pattern accepts an Indian mobile', () => {
+    expect(isIndianPhonePattern('^[0-9]{10}$')).toBe(true);
+    expect(isIndianPhonePattern(undefined)).toBe(false);
+    expect(isIndianPhonePattern('^[A-Z]{3}$')).toBe(false);
+    expect(splitPhone('09876543210')).toEqual({ code: '+91', national: '9876543210' });
   });
 
   it('keeps +91 for a partial value and accepts landlines as contact numbers', () => {

@@ -67,6 +67,15 @@ export function GuardianOtpStep({
             "This instance isn't fully configured for guardian confirmation yet. Please contact support.",
           ),
         });
+      } else if (code === 'NO_PENDING_SIGNUP') {
+        // The pending sign-up behind the code has expired; only a new code helps.
+        setInlineError({
+          title: t('u18.otp_error_expired_title', 'Code expired'),
+          description: t(
+            'u18.otp_error_expired_desc',
+            'This code has expired. Tap "Resend code" to send a new one to your guardian.',
+          ),
+        });
       } else if (code === 'INVALID_OTP') {
         setInlineError({
           title: t('u18.otp_error_invalid_title', 'Incorrect code'),

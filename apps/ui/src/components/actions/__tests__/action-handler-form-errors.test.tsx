@@ -38,10 +38,10 @@ const schemaWithForm = {
   } as RJSFSchema,
 } as unknown as DotActionSchema;
 
-async function renderHandler(onActionSubmit: () => Promise<void>) {
+async function renderHandler(onActionSubmit: () => Promise<void>, guardianConfirmRequired = false) {
   const { ActionHandler } = await import('../action-handler');
   render(
-    <ActionHandler onActionSubmit={onActionSubmit}>
+    <ActionHandler onActionSubmit={onActionSubmit} guardianConfirmRequired={guardianConfirmRequired}>
       {(trigger) => <button onClick={() => trigger('connect', schemaWithForm, 'target-1')}>Open</button>}
     </ActionHandler>,
   );
@@ -86,5 +86,33 @@ describe('ActionHandler requirement form errors', () => {
     await userEvent.type(screen.getByLabelText(/Note/), 'Hi');
     await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Confirm' })).toBeNull());
+  });
+
+  it('shows a server rejection under the field it names, with no toast, and keeps the input', async () => {
+    const { BulkSingleError } = await import('@/lib/bulk');
+    const onActionSubmit = vi.fn(async () => {
+      throw new BulkSingleError('INVALID_ACTION_REQUEST', 'Invalid action requirements: note: too short', 422, {
+        note: 'Please write at least 10 characters.',
+      });
+    });
+    await renderHandler(onActionSubmit);
+    await userEvent.type(screen.getByLabelText(/Note/), 'Hi');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    // Shown once, under the field.
+    expect(await screen.findAllByText(/Please write at least 10 characters/)).toHaveLength(1);
+    expect(mocks.toast.error).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/Note/)).toHaveValue('Hi');
+  });
+
+  it("keeps what was typed when a minor's guardian confirmation is cancelled", async () => {
+    const onActionSubmit = vi.fn(async () => {});
+    await renderHandler(onActionSubmit, true);
+    await userEvent.type(screen.getByLabelText(/Note/), 'Hello there');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    expect(onActionSubmit).not.toHaveBeenCalled();
+    expect(await screen.findByLabelText(/Note/)).toHaveValue('Hello there');
   });
 });

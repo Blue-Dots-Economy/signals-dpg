@@ -156,7 +156,8 @@ export function ActionStatusUpdater({
     setAttempted(true);
     // Without the config we cannot tell whether consent is required; the
     // message under the buttons says so.
-    if (!networkConfig) return;
+    // Only accepting needs the network config: it says whether consent is asked.
+    if (!networkConfig && targetStatus === 'accepted') return;
     if (requiresConsent && !consentChecked) {
       document.getElementById('consent-acknowledge')?.focus();
       return;
@@ -249,7 +250,12 @@ export function ActionStatusUpdater({
     />
   );
 
-  const configMessage = updaterConfigMessage(attempted, Boolean(networkConfig), networkConfigFailed, t);
+  const configMessage = updaterConfigMessage(
+    attempted && targetStatus === 'accepted',
+    Boolean(networkConfig),
+    networkConfigFailed,
+    t,
+  );
 
   const footer = (
     <div className="space-y-2">

@@ -1736,6 +1736,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -1863,6 +1869,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2021,6 +2033,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2148,6 +2166,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2298,6 +2322,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2448,6 +2478,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2567,6 +2603,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [
@@ -2709,6 +2751,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               }
                             },
                             "required": [

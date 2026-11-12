@@ -14,10 +14,14 @@ export interface ApiErrorInfo {
   fields?: Record<string, string>;
   /** True when the server was never reached (offline, DNS, CORS, timeout). */
   network: boolean;
+  /** The API's `x-request-id`, quoted to support for a server fault. */
+  requestId?: string;
 }
 
 export function readApiError(err: unknown): ApiErrorInfo {
-  const response = (err as { response?: { status?: number; data?: unknown } } | null)?.response;
+  const response = (
+    err as { response?: { status?: number; data?: unknown; headers?: Record<string, unknown> } } | null
+  )?.response;
   if (!response) {
     // A cancelled request (closed dialog, aborted query) is not a connection problem.
     const cancelled = axios.isCancel(err) || (axios.isAxiosError(err) && err.code === 'ERR_CANCELED');
@@ -49,6 +53,9 @@ export function readApiError(err: unknown): ApiErrorInfo {
     message: typeof data.message === 'string' ? data.message : undefined,
     fields,
     network: false,
+    ...(typeof response.headers?.['x-request-id'] === 'string'
+      ? { requestId: response.headers['x-request-id'] }
+      : {}),
   };
 }
 
@@ -88,6 +95,12 @@ export function apiErrorMessage(err: unknown, t: TFunction, fallback?: string): 
   }
   if (status === 403) return t('errors.forbidden', "You don't have permission to do this.");
   if (status === 429) return t('errors.rate_limited', 'Too many attempts. Please wait a moment and try again.');
-  if (status >= 500) return t('errors.server', 'Something went wrong on our side. Please try again in a moment.');
+  if (status >= 500) {
+    const server = t('errors.server', 'Something went wrong on our side. Please try again in a moment.');
+    // A server fault names its request, so support can find it.
+    return info.requestId
+      ? `${server} ${t('errors.reference', 'Reference: {{id}}', { id: info.requestId })}`
+      : server;
+  }
   return isReadableServerMessage(info.message) ? info.message : generic;
 }

@@ -43,6 +43,7 @@ const emptyEnvelope: BulkEnvelope<UpdateActionStatusResponse> = {
 const mocks = vi.hoisted(() => ({
   isMobile: { value: false },
   networkConfig: { value: null as DotNetworkSchema | null },
+  networkConfigFailed: { value: false },
   consentConfig: { value: null as ConsentConfigDocument | null },
   statusPending: { value: false },
   bulkPending: { value: false },
@@ -93,7 +94,7 @@ vi.mock('@/hooks/use-network-config', () => ({
   useNetworkConfig: () => ({
     data: mocks.networkConfig.value,
     isLoading: false,
-    isError: false,
+    isError: mocks.networkConfigFailed.value,
     error: null,
   }),
 }));
@@ -285,6 +286,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.isMobile.value = false;
   mocks.networkConfig.value = makeNetworkConfig();
+  mocks.networkConfigFailed.value = false;
   mocks.consentConfig.value = consentConfig;
   mocks.statusPending.value = false;
   mocks.bulkPending.value = false;
@@ -1108,6 +1110,46 @@ describe('BulkStatusDialog', () => {
     makeAction({ action_id: 'act-2', source_item_domain: 'provider' }),
   ];
 
+  it('still rejects when the network config failed to load, since only accepting needs it', async () => {
+    const user = userEvent.setup();
+    mocks.networkConfig.value = null;
+    mocks.networkConfigFailed.value = true;
+    mocks.bulkMutateAsync.mockResolvedValue(successEnvelope(2));
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="rejected" onSettled={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(mocks.bulkMutateAsync).toHaveBeenCalled());
+  });
+
+  it('keeps Confirm enabled and says why when accepting needs the config that failed to load', async () => {
+    const user = userEvent.setup();
+    mocks.networkConfig.value = null;
+    mocks.networkConfigFailed.value = true;
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="accepted" onSettled={vi.fn()} />);
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+    expect(await screen.findByText(/Couldn't load the details for this request/)).toBeInTheDocument();
+    expect(mocks.bulkMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('lists each distinct reason when several requests fail', async () => {
+    const user = userEvent.setup();
+    mocks.bulkMutateAsync.mockResolvedValue({
+      results: [
+        { index: 0, status: 'error', error: 'INVALID_STATUS_TRANSITION', message: 'already final' },
+        { index: 1, status: 'error', error: 'NOT_FOUND', message: 'request was withdrawn' },
+      ],
+      summary: { total: 2, succeeded: 0, failed: 2 },
+    });
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="rejected" onSettled={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(expect.any(String), {
+        description: 'Why some failed: already final; request was withdrawn',
+      }),
+    );
+  });
+
   it('rejects a batch with one shared reason, toasts the total and closes', async () => {
     const user = userEvent.setup();
     const onSettled = vi.fn((_s: number, _t: number, _f: string[]) => {});
@@ -1170,7 +1212,7 @@ describe('BulkStatusDialog', () => {
 
     await waitFor(() =>
       expect(mocks.toast.warning).toHaveBeenCalledWith('Updated 1 of 2', {
-        description: 'First error: already final',
+        description: 'Why some failed: already final',
       }),
     );
     expect(onSettled).toHaveBeenCalledWith(1, 2, ['act-2']);

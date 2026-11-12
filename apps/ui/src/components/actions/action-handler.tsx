@@ -5,7 +5,7 @@ import { ActionModal } from './action-modal';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { ActionAbortedError } from '@/lib/action-abort';
-import { apiErrorMessage } from '@/lib/api-error';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import type { TFunction } from 'i18next';
 import { toast } from 'sonner';
@@ -81,10 +81,13 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
   // is up it is hidden and reopened with `draft` on cancel or failure.
   const [modalHidden, setModalHidden] = React.useState(false);
   const [draft, setDraft] = React.useState<Record<string, unknown> | undefined>();
+  // The server's per-field messages for the open form, from its last failed submit.
+  const [serverErrors, setServerErrors] = React.useState<Record<string, string> | undefined>();
   const closeModal = React.useCallback(() => {
     setActiveAction(null);
     setModalHidden(false);
     setDraft(undefined);
+    setServerErrors(undefined);
   }, []);
   // An action that returns GUARDIAN_OTP_REQUIRED is stashed and replayed with
   // the guardian's code.
@@ -138,9 +141,16 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     targetItemId: string,
   ): Promise<'ok' | 'guardian' | 'error'> => {
     setLoading(true);
+    setServerErrors(undefined);
     try {
       return (await submitWithGuardianGate(type, schema, formData, targetItemId)) ? 'ok' : 'guardian';
     } catch (err) {
+      // A rejection that names the form's fields is shown on them, not in a toast.
+      const { fields } = readApiError(err);
+      if (fields && Object.keys(fields).length > 0 && schema.requirement_schema) {
+        setServerErrors(fields);
+        return 'error';
+      }
       showActionError(err, t);
       return 'error';
     } finally {
@@ -192,6 +202,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
           onSubmit={handleModalSubmit}
           loading={loading}
           minor={guardianConfirmRequired}
+          {...(serverErrors ? { serverErrors } : {})}
         />
       )}
       <GuardianOtpDialog

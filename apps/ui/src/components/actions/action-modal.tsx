@@ -40,6 +40,8 @@ interface ActionModalProps {
    * Confirm.
    */
   minor?: boolean;
+  /** The server's per-field messages from the last failed submit. */
+  serverErrors?: Record<string, string>;
 }
 
 const ACTION_FORM_ID = 'action-requirement-form';
@@ -63,6 +65,7 @@ export function ActionModal({
   loading = false,
   initialData,
   minor = false,
+  serverErrors,
 }: ActionModalProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -147,6 +150,7 @@ export function ActionModal({
           hideSubmit
           disabled={loading}
           onSubmit={handleSubmit}
+          {...(serverErrors ? { serverErrors } : {})}
         />
       ) : (
         <p className="text-muted-foreground text-sm">{t('actions.modal_no_form')}</p>

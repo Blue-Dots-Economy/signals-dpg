@@ -10,11 +10,12 @@ import type {
   RJSFValidationError,
   ErrorSchema,
   BaseInputTemplateProps,
+  FieldErrorProps,
 } from '@rjsf/utils';
 import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { PhoneWidget } from './custom-widgets/phone-widget';
-import { isPhoneFieldName } from '@/components/auth/phone-input';
+import { isIndianPhonePattern, isPhoneFieldName } from '@/components/auth/phone-input';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
@@ -287,7 +288,7 @@ function generateUiSchema(
       uiSchema[key] = { 'ui:widget': 'date' };
     }
 
-    if (typed.type === 'string' && isPhoneFieldName(key)) {
+    if (typed.type === 'string' && isPhoneFieldName(key) && isIndianPhonePattern(typed.pattern)) {
       uiSchema[key] = { 'ui:widget': 'phone' };
     }
 
@@ -511,6 +512,21 @@ export function getSchemaFormValidity(
   return { valid: errors.length === 0, missingRequired, invalidValues };
 }
 
+/**
+ * The field's messages, each once: RJSF merges server messages into its own
+ * errors again after a re-check, which would list the same message twice.
+ */
+function UniqueFieldErrorTemplate(props: FieldErrorProps) {
+  const seen = new Set<string>();
+  const errors = (props.errors ?? []).filter((e) => {
+    if (typeof e !== 'string') return true;
+    if (seen.has(e)) return false;
+    seen.add(e);
+    return true;
+  });
+  const Shadcn = ShadcnTemplates.FieldErrorTemplate;
+  return Shadcn ? <Shadcn {...props} errors={errors} /> : null;
+}
 
 
 export function SchemaForm({
@@ -728,6 +744,7 @@ export function SchemaForm({
 
   const templates = {
     FieldTemplate: CustomFieldTemplate,
+    FieldErrorTemplate: UniqueFieldErrorTemplate,
     BaseInputTemplate,
     ...(activeLayout
       ? { ObjectFieldTemplate: SectionedObjectFieldTemplate(activeLayout, sectionHeadingLevel) }

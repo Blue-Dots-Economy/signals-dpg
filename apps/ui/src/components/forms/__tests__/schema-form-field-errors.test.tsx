@@ -210,7 +210,7 @@ describe('SchemaForm server field errors', () => {
     expect(await screen.findByText(INVALID)).toBeInTheDocument();
     const mobile = screen.getByLabelText(/Mobile/);
     expect(mobile).toHaveAttribute('aria-invalid', 'true');
-    await user.type(mobile, '1');
+    await user.type(mobile, '{backspace}');
     await waitFor(() => expect(screen.queryByText(INVALID)).toBeNull());
   });
 });

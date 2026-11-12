@@ -48,6 +48,21 @@ export function isPhoneFieldName(name: string): boolean {
 }
 
 /**
+ * True when a schema `pattern` accepts an Indian mobile, with or without +91.
+ * Only such fields get the +91 phone box; a phone-named field with no pattern
+ * stays a plain text box, so a foreign number is never rewritten as +91.
+ */
+export function isIndianPhonePattern(pattern: unknown): boolean {
+  if (typeof pattern !== 'string') return false;
+  try {
+    const re = new RegExp(pattern);
+    return re.test('+919876543210') || re.test('9876543210');
+  } catch {
+    return false;
+  }
+}
+
+/**
  * How a phone field stores its value, read from its schema `pattern`: with the
  * country code (`+91…`), or as the bare number when the pattern only accepts that.
  */
@@ -78,6 +93,10 @@ export function splitPhone(value: string | null | undefined): { code: string; na
     // `919876543210` is the +91 number without its plus.
     if (digits.length === 2 + IN_NATIONAL_DIGITS && digits.startsWith('91')) {
       return { code: IN_DIAL_CODE, national: digits.slice(2) };
+    }
+    // `09876543210` carries the trunk 0.
+    if (digits.length === 1 + IN_NATIONAL_DIGITS && digits.startsWith('0')) {
+      return { code: IN_DIAL_CODE, national: digits.slice(1) };
     }
     return { code: IN_DIAL_CODE, national: digits };
   }

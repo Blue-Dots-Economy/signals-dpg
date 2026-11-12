@@ -4,6 +4,7 @@ import z, {
   PerformActionBodySchema,
   projectPrivateStateForSchema,
   validateAgainstJsonSchema,
+  JsonSchemaValidationError,
   BulkPerformActionResponseSchema,
   BulkRequestErrorSchema,
 } from '@dpg/schemas';
@@ -292,6 +293,7 @@ async function runPerformActions(
         throw new BulkItemFailure(
           'INVALID_ACTION_REQUEST',
           err instanceof Error ? err.message : 'Invalid action request',
+          err instanceof JsonSchemaValidationError ? err.fields : undefined,
         );
       }
 
