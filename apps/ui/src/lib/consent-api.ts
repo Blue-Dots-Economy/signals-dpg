@@ -157,6 +157,8 @@ export interface U18StatusResponse {
   isMinor: boolean;
   /** A guardian has already been OTP-verified for this user. */
   guardianVerified: boolean;
+  /** How the guardian gets OTPs; null before a guardian is on file. Absent on older APIs. */
+  guardianContactType?: 'phone' | 'email' | null;
 }
 
 /**
