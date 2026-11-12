@@ -1,5 +1,5 @@
 import { bulkFailureIndices, firstBulkError, type BulkEnvelope } from './bulk';
-import { guardianOtpErrorOf, type PerformActionPayload } from './action-api';
+import { guardianOtpErrorOf, MINOR_BULK_ACTION_BLOCKED, type PerformActionPayload } from './action-api';
 
 /**
  * What a completed bulk action means, as one value.
@@ -16,7 +16,8 @@ import { guardianOtpErrorOf, type PerformActionPayload } from './action-api';
  */
 export type BulkOutcome =
   | { kind: 'all'; succeeded: number }
-  | { kind: 'guardian'; payloads: PerformActionPayload[]; otherFailedIds?: string[] }
+  | { kind: 'guardian'; payloads: PerformActionPayload[]; otherFailedIds?: string[]; sentTo?: string }
+  | { kind: 'minor_bulk_blocked'; failedIds: string[] }
   | {
       kind: 'partial';
       failedIds: string[];
@@ -43,6 +44,10 @@ export function resolveBulkOutcome<T>(
   if (env.summary.failed === 0) return { kind: 'all', succeeded: env.summary.succeeded };
 
   const failedResults = env.results.filter((r) => r.status === 'error');
+  // No OTP was sent for a blocked batch, so this outranks the guardian case.
+  if (failedResults.some((r) => (r as { error?: string }).error === MINOR_BULK_ACTION_BLOCKED)) {
+    return { kind: 'minor_bulk_blocked', failedIds: failedResults.map((r) => targets[r.index].item_id) };
+  }
   const guardianResults = failedResults.filter(
     (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
   );
@@ -51,10 +56,12 @@ export function resolveBulkOutcome<T>(
     const otherFailedIds = failedResults
       .filter((r) => guardianOtpErrorOf(r) !== 'GUARDIAN_OTP_REQUIRED')
       .map((r) => targets[r.index].item_id);
+    const sentTo = (guardianResults[0] as { sent_to?: string }).sent_to;
     return {
       kind: 'guardian',
       payloads: guardianResults.map((r) => payloads[r.index]),
       otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+      ...(sentTo ? { sentTo } : {}),
     };
   }
 

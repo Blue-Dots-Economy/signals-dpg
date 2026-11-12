@@ -14,6 +14,8 @@ interface BulkItemError {
   status: 'error';
   error: string;
   message: string;
+  /** Masked guardian contact, on GUARDIAN_OTP_REQUIRED. */
+  sent_to?: string;
 }
 type BulkResult<T> = ({ index: number; status: 'success' } & T) | BulkItemError;
 
@@ -33,12 +35,12 @@ export class BulkSingleError extends Error {
   // `response.status` is the HTTP response status (e.g. 422 for an all-fail
   // single-item bulk call), which is why callers' `status === 401` checks
   // correctly never match a per-item bulk failure.
-  response: { status?: number; data: { error: string; message: string } };
-  constructor(code: string, message: string, status?: number) {
+  response: { status?: number; data: { error: string; message: string; sent_to?: string } };
+  constructor(code: string, message: string, status?: number, sentTo?: string) {
     super(message);
     this.name = 'BulkSingleError';
     this.code = code;
-    this.response = { status, data: { error: code, message } };
+    this.response = { status, data: { error: code, message, ...(sentTo ? { sent_to: sentTo } : {}) } };
   }
 }
 
@@ -49,6 +51,7 @@ function envelopeToResult<T extends object>(env: BulkEnvelope<NoStatusField<T>>,
       first?.error ?? 'UNKNOWN',
       first?.message ?? 'Request failed',
       status,
+      first?.sent_to,
     );
   }
   // strip envelope-only fields (`index`, `status`), return the caller's response shape

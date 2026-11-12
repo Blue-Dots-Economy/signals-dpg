@@ -1616,6 +1616,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -1742,6 +1745,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -1901,6 +1907,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -2027,6 +2036,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2177,6 +2189,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2328,6 +2343,9 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "sent_to": {
+                                "type": "string"
                               }
                             },
                             "required": [
@@ -2446,6 +2464,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -2588,6 +2609,9 @@
                                 "minLength": 1
                               },
                               "message": {
+                                "type": "string"
+                              },
+                              "sent_to": {
                                 "type": "string"
                               }
                             },
@@ -7371,12 +7395,21 @@
                     },
                     "guardianVerified": {
                       "type": "boolean"
+                    },
+                    "guardianContactType": {
+                      "nullable": true,
+                      "type": "string",
+                      "enum": [
+                        "phone",
+                        "email"
+                      ]
                     }
                   },
                   "required": [
                     "hasBirthData",
                     "isMinor",
-                    "guardianVerified"
+                    "guardianVerified",
+                    "guardianContactType"
                   ],
                   "additionalProperties": false
                 }
@@ -7574,6 +7607,9 @@
                   "properties": {
                     "otpSent": {
                       "type": "boolean"
+                    },
+                    "sent_to": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -7709,6 +7745,9 @@
                   "properties": {
                     "otpSent": {
                       "type": "boolean"
+                    },
+                    "sent_to": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -8058,13 +8097,17 @@
                         "clientId"
                       ],
                       "additionalProperties": false
+                    },
+                    "minorBulkActionsEnabled": {
+                      "type": "boolean"
                     }
                   },
                   "required": [
                     "selfSignupAllowed",
                     "loginChannels",
                     "authProvider",
-                    "keycloak"
+                    "keycloak",
+                    "minorBulkActionsEnabled"
                   ],
                   "additionalProperties": false
                 }

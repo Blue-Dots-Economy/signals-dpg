@@ -2,13 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the dispatcher's external deps so we exercise its own logic (config gate,
 // owner lookup, case selection, variable build, dispatchEmail call) in isolation.
-const { dispatchEmail, resolveNotifierConfig, resolveNetworkBrandName, resolveOwnerNameEmail } =
+const { dispatchEmail, dispatchSms, resolveNotifierConfig, resolveNetworkBrandName, resolveOwnerNameEmail } =
   vi.hoisted(() => ({
     dispatchEmail: vi.fn().mockResolvedValue({ ok: true }),
+    dispatchSms: vi.fn().mockResolvedValue({ ok: true }),
     resolveNotifierConfig: vi.fn(),
     resolveNetworkBrandName: vi.fn().mockResolvedValue('Blue Dot'),
     resolveOwnerNameEmail: vi.fn(),
   }));
+
+vi.mock('../sms/dispatch_sms', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../sms/dispatch_sms')>()),
+  getDefaultSmsSender: () => ({ dispatchSms }),
+}));
 
 vi.mock('../notify_actions', () => ({
   resolveNotifierConfig: () => resolveNotifierConfig(),
@@ -181,5 +187,101 @@ describe('dispatchItemLifecycleNotification', () => {
 
     expect(dispatchEmail).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('dispatchItemLifecycleNotification — SMS', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveNetworkBrandName.mockResolvedValue('Purple Dot');
+  });
+
+  it('texts a phone-only owner, with the portal origin as the link', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: null, phone: '+919000000001', phoneVerified: true });
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: 'u1', domain: 'seeker', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms).toHaveBeenCalledWith({
+      caseId: 'profile.create',
+      to: '+919000000001',
+      network: 'purple_dot',
+      variables: { url: 'https://seeker.example.org' },
+    });
+    expect(dispatchEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends both the email and the SMS when the owner has both', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com', phone: '+919000000001', phoneVerified: true });
+    await dispatchItemLifecycleNotification(
+      { op: 'pause', ownerId: 'u1', domain: 'seeker', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms.mock.calls[0]![0]).toMatchObject({ caseId: 'profile.pause' });
+    expect(dispatchEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends no SMS without a phone', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: 'a@x.com', phone: null, phoneVerified: false });
+    await dispatchItemLifecycleNotification(
+      { op: 'create', ownerId: 'u1', domain: 'seeker', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms).not.toHaveBeenCalled();
+  });
+
+  it('uses the same case id as the email, so the template file decides who gets SMS', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Acme', email: null, phone: '+919000000002', phoneVerified: true });
+    await dispatchItemLifecycleNotification(
+      { op: 'update', ownerId: 'u1', domain: 'service_provider', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms.mock.calls[0]![0]).toMatchObject({ caseId: 'offer.update' });
+  });
+
+  it('sends the SMS with no link when the domain has no portal URL', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: null, phone: '+919000000001', phoneVerified: true });
+    await dispatchItemLifecycleNotification(
+      { op: 'retire', ownerId: 'u1', domain: 'unmapped', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms.mock.calls[0]![0]).toMatchObject({ caseId: 'profile.retire', variables: {} });
+  });
+
+  it('sends no SMS to an unverified phone for a self-service event', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: null, phone: '+919000000001', phoneVerified: false });
+    await dispatchItemLifecycleNotification(
+      { op: 'update', ownerId: 'u1', domain: 'seeker', network: 'purple_dot' },
+      log,
+    );
+    expect(dispatchSms).not.toHaveBeenCalled();
+  });
+
+  it('texts the aggregator-supplied phone for the onboarding message even though it is unverified', async () => {
+    configured();
+    resolveOwnerNameEmail.mockResolvedValue({ found: true, name: 'Asha', email: null, phone: '+919000000001', phoneVerified: false });
+    await dispatchItemLifecycleNotification(
+      {
+        op: 'create',
+        ownerId: 'u1',
+        domain: 'seeker',
+        network: 'purple_dot',
+        actingOrgType: 'aggregator',
+        aggregatorOrgName: 'Org',
+      },
+      log,
+    );
+    expect(dispatchSms).toHaveBeenCalledWith({
+      caseId: 'account.aggregator_init.seeker',
+      to: '+919000000001',
+      network: 'purple_dot',
+      variables: { url: 'https://seeker.example.org' },
+    });
   });
 });
