@@ -108,6 +108,15 @@ describe('guardianBulkActionGate with MINOR_BULK_ACTIONS_ENABLED=false (#917)', 
     expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
   });
 
+  it('blocks the batch when the guardian lookup fails', async () => {
+    setting.enabled = false;
+    getMinorGuardian.mockRejectedValue(new Error('db down'));
+    const map = await guardianBulkActionGate({ items: [row(0), row(1)] });
+    expect(map.get(0)).toEqual({ status: 'minor_bulk_blocked' });
+    expect(map.get(1)).toEqual({ status: 'minor_bulk_blocked' });
+    expect(issueGuardianOtp).not.toHaveBeenCalled();
+  });
+
   it('leaves adults alone', async () => {
     setting.enabled = false;
     getWardAge.mockResolvedValue(30);

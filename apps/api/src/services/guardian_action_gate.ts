@@ -164,8 +164,16 @@ async function wardsWithSmsGuardian(groups: Map<string, BulkGateItem[]>): Promis
   const wards = [
     ...new Set([...groups.values()].filter((b) => b.length > 1).map((b) => b[0].wardUserId)),
   ];
-  const types = await Promise.all(wards.map((w) => getMinorGuardian(w)));
-  return new Set(wards.filter((_, i) => types[i]?.guardianContactType === 'phone'));
+  // A failed lookup counts as SMS: otherwise the route's fallback sends one OTP per row.
+  const types = await Promise.all(
+    wards.map((w) => getMinorGuardian(w).catch(() => 'lookup_failed' as const))
+  );
+  return new Set(
+    wards.filter((_, i) => {
+      const t = types[i];
+      return t === 'lookup_failed' || t?.guardianContactType === 'phone';
+    })
+  );
 }
 
 /**
