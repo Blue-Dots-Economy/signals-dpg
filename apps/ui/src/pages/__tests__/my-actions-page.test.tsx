@@ -137,6 +137,9 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, defaultValue?: unknown) => (typeof defaultValue === 'string' ? defaultValue : key) }),
 }));
 
+vi.mock('@/hooks/use-minor-bulk-blocked', () => ({ useMinorBulkBlocked: () => false }));
+vi.mock('@/components/actions/minor-bulk-note-dialog', () => ({ MinorBulkNoteDialog: () => null }));
+
 vi.mock('@/components/layout/page-shell', () => ({
   PageShell: (p: { children: React.ReactNode }) => <div data-testid="shell">{p.children}</div>,
 }));
