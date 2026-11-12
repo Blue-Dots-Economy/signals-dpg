@@ -232,6 +232,8 @@ export async function guardianBulkActionGate(args: {
   const smsGuardianWards = await wardsWithSmsGuardian(groups);
 
   for (const bucket of groups.values()) {
+    // One gated row: leave it to the per-action gate, which sends that action's own template.
+    if (bucket.length === 1) continue;
     const { wardUserId, network } = bucket[0];
     const scope = bulkScope(wardUserId, network, bucket);
     const assign = (r: GateResult) => {
