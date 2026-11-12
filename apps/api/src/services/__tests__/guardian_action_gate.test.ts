@@ -323,6 +323,7 @@ describe('guardianBulkActionGate (#393)', () => {
     const map = await guardianBulkActionGate({
       items: [
         bulkItems[0],
+        bulkItems[1],
         // Ungated source domain → not gated → absent from the map.
         { index: 2, wardUserId: 'ward-1', network: 'blue_dot', sourceDomain: 'provider', actionType: 'connect', sourceItemId: 'src2', targetItemId: 'tgt-c' },
       ],

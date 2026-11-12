@@ -20,6 +20,8 @@ export const U18StatusResponseSchema = z.object({
   isMinor: z.boolean(),
   /** A guardian has already been OTP-verified for this user. */
   guardianVerified: z.boolean(),
+  /** How the guardian gets OTPs; null before a guardian is on file. */
+  guardianContactType: z.enum(['phone', 'email']).nullable(),
 });
 export type U18StatusQuery = z.infer<typeof U18StatusQuerySchema>;
 

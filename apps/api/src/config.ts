@@ -43,6 +43,7 @@ export const apiConfig = {
   export_timezone: networkRuntime.EXPORT_TIMEZONE,
   export_rate_limit_per_hour: networkRuntime.EXPORT_RATE_LIMIT_PER_HOUR,
   max_wards_per_guardian: networkRuntime.MAX_WARDS_PER_GUARDIAN,
+  minor_bulk_actions_enabled: networkRuntime.MINOR_BULK_ACTIONS_ENABLED,
   max_profiles_per_user: networkRuntime.MAX_PROFILES_PER_USER,
   schema_registry_url: schemaRegistry.SCHEMA_REGISTRY_URL,
   peer_fetch_timeout_ms: networkRuntime.PEER_FETCH_TIMEOUT_MS,

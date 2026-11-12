@@ -380,6 +380,12 @@ export const NetworkRuntimeSecretsSchema = z.object({
     }),
   // Max wards that may share one guardian contact (U18). Best-effort cap.
   MAX_WARDS_PER_GUARDIAN: z.coerce.number().int().positive().default(6),
+  // Off where no guardian-OTP SMS template covers a batch: a minor whose
+  // guardian is on a phone then sends or accepts requests one at a time.
+  MINOR_BULK_ACTIONS_ENABLED: z
+    .string()
+    .default('true')
+    .transform((val) => val === 'true'),
   // Global default cap on profiles a single user may own per (network, domain,
   // item_type). A network.json domain's `max_profiles_per_user` overrides this.
   MAX_PROFILES_PER_USER: z.coerce.number().int().positive().default(5),
