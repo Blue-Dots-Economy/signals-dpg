@@ -8,6 +8,7 @@ import {
   buildEndSessionUrl,
   exchangeCode,
   idTokenNonce,
+  idTokenSid,
   newPkcePair,
   newStateValue,
   OidcExchangeError,
@@ -22,6 +23,7 @@ import {
 import {
   createSession,
   destroySession,
+  destroySessionsForIdpSession,
   newCsrfToken,
   newSessionId,
   readSession,
@@ -33,6 +35,7 @@ import {
   SESSION_COOKIE,
 } from '@api/plugins/auth/resolve_browser_session';
 import { public_rate_limit } from '@/middleware/public_rate_limit';
+import { verifyKeycloakLogoutToken } from '@/utils/keycloak_token';
 
 /**
  * Browser login, run server-side (AUTH-VULN-03/04).
@@ -130,6 +133,24 @@ function clearFlowCookie(reply: FastifyReply): void {
   reply.clearCookie(FLOW_COOKIE, { path: FLOW_COOKIE_PATH });
 }
 
+/**
+ * Identifies the browser across its sign-ins, so `/session/switch` can tell a
+ * flow this browser started from one started elsewhere. Unlike the flow
+ * cookie, a second sign-in in the same browser keeps it.
+ */
+const BROWSER_COOKIE = 'signin_browser';
+
+/** A session cookie (no `maxAge`): it only has to outlive the sign-ins in progress. */
+function browserCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: instance.INSTANCE_ENV !== 'development',
+    // Lax: `/session/switch` is a top-level GET from Keycloak's error page.
+    sameSite: 'lax' as const,
+    path: FLOW_COOKIE_PATH,
+  };
+}
+
 function cookieOptions() {
   return {
     httpOnly: true,
@@ -146,6 +167,15 @@ function cookieOptions() {
 }
 
 export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
+  // Keycloak posts the back-channel logout token as a form, not JSON.
+  fastify.addContentTypeParser(
+    'application/x-www-form-urlencoded',
+    { parseAs: 'string' },
+    (_request, body, done) => {
+      done(null, Object.fromEntries(new URLSearchParams(String(body))));
+    }
+  );
+
   /**
    * Starts a login. Redirects to Keycloak; the PKCE verifier stays server-side.
    */
@@ -176,6 +206,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       const self = requestOrigin(request);
       const redirectUri = `${self}/api/v1/auth/session/callback`;
 
+      const browser = request.cookies?.[BROWSER_COOKIE] || randomBytes(32).toString('base64url');
       await saveFlowState(state, {
         verifier,
         nonce,
@@ -183,10 +214,12 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         consentAttempt: request.query.consentAttempt,
         redirectUri,
         appOrigin: safeAppOrigin(request.query.appOrigin, self),
+        browser,
       });
 
       // The browser's half of the binding checked at the callback.
       reply.setCookie(FLOW_COOKIE, state, flowCookieOptions());
+      reply.setCookie(BROWSER_COOKIE, browser, browserCookieOptions());
 
       return reply.redirect(
         buildAuthorizeUrl({ redirectUri, state, nonce, challenge })
@@ -273,6 +306,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       }
 
       const sessionId = newSessionId();
+      const idpSid = idTokenSid(tokens.idToken);
       await createSession(sessionId, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
@@ -282,6 +316,7 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
         csrfToken: newCsrfToken(),
         appOrigin: flow.appOrigin,
         createdAt: Date.now(),
+        ...(idpSid ? { idpSid } : {}),
       });
 
       reply.setCookie(SESSION_COOKIE, sessionId, cookieOptions());
@@ -328,6 +363,11 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
   /**
    * Ends the local session and hands back the Keycloak end-session URL, so the
    * SSO session goes too rather than silently logging the user back in.
+   *
+   * With no session there is no ID token to name a Keycloak session, and
+   * Keycloak would only ask the user to confirm, so the user goes straight to
+   * the sign-in screen. The UI's origin then comes from the request's `Origin`
+   * header, checked against the allowlist.
    */
   fastify.route({
     url: '/session/logout',
@@ -345,16 +385,119 @@ export const auth_session: FastifyPluginAsyncZod = async (fastify) => {
       if (sessionId) await destroySession(sessionId);
       clearSessionCookie(reply);
 
+      const appOrigin =
+        session?.appOrigin ?? safeAppOrigin(request.headers.origin, requestOrigin(request));
+      // Must be a post-logout URL the realm registers for `signals-ui`;
+      // Keycloak matches exactly and refuses anything else.
+      const loginUrl = `${appOrigin}/auth/login`;
+      if (!session?.idToken) return reply.send({ endSessionUrl: loginUrl });
+
       return reply.send({
         endSessionUrl: buildEndSessionUrl({
           // Names the session being ended, so Keycloak logs the user out
           // straight away instead of asking them to confirm.
-          idToken: session?.idToken,
-          // Must be a post-logout URL the realm registers for `signals-ui`;
-          // Keycloak matches exactly and refuses anything else.
-          postLogoutRedirectUri: `${session?.appOrigin ?? requestOrigin(request)}/auth/login`,
+          idToken: session.idToken,
+          postLogoutRedirectUri: loginUrl,
         }),
       });
+    },
+  });
+
+  /**
+   * Signs out from Keycloak's error page so a different account can sign in,
+   * then returns the browser to the app's sign-in screen.
+   *
+   * `flow` is the `state` of the refused sign-in. The local session is only
+   * ended when that flow is live and was started by this browser: its stored
+   * browser value must match this request's browser cookie. A link from
+   * another site can name a flow, but only one started in another browser.
+   * The flow cookie cannot be the proof, because a second sign-in in the same
+   * browser replaces it.
+   */
+  fastify.route({
+    url: '/session/switch',
+    method: 'GET',
+    preHandler: public_rate_limit('auth_session_switch', 60),
+    schema: {
+      tags: ['auth'],
+      querystring: z.object({
+        /** `state` of the refused sign-in, read from Keycloak's error page URL. */
+        flow: z.string().optional(),
+      }),
+      response: { 302: RedirectResponse, 404: ErrorResponseSchema },
+    },
+    handler: async (request, reply) => {
+      if (!authConfig.keycloak_enabled) return notEnabled(reply);
+      const { flow } = request.query;
+      // The refused sign-in cannot finish, so its single-use state goes now.
+      const flowState = flow ? await consumeFlowState(flow) : null;
+
+      const browserCookie = request.cookies?.[BROWSER_COOKIE];
+      const ownFlow = Boolean(
+        flowState?.browser && browserCookie && safeEqual(flowState.browser, browserCookie)
+      );
+
+      let idToken: string | undefined;
+      let appOrigin = flowState?.appOrigin;
+      const sessionId = request.cookies?.[SESSION_COOKIE];
+      if (ownFlow && sessionId) {
+        const session = await readSession(sessionId);
+        idToken = session?.idToken;
+        appOrigin = appOrigin ?? session?.appOrigin;
+        await destroySession(sessionId);
+        clearSessionCookie(reply);
+      }
+
+      return reply.redirect(
+        buildEndSessionUrl({
+          idToken,
+          postLogoutRedirectUri: `${appOrigin ?? requestOrigin(request)}/auth/login`,
+        })
+      );
+    },
+  });
+
+  /**
+   * Keycloak's back-channel logout: called server to server when a Keycloak
+   * session ends, so the browser sessions opened under it end at once rather
+   * than when their access token runs out.
+   *
+   * Not rate-limited: Keycloak calls it from one address in bursts when many
+   * sessions end, and nothing happens without a correctly signed token.
+   */
+  fastify.route({
+    url: '/session/backchannel-logout',
+    method: 'POST',
+    schema: {
+      tags: ['auth'],
+      consumes: ['application/x-www-form-urlencoded'],
+      body: z.object({ logout_token: z.string().min(1) }),
+      response: {
+        200: z.null().describe('The sessions were ended.'),
+        400: ErrorResponseSchema,
+        404: ErrorResponseSchema,
+        503: ErrorResponseSchema,
+      },
+    },
+    handler: async (request, reply) => {
+      if (!authConfig.keycloak_enabled) return notEnabled(reply);
+      reply.header('cache-control', 'no-store');
+
+      const verified = await verifyKeycloakLogoutToken(request.body.logout_token);
+      if (!verified.ok) {
+        request.log.warn(
+          { code: verified.code, reason: verified.message },
+          'Back-channel logout rejected'
+        );
+        return reply.code(verified.code === 'TOKEN_INVALID' ? 400 : 503).send({
+          error: verified.code,
+          message: 'The logout token was not accepted',
+        });
+      }
+
+      const ended = await destroySessionsForIdpSession(verified.sid);
+      request.log.info({ ended }, 'Back-channel logout ended browser sessions');
+      return reply.code(200).send(null);
     },
   });
 };

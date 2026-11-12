@@ -60,6 +60,8 @@ const PUBLIC_OPERATION_URLS = new Set([
   '/api/v1/auth/session/login',
   '/api/v1/auth/session/callback',
   '/api/v1/auth/session/logout',
+  '/api/v1/auth/session/switch',
+  '/api/v1/auth/session/backchannel-logout',
 ]);
 
 // Operations guarded by peer_instance_guard (inter-instance HMAC) instead of

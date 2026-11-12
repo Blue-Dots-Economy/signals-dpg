@@ -12,13 +12,24 @@ import { createHash } from 'node:crypto';
 const redisGet = vi.fn();
 const redisSet = vi.fn();
 const redisDel = vi.fn();
+const redisSadd = vi.fn();
+const redisExpire = vi.fn();
+const redisSmembers = vi.fn();
 vi.mock('@api/db/secondary/redis', () => ({
-  redis: { get: redisGet, set: redisSet, del: redisDel },
+  redis: {
+    get: redisGet,
+    set: redisSet,
+    del: redisDel,
+    sadd: redisSadd,
+    expire: redisExpire,
+    smembers: redisSmembers,
+  },
 }));
 
 const {
   createSession,
   destroySession,
+  destroySessionsForIdpSession,
   newCsrfToken,
   newSessionId,
   readSession,
@@ -49,6 +60,9 @@ beforeEach(() => {
   redisGet.mockResolvedValue(null);
   redisSet.mockResolvedValue('OK');
   redisDel.mockResolvedValue(1);
+  redisSadd.mockResolvedValue(1);
+  redisExpire.mockResolvedValue(1);
+  redisSmembers.mockResolvedValue([]);
 });
 
 describe('session ids', () => {
@@ -154,6 +168,39 @@ describe('updateSession', () => {
     expect(result).toBeNull();
     // A write here would resurrect a destroyed session from a patch.
     expect(redisSet).not.toHaveBeenCalled();
+  });
+});
+
+describe('sessions by Keycloak session id', () => {
+  const indexKey = (sid: string) =>
+    'bsessidp:' + createHash('sha256').update(sid).digest('hex');
+
+  it('lists a session under its hashed Keycloak session id', async () => {
+    await createSession('the-session', session({ idpSid: 'kc-1' }));
+
+    expect(redisSadd).toHaveBeenCalledWith(indexKey('kc-1'), hashedKey('the-session'));
+    expect(redisExpire).toHaveBeenCalledWith(indexKey('kc-1'), SESSION_TTL_SECONDS);
+    expect(JSON.stringify(redisSadd.mock.calls)).not.toContain('kc-1');
+  });
+
+  it('does not index a session without a Keycloak session id', async () => {
+    await createSession('the-session', session());
+    expect(redisSadd).not.toHaveBeenCalled();
+  });
+
+  it('ends every session listed under a Keycloak session id, and the list itself', async () => {
+    redisSmembers.mockResolvedValue([hashedKey('a'), hashedKey('b')]);
+
+    const ended = await destroySessionsForIdpSession('kc-1');
+
+    expect(ended).toBe(2);
+    expect(redisDel).toHaveBeenCalledWith(hashedKey('a'), hashedKey('b'), indexKey('kc-1'));
+  });
+
+  it('is a no-op for a Keycloak session with no sessions here', async () => {
+    redisSmembers.mockResolvedValue([]);
+    expect(await destroySessionsForIdpSession('kc-unknown')).toBe(0);
+    expect(redisDel).toHaveBeenCalledWith(indexKey('kc-unknown'));
   });
 });
 
