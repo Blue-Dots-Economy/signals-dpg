@@ -14,6 +14,7 @@ import { X } from 'lucide-react';
 import { Widgets } from '@rjsf/shadcn';
 import {
   enumOptionsIndexForValue,
+  errorId,
   enumOptionsValueForIndex,
   type EnumOptionsType,
   type WidgetProps,
@@ -48,7 +49,14 @@ export function ClearableSelectWidget(props: Readonly<WidgetProps>) {
     rawErrors = [],
   } = props;
 
-  if (multiple) return <ThemeSelectWidget {...props} />;
+  const invalid = rawErrors.length > 0;
+  if (multiple) {
+    return (
+      <div {...(invalid ? { role: 'group', 'aria-invalid': true, 'aria-describedby': errorId(id) } : {})}>
+        <ThemeSelectWidget {...props} />
+      </div>
+    );
+  }
 
   const enumOptions = (options.enumOptions ?? []) as EnumOptionsType[];
   const enumDisabled = options.enumDisabled as EnumOptionsType['value'][] | undefined;
@@ -75,7 +83,8 @@ export function ClearableSelectWidget(props: Readonly<WidgetProps>) {
           autoFocus={autofocus}
           onBlur={() => onBlur(id, value)}
           onFocus={() => onFocus(id, value)}
-          aria-invalid={rawErrors.length > 0 || undefined}
+          aria-invalid={invalid || undefined}
+          aria-describedby={invalid ? errorId(id) : undefined}
           // Pad the value, not the trigger, so the chevron stays put and the
           // clear button fits between them.
           className={cn(clearable && '*:data-[slot=select-value]:pr-7')}

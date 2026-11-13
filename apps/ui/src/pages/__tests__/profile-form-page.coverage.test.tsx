@@ -24,7 +24,11 @@ import type { CreateItemPayload, Item, UpdateItemPayload } from '@/lib/item-api'
 
 const SCHEMA: RJSFSchema = {
   type: 'object',
-  properties: { 'Full Name': { type: 'string' } },
+  properties: {
+    'Full Name': { type: 'string' },
+    // Hidden unless Full Name is "show": a server error on it has nowhere to render.
+    Licence: { type: 'string', 'x-show-if': { 'Full Name': ['show'] } } as RJSFSchema,
+  },
   required: ['Full Name'],
 };
 
@@ -176,6 +180,7 @@ vi.mock('@/components/forms/schema-form', () => ({
     id?: string;
     onSubmit: (data: Record<string, unknown>) => void;
     onValidityChange?: (v: boolean) => void;
+    serverErrors?: Record<string, string>;
   }) => {
     React.useEffect(() => {
       p.onValidityChange?.(true);
@@ -195,6 +200,7 @@ vi.mock('@/components/forms/schema-form', () => ({
         <button type="button" data-testid="form-valid" onClick={() => p.onValidityChange?.(true)}>
           report valid
         </button>
+        <output data-testid="server-errors">{JSON.stringify(p.serverErrors ?? null)}</output>
       </form>
     );
   },
@@ -496,17 +502,23 @@ describe('ProfileFormPage role picker', () => {
 // ---- Validity gate --------------------------------------------------------
 
 describe('ProfileFormPage validity gate', () => {
-  it('an invalid form hides consent, shows the fill-required hint, and re-validating clears the tick', async () => {
+  it('an invalid form hides consent, keeps Submit enabled, and re-validating clears the tick', async () => {
     consentConfigResult = { config: CONSENT_CONFIG, isLoading: false };
 
     await renderPage();
 
     const submit = await screen.findByRole('button', { name: 'Save & publish' });
-    expect(submit).toBeDisabled();
+    expect(submit).toBeEnabled();
     expect(screen.getByText('All required fields complete')).toBeInTheDocument();
 
+    // Unticked: the click says what to do under the box and creates nothing.
+    await ui().click(submit);
+    expect(createItemMock).not.toHaveBeenCalled();
+    expect(await screen.findByText('Tick the box to agree before you continue.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /agree/i })).toHaveAttribute('aria-invalid', 'true');
+
     await ui().click(await screen.findByRole('checkbox', { name: /agree/i }));
-    expect(submit).toBeEnabled();
+    expect(screen.queryByText('Tick the box to agree before you continue.')).toBeNull();
 
     fireEvent.click(screen.getByTestId('form-invalid'));
 
@@ -514,14 +526,14 @@ describe('ProfileFormPage validity gate', () => {
       await screen.findByText('Please fill in all the required fields to continue.'),
     ).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /agree/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeEnabled();
 
     fireEvent.click(screen.getByTestId('form-valid'));
 
     // Consent comes back UNTICKED — going invalid resets the acknowledgement.
     const tick = await screen.findByRole('checkbox', { name: /agree/i });
     expect(tick).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeEnabled();
   });
 });
 
@@ -619,7 +631,7 @@ describe('ProfileFormPage submit failures', () => {
     expect(alert).not.toHaveTextContent('Profile already exists');
   });
 
-  it('any other create failure shows the create-failed title with the server message', async () => {
+  it('a server failure shows the create-failed title with a human message, not the raw server text', async () => {
     createItemMock.mockRejectedValue(httpError(500, { message: 'database unavailable' }));
 
     await renderPage();
@@ -627,7 +639,70 @@ describe('ProfileFormPage submit failures', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Couldn't create your profile");
-    expect(alert).toHaveTextContent('database unavailable');
+    expect(alert).toHaveTextContent('Something went wrong on our side. Please try again in a moment.');
+    expect(alert).not.toHaveTextContent('database unavailable');
+  });
+
+  it('a readable 4xx message from the server is shown as is', async () => {
+    createItemMock.mockRejectedValue(httpError(409, { error: 'PROFILE_LIMIT_REACHED', message: 'You already have the maximum number of profiles.' }));
+
+    await renderPage();
+    await submitCreate();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('You already have the maximum number of profiles.');
+  });
+
+  it('server field errors go to the form fields, with no banner', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: Full Name: Please enter a valid Full Name.',
+        fields: { 'Full Name': 'Please enter a valid Full Name.' },
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('server-errors')).toHaveTextContent('{"Full Name":"Please enter a valid Full Name."}'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(/Invalid item_state/)).toBeNull();
+  });
+
+  it('a server field the form does not show is reported in the banner, not dropped', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: email: is not an allowed field',
+        fields: { email: 'is not an allowed field' },
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("Couldn't create your profile");
+    expect(alert).toHaveTextContent('Some saved details cannot be changed in this form (email).');
+  });
+
+  it('a server error on a field its show-if rule hides goes to the banner', async () => {
+    createItemMock.mockRejectedValue(
+      httpError(400, {
+        error: 'INVALID_ITEM_STATE',
+        message: 'Invalid item_state: Licence: is required',
+        fields: { Licence: 'is required' },
+      }),
+    );
+
+    await renderPage();
+    await submitCreate();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Some saved details cannot be changed in this form (Licence).',
+    );
   });
 
   it('a failing edit shows the update-failed title with the generic description', async () => {
@@ -643,7 +718,7 @@ describe('ProfileFormPage submit failures', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Couldn't update your profile");
-    expect(alert).toHaveTextContent(/An unexpected error occurred/);
+    expect(alert).toHaveTextContent('Something went wrong on our side. Please try again in a moment.');
     expect(navigateMock).not.toHaveBeenCalled();
   });
 });
@@ -684,7 +759,7 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     await renderPage();
 
     const submit = await screen.findByRole('button', { name: 'Save & publish' });
-    expect(submit).toBeDisabled();
+    expect(submit).toBeEnabled();
 
     await tickConsent();
 
@@ -695,7 +770,6 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     expect(
       screen.getByText(/your guardian must verify with a one-time code/i),
     ).toBeInTheDocument();
-    expect(submit).toBeDisabled();
 
     fireEvent.click(within(notice).getByRole('button', { name: /send code to guardian/i }));
 
@@ -758,7 +832,8 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(issueOtpMock).not.toHaveBeenCalled();
     expect(await screen.findByRole('checkbox', { name: /agree/i })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    await ui().click(screen.getByRole('button', { name: 'Save & publish' }));
+    expect(createItemMock).not.toHaveBeenCalled();
   });
 
   it('closing the OTP dialog unverified unticks consent so re-ticking re-issues the code', async () => {
@@ -772,7 +847,8 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     await waitFor(() => expect(screen.queryByText(OTP_TITLE)).not.toBeInTheDocument());
     expect(verifyOtpMock).not.toHaveBeenCalled();
     expect(await screen.findByRole('checkbox', { name: /agree/i })).not.toBeChecked();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    await ui().click(screen.getByRole('button', { name: 'Save & publish' }));
+    expect(createItemMock).not.toHaveBeenCalled();
   });
 
   it('offers a sign-out escape from the OTP challenge', async () => {
@@ -824,7 +900,8 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
 
     expect(await screen.findByText('Too many attempts. Please try again shortly.')).toBeInTheDocument();
     expect(screen.queryByText(OTP_TITLE)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    await ui().click(screen.getByRole('button', { name: 'Save & publish' }));
+    expect(createItemMock).not.toHaveBeenCalled();
   });
 
   it('an unavailable OTP provider (503) is reported and opens no challenge', async () => {
@@ -855,6 +932,7 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
 
     await waitFor(() => expect(issueOtpMock).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(OTP_TITLE)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Save & publish' })).toBeDisabled();
+    await ui().click(screen.getByRole('button', { name: 'Save & publish' }));
+    expect(createItemMock).not.toHaveBeenCalled();
   });
 });

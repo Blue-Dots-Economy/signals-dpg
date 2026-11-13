@@ -1,4 +1,4 @@
-import z from '@dpg/schemas';
+import z, { PHONE_INPUT_PATTERN } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { and, eq } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
@@ -11,7 +11,7 @@ import { guardianConsentRequired } from '@/services/minor';
 const U18PrecheckBody = z.object({
   network: z.string().min(1),
   email: z.string().email().optional(),
-  phoneNumber: z.string().min(1).optional(),
+  phoneNumber: z.string().regex(PHONE_INPUT_PATTERN).optional(),
 });
 
 // Reveal only the single boolean the login flow needs — NOT the domain — so an

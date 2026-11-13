@@ -7,6 +7,8 @@ interface ConsentCheckboxProps {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   id?: string;
+  /** Shown in red under the box, e.g. after a submit without the tick. */
+  error?: string;
 }
 
 export function ConsentCheckbox({
@@ -14,6 +16,7 @@ export function ConsentCheckbox({
   checked,
   onCheckedChange,
   id = 'consent-acknowledge',
+  error,
 }: ConsentCheckboxProps) {
   const { t } = useTranslation();
   return (
@@ -26,6 +29,8 @@ export function ConsentCheckbox({
           id={id}
           checked={checked}
           onCheckedChange={(value) => onCheckedChange(value === true)}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? `${id}-error` : undefined}
           // Same ring on the box, whose `border-input` blends into the dark
           // card. The primitive's checked style still wins on specificity.
           className="size-5 border-ring ring-2 ring-ring/50"
@@ -34,6 +39,11 @@ export function ConsentCheckbox({
           {t('consent.agree_short')}
         </Label>
       </div>
+      {error && (
+        <p id={`${id}-error`} className="mt-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

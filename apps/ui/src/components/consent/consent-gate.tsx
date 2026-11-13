@@ -28,6 +28,12 @@ export interface ConsentGateBodyProps {
   onAccept: () => void;
 }
 
+/** Colour of the "scroll to the end" hint: done, missed after a Continue, or neutral. */
+function scrollHintTone(allRead: boolean, attempted: boolean): string {
+  if (allRead) return 'font-semibold text-success';
+  return attempted ? 'font-semibold text-destructive' : 'text-muted-foreground';
+}
+
 export function ConsentGateBody({
   docs,
   onAccept,
@@ -35,12 +41,15 @@ export function ConsentGateBody({
   const { t } = useTranslation();
   const readerRef = useRef<HTMLElement>(null);
   const [checked, setChecked] = useState(false);
+  // Accept was pressed before the gate was satisfied; its hint turns into an error.
+  const [attempted, setAttempted] = useState(false);
   const docIds = useMemo(() => docs.map((d) => d.id), [docs]);
   const progress = useReadProgress(readerRef, docIds);
   /**
    * Both controls below report these via `aria-disabled` and guard their
    * handlers on them. Not `disabled`, so they stay focusable and a
-   * screen-reader user can discover why they cannot proceed.
+   * screen-reader user can discover why they cannot proceed; pressing accept
+   * early also shows what is missing.
    */
   const canTick = progress.allRead;
   const canAccept = progress.allRead && checked;
@@ -85,9 +94,7 @@ export function ConsentGateBody({
         <p
           id="consent-scroll-hint"
           aria-live="polite"
-          className={`flex items-center gap-1.5 text-xs ${
-            progress.allRead ? 'font-semibold text-success' : 'text-muted-foreground'
-          }`}
+          className={`flex items-center gap-1.5 text-xs ${scrollHintTone(progress.allRead, attempted)}`}
         >
           {progress.allRead ? (
             <Check className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -102,7 +109,8 @@ export function ConsentGateBody({
             id="consent-agree"
             checked={checked}
             aria-disabled={!canTick}
-            aria-describedby="consent-scroll-hint"
+            aria-describedby={attempted && canTick && !checked ? 'consent-agree-error' : 'consent-scroll-hint'}
+            aria-invalid={attempted && canTick && !checked ? true : undefined}
             className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
             onCheckedChange={(value) => {
               // `aria-disabled` alone leaves the control operable.
@@ -114,17 +122,25 @@ export function ConsentGateBody({
             {t('consent.agree_label')}
           </Label>
         </div>
+        {attempted && canTick && !checked && (
+          <p id="consent-agree-error" className="text-sm text-destructive">
+            {t('consent.agree_required_error', 'Tick the box to agree before you continue.')}
+          </p>
+        )}
 
         <button
           type="button"
           aria-disabled={!canAccept}
           aria-describedby="consent-scroll-hint"
           onClick={() => {
-            // See the checkbox: `aria-disabled` does not block activation.
-            if (!canAccept) return;
+            if (!canAccept) {
+              setAttempted(true);
+              if (canTick) document.getElementById('consent-agree')?.focus();
+              return;
+            }
             onAccept();
           }}
-          className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all aria-disabled:opacity-60 aria-disabled:cursor-not-allowed bg-brand-cta hover:brightness-110 h-11"
+          className="flex w-full items-center justify-center rounded-md py-3 text-sm font-semibold text-[var(--brand-cta-foreground)] transition-all aria-disabled:opacity-60 bg-brand-cta hover:brightness-110 h-11"
         >
           {t('consent.accept_continue')}
         </button>

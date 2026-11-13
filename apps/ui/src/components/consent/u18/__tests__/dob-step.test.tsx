@@ -26,13 +26,24 @@ describe('DobStep (birth year → age, #331)', () => {
     vi.clearAllMocks();
   });
 
-  it('picking a year enables Continue (no month asked)', async () => {
+  it('Continue without a year says it is required under the select and sends nothing (no month asked)', async () => {
     await renderDobStep(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
-    expect(submit).toBeDisabled();
+    expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+    expect(screen.getByText('Birth year is required.')).toBeInTheDocument();
+    expect(submitU18Dob).not.toHaveBeenCalled();
     await pickBirthYear(2012);
     expect(screen.queryByRole('combobox', { name: /birth month/i })).toBeNull();
-    expect(submit).toBeEnabled();
+    expect(screen.queryByText('Birth year is required.')).toBeNull();
+  });
+
+  it('shows a rejected year under the select', async () => {
+    submitU18Dob.mockRejectedValue({ isAxiosError: true, response: { status: 400, data: { error: 'INVALID_AGE' } } });
+    await renderDobStep(vi.fn());
+    await pickBirthYear(2012);
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(await screen.findByText('That birth year looks invalid.')).toBeInTheDocument();
   });
 
   it('submits the derived age (currentYear - birthYear)', async () => {

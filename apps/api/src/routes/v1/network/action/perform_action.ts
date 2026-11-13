@@ -2,6 +2,7 @@ import z, {
   getActionInteraction,
   PerformNetworkActionBodySchema,
   validateAgainstJsonSchema,
+  JsonSchemaValidationError,
 } from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -171,6 +172,7 @@ export const perform_network_action_handler = async (
     return reply.code(400).send({
       error: 'INVALID_ACTION_REQUEST',
       message: err instanceof Error ? err.message : 'Invalid action request',
+      ...(err instanceof JsonSchemaValidationError ? { fields: err.fields } : {}),
     });
   }
 

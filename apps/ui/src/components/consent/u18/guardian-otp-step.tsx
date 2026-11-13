@@ -1,5 +1,4 @@
 import * as React from 'react';
-import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { Loader2, OctagonX } from 'lucide-react';
@@ -7,6 +6,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { verifyGuardian, type VerifyGuardianResponse } from '@/lib/consent-api';
 import { toastGuardianSendError } from '@/lib/guardian-consent';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { useResendCountdown } from '@/hooks/use-resend-countdown';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
@@ -49,10 +49,7 @@ export function GuardianOtpStep({
       const result = await verify(otp);
       if (result.verified) onVerified();
     } catch (err) {
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      const code = axios.isAxiosError(err)
-        ? (err.response?.data as { error?: string } | undefined)?.error
-        : undefined;
+      const { status, code } = readApiError(err);
 
       if (status === 429) {
         setInlineError({
@@ -70,10 +67,24 @@ export function GuardianOtpStep({
             "This instance isn't fully configured for guardian confirmation yet. Please contact support.",
           ),
         });
-      } else {
+      } else if (code === 'NO_PENDING_SIGNUP') {
+        // The pending sign-up behind the code has expired; only a new code helps.
+        setInlineError({
+          title: t('u18.otp_error_expired_title', 'Code expired'),
+          description: t(
+            'u18.otp_error_expired_desc',
+            'This code has expired. Tap "Resend code" to send a new one to your guardian.',
+          ),
+        });
+      } else if (code === 'INVALID_OTP') {
         setInlineError({
           title: t('u18.otp_error_invalid_title', 'Incorrect code'),
           description: t('u18.otp_error_invalid_desc', 'That code is invalid or expired. Please try again.'),
+        });
+      } else {
+        setInlineError({
+          title: t('u18.otp_error_generic_title', "Couldn't confirm the code"),
+          description: apiErrorMessage(err, t),
         });
       }
       setOtpKey((k) => k + 1);

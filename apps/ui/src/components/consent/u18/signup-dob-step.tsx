@@ -18,6 +18,7 @@ export interface SignupDobStepProps {
 export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps) {
   const { t } = useTranslation();
   const [age, setAge] = React.useState<number | undefined>(undefined);
+  const [error, setError] = React.useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-6">
@@ -31,19 +32,30 @@ export function SignupDobStep({ onSubmit, existing = false }: SignupDobStepProps
         className="flex flex-col gap-5"
         onSubmit={(e) => {
           e.preventDefault();
-          if (age !== undefined) onSubmit(age);
+          if (age !== undefined) {
+            onSubmit(age);
+            return;
+          }
+          setError(t('form.error_required', '{{label}} is required.', { label: t('auth.dob_label_year', 'Birth year') }));
+          document.getElementById('signup-dob-year')?.focus();
         }}
       >
         <div className="space-y-2">
-          <label className="text-base font-semibold">
+          <label htmlFor="signup-dob-year" className="text-base font-semibold">
             {t('auth.signup_dob_label_ym', 'Select your birth year')}
           </label>
-          <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
+          <BirthYearSelect
+            idPrefix="signup-dob"
+            error={error}
+            onChange={(next) => {
+              setAge(next);
+              setError(null);
+            }}
+          />
         </div>
 
         <button
           type="submit"
-          disabled={age === undefined}
           className="flex w-full items-center justify-center gap-2 rounded-md py-3 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta h-12"
         >
           {t('auth.signup_dob_continue', 'Continue')}

@@ -56,6 +56,25 @@ describe('runBulk', () => {
     expect(spy).toHaveBeenCalledTimes(0);
   });
 
+  it("passes a failure's per-field messages through to its result", async () => {
+    const out = await runBulk(
+      ['bad', 'plain'],
+      async (el) => {
+        if (el === 'bad') throw new BulkItemFailure('INVALID', 'bad item', { note: 'too short' });
+        throw new BulkItemFailure('NOPE', 'no fields');
+      },
+      { maxItems: 5, okStatus: 201 },
+    );
+    expect(out.results?.[0]).toEqual({
+      index: 0,
+      status: 'error',
+      error: 'INVALID',
+      message: 'bad item',
+      fields: { note: 'too short' },
+    });
+    expect(out.results?.[1]).not.toHaveProperty('fields');
+  });
+
   it('returns 422 when every item fails', async () => {
     const out = await runBulk(
       ['x'],

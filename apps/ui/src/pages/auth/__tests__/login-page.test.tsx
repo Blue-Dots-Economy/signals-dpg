@@ -156,7 +156,19 @@ describe('LoginPage', () => {
     expect(screen.queryByText(/contact your administrator/i)).toBeNull();
   });
 
-  it('mobile field takes only the 10-digit national number (+91 is a fixed prefix)', async () => {
+  it('an empty Continue says the mobile number is required under the field and sends nothing', async () => {
+    fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
+    await renderPage();
+    await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
+
+    await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+    expect(screen.getByText('Mobile number is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/mobile/i)).toHaveAttribute('aria-invalid', 'true');
+    expect(requestOtp).not.toHaveBeenCalled();
+  });
+
+  it('mobile field takes at most 10 digits after the +91 code', async () => {
     fetchAuthConfig.mockResolvedValue({ selfSignupAllowed: true, loginChannels: ['phone', 'email'] });
     await renderPage();
     await waitFor(() => expect(fetchAuthConfig).toHaveBeenCalled());
@@ -164,14 +176,18 @@ describe('LoginPage', () => {
     const input = screen.getByLabelText(/mobile/i) as HTMLInputElement;
     const cta = screen.getByRole('button', { name: /^continue$/i });
 
-    // Fewer than 10 digits → CTA stays disabled.
+    // Fewer than 10 digits: CTA stays enabled; leaving the field shows the message.
     await userEvent.type(input, '96204');
-    expect(cta).toBeDisabled();
+    expect(cta).toBeEnabled();
+    await userEvent.tab();
+    expect(screen.getByText(/^Invalid entry\./)).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'contact-error');
 
-    // Letters + formatting stripped; capped at 10 digits; CTA enables at 10.
+    // Letters + formatting stripped; capped at 10 digits; the message clears.
     await userEvent.type(input, '21129abc99');
     expect(input.value).toBe('9620421129');
-    expect(cta).toBeEnabled();
+    expect(screen.queryByText(/^Invalid entry/)).toBeNull();
   });
 
   describe('signup form: name + domain only (DOB is a separate gated step)', () => {

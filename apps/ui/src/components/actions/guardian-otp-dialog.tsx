@@ -5,6 +5,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { guardianOtpErrorFromThrown, type GuardianOtpErrorCode } from '@/lib/action-api';
+import { apiErrorMessage } from '@/lib/api-error';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -96,7 +97,8 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, p
     } catch (err) {
       const code = guardianOtpErrorFromThrown(err);
       const { title, description } = messageForCode(code, t);
-      setInlineError({ code, title, description });
+      // An unclassified failure (network, server, other 4xx) says what actually happened.
+      setInlineError({ code, title, description: code ? description : apiErrorMessage(err, t, description) });
       setOtpKey((k) => k + 1);
     } finally {
       setIsSubmitting(false);

@@ -4,6 +4,32 @@ import { apiConfig } from './api-config';
 import { emitSessionExpired } from './auth-events';
 import { fetchBffSession, getCsrfToken } from './bff-session';
 
+/**
+ * Logs a failed request for support: method, path, status, code and request id
+ * only, never the body, which can hold the person's input.
+ */
+function logFailure(error: unknown): void {
+  const e = error as {
+    code?: string;
+    config?: { method?: string; url?: string };
+    response?: { status?: number; data?: { error?: unknown }; headers?: Record<string, unknown> };
+  } | null;
+  if (!e?.config || e.code === 'ERR_CANCELED') return;
+  const where = { method: e.config.method, url: e.config.url };
+  const res = e.response;
+  if (!res) {
+    console.warn('[api] request did not reach the server', where);
+    return;
+  }
+  if ((res.status ?? 0) < 500) return;
+  console.error('[api] request failed', {
+    ...where,
+    status: res.status,
+    code: typeof res.data?.error === 'string' ? res.data.error : undefined,
+    requestId: res.headers?.['x-request-id'],
+  });
+}
+
 export function createApiClient() {
   const client = axios.create({
     baseURL: apiConfig.getUrl(),
@@ -64,6 +90,7 @@ export function createApiClient() {
       if (res?.status === 401 && sessionIsGone) {
         emitSessionExpired();
       }
+      logFailure(error);
       return Promise.reject(error);
     },
   );
