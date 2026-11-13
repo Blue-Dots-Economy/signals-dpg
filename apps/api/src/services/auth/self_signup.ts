@@ -63,7 +63,7 @@ export type SelfSignupResult =
 
 /** Signup attempts allowed per identifier and per IP, and over what window. */
 const RATE_LIMIT_WINDOW_SECONDS = 3600;
-const MAX_PER_IDENTIFIER = 3;
+const MAX_PER_IDENTIFIER = 10;
 const MAX_PER_IP = 10;
 
 function normalizeEmail(value: string | null | undefined): string | null {

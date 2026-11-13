@@ -1,6 +1,7 @@
 import { buildNotifications } from './build_notifications';
 import type { NotificationEvent, NotificationPlan } from './build_notifications';
 import type { DispatchEmailArgs } from './email/dispatch_email';
+import { smsLink, type SmsDispatchArgs } from './sms/dispatch_sms';
 import {
   FALLBACK_SERVICE_NAME,
   resolveCopyGroup,
@@ -26,6 +27,10 @@ export interface DispatcherDeps {
   log: (message: string, meta?: Record<string, unknown>) => void;
   /** Visibility hook for skipped (dark) recipients. */
   onSkip: (reason: string) => void;
+  /** Sends the plan's SMS case; skips on its own where the case has no template. */
+  sendSms?: (args: SmsDispatchArgs) => Promise<unknown>;
+  /** The owner's verified phone; null when there is none. */
+  resolvePhone?: (userId: string) => Promise<string | null>;
 }
 
 export interface DirectDispatcher {
@@ -45,6 +50,35 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
         actionId: plan.actionId,
       });
       return;
+    }
+
+    const caseId = actionCaseId(
+      resolveCopyGroup(plan.actionType),
+      resolveRecipientRole(plan.recipientDomain),
+      plan.shape,
+    );
+    // Sent before the email checks, so a phone-only owner still hears about it;
+    // an SMS failure must not cost the email.
+    if (deps.sendSms && deps.resolvePhone) {
+      try {
+        const phone = await deps.resolvePhone(plan.recipientUserId);
+        if (phone) {
+          const url = smsLink(deps.resolveCtaUrl(plan.recipientDomain));
+          const name = (await deps.resolveCounterpartyName(plan))?.trim() || FALLBACK_SERVICE_NAME;
+          await deps.sendSms({
+            caseId,
+            to: phone,
+            network: plan.counterpartyNetwork,
+            variables: url ? { name, url } : { name },
+          });
+        }
+      } catch (err) {
+        deps.log('notification sms failed', {
+          error: err instanceof Error ? err.message : String(err),
+          shape: plan.shape,
+          actionId: plan.actionId,
+        });
+      }
     }
 
     const email = await deps.resolveEmail(plan.recipientUserId);
@@ -73,11 +107,7 @@ export function createDirectDispatcher(deps: DispatcherDeps): DirectDispatcher {
     const counterpartyName = await deps.resolveCounterpartyName(plan);
 
     await deps.sendEmail({
-      caseId: actionCaseId(
-        resolveCopyGroup(plan.actionType),
-        resolveRecipientRole(plan.recipientDomain),
-        plan.shape,
-      ),
+      caseId,
       to: email,
       fromName: deps.brand.brandName,
       network: plan.counterpartyNetwork,

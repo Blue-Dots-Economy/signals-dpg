@@ -16,6 +16,8 @@ const actions = {
 
 export const queryKeys = {
   networkConfig: (networkId: string) => ['network-config', networkId] as const,
+  // The signed-in user's minor/guardian status on a network.
+  u18Status: (networkId: string) => ['u18-status', networkId] as const,
   // Every entry of GET /network/schemas (no `network` param).
   networkSchemas: () => ['network-schemas'] as const,
   // Network config with `$ref`s resolved against an API base URL. The base URL

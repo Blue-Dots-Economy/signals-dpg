@@ -12,6 +12,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { createCtaUrlResolver } from './brand';
 import { getDefaultEmailSender } from './email/dispatch_email';
 import { resolveRecipientRole } from './action_copy';
+import { getDefaultSmsSender, smsLink } from './sms/dispatch_sms';
 
 /** Pre-approved Twilio content template; `contentVariables['1']` is the recipient's name. */
 const WELCOME_WHATSAPP_CONTENT_SID = 'HX3f2a5d7e4a18e5664124592a12a154eb';
@@ -21,6 +22,23 @@ export interface WelcomeRecipient {
   name: string;
   email: string | null;
   phoneNumber: string | null;
+  /** SMS goes only to a verified number. */
+  phoneNumberVerified?: boolean;
+}
+
+/** The portal link for the signup domain, falling back to FRONTEND_BASE_URL. */
+function welcomeSiteUrl(domain?: string | null): string | undefined {
+  return domain
+    ? createCtaUrlResolver({
+        byDomain: uiHostBindings.byDomain,
+        fallbackBaseUrl: notification.FRONTEND_BASE_URL,
+      })(domain)
+    : notification.FRONTEND_BASE_URL;
+}
+
+/** Domain-less accounts get the generic `welcome` case. */
+function welcomeCaseId(domain?: string | null): string {
+  return domain ? `welcome.${resolveRecipientRole(domain)}` : 'welcome';
 }
 
 /** Minimal logger shape; `FastifyBaseLogger` satisfies it. */
@@ -51,19 +69,10 @@ export async function sendWelcomeNotifications(
     // `welcome.*` is best-effort, so dispatchEmail already swallows send
     // failures; the catch covers URL resolution and setup errors.
     try {
-      const siteUrl = domain
-        ? createCtaUrlResolver({
-            byDomain: uiHostBindings.byDomain,
-            fallbackBaseUrl: notification.FRONTEND_BASE_URL,
-          })(domain)
-        : notification.FRONTEND_BASE_URL;
-
-      // Domain-less accounts get the generic `welcome` copy.
-      const caseId = domain ? `welcome.${resolveRecipientRole(domain)}` : 'welcome';
-
+      const siteUrl = welcomeSiteUrl(domain);
       const sender = getDefaultEmailSender();
       await sender?.dispatchEmail({
-        caseId,
+        caseId: welcomeCaseId(domain),
         to: recipient.email,
         fromName: appName,
         variables: {
@@ -77,6 +86,20 @@ export async function sendWelcomeNotifications(
       });
     } catch (err) {
       log.error({ err }, 'welcome: could not send the welcome email');
+    }
+  }
+
+  if (recipient.phoneNumber && recipient.phoneNumberVerified) {
+    // dispatchSms never throws and skips unless the SMS template file names this case.
+    try {
+      const url = smsLink(welcomeSiteUrl(domain));
+      await getDefaultSmsSender()?.dispatchSms({
+        caseId: welcomeCaseId(domain),
+        to: recipient.phoneNumber,
+        variables: url ? { url } : {},
+      });
+    } catch (err) {
+      log.error({ err }, 'welcome: could not send the welcome SMS');
     }
   }
 

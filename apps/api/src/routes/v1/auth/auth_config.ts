@@ -1,6 +1,6 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
-import { authConfig, keycloakConfig } from '@/config';
+import { apiConfig, authConfig, keycloakConfig } from '@/config';
 
 const KeycloakPublicConfig = z.object({
   /** Browser-facing Keycloak base URL. */
@@ -23,6 +23,8 @@ const AuthConfigResponse = z.object({
    * values are public for a public OIDC client.
    */
   keycloak: KeycloakPublicConfig.nullable(),
+  /** False: the UI tells a minor to send or accept one request at a time (#917). */
+  minorBulkActionsEnabled: z.boolean(),
 });
 
 /**
@@ -56,6 +58,7 @@ export const auth_config: FastifyPluginAsyncZod = async function (fastify) {
                 clientId: keycloakConfig.ui_client_id,
               }
             : null,
+        minorBulkActionsEnabled: apiConfig.minor_bulk_actions_enabled,
       });
     },
   });

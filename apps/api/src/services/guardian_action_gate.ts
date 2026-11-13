@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { BulkItemFailure } from '@/utils/bulk_runner';
+import { apiConfig } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import {
+  getMinorGuardian,
   getWardAge,
   getGuardianContactPlaintext,
   getGuardianNamePlaintext,
@@ -29,13 +31,14 @@ export type GateInput = {
 
 export type GateResult =
   | { status: 'not_required' } // adult or ungated → proceed normally
-  | { status: 'challenge_issued' } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
+  | { status: 'challenge_issued'; sentTo: string } // OTP sent; caller fails the item GUARDIAN_OTP_REQUIRED
   | { status: 'verified' } // OTP ok; caller writes guardian action row + proceeds
   | { status: 'invalid_otp' }
   | { status: 'throttled' }
   | { status: 'rate_limited' }
   | { status: 'no_provider' }
-  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' }; // U18 on external channel
+  | { status: 'external_minor_blocked'; reason: 'minor' | 'age_unknown' } // U18 on external channel
+  | { status: 'minor_bulk_blocked' }; // MINOR_BULK_ACTIONS_ENABLED=false and >1 gated row
 
 /**
  * U18 guardian-consent gate for actions. Detects whether the ward is a minor on
@@ -81,7 +84,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
         getGuardianNamePlaintext(input.wardUserId),
         resolveProviderServiceName(input.targetItemId, input.network),
       ]);
-      await issueGuardianOtp({
+      const { sentTo } = await issueGuardianOtp({
         scope,
         contact: contact.contact,
         contactType: contact.contactType,
@@ -91,7 +94,7 @@ export async function guardianActionGate(input: GateInput): Promise<GateResult> 
           ...(providerOrgName ? { providerOrgName } : {}),
         },
       });
-      return { status: 'challenge_issued' };
+      return { status: 'challenge_issued', sentTo };
     } catch (err) {
       if (err instanceof GuardianOtpError) {
         if (err.code === 'RATE_LIMITED') return { status: 'rate_limited' };
@@ -143,6 +146,28 @@ function bulkScope(wardUserId: string, network: string, items: BulkGateItem[]): 
 }
 
 /**
+ * Wards whose multi-row batch must be refused: bulk is turned off for
+ * minors and their guardian gets OTPs by SMS. Looked up in parallel, and only
+ * when the setting is off.
+ */
+async function wardsWithSmsGuardian(groups: Map<string, BulkGateItem[]>): Promise<Set<string>> {
+  if (apiConfig.minor_bulk_actions_enabled) return new Set();
+  const wards = [
+    ...new Set([...groups.values()].filter((b) => b.length > 1).map((b) => b[0].wardUserId)),
+  ];
+  // A failed lookup counts as SMS: otherwise the route's fallback sends one OTP per row.
+  const types = await Promise.all(
+    wards.map((w) => getMinorGuardian(w).catch(() => 'lookup_failed' as const))
+  );
+  return new Set(
+    wards.filter((_, i) => {
+      const t = types[i];
+      return t === 'lookup_failed' || t?.guardianContactType === 'phone';
+    })
+  );
+}
+
+/**
  * Bulk counterpart of {@link guardianActionGate}: one OTP (and one email
  * listing every provider org) per ward and network for the gated items of a
  * bulk submit, verified once for the whole group. Returns a `GateResult` per
@@ -189,12 +214,22 @@ export async function guardianBulkActionGate(args: {
     else groups.set(key, [item]);
   }
 
+  // Only an SMS guardian lacks a batch OTP template; email lists every org.
+  const smsGuardianWards = await wardsWithSmsGuardian(groups);
+
   for (const bucket of groups.values()) {
+    // One gated row: leave it to the per-action gate, which sends that action's own template.
+    if (bucket.length === 1) continue;
     const { wardUserId, network } = bucket[0];
     const scope = bulkScope(wardUserId, network, bucket);
     const assign = (r: GateResult) => {
       for (const item of bucket) results.set(item.index, r);
     };
+
+    if (bucket.length > 1 && smsGuardianWards.has(wardUserId)) {
+      assign({ status: 'minor_bulk_blocked' });
+      continue;
+    }
 
     if (!args.otp) {
       try {
@@ -211,7 +246,7 @@ export async function guardianBulkActionGate(args: {
             names.push(name);
           }
         }
-        await issueGuardianOtp({
+        const { sentTo } = await issueGuardianOtp({
           scope,
           contact: contact.contact,
           contactType: contact.contactType,
@@ -225,7 +260,7 @@ export async function guardianBulkActionGate(args: {
           },
           variables: parentName ? { parentName } : {},
         });
-        assign({ status: 'challenge_issued' });
+        assign({ status: 'challenge_issued', sentTo });
       } catch (err) {
         if (err instanceof GuardianOtpError) {
           if (err.code === 'RATE_LIMITED') { assign({ status: 'rate_limited' }); continue; }
@@ -264,6 +299,7 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'GUARDIAN_OTP_REQUIRED',
         'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        { sent_to: gate.sentTo },
       );
     case 'invalid_otp':
       return new BulkItemFailure('GUARDIAN_OTP_INVALID', 'Guardian OTP is invalid or expired.');
@@ -281,6 +317,11 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'MINOR_ACTION_CHANNEL_BLOCKED',
         "This participant is a minor; actions for minors must be completed in the app and can't be performed via this channel.",
+      );
+    case 'minor_bulk_blocked':
+      return new BulkItemFailure(
+        'MINOR_BULK_ACTION_BLOCKED',
+        'Under-18 accounts can send or accept one request at a time.',
       );
     default:
       return null; // not_required | verified → proceed

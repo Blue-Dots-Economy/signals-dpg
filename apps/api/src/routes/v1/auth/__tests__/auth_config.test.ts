@@ -24,7 +24,10 @@ const mockKeycloakConfig = {
   ui_client_id: 'signals-ui',
 };
 
+const mockApiConfig = { minor_bulk_actions_enabled: true };
+
 vi.mock('@/config', () => ({
+  apiConfig: mockApiConfig,
   authConfig: mockAuthConfig,
   keycloakConfig: mockKeycloakConfig,
 }));
@@ -83,6 +86,13 @@ describe('GET /api/v1/auth/config', () => {
     });
   });
 
+
+  it('tells the UI whether a minor may send or accept in bulk (#917)', async () => {
+    mockApiConfig.minor_bulk_actions_enabled = false;
+    expect((await get()).json().minorBulkActionsEnabled).toBe(false);
+    mockApiConfig.minor_bulk_actions_enabled = true;
+    expect((await get()).json().minorBulkActionsEnabled).toBe(true);
+  });
 
   it('withholds Keycloak details when the mode is on but no URL is configured', async () => {
     // A half-configured instance must not send the UI somewhere broken.

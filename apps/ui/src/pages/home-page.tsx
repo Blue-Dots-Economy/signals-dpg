@@ -117,6 +117,8 @@ import type { Marker as NetworkMarker } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
+import { useMinorBulkBlocked } from '@/hooks/use-minor-bulk-blocked';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -624,7 +626,9 @@ export function HomePage() {
     // Non-guardian failures from a mixed batch, reselected once the guardian
     // dialog resolves so they can be retried.
     otherFailedIds?: string[];
+    sentTo?: string;
   } | null>(null);
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
   // Minor ward: the "a code will be sent to your guardian" confirm shown before
   // a bulk action dispatches the OTP. Holds the deferred submit and action type.
   const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
@@ -1233,6 +1237,9 @@ export function HomePage() {
     [network, currentDomain, myItem]
   );
 
+  // Bulk off for minors (#917): say "one at a time" before anything is sent.
+  const minorBulkBlocked = useMinorBulkBlocked(network, wardDomain);
+
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
@@ -1308,6 +1315,9 @@ export function HomePage() {
         if (outcome.kind === 'all') {
           toast.success(t('home.bulk_connected_all', { count: outcome.succeeded }));
           browseSelection.exitSelect();
+        } else if (outcome.kind === 'minor_bulk_blocked') {
+          setMinorBulkNoteOpen(true);
+          browseSelection.setSelected(outcome.failedIds);
         } else if (outcome.kind === 'guardian') {
           // A code has already gone to the guardian; the OTP dialog owns the
           // resubmit.
@@ -1317,6 +1327,7 @@ export function HomePage() {
             sourceInstanceUrl: sourceItemInstanceUrl,
             actionType,
             otherFailedIds: outcome.otherFailedIds,
+            sentTo: outcome.sentTo,
           });
         } else {
           toast.warning(
@@ -1713,10 +1724,15 @@ export function HomePage() {
     </Dialog>
   );
 
+  const minorBulkNoteModal = (
+    <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
+  );
+
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      sentTo={bulkGuardianChallenge?.sentTo}
       purpose={{
         kind: 'bulk',
         action: guardianActionKind(bulkGuardianChallenge?.actionType),
@@ -1784,6 +1800,7 @@ export function HomePage() {
         {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
       </>
     );
   }
@@ -2212,7 +2229,13 @@ export function HomePage() {
                         <button
                           type="button"
                           disabled={!connectAction || bulkConnectBusy}
-                          onClick={() => setBulkConnectOpen(true)}
+                          onClick={() => {
+                            if (minorBulkBlocked && browseSelection.selected.size > 1) {
+                              setMinorBulkNoteOpen(true);
+                              return;
+                            }
+                            setBulkConnectOpen(true);
+                          }}
                           className="rounded-lg bg-primary px-4 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50"
                         >
                           {t('home.bulk_connect_all', { count: browseSelection.selected.size })}
@@ -2362,6 +2385,7 @@ export function HomePage() {
     {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
     </>
   );
 }

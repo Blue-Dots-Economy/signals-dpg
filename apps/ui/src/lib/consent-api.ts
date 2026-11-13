@@ -138,6 +138,8 @@ export interface ProfileConsentOtpItemRef {
 
 export interface IssueProfileConsentOtpResponse {
   otpSent: boolean;
+  /** Masked guardian contact the code went to. */
+  sent_to?: string;
 }
 
 export interface VerifyProfileConsentOtpBody extends ProfileConsentOtpItemRef {
@@ -161,6 +163,8 @@ export interface U18StatusResponse {
   isMinor: boolean;
   /** A guardian has already been OTP-verified for this user. */
   guardianVerified: boolean;
+  /** How the guardian gets OTPs; null before a guardian is on file. Absent on older APIs. */
+  guardianContactType?: 'phone' | 'email' | null;
 }
 
 /**
@@ -265,8 +269,8 @@ export interface ProfilePrecreateRef {
 
 export async function issueProfilePrecreateOtp(
   body: ProfilePrecreateRef,
-): Promise<{ otpSent: boolean }> {
-  const response = await apiClient.post<{ otpSent: boolean }>(
+): Promise<IssueProfileConsentOtpResponse> {
+  const response = await apiClient.post<IssueProfileConsentOtpResponse>(
     '/api/v1/consent/u18/profile-consent/precreate/issue',
     body,
   );

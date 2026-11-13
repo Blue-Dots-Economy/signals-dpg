@@ -278,6 +278,15 @@ export function guardianOtpErrorOf(
   return GUARDIAN_OTP_CODE_ALIASES[code] ?? null;
 }
 
+/** A minor's multi-request send or accept refused by the API (bulk turned off for minors). */
+export const MINOR_BULK_ACTION_BLOCKED = 'MINOR_BULK_ACTION_BLOCKED';
+
+/** Masked guardian contact (`sent_to`) carried by a thrown guardian-OTP error, if any. */
+export function guardianSentToFromThrown(err: unknown): string | undefined {
+  const sentTo = (err as { response?: { data?: { sent_to?: unknown } } } | null | undefined)?.response?.data?.sent_to;
+  return typeof sentTo === 'string' && sentTo ? sentTo : undefined;
+}
+
 /**
  * Classifies a thrown error as a `GuardianOtpErrorCode`, or `null`. Single-item
  * calls throw a `BulkSingleError` with the code on `.code`; a raw axios error

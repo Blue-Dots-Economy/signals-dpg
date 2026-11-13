@@ -19,6 +19,8 @@ import { formatDomainLabel, pluralizeDomainLabel } from '@/lib/domain-icons';
 import { PageShell } from '@/components/layout/page-shell';
 import { ActionStatusUpdater } from '@/components/actions/action-status-updater';
 import { BulkStatusDialog } from '@/components/actions/bulk-status-dialog';
+import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
+import { useMinorBulkBlocked } from '@/hooks/use-minor-bulk-blocked';
 import { ProfileCardModal, type ProfileCardCounterparty } from '@/components/actions/profile-card-modal';
 import { getStatusStyle } from '@/components/actions/action-card';
 import {
@@ -368,6 +370,7 @@ export function MyActionsPage() {
 
   const [statusTarget, setStatusTarget] = React.useState<{ action: Action; status: string } | null>(null);
   const [bulk, setBulk] = React.useState<{ actions: Action[]; status: string } | null>(null);
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
   const [profileOf, setProfileOf] = React.useState<{ action: Action; counterparty: ProfileCardCounterparty } | null>(
     null,
   );
@@ -439,6 +442,7 @@ export function MyActionsPage() {
   // Bulk commands (counts reflect what each would act on).
   const pickedRows = [...picked.values()];
   const respondable = pickedRows.filter((a) => needsResponse(a, pending));
+  const minorBulkBlocked = useMinorBulkBlocked(network, respondable[0]?.target_item_domain);
   const { exportable: exportableCount, notExportable } = exportSelectionCounts({
     pickedStatuses: pickedRows.map((a) => a.action_status),
     allMatching,
@@ -477,7 +481,13 @@ export function MyActionsPage() {
       label: t('actions.btn_accept', 'Accept'),
       count: allMatching ? 0 : respondable.length,
       tone: 'accept',
-      onClick: () => setBulk({ actions: respondable, status: 'accepted' }),
+      onClick: () => {
+        if (minorBulkBlocked && respondable.length > 1) {
+          setMinorBulkNoteOpen(true);
+          return;
+        }
+        setBulk({ actions: respondable, status: 'accepted' });
+      },
     },
     {
       id: 'reject',
@@ -649,6 +659,7 @@ export function MyActionsPage() {
         onOpenChange={(open) => !open && setStatusTarget(null)}
         suggestedStatus={statusTarget?.status ?? ''}
       />
+      <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
       <BulkStatusDialog
         open={bulk !== null}
         onOpenChange={(open) => !open && setBulk(null)}

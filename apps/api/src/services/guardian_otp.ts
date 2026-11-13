@@ -4,6 +4,7 @@ import { getNotificationClient } from '@/utils/notificationClient';
 import { authConfig, supportConfig, notification } from '@/config';
 import { renderOrgList } from '@/notifications/email/shells';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import { getDefaultSmsSender } from '@/notifications/sms/dispatch_sms';
 import { incrWithinWindow } from '@/utils/rate_window';
 
 /** Codes the primitive raises; callers map these to HTTP responses. */
@@ -19,7 +20,8 @@ export type GuardianContactType = 'phone' | 'email';
 /**
  * The parent-facing scenario a guardian OTP is issued for. Selects the email
  * case (`guardian.<kind>`) and its copy; the code, TTL and throttles are the
- * same for every scenario, and SMS always uses the one generic OTP template.
+ * same for every scenario. SMS uses the scenario's own template where the
+ * instance maps one (`guardian.<kind>[.<stage>]`), else the generic OTP template.
  * For actions, `actionType` comes from the interaction in `network.json`.
  */
 export type GuardianOtpScenario =
@@ -49,8 +51,8 @@ export type OtpSend = (args: {
 }) => Promise<void>;
 
 export const GUARDIAN_OTP_TTL_SEC = 600; // nonce lifetime (10 min; the email copy states it)
-export const GUARDIAN_OTP_MAX_PER_WINDOW = 3; // sends allowed per scope per window
-export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 5; // sends allowed per guardian contact per window
+export const GUARDIAN_OTP_MAX_PER_WINDOW = 10; // sends allowed per scope per window
+export const GUARDIAN_OTP_CONTACT_MAX_PER_WINDOW = 10; // sends allowed per guardian contact per window
 export const GUARDIAN_OTP_WINDOW_SEC = 300; // rate-limit window (5 min)
 export const GUARDIAN_OTP_VERIFY_MAX = 5; // verify attempts per window
 export const GUARDIAN_OTP_VERIFY_WINDOW_SEC = 300;
@@ -104,7 +106,7 @@ export async function issueGuardianOtp(args: {
   scenario?: GuardianOtpScenario;
   variables?: GuardianOtpVariables;
   send?: OtpSend;
-}): Promise<void> {
+}): Promise<{ sentTo: string }> {
   const count = await incrWithinWindow(rateKey(args.scope), GUARDIAN_OTP_WINDOW_SEC);
   if (count > GUARDIAN_OTP_MAX_PER_WINDOW) {
     throw new GuardianOtpError('RATE_LIMITED');
@@ -123,7 +125,8 @@ export async function issueGuardianOtp(args: {
   // Only the hash is stored, so Redis read access cannot expose a live OTP.
   await redis.set(codeKey(args.scope), hashOtp(otp), 'EX', GUARDIAN_OTP_TTL_SEC);
   // Test-OTP mode skips dispatch; the fixed code is already known.
-  if (authConfig.create_test_otp) return;
+  const sentTo = maskGuardianContact(args.contact, args.contactType);
+  if (authConfig.create_test_otp) return { sentTo };
   const send = args.send ?? defaultGuardianOtpSend;
   await send({
     contact: args.contact,
@@ -132,6 +135,15 @@ export async function issueGuardianOtp(args: {
     scenario: args.scenario,
     variables: args.variables,
   });
+  return { sentTo };
+}
+
+/** Masked guardian contact shown to the ward: `******7347`, `ab***@gmail.com`. */
+export function maskGuardianContact(contact: string, contactType: GuardianContactType): string {
+  if (contactType === 'phone') return `******${contact.replace(/\D/g, '').slice(-4)}`;
+  const at = contact.lastIndexOf('@');
+  if (at < 1) return '***';
+  return `${contact.slice(0, Math.min(2, at))}***${contact.slice(at)}`;
 }
 
 // Atomic compare-and-delete on the stored hash, so two concurrent verifies of
@@ -173,6 +185,12 @@ const CHANNEL_BY_CONTACT_TYPE: Record<GuardianContactType, 'sms' | 'email'> = {
 // only the code; parent-facing copy is email-only.
 const GENERIC_SMS_TEMPLATE_ID = 'login_otp';
 
+/** SMS case id for a scenario; bulk has no case of its own and uses the generic OTP. */
+export function guardianSmsCaseId(scenario?: GuardianOtpScenario): string | null {
+  if (!scenario || scenario.kind === 'action_bulk') return null;
+  return scenario.kind === 'action' ? `guardian.action.${scenario.stage}` : `guardian.${scenario.kind}`;
+}
+
 /**
  * Maps a guardian OTP scenario to its email case and variables. Fallbacks are
  * supplied here because the copy file has no conditionals: every placeholder
@@ -209,7 +227,8 @@ export function buildGuardianEmailDispatch(args: {
  *
  * Email goes through `dispatchEmail` with the case from
  * `buildGuardianEmailDispatch` (copy lives in the email messages file). SMS
- * sends the generic OTP template; notification-service renders the body.
+ * sends the scenario's template if mapped, else the generic OTP template;
+ * notification-service renders the body.
  */
 export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, otp, scenario, variables }) => {
   const client = getNotificationClient();
@@ -238,6 +257,19 @@ export const defaultGuardianOtpSend: OtpSend = async ({ contact, contactType, ot
       variables: dispatch.variables,
     });
     return;
+  }
+
+  // A scenario's own template where the instance maps one, else the generic OTP.
+  const caseId = guardianSmsCaseId(scenario);
+  if (caseId) {
+    const sent = await getDefaultSmsSender()?.dispatchSms({
+      caseId,
+      to: contact,
+      priority: 'realtime',
+      critical: true,
+      variables: { otp, org: variables?.providerOrgName || 'the organisation' },
+    });
+    if (sent?.ok) return;
   }
 
   await client.notify({

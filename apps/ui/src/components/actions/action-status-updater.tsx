@@ -178,14 +178,12 @@ export function ActionStatusUpdater({
         onOpenChange(false);
       },
       onError: (error: Error) => {
-        // A minor ward needs guardian confirmation: open the OTP challenge
-        // instead of an error toast.
-        if (gate.captureIfGuardianRequired(error, payload)) {
-          // Close this dialog in favour of the OTP dialog, which stays mounted
-          // (it is driven by gate.challenge).
-          onOpenChange(false);
-          return;
-        }
+        // A minor ward: the accept/reject/etc. requires guardian confirmation.
+        // Stash the exact payload and open the OTP challenge instead of the
+        // generic error toast — adults never see a GUARDIAN_OTP_* code here.
+        // The form hides while the challenge is open; closing it here would
+        // clear the parent's action and unmount the OTP dialog with it.
+        if (gate.captureIfGuardianRequired(error, payload)) return;
         toast.error(t('actions.toast_update_failed', { message: error.message }));
       },
     });
@@ -248,16 +246,21 @@ export function ActionStatusUpdater({
   const guardianOtpDialog = (
     <GuardianOtpDialog
       open={!!gate.challenge}
-      onOpenChange={(o) => !o && gate.setChallenge(null)}
+      onOpenChange={(o) => {
+        if (o) return;
+        gate.setChallenge(null);
+        onOpenChange(false);
+      }}
       onSubmitOtp={gate.submitOtp}
       purpose={{ kind: 'accept' }}
+      sentTo={gate.sentTo}
     />
   );
 
   if (isMobile) {
     return (
       <>
-        <Drawer open={open} onOpenChange={onOpenChange}>
+        <Drawer open={open && !gate.challenge} onOpenChange={onOpenChange}>
           <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
             <div className="px-6 pt-6">{header}</div>
             <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
@@ -271,7 +274,7 @@ export function ActionStatusUpdater({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open && !gate.challenge} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[520px] max-h-[90dvh] overflow-y-auto gap-0 p-6">
           {header}
           <div className="py-4">{formContent}</div>

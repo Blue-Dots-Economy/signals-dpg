@@ -69,6 +69,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
   const { signOut } = useAuth();
   const [isPending, setIsPending] = React.useState(false);
   const [guardian, setGuardian] = React.useState<GuardianPending | null>(null);
+  const [guardianSentTo, setGuardianSentTo] = React.useState<string | undefined>(undefined);
   const [guardianSetup, setGuardianSetup] = React.useState<GuardianPending | null>(null);
 
   // Seeds the profile-consent set directly (not invalidate) so the accepted
@@ -95,8 +96,9 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
   const issueOtp = React.useCallback(
     async (pending: GuardianPending) => {
       try {
-        const { otpSent } = await issueProfileConsentOtp(pending.ref);
+        const { otpSent, sent_to } = await issueProfileConsentOtp(pending.ref);
         if (otpSent) {
+          setGuardianSentTo(sent_to);
           setGuardian(pending);
         } else {
           // Accepted but no code sent: say so rather than leave the user stuck.
@@ -192,6 +194,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
           if (!open) setGuardian(null);
         }}
         purpose={{ kind: 'profile' }}
+        sentTo={guardianSentTo}
         onLogout={() => {
           void signOut();
         }}
