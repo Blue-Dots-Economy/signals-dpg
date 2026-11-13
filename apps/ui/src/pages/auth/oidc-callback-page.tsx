@@ -415,12 +415,25 @@ const LOCALISED_REJECTION_KEYS: Readonly<Record<string, string>> = {
 };
 
 /**
- * Whether signing out and back in could succeed: only when the realm handed
- * over the wrong identity. Offering it for KEYCLOAK_NOT_CONFIGURED or
- * USER_BANNED would loop.
+ * Refusals about the signed-in account itself. "Try again" cannot help with
+ * these: Keycloak's sign-in is still live, so it hands back the same account
+ * and the same error. Ending the sign-in lets the user enter a different
+ * phone or email. Outages (IDENTITY_PROVIDER_UNAVAILABLE, PROVISIONING_FAILED)
+ * stay on "Try again", since the same account can succeed on a retry.
  */
+const ACCOUNT_REFUSALS: ReadonlySet<string> = new Set([
+  'TOKEN_AGGREGATOR_ACCOUNT',
+  'TOKEN_ROLE_REJECTED',
+  'SELF_SIGNUP_DISABLED',
+  'IDENTITY_CONFLICT',
+  'NO_IDENTIFIER',
+  'USER_BANNED',
+  'LOGIN_CHANNEL_DISABLED',
+]);
+
+/** Whether the error page should end the sign-in rather than retry it. */
 function isRecoverableIdentity(errorCode: string | null | undefined): boolean {
-  return errorCode === 'TOKEN_AGGREGATOR_ACCOUNT' || errorCode === 'TOKEN_ROLE_REJECTED';
+  return errorCode != null && ACCOUNT_REFUSALS.has(errorCode);
 }
 
 /**

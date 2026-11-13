@@ -662,6 +662,38 @@ describe('#558 — first-time-login profile redirect', () => {
       expect(screen.getByText(/already signed in with a different account/i)).toBeInTheDocument();
     });
 
+    it.each([
+      'SELF_SIGNUP_DISABLED',
+      'IDENTITY_CONFLICT',
+      'NO_IDENTIFIER',
+      'USER_BANNED',
+      'LOGIN_CHANNEL_DISABLED',
+    ])('ENDS the session for the account refusal %s (#713)', async (code) => {
+      // "Try again" would loop: Keycloak's sign-in is still live, so it hands
+      // back the same account. Someone who typed the wrong phone or email
+      // must be able to enter a different one.
+      rejectWith(code, 'Refused');
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /sign out and switch account/i }));
+
+      await waitFor(() => expect(endBffSession).toHaveBeenCalled());
+      expect(startBffLogin).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalledWith('/auth/login', { replace: true });
+    });
+
+    it.each(['IDENTITY_PROVIDER_UNAVAILABLE', 'PROVISIONING_FAILED'])(
+      'keeps the plain retry for the outage %s',
+      async (code) => {
+        // The same account can succeed once the outage passes.
+        rejectWith(code, 'Outage');
+        renderPage();
+
+        expect(await screen.findByText('Outage')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /sign out and switch account/i })).toBeNull();
+      },
+    );
+
     it('keeps the plain retry when signing out could not possibly help', async () => {
       // Switching account cannot fix a misconfigured instance, so offering it
       // would just walk the user round a loop with no exit.
