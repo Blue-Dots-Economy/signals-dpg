@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { toast } from 'sonner';
-import axios from 'axios';
+import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 import { Loader2, Paperclip, X } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -16,13 +18,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import { submitSupport, type SupportType } from '@/lib/support-api';
+import { PhoneInput, isAcceptedPhone } from '@/components/auth/phone-input';
 import { useSupportConfig } from '@/hooks/use-support-config';
 import {
   encodeAttachments,
   formatBytes,
   pickerAccept,
   validateAttachmentSelection,
+  type AttachmentRejection,
 } from '@/lib/support-attachments';
+import type { SupportConfig } from '@/lib/support-api';
 
 interface SupportDialogProps {
   open: boolean;
@@ -31,39 +36,104 @@ interface SupportDialogProps {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-/** Maps a failed submit to its specific toast. */
+/** Maps a failed submit that no field owns to its toast. */
 function resolveSubmitErrorToast(
   err: unknown,
   t: Translate,
-  maxTotalBytes: number,
 ): { title: string; description?: string } {
-  const response = axios.isAxiosError(err) ? err.response : undefined;
-  const data = response?.data as { error?: unknown; message?: unknown } | undefined;
-
-  if (response?.status === 503) {
+  const { status } = readApiError(err);
+  if (status === 503) {
     return { title: t('support.toast_unavailable'), description: t('support.toast_unavailable_desc') };
   }
-  if (response?.status === 429) {
+  if (status === 429) {
     return { title: t('support.toast_rate_limited'), description: t('support.toast_rate_limited_desc') };
   }
-  if (response?.status === 413) {
-    // The server's body limit, not its attachment check — a payload this far
-    // over the cap never reaches the handler's specific error codes.
-    return { title: t('support.validation_attachment_size', { size: formatBytes(maxTotalBytes) }) };
+  return {
+    title: t('support.toast_error'),
+    description: apiErrorMessage(err, t as TFunction, t('support.toast_error_desc')),
+  };
+}
+
+type SupportField = 'name' | 'email' | 'phone' | 'details' | 'contact' | 'consent' | 'attachments';
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s.@]+\.[^\s@]+$/;
+
+/** "Invalid entry. Please enter a valid {label}." */
+function invalidFieldMessage(t: TFunction, label: string): string {
+  return t('form.error_invalid', 'Invalid entry. {{message}}', {
+    message: t('form.invalid_format', 'Please enter a valid {{field}}.', { field: label }),
+  });
+}
+
+/** The message under the picker for files the client refused. */
+function attachmentRejectionMessage(rejection: AttachmentRejection, config: SupportConfig, t: TFunction): string {
+  if (rejection.reason === 'count') return t('support.validation_attachment_count', { count: config.maxFiles });
+  if (rejection.reason === 'size') {
+    return t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) });
   }
-  if (
-    response?.status === 400 &&
-    typeof data?.error === 'string' &&
-    data.error.startsWith('ATTACHMENT_')
-  ) {
-    // A server-side attachment rejection the client check missed (e.g. limits
-    // lowered since the config was cached); its message names the file.
+  return t('support.validation_attachment_type', { name: rejection.filename });
+}
+
+/** Field messages for a failed submit; empty when no field owns the failure. */
+function submitFailureFieldErrors(
+  err: unknown,
+  config: SupportConfig,
+  t: TFunction,
+): Partial<Record<SupportField, string>> {
+  const info = readApiError(err);
+  // The server's body limit, not its attachment check.
+  if (info.status === 413) {
+    return { attachments: t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) }) };
+  }
+  if (info.status !== 400) return {};
+  // Its message names the file the client check missed.
+  if (info.code?.startsWith('ATTACHMENT_')) {
     return {
-      title: t('support.toast_attachment_rejected'),
-      description: typeof data.message === 'string' ? data.message : undefined,
+      attachments: isReadableServerMessage(info.message) ? info.message : t('support.toast_attachment_rejected'),
     };
   }
-  return { title: t('support.toast_error'), description: t('support.toast_error_desc') };
+  const labels = {
+    name: t('support.label_name'),
+    email: t('support.label_email'),
+    phone: t('support.label_phone'),
+    details: t('support.label_details'),
+  };
+  const out: Partial<Record<SupportField, string>> = {};
+  for (const key of ['name', 'email', 'phone', 'details'] as const) {
+    if (info.fields?.[key]) out[key] = invalidFieldMessage(t, labels[key]);
+  }
+  return out;
+}
+
+/** What {@link supportFieldErrors} reads from the form. */
+interface SupportFormState {
+  submitAttempted: boolean;
+  left: { email?: boolean; phone?: boolean };
+  extra: Partial<Record<SupportField, string>>;
+  nameMissing: boolean;
+  emailWrong: boolean;
+  phoneWrong: boolean;
+  contactMissing: boolean;
+  detailsMissing: boolean;
+  consentMissing: boolean;
+}
+
+/** Each field's message: a server or picker message first, else the form's own check. */
+function supportFieldErrors(f: SupportFormState, t: TFunction): Partial<Record<SupportField, string>> {
+  const after = (missing: boolean, message: string) => (f.submitAttempted && missing ? message : undefined);
+  const onceLeft = (wasLeft: boolean | undefined, wrong: boolean, message: string) =>
+    (wasLeft || f.submitAttempted) && wrong ? message : undefined;
+  return {
+    name:
+      f.extra.name ??
+      after(f.nameMissing, t('form.error_required', '{{label}} is required.', { label: t('support.label_name') })),
+    email: f.extra.email ?? onceLeft(f.left.email, f.emailWrong, invalidFieldMessage(t, t('support.label_email'))),
+    phone: f.extra.phone ?? onceLeft(f.left.phone, f.phoneWrong, invalidFieldMessage(t, t('support.label_phone'))),
+    contact: after(f.contactMissing, t('support.validation_contact_required')),
+    details: f.extra.details ?? after(f.detailsMissing, t('support.validation_details_required')),
+    consent: after(f.consentMissing, t('support.validation_consent_required')),
+    attachments: f.extra.attachments,
+  };
 }
 
 export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
@@ -77,6 +147,12 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const [consent, setConsent] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [left, setLeft] = useState<{ email?: boolean; phone?: boolean }>({});
+  // Messages from the server or the attachment picker, cleared when that field changes.
+  const [extraErrors, setExtraErrors] = useState<Partial<Record<SupportField, string>>>({});
+  const clearExtra = (field: SupportField) =>
+    setExtraErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Limits come from the API, fetched only while the dialog is open.
   const { config } = useSupportConfig(open);
@@ -94,6 +170,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
     setDetails('');
     setConsent(false);
     setAttachments([]);
+    setSubmitAttempted(false);
+    setLeft({});
+    setExtraErrors({});
   };
 
   const handleFilesSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,21 +183,16 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
 
     const result = validateAttachmentSelection(attachments, incoming, config);
     if (!result.ok) {
-      if (result.reason === 'count') {
-        toast.error(t('support.validation_attachment_count', { count: config.maxFiles }));
-      } else if (result.reason === 'size') {
-        toast.error(
-          t('support.validation_attachment_size', { size: formatBytes(config.maxTotalBytes) }),
-        );
-      } else {
-        toast.error(t('support.validation_attachment_type', { name: result.filename }));
-      }
+      const message = attachmentRejectionMessage(result, config, t);
+      setExtraErrors((prev) => ({ ...prev, attachments: message }));
       return;
     }
+    clearExtra('attachments');
     setAttachments(result.files);
   };
 
   const removeAttachment = (index: number) => {
+    clearExtra('attachments');
     setAttachments((current) => current.filter((_, i) => i !== index));
   };
 
@@ -128,21 +202,48 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
   const trimmedEmail = email.trim();
   const trimmedPhone = phone.trim();
   const hasContact = Boolean(trimmedEmail || trimmedPhone);
-  const canSubmit =
-    Boolean(trimmedName) && Boolean(details.trim()) && hasContact && consent && !isSubmitting;
+  const emailWrong = Boolean(trimmedEmail) && !EMAIL_SHAPE.test(trimmedEmail);
+  const phoneWrong = Boolean(trimmedPhone) && !isAcceptedPhone(trimmedPhone);
+
+  const errors = supportFieldErrors(
+    {
+      submitAttempted,
+      left,
+      extra: extraErrors,
+      nameMissing: !trimmedName,
+      emailWrong,
+      phoneWrong,
+      contactMissing: !hasContact,
+      detailsMissing: !details.trim(),
+      consentMissing: !consent,
+    },
+    t,
+  );
+  const FIELD_IDS: Record<SupportField, string> = {
+    name: 'support-name',
+    email: 'support-email',
+    phone: 'support-phone',
+    contact: 'support-email',
+    details: 'support-details',
+    consent: 'support-consent',
+    attachments: 'support-attachments-button',
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!details.trim()) {
-      toast.error(t('support.validation_details_required'));
-      return;
-    }
-    if (!hasContact) {
-      toast.error(t('support.validation_contact_required'));
-      return;
-    }
-    if (!consent) {
-      toast.error(t('support.validation_consent_required'));
+    if (isSubmitting) return;
+    setSubmitAttempted(true);
+    const blocked: Record<'name' | 'email' | 'phone' | 'contact' | 'details' | 'consent', boolean> = {
+      name: !trimmedName,
+      email: emailWrong,
+      phone: phoneWrong,
+      contact: !hasContact,
+      details: !details.trim(),
+      consent: !consent,
+    };
+    const missing = (['name', 'email', 'phone', 'contact', 'details', 'consent'] as const).find((field) => blocked[field]);
+    if (missing) {
+      document.getElementById(FIELD_IDS[missing])?.focus();
       return;
     }
     setIsSubmitting(true);
@@ -162,8 +263,15 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
       reset();
       onOpenChange(false);
     } catch (err) {
-      const { title, description } = resolveSubmitErrorToast(err, t, config.maxTotalBytes);
-      toast.error(title, description ? { description } : undefined);
+      const fieldErrors = submitFailureFieldErrors(err, config, t);
+      const fieldKeys = Object.keys(fieldErrors) as SupportField[];
+      if (fieldKeys.length > 0) {
+        setExtraErrors((prev) => ({ ...prev, ...fieldErrors }));
+        document.getElementById(FIELD_IDS[fieldKeys[0]!])?.focus();
+      } else {
+        const { title, description } = resolveSubmitErrorToast(err, t);
+        toast.error(title, description ? { description } : undefined);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -187,11 +295,15 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
             <Input
               id="support-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                clearExtra('name');
+              }}
               maxLength={200}
               disabled={isSubmitting}
-              required
+              {...fieldErrorAria('support-name-error', errors.name)}
             />
+            <InlineFieldError id="support-name-error" message={errors.name} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="support-email">{t('support.label_email')}</Label>
@@ -199,21 +311,36 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               id="support-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                clearExtra('email');
+              }}
+              onBlur={() => setLeft((prev) => ({ ...prev, email: true }))}
               maxLength={320}
               disabled={isSubmitting}
+              {...fieldErrorAria(
+                errors.email ? 'support-email-error' : 'support-contact-error',
+                errors.email ?? errors.contact,
+              )}
             />
+            <InlineFieldError id="support-email-error" message={errors.email} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="support-phone">{t('support.label_phone')}</Label>
-            <Input
+            <PhoneInput
               id="support-phone"
-              type="tel"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              maxLength={20}
+              onChange={(next) => {
+                setPhone(next);
+                clearExtra('phone');
+              }}
+              onBlur={() => setLeft((prev) => ({ ...prev, phone: true }))}
               disabled={isSubmitting}
+              invalid={Boolean(errors.phone ?? errors.contact)}
+              describedBy={errors.phone ? 'support-phone-error' : 'support-contact-error'}
             />
+            <InlineFieldError id="support-phone-error" message={errors.phone} />
+            <InlineFieldError id="support-contact-error" message={errors.contact} />
           </div>
           <fieldset className="space-y-1.5" disabled={isSubmitting}>
             <legend className="text-sm font-medium">{t('support.label_type')}</legend>
@@ -245,13 +372,17 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
             <Textarea
               id="support-details"
               value={details}
-              onChange={(e) => setDetails(e.target.value)}
+              onChange={(e) => {
+                setDetails(e.target.value);
+                clearExtra('details');
+              }}
               placeholder={t('support.placeholder_details')}
               maxLength={5000}
               rows={5}
               disabled={isSubmitting}
-              required
+              {...fieldErrorAria('support-details-error', errors.details)}
             />
+            <InlineFieldError id="support-details-error" message={errors.details} />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="support-attachments">{t('support.label_attachments')}</Label>
@@ -272,7 +403,9 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               className="sr-only"
             />
             <button
+              id="support-attachments-button"
               type="button"
+              {...fieldErrorAria('support-attachments-error', errors.attachments)}
               onClick={() => fileInputRef.current?.click()}
               disabled={isSubmitting || attachments.length >= config.maxFiles}
               className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm disabled:opacity-60"
@@ -280,6 +413,7 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               <Paperclip className="h-4 w-4" />
               {t('support.attachments_add')}
             </button>
+            <InlineFieldError id="support-attachments-error" message={errors.attachments} />
             {attachments.length > 0 && (
               <ul className="space-y-1">
                 {attachments.map((file, index) => (
@@ -313,21 +447,25 @@ export function SupportDialog({ open, onOpenChange }: SupportDialogProps) {
               </ul>
             )}
           </div>
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="support-consent"
-              checked={consent}
-              onCheckedChange={(checked) => setConsent(checked === true)}
-              disabled={isSubmitting}
-            />
-            <Label htmlFor="support-consent" className="text-sm font-normal leading-snug">
-              {t('support.consent_text')}
-            </Label>
+          <div className="space-y-1.5">
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="support-consent"
+                checked={consent}
+                onCheckedChange={(checked) => setConsent(checked === true)}
+                disabled={isSubmitting}
+                {...fieldErrorAria('support-consent-error', errors.consent)}
+              />
+              <Label htmlFor="support-consent" className="text-sm font-normal leading-snug">
+                {t('support.consent_text')}
+              </Label>
+            </div>
+            <InlineFieldError id="support-consent-error" message={errors.consent} />
           </div>
           <DialogFooter>
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={isSubmitting}
               className="flex w-full items-center justify-center gap-2 rounded-md py-2.5 text-sm font-semibold transition-all disabled:opacity-60 bg-brand-cta"
             >
               {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

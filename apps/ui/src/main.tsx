@@ -5,7 +5,6 @@ import { createQueryClient } from '@/lib/query-client';
 import { purgeLegacyAuthStorage } from '@/lib/purge-legacy-auth-storage';
 import { sweepLegacyMatchScoreCache } from '@/utils/match-score-cache';
 import { App } from './app';
-import '@/components/wallet/providers';
 import './i18n';
 import './index.css';
 

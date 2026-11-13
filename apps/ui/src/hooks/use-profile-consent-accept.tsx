@@ -1,6 +1,7 @@
 import * as React from 'react';
 import axios from 'axios';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/api-error';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
@@ -128,7 +129,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
             ),
           );
         } else {
-          toast.error(t('profile.error_generic_desc'));
+          toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
         }
       }
     },
@@ -175,9 +176,9 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
             version: args.version,
           });
           recordAndFinish(args.network, args.item.item_id, args.onDone);
-        } catch {
+        } catch (err) {
           // The caller keeps its prompt open to retry.
-          toast.error(t('profile.error_generic_desc'));
+          toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
         }
       } finally {
         setIsPending(false);

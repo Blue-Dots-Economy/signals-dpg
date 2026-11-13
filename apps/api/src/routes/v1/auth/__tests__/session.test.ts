@@ -22,7 +22,11 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 // the routes can be exercised without a server; the real clearSessionCookie is
 // kept, since one of the assertions below is about the cookie it clears.
 vi.mock('@api/db/secondary/redis', () => ({ redis: {} }));
-vi.mock('@/utils/keycloak_token', () => ({ verifyKeycloakToken: vi.fn() }));
+const verifyKeycloakLogoutToken = vi.fn();
+vi.mock('@/utils/keycloak_token', () => ({
+  verifyKeycloakToken: vi.fn(),
+  verifyKeycloakLogoutToken: (...a: unknown[]) => verifyKeycloakLogoutToken(...a),
+}));
 vi.mock('@api/plugins/auth/resolve_session', () => ({ resolveHumanSession: vi.fn() }));
 
 const mockAuthConfig = { keycloak_enabled: true };
@@ -51,6 +55,7 @@ vi.mock('@/services/auth/oidc_exchange', () => ({
   newPkcePair: () => ({ verifier: 'the-verifier', challenge: 'the-challenge' }),
   newStateValue: () => 'the-state',
   idTokenNonce: (...a: unknown[]) => idTokenNonce(...(a as [string])),
+  idTokenSid: () => 'kc-session-1',
   OidcExchangeError: class OidcExchangeError extends Error {},
 }));
 
@@ -76,10 +81,12 @@ vi.mock('@/services/auth/oidc_flow_state', async (orig) => {
 const createSession = vi.fn();
 const readSession = vi.fn();
 const destroySession = vi.fn();
+const destroySessionsForIdpSession = vi.fn();
 vi.mock('@/services/auth/browser_session', () => ({
   createSession: (...a: unknown[]) => createSession(...a),
   readSession: (...a: unknown[]) => readSession(...a),
   destroySession: (...a: unknown[]) => destroySession(...a),
+  destroySessionsForIdpSession: (...a: unknown[]) => destroySessionsForIdpSession(...a),
   newSessionId: () => 'the-session-id',
   newCsrfToken: () => 'the-csrf-token',
   SESSION_TTL_SECONDS: 28800,
@@ -166,6 +173,27 @@ describe('GET /auth/session/login', () => {
     expect(everythingSentBack(res)).not.toContain('the-verifier');
   });
 
+  it('ties the flow to this browser with a browser cookie, kept across sign-ins', async () => {
+    const first = await inject({ method: 'GET', url: '/api/v1/auth/session/login' });
+    const cookie = first.cookies.find((c) => c.name === 'signin_browser');
+    expect(cookie).toMatchObject({ httpOnly: true, sameSite: 'Lax', path: '/api/v1/auth/session' });
+    expect(saveFlowState).toHaveBeenLastCalledWith(
+      'the-state',
+      expect.objectContaining({ browser: cookie?.value }),
+    );
+
+    // A second sign-in in the same browser keeps the same browser value.
+    await inject({
+      method: 'GET',
+      url: '/api/v1/auth/session/login',
+      cookies: { signin_browser: 'this-browser' },
+    });
+    expect(saveFlowState).toHaveBeenLastCalledWith(
+      'the-state',
+      expect.objectContaining({ browser: 'this-browser' }),
+    );
+  });
+
   it('names the API — not the UI — as the OIDC redirect target', async () => {
     // Keycloak has to send the code back to the server that holds the verifier.
     await inject({ method: 'GET', url: '/api/v1/auth/session/login' });
@@ -250,7 +278,7 @@ describe('GET /auth/session/login', () => {
     });
     // Lax, not Strict: the callback is a top-level cross-site GET from Keycloak
     // and Strict would withhold the cookie on exactly that navigation.
-    expect(flow?.maxAge).toBe(300);
+    expect(flow?.maxAge).toBe(1800);
   });
 
   it.each([
@@ -314,6 +342,8 @@ describe('GET /auth/session/callback', () => {
         refreshToken: 'the-refresh-token',
         idToken: 'the-id-token',
         appOrigin: 'https://app.example.org',
+        // Keycloak's back-channel logout names this session.
+        idpSid: 'kc-session-1',
       }),
     );
     expect(res.cookies[0]).toMatchObject({ name: 'sid', value: 'the-session-id' });
@@ -546,7 +576,7 @@ describe('GET /auth/session', () => {
 
 describe('POST /auth/session/logout', () => {
   it('destroys the session, clears the cookie, and ends the Keycloak session too', async () => {
-    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
     const res = await inject({
       method: 'POST',
@@ -564,7 +594,7 @@ describe('POST /auth/session/logout', () => {
   it('sends the user back to the app that opened the session', async () => {
     // Not the API's own origin: Keycloak only honours post-logout URLs it has
     // registered for the client, and those name the app.
-    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
 
     await inject({
       method: 'POST',
@@ -604,5 +634,196 @@ describe('POST /auth/session/logout', () => {
     expect(res.statusCode).toBe(200);
     expect(destroySession).not.toHaveBeenCalled();
     expect(res.cookies[0]).toMatchObject({ name: 'sid', value: '' });
+  });
+
+  it('goes straight to the sign-in screen of the calling app when there is no session', async () => {
+    // Without an ID token Keycloak would only ask "Do you want to log out?".
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      headers: { origin: 'https://app.example.org' },
+    });
+
+    expect(res.json().endSessionUrl).toBe('https://app.example.org/auth/login');
+    expect(buildEndSessionUrl).not.toHaveBeenCalled();
+  });
+
+  it('ignores an Origin header that is not on the allowlist', async () => {
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      headers: { origin: 'https://evil.example' },
+    });
+
+    expect(res.json().endSessionUrl).toBe('https://api.example.org/auth/login');
+  });
+
+  it('goes straight to the sign-in screen when the session holds no ID token', async () => {
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org' });
+
+    const res = await inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/logout',
+      cookies: { sid: 'the-session-id' },
+    });
+
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    expect(res.json().endSessionUrl).toBe('https://app.example.org/auth/login');
+    expect(buildEndSessionUrl).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /auth/session/switch', () => {
+  const switchTo = (opts: Partial<InjectOptions> = {}) =>
+    inject({ method: 'GET', url: '/api/v1/auth/session/switch?flow=the-state', ...opts });
+  /** The flow was started by the browser holding this cookie. */
+  const ownFlow = () =>
+    consumeFlowState.mockResolvedValue({
+      verifier: 'v',
+      nonce: 'n',
+      returnTo: '/',
+      redirectUri: 'https://api.example.org/api/v1/auth/session/callback',
+      appOrigin: 'https://app.example.org',
+      browser: 'this-browser',
+    });
+
+  it('ends the session and names it to Keycloak when the refused sign-in is this browser\'s', async () => {
+    ownFlow();
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
+
+    const res = await switchTo({ cookies: { sid: 'the-session-id', signin_browser: 'this-browser' } });
+
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toContain('kc.example.org/logout');
+    expect(consumeFlowState).toHaveBeenCalledWith('the-state');
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    // The hint is what lets Keycloak sign out without a confirmation page.
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: 'the-id-token',
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+    expect(res.cookies.find((c) => c.name === 'sid')).toMatchObject({ value: '' });
+  });
+
+  it('still works after another sign-in in the same browser replaced the flow cookie', async () => {
+    // Two accounts signing in to signals in one browser: the second sign-in
+    // overwrites the single flow cookie but keeps the browser cookie.
+    ownFlow();
+    readSession.mockResolvedValue({ csrfToken: 'c', appOrigin: 'https://app.example.org', idToken: 'the-id-token' });
+
+    await switchTo({
+      cookies: { oidc_flow: 'another-state', sid: 'the-session-id', signin_browser: 'this-browser' },
+    });
+
+    expect(destroySession).toHaveBeenCalledWith('the-session-id');
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ idToken: 'the-id-token' }),
+    );
+  });
+
+  it('leaves the session alone when the flow was started in another browser', async () => {
+    // An attacker can start their own sign-in and send its `state` in a link;
+    // the flow is live, but it carries the attacker's browser value.
+    ownFlow();
+
+    await switchTo({ cookies: { sid: 'the-session-id', signin_browser: 'victim-browser' } });
+
+    expect(readSession).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(expect.objectContaining({ idToken: undefined }));
+  });
+
+  it('leaves the session alone when the browser has no browser cookie', async () => {
+    ownFlow();
+
+    await switchTo({ cookies: { sid: 'the-session-id' } });
+
+    expect(destroySession).not.toHaveBeenCalled();
+  });
+
+  it('returns to the app the refused sign-in started from when there is no session', async () => {
+    // The flow names the UI origin, which can differ from the API's own.
+    ownFlow();
+    await switchTo({ cookies: { signin_browser: 'this-browser' } });
+
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: undefined,
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+    expect(destroySession).not.toHaveBeenCalled();
+  });
+
+  it('leaves the session alone when the flow is unknown or expired', async () => {
+    consumeFlowState.mockResolvedValue(null);
+
+    const res = await switchTo({
+      cookies: { sid: 'the-session-id', signin_browser: 'this-browser' },
+      headers: asPortalHost,
+    });
+
+    expect(res.statusCode).toBe(302);
+    expect(readSession).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith({
+      idToken: undefined,
+      postLogoutRedirectUri: 'https://app.example.org/auth/login',
+    });
+  });
+
+  it('leaves the session alone when no flow is given', async () => {
+    await switchTo({ url: '/api/v1/auth/session/switch', cookies: { sid: 'the-session-id' } });
+
+    expect(consumeFlowState).not.toHaveBeenCalled();
+    expect(destroySession).not.toHaveBeenCalled();
+    expect(buildEndSessionUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ idToken: undefined }),
+    );
+  });
+});
+
+describe('POST /auth/session/backchannel-logout', () => {
+  const post = (payload: string) =>
+    inject({
+      method: 'POST',
+      url: '/api/v1/auth/session/backchannel-logout',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload,
+    });
+
+  it('ends the sessions of the Keycloak session a valid logout token names', async () => {
+    verifyKeycloakLogoutToken.mockResolvedValue({ ok: true, sid: 'kc-session-1' });
+    destroySessionsForIdpSession.mockResolvedValue(2);
+
+    const res = await post('logout_token=the.logout.token');
+
+    expect(res.statusCode).toBe(200);
+    expect(verifyKeycloakLogoutToken).toHaveBeenCalledWith('the.logout.token');
+    expect(destroySessionsForIdpSession).toHaveBeenCalledWith('kc-session-1');
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('rejects an invalid logout token and ends nothing', async () => {
+    verifyKeycloakLogoutToken.mockResolvedValue({ ok: false, code: 'TOKEN_INVALID', message: 'bad' });
+
+    const res = await post('logout_token=forged');
+
+    expect(res.statusCode).toBe(400);
+    expect(destroySessionsForIdpSession).not.toHaveBeenCalled();
+  });
+
+  it('reports a Keycloak outage as unavailable, not as a bad token', async () => {
+    verifyKeycloakLogoutToken.mockResolvedValue({ ok: false, code: 'KEYCLOAK_UNAVAILABLE', message: 'down' });
+
+    const res = await post('logout_token=the.logout.token');
+
+    expect(res.statusCode).toBe(503);
+    expect(destroySessionsForIdpSession).not.toHaveBeenCalled();
+  });
+
+  it('rejects a request without a logout token', async () => {
+    const res = await post('something=else');
+
+    expect(res.statusCode).toBe(400);
+    expect(verifyKeycloakLogoutToken).not.toHaveBeenCalled();
   });
 });

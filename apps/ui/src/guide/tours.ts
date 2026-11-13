@@ -205,7 +205,6 @@ const CREATE_PROFILE_TOUR: GuideTour = {
       description: `
         <ul>
           <li>Work through each section. Fields marked <b>*</b> are required; the rest help others find you.</li>
-          <li>Hold digital credentials in a wallet? <b>Import credentials</b> above the form fills parts of it for you.</li>
         </ul>`,
     },
     {

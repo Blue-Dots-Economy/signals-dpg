@@ -299,6 +299,7 @@ export function guardianGateFailure(gate: GateResult): BulkItemFailure | null {
       return new BulkItemFailure(
         'GUARDIAN_OTP_REQUIRED',
         'Guardian OTP sent; resubmit with guardian_otp to confirm this action.',
+        undefined,
         { sent_to: gate.sentTo },
       );
     case 'invalid_otp':

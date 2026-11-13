@@ -317,10 +317,13 @@ describe('ProfileFormPage inline consent on edit-of-draft (Task 5)', () => {
     await renderPage('/profile/item-1');
 
     const submit = await screen.findByRole('button', { name: /save & publish/i });
-    expect(submit).toBeDisabled();
+    await waitFor(() => expect(submit).toBeEnabled());
+    await userEvent.click(submit);
+    expect(updateItemMock).not.toHaveBeenCalled();
+    expect(await screen.findByText('Tick the box to agree before you continue.')).toBeInTheDocument();
 
     await userEvent.click(await screen.findByRole('checkbox', { name: /agree/i }));
-    expect(submit).toBeEnabled();
+    expect(screen.queryByText('Tick the box to agree before you continue.')).toBeNull();
   });
 
   it('edit of a LIVE profile shows no consent and enables submit', async () => {

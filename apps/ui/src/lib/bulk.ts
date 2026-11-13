@@ -12,6 +12,8 @@ interface BulkItemError {
   status: 'error';
   error: string;
   message: string;
+  /** Per-field messages, keyed by dotted path, for a failed schema check. */
+  fields?: Record<string, string>;
   /** Masked guardian contact, on GUARDIAN_OTP_REQUIRED. */
   sent_to?: string;
 }
@@ -31,12 +33,29 @@ export class BulkSingleError extends Error {
   code: string;
   // The HTTP status (e.g. 422 for an all-fail call), so callers' `status === 401`
   // checks never match a per-item failure.
-  response: { status?: number; data: { error: string; message: string; sent_to?: string } };
-  constructor(code: string, message: string, status?: number, sentTo?: string) {
+  response: {
+    status?: number;
+    data: { error: string; message: string; fields?: Record<string, string>; sent_to?: string };
+  };
+  constructor(
+    code: string,
+    message: string,
+    status?: number,
+    fields?: Record<string, string>,
+    sentTo?: string,
+  ) {
     super(message);
     this.name = 'BulkSingleError';
     this.code = code;
-    this.response = { status, data: { error: code, message, ...(sentTo ? { sent_to: sentTo } : {}) } };
+    this.response = {
+      status,
+      data: {
+        error: code,
+        message,
+        ...(fields ? { fields } : {}),
+        ...(sentTo ? { sent_to: sentTo } : {}),
+      },
+    };
   }
 }
 
@@ -47,6 +66,7 @@ function envelopeToResult<T extends object>(env: BulkEnvelope<NoStatusField<T>>,
       first?.error ?? 'UNKNOWN',
       first?.message ?? 'Request failed',
       status,
+      first && first.status === 'error' ? first.fields : undefined,
       first?.sent_to,
     );
   }
@@ -108,6 +128,17 @@ export function bulkFailureIndices<T>(env: BulkEnvelope<T>): number[] {
 }
 
 /** The first per-item error message in the envelope, if any. */
+/** Each distinct message of the failed items, in order, at most `limit`. */
+export function bulkErrorMessages<T>(env: BulkEnvelope<T>, limit: number): string[] {
+  const out: string[] = [];
+  for (const r of env.results) {
+    if (r.status !== 'error' || out.includes(r.message)) continue;
+    out.push(r.message);
+    if (out.length === limit) break;
+  }
+  return out;
+}
+
 export function firstBulkError<T>(env: BulkEnvelope<T>): string | null {
   const f = env.results.find((r) => r.status === 'error');
   return f && f.status === 'error' ? f.message : null;

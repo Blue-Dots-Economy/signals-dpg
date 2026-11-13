@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { updaterConfigMessage } from './updater-config-message';
 import { toast } from 'sonner';
 import {
   guardianOtpErrorOf,
@@ -7,7 +8,11 @@ import {
   type Action,
   type UpdateActionStatusPayload,
 } from '@/lib/action-api';
-import { BulkSingleError } from '@/lib/bulk';
+import { BulkSingleError, bulkErrorMessages } from '@/lib/bulk';
+
+/** Distinct failure reasons a partial bulk result lists. */
+const MAX_REASONS_SHOWN = 3;
+import { apiErrorMessage, isReadableServerMessage } from '@/lib/api-error';
 import { useAuth } from '@/contexts/auth-context';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { MinorBulkNoteDialog } from './minor-bulk-note-dialog';
@@ -47,6 +52,7 @@ export function BulkStatusDialog({
   const { mutateAsync, isPending } = useUpdateActionStatusBulk();
   const [remarks, setRemarks] = React.useState('');
   const [consentChecked, setConsentChecked] = React.useState(false);
+  const [attempted, setAttempted] = React.useState(false);
 
   // A minor's bulk accept: gated rows return GUARDIAN_OTP_REQUIRED after one
   // OTP goes to the guardian. Their payloads are stashed and resubmitted with
@@ -65,13 +71,16 @@ export function BulkStatusDialog({
     if (open) {
       setRemarks('');
       setConsentChecked(false);
+      setAttempted(false);
     }
   }, [open]);
 
   // Consent text from the first action's network config; a selection shares
   // one action_type.
   const first = actions[0] ?? null;
-  const { data: networkConfig } = useNetworkConfig(first?.target_item_network ?? null);
+  const { data: networkConfig, isError: networkConfigFailed } = useNetworkConfig(
+    first?.target_item_network ?? null,
+  );
 
   const interaction = React.useMemo(() => {
     if (!networkConfig || !first) return null;
@@ -115,6 +124,13 @@ export function BulkStatusDialog({
           : 'actions.bulk_confirm_cancel_title';
 
   const handleConfirm = async () => {
+    setAttempted(true);
+    // Only accepting needs the network config: it says whether consent is asked.
+    if (!networkConfig && targetStatus === 'accepted') return;
+    if (requiresConsent && !consentChecked) {
+      document.getElementById('consent-acknowledge')?.focus();
+      return;
+    }
     const ids = actions.map((a) => a.action_id);
     const sharedRemarks = remarks.trim();
     const payloads = ids.map((action_id) => ({
@@ -172,22 +188,35 @@ export function BulkStatusDialog({
       const failedIds = ids.filter((_, i) =>
         failedResults.some((r) => r.index === i),
       );
+      const reasons = bulkErrorMessages(env, MAX_REASONS_SHOWN).filter(isReadableServerMessage);
       toast.warning(
         t('actions.bulk_done_partial', {
           succeeded: env.summary.succeeded,
           total: env.summary.total,
         }),
+        {
+          description:
+            reasons.length > 0
+              ? t('actions.bulk_failed_reasons', 'Why some failed: {{reasons}}', { reasons: reasons.join('; ') })
+              : t('actions.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.'),
+        },
       );
       onOpenChange(false);
       onSettled(env.summary.succeeded, env.summary.total, failedIds);
     } catch (err) {
       toast.error(t('actions.bulk_failed'), {
-        description: err instanceof Error ? err.message : undefined,
+        description: apiErrorMessage(err, t),
       });
     }
   };
 
-  const confirmDisabled = isPending || (requiresConsent && !consentChecked) || actions.length === 0;
+  const confirmDisabled = isPending || actions.length === 0;
+  const configMessage = updaterConfigMessage(
+    attempted && targetStatus === 'accepted',
+    Boolean(networkConfig),
+    networkConfigFailed,
+    t,
+  );
 
   // The guardian code resubmits the stashed payloads via
   // updateActionStatusBulk.
@@ -214,6 +243,7 @@ export function BulkStatusDialog({
             // non-guardian reason — keep those selected for a retry.
             toast.warning(
               t('actions.bulk_done_partial', { succeeded: env2.summary.succeeded, total }),
+              { description: t('actions.bulk_partial_reselected', 'The ones that failed are still selected so you can try again.') },
             );
           } else {
             toast.success(t('actions.bulk_done_all', { count: env2.summary.succeeded }));
@@ -223,9 +253,11 @@ export function BulkStatusDialog({
         }
         // Still failing (wrong code, throttled): throw a classified error so
         // GuardianOtpDialog shows it inline and stays open.
-        const firstFail = env2.results.find((r) => r.status === 'error');
-        const code = guardianOtpErrorOf(firstFail) ?? 'GUARDIAN_OTP_INVALID';
-        throw new BulkSingleError(code, firstFail?.message ?? 'Guardian confirmation failed', 422);
+        const failed = env2.results.find((r) => r.status === 'error') as
+          | { error?: string; message?: string }
+          | undefined;
+        const code = guardianOtpErrorOf(failed) ?? failed?.error ?? 'UNKNOWN';
+        throw new BulkSingleError(code, failed?.message ?? '', 422);
       }}
     />
   );
@@ -249,6 +281,11 @@ export function BulkStatusDialog({
               text={consentText}
               checked={consentChecked}
               onCheckedChange={setConsentChecked}
+              error={
+                attempted && !consentChecked
+                  ? t('actions.consent_required_error', 'Tick the box to agree before you confirm.')
+                  : undefined
+              }
             />
           ) : targetStatus === 'rejected' || targetStatus === 'cancelled' || targetStatus === 'completed' ? (
             <div className="space-y-2">
@@ -262,6 +299,11 @@ export function BulkStatusDialog({
             </div>
           ) : null}
         </div>
+        {configMessage && (
+          <p role="alert" className="mb-2 text-sm text-destructive sm:text-right">
+            {configMessage}
+          </p>
+        )}
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             {t('common.cancel')}

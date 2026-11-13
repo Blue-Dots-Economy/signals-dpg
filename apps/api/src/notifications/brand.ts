@@ -22,7 +22,6 @@ const BRAND_COLOR: Record<string, string> = {
   blue_dot: '#2563eb',
   purple_dot: '#7c3aed',
   yellow_dot: '#d97706',
-  onest_yellow_dot: '#d97706',
   pink_dot: '#db2777',
   green_dot: '#16a34a',
   orange_dot: '#ea580c',

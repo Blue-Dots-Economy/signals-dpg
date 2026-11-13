@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { Wallet, OctagonX } from 'lucide-react';
+import { OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,11 +27,7 @@ import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
-import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
-import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
-import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
 import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { useEditItem } from '@/hooks/use-edit-item';
@@ -49,6 +45,8 @@ import {
   finalizeProfileConsent,
 } from '@/lib/consent-api';
 import axios from 'axios';
+import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
+import { schemaNodeAt, splitServerFieldErrors } from '@/components/forms/field-error-message';
 
 import {
   createItem,
@@ -67,6 +65,16 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 }
 
 import { getDomainIcon, formatDomainLabel } from '@/lib/domain-icons';
+
+/** A field's title for the user, else its top-level name in plain words. */
+function readableFieldName(schema: unknown, segments: string[]): string {
+  const title = schemaNodeAt(schema, segments.slice(0, 1))?.title;
+  if (typeof title === 'string' && title.trim()) return title;
+  return (segments[0] ?? '')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
 
 export function ProfileFormPage() {
   const { t } = useTranslation();
@@ -100,8 +108,10 @@ export function ProfileFormPage() {
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   // Lifecycle controls (pause/resume/retire) live on the sidebar's "My
   // Profiles" rows, not in this editor.
-  const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
+  const [serverFieldErrors, setServerFieldErrors] = React.useState<Record<string, string> | undefined>();
+  // A valid form was submitted while consent/guardian was still pending.
+  const [gateAttempted, setGateAttempted] = React.useState(false);
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
@@ -364,7 +374,7 @@ export function ProfileFormPage() {
       } else if (status === 503) {
         toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
       } else {
-        toast.error(t('profile.error_generic_desc'));
+        toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
       }
     }
   }, [precreateRef, t]);
@@ -432,67 +442,11 @@ export function ProfileFormPage() {
     if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
   }, [network, queryClient]);
 
-  const canImportCredentials = React.useMemo(
-    () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
-    [profileSchema]
-  );
-
   // Network-level instance URL and schema URL for the selected domain.
   const domainInstance = React.useMemo(() => {
     if (!selectedDomain || !network) return null;
     return network.instances?.find((i) => i.domain_id === selectedDomain) ?? null;
   }, [selectedDomain, network]);
-
-  const walletImportContext = React.useMemo(
-    () => ({
-      user: {
-        email: user?.email ?? null,
-        phoneNumber: user?.phoneNumber ?? null,
-        name: user?.name ?? 'User',
-      },
-      networkId: network?.id ?? null,
-      domainId: selectedDomain,
-      schema: profileSchema,
-      formData: initialData,
-    }),
-    [initialData, network?.id, profileSchema, selectedDomain, user?.email, user?.name, user?.phoneNumber]
-  );
-
-  const handleImportedCredentials = React.useCallback(
-    (result: WalletImportResult) => {
-      if (!profileSchema) {
-        toast.error(t('profile.toast_no_schema'), {
-          description: t('profile.toast_no_schema_desc'),
-        });
-        return;
-      }
-
-      const { mergedData, mappedCount, skippedKeys } = mergeImportedDataIntoSchema(
-        profileSchema,
-        initialData,
-        result
-      );
-
-      if (mappedCount === 0) {
-        toast.error(t('profile.toast_import_no_match', { provider: result.providerLabel }));
-        return;
-      }
-
-      setInitialData(mergedData);
-
-      if (skippedKeys.length > 0) {
-        toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-          description: t('profile.toast_import_skipped', { count: skippedKeys.length }),
-        });
-        return;
-      }
-
-      toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-        description: result.summary,
-      });
-    },
-    [initialData, profileSchema]
-  );
 
   const handleSubmit = async (data: Record<string, unknown>) => {
     if (!selectedDomain || !network) return;
@@ -513,6 +467,7 @@ export function ProfileFormPage() {
 
     setIsSubmitting(true);
     setFormError(null);
+    setServerFieldErrors(undefined);
 
     try {
       // Resolve coordinates client-side with the same geocoder as the
@@ -682,14 +637,34 @@ export function ProfileFormPage() {
     } catch (err: unknown) {
       console.error('Failed to save profile:', err);
 
-      const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
-      const status = axiosError?.response?.status;
-      const error = axiosError?.response?.data;
+      const info = readApiError(err);
+      const status = info.status;
 
-      if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
+      const split = splitServerFieldErrors(info.fields ?? {}, profileSchema, data);
+      const onForm = split.onForm;
+      const offForm = split.offForm.map((path) => readableFieldName(profileSchema, path.split('.').filter(Boolean)));
+
+      if (offForm.length > 0) {
+        const names = [...new Set(offForm)];
+        // The form has no field to show these on, so they go in the banner.
+        if (Object.keys(onForm).length > 0) setServerFieldErrors(onForm);
+        setFormError({
+          title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
+          description: t(
+            'profile.error_fields_not_in_form',
+            'Some saved details cannot be changed in this form ({{fields}}). Please contact support.',
+            { fields: names.join(', ') },
+          ),
+        });
+      } else if (Object.keys(onForm).length > 0) {
+        // Field messages go under their fields; no banner.
+        setServerFieldErrors(onForm);
+      } else if (status === 403 && info.code === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
           title: t('profile.error_role_unavailable'),
-          description: error?.message ?? t('profile.error_role_unavailable_fallback_desc'),
+          description: isReadableServerMessage(info.message)
+            ? info.message
+            : t('profile.error_role_unavailable_fallback_desc'),
         });
       } else if (status === 401) {
         const redirectTo = `${location.pathname}${location.search}`;
@@ -697,7 +672,7 @@ export function ProfileFormPage() {
           description: t('profile.toast_sign_in_desc'),
         });
         navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
-      } else if (status === 409 && error?.error === 'ITEM_ALREADY_EXISTS') {
+      } else if (status === 409 && info.code === 'ITEM_ALREADY_EXISTS') {
         // Match on the code, not the bare 409: PROFILE_LIMIT_REACHED,
         // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are 409s too, and
         // only a genuine duplicate is "already exists". Other 409s fall through
@@ -709,7 +684,7 @@ export function ProfileFormPage() {
       } else {
         setFormError({
           title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
-          description: error?.message ?? t('profile.error_generic_desc'),
+          description: apiErrorMessage(err, t, t('profile.error_generic_desc')),
         });
       }
     } finally {
@@ -807,14 +782,18 @@ export function ProfileFormPage() {
   const primaryLabel = needsConsent
     ? t('profile.btn_save_publish')
     : editPrimaryLabel;
-  const submitDisabled = isEdit
-    ? // Live edit: formValid only. Draft with consent: wait for the consent
-      // config, then require the tick.
-      !formValid || (isDraft && consentLoading) || (needsConsent && !consentChecked)
-    : !formValid ||
-      consentLoading ||
-      (needsConsent && !consentChecked) ||
-      (minorGatedCreate && !guardianVerifiedForCreate);
+  // Consent and guardian steps that must finish before a valid form is sent.
+  const consentPending = isEdit ? isDraft && consentLoading : consentLoading;
+  const gateBlocked =
+    consentPending ||
+    (needsConsent && !consentChecked) ||
+    (!isEdit && minorGatedCreate && !guardianVerifiedForCreate);
+  // Only a request in flight disables Submit; a click otherwise shows what is missing.
+  const submitDisabled = isSubmitting || consentPending;
+  const consentError =
+    gateAttempted && needsConsent && !consentChecked
+      ? t('profile.consent_required_error', 'Tick the box to agree before you continue.')
+      : undefined;
 
   // Action bar in PageShell's pinned footer, not sticky inside the scroll area
   // (which floated mid-content and added a second scrollbar). The submit is
@@ -830,6 +809,7 @@ export function ProfileFormPage() {
           <ConsentCheckbox
             text={statement}
             checked={consentChecked}
+            error={consentError}
             onCheckedChange={(v) => {
               setConsentChecked(v);
               if (v && minorGatedCreate && !guardianVerifiedForCreate) {
@@ -838,7 +818,10 @@ export function ProfileFormPage() {
             }}
           />
           {!isEdit && minorGatedCreate && consentChecked && (
-            <p className="text-sm text-muted-foreground">
+            <p
+              className={gateAttempted && !guardianVerifiedForCreate ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
+              role={gateAttempted && !guardianVerifiedForCreate ? 'alert' : undefined}
+            >
               {guardianVerifiedForCreate
                 ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
                 : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
@@ -925,15 +908,6 @@ export function ProfileFormPage() {
               </div>
             )}
 
-            {canImportCredentials && (
-              <div className="mb-4">
-                <Button data-tour="import-credentials" variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
-                  <Wallet className="h-4 w-4" />
-                  {t('profile.import_credentials')}
-                </Button>
-              </div>
-            )}
-
             {formError && (
               <Alert variant="destructive" className="mb-4">
                 <OctagonX className="h-4 w-4" />
@@ -946,7 +920,14 @@ export function ProfileFormPage() {
               <SchemaForm
                 id="profile-form"
                 schema={profileSchema}
-                onSubmit={handleSubmit}
+                onSubmit={(data) => {
+                  if (gateBlocked) {
+                    setGateAttempted(true);
+                    return;
+                  }
+                  void handleSubmit(data);
+                }}
+                serverErrors={serverFieldErrors}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 hideSubmit
@@ -969,13 +950,6 @@ export function ProfileFormPage() {
 
           </CardContent>
         </Card>
-
-        <WalletImportModal
-          open={isWalletModalOpen}
-          onOpenChange={setIsWalletModalOpen}
-          context={walletImportContext}
-          onImported={handleImportedCredentials}
-        />
 
         {/* Interstitial: tells the minor what happens before any code is
             sent. Confirming issues the guardian OTP. */}

@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getServedScope } from '@/lib/served-binding';
 import { evaluateDomainGate, resolveHeldDomains } from '@/lib/domain-gate';
 import { toast } from 'sonner';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { acceptConsent, submitU18Dob, getU18Status } from '@/lib/consent-api';
 import type { ConsentAcceptBody } from '@dpg/schemas';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
@@ -75,6 +76,18 @@ export function OtpPage() {
     setInlineError(null);
     try {
       await verifyOtp(getAuthIdentifier(state), otp, state.userExists ? undefined : state.name);
+    } catch (err) {
+      // Only a rejected code is "incorrect"; network, server and rate-limit failures say so.
+      const { status } = readApiError(err);
+      setInlineError(
+        status === 400 || status === 401
+          ? { title: t('auth.otp_incorrect_title'), description: t('auth.otp_incorrect_desc') }
+          : { title: t('auth.otp_verify_failed_title', "Couldn't check your code"), description: apiErrorMessage(err, t) },
+      );
+      setIsLoading(false);
+      return;
+    }
+    try {
 
       // Per-domain UI: block a user who already holds a profile in a domain
       // this deployment does not serve (they must use that domain's portal).
@@ -146,10 +159,10 @@ export function OtpPage() {
       }
 
       await finishSignIn();
-    } catch {
+    } catch (err) {
       setInlineError({
-        title: t('auth.otp_incorrect_title'),
-        description: t('auth.otp_incorrect_desc'),
+        title: t('auth.post_verify_failed_title', "Couldn't finish signing in"),
+        description: apiErrorMessage(err, t),
       });
     } finally {
       setIsLoading(false);
@@ -166,10 +179,10 @@ export function OtpPage() {
       toast.success(t('auth.toast_new_code_sent'), {
         description: t('auth.toast_new_code_sent_desc'),
       });
-    } catch {
+    } catch (err) {
       setInlineError({
         title: t('auth.otp_resend_error_title'),
-        description: t('auth.otp_resend_error_desc'),
+        description: apiErrorMessage(err, t, t('auth.otp_resend_error_desc')),
       });
     } finally {
       setIsLoading(false);

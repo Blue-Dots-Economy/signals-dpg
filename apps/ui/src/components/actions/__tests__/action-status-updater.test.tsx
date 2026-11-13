@@ -27,7 +27,7 @@ vi.mock('@/hooks/use-actions', () => ({
   useUpdateActionStatus: () => ({
     isPending: false,
     mutate: (_payload: unknown, opts: { onError: (e: Error) => void }) =>
-      opts.onError(new BulkSingleError('GUARDIAN_OTP_REQUIRED', 'Guardian OTP sent', 422, '******7347')),
+      opts.onError(new BulkSingleError('GUARDIAN_OTP_REQUIRED', 'Guardian OTP sent', 422, undefined, '******7347')),
   }),
 }));
 

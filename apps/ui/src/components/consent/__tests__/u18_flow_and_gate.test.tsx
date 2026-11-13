@@ -320,7 +320,6 @@ describe('SignupGuardianFlow (pre-auth U18 signup)', () => {
       target: { value: '9000000000' },
     });
     expect(screen.getByText(/can't be the same as your own/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^continue$/i })).toBeDisabled();
 
     await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
     expect(startSignupGuardian).not.toHaveBeenCalled();
@@ -657,7 +656,7 @@ describe('useProfileConsentAccept — gating and failure branches', () => {
     expect(screen.queryByTestId('guardian-otp-dialog')).not.toBeInTheDocument();
   });
 
-  it('falls back to the generic error for an unexpected issuing failure', async () => {
+  it('says the server failed (not a generic or raw message) for an unexpected issuing failure', async () => {
     vi.mocked(issueProfileConsentOtp).mockRejectedValue(axiosError(500));
     render(<AcceptHarness />, { wrapper: acceptWrapper });
 
@@ -665,7 +664,7 @@ describe('useProfileConsentAccept — gating and failure branches', () => {
       await hookResult.accept(minorArgs('p-500'));
     });
 
-    expect(await screen.findByText(/an unexpected error occurred/i)).toBeInTheDocument();
+    expect(await screen.findByText(/something went wrong on our side/i)).toBeInTheDocument();
     expect(screen.queryByTestId('guardian-otp-dialog')).not.toBeInTheDocument();
   });
 
@@ -685,7 +684,7 @@ describe('useProfileConsentAccept — gating and failure branches', () => {
       });
     });
 
-    expect(await screen.findByText(/an unexpected error occurred/i)).toBeInTheDocument();
+    expect(await screen.findByText(/something went wrong on our side/i)).toBeInTheDocument();
     // The caller keeps its own prompt open to retry: no onDone, no cache seed.
     expect(onDone).not.toHaveBeenCalled();
     expect(acceptClient.getQueryData(queryKeys.profileConsent(network))).toBeUndefined();

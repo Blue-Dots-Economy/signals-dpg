@@ -233,6 +233,75 @@ export async function verifyKeycloakToken(
   };
 }
 
+/** The `events` member that marks a back-channel logout token (OIDC Back-Channel Logout 1.0, §2.4). */
+const BACKCHANNEL_LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout'; // NOSONAR typescript:S5332 — an event name fixed by the OIDC spec, never fetched
+
+/**
+ * Oldest logout token accepted, by its `iat`. Keycloak sends the token the
+ * moment a session ends, so anything older is a replay, not a delivery.
+ */
+const LOGOUT_TOKEN_MAX_AGE_SECONDS = 120;
+
+export type LogoutTokenResult =
+  | { ok: true; sid: string }
+  | { ok: false; code: 'TOKEN_INVALID' | 'KEYCLOAK_UNAVAILABLE' | 'KEYCLOAK_NOT_CONFIGURED'; message: string };
+
+/**
+ * Verify a Keycloak back-channel logout token: signature against the realm
+ * JWKS, `iss`, an `aud` naming the signals UI client, a recent `iat`, the
+ * logout event, and no `nonce` (OIDC Back-Channel Logout 1.0, §2.6).
+ *
+ * Only a token naming a Keycloak session (`sid`) is accepted: the realm sends
+ * `sid` for this client, and sessions are looked up by it.
+ */
+export async function verifyKeycloakLogoutToken(token: string): Promise<LogoutTokenResult> {
+  if (!keycloakConfig.issuer || !keycloakConfig.jwks_uri) {
+    return {
+      ok: false,
+      code: 'KEYCLOAK_NOT_CONFIGURED',
+      message: 'Keycloak issuer is not configured (KEYCLOAK_BASE_URL unset)',
+    };
+  }
+
+  let payload: JWTPayload;
+  try {
+    ({ payload } = await jwtVerify(token, getJwks(keycloakConfig.jwks_uri), {
+      issuer: keycloakConfig.issuer,
+      audience: keycloakConfig.ui_client_id,
+      requiredClaims: ['iat', 'jti'],
+      maxTokenAge: LOGOUT_TOKEN_MAX_AGE_SECONDS,
+      clockTolerance: keycloakConfig.clock_tolerance_seconds,
+    }));
+  } catch (err) {
+    if (isJwksRetrievalFailure(err)) {
+      return {
+        ok: false,
+        code: 'KEYCLOAK_UNAVAILABLE',
+        message: 'Could not fetch the Keycloak JWKS to verify the token',
+      };
+    }
+    return {
+      ok: false,
+      code: 'TOKEN_INVALID',
+      message: err instanceof Error ? err.message : 'Logout token is not valid',
+    };
+  }
+
+  const events = payload.events;
+  const isLogoutEvent =
+    typeof events === 'object' && events !== null && BACKCHANNEL_LOGOUT_EVENT in events;
+  if (!isLogoutEvent) {
+    return { ok: false, code: 'TOKEN_INVALID', message: 'Not a back-channel logout token' };
+  }
+  if ('nonce' in payload) {
+    return { ok: false, code: 'TOKEN_INVALID', message: 'Logout token must not carry a nonce' };
+  }
+  if (typeof payload.sid !== 'string' || !payload.sid) {
+    return { ok: false, code: 'TOKEN_INVALID', message: 'Logout token has no session id (sid)' };
+  }
+  return { ok: true, sid: payload.sid };
+}
+
 /** Claim carrying the signals organizations a caller may act for. */
 export const ACTING_ORG_CLAIM = 'signals_acting_orgs';
 

@@ -52,7 +52,7 @@
     },
     {
       "key": "network",
-      "value": "onest_yellow_dot"
+      "value": "yellow_dot"
     },
     {
       "key": "student_domain",
@@ -132,7 +132,7 @@
     },
     {
       "key": "source_item_network",
-      "value": "onest_yellow_dot"
+      "value": "yellow_dot"
     },
     {
       "key": "source_item_domain",
@@ -160,7 +160,7 @@
     },
     {
       "key": "target_item_network",
-      "value": "onest_yellow_dot"
+      "value": "yellow_dot"
     },
     {
       "key": "target_item_domain",

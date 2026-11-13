@@ -1737,6 +1737,12 @@
                               "message": {
                                 "type": "string"
                               },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
                               "sent_to": {
                                 "type": "string"
                               }
@@ -1866,6 +1872,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               },
                               "sent_to": {
                                 "type": "string"
@@ -2028,6 +2040,12 @@
                               "message": {
                                 "type": "string"
                               },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
                               "sent_to": {
                                 "type": "string"
                               }
@@ -2157,6 +2175,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               },
                               "sent_to": {
                                 "type": "string"
@@ -2310,6 +2334,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               },
                               "sent_to": {
                                 "type": "string"
@@ -2464,6 +2494,12 @@
                               "message": {
                                 "type": "string"
                               },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
+                              },
                               "sent_to": {
                                 "type": "string"
                               }
@@ -2585,6 +2621,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               },
                               "sent_to": {
                                 "type": "string"
@@ -2730,6 +2772,12 @@
                               },
                               "message": {
                                 "type": "string"
+                              },
+                              "fields": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "type": "string"
+                                }
                               },
                               "sent_to": {
                                 "type": "string"
@@ -6178,7 +6226,7 @@
                   },
                   "phone_number": {
                     "type": "string",
-                    "pattern": "^\\+\\d{10,15}$"
+                    "pattern": "^\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})$"
                   },
                   "name": {
                     "type": "string",
@@ -8760,6 +8808,177 @@
         }
       }
     },
+    "/api/v1/auth/session/switch": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "flow",
+            "required": false
+          }
+        ],
+        "security": [],
+        "responses": {
+          "302": {
+            "description": "Redirect (Location header).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ],
+                  "description": "Redirect (Location header)."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/session/backchannel-logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "logout_token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "logout_token"
+                ]
+              }
+            }
+          }
+        },
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The sessions were ended.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "nullable": true,
+                  "enum": [
+                    null
+                  ],
+                  "description": "The sessions were ended."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/signup": {
       "post": {
         "tags": [
@@ -8784,7 +9003,7 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
                   },
                   "domain": {
                     "type": "string",
@@ -8964,7 +9183,7 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "minLength": 1
+                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
                   }
                 },
                 "required": [
@@ -9082,6 +9301,150 @@
         }
       }
     },
+    "/api/v1/geo/resolve": {
+      "post": {
+        "tags": [
+          "geo"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "address": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "address"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "label": {
+                      "type": "string"
+                    },
+                    "point": {
+                      "type": "object",
+                      "properties": {
+                        "lat": {
+                          "type": "number"
+                        },
+                        "lng": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "lat",
+                        "lng"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "precision": {
+                      "type": "string",
+                      "enum": [
+                        "postal_code",
+                        "locality",
+                        "city",
+                        "district"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "label",
+                    "point",
+                    "precision"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "message"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/support/": {
       "post": {
         "tags": [
@@ -9107,7 +9470,6 @@
                   },
                   "phone": {
                     "type": "string",
-                    "minLength": 3,
                     "maxLength": 20
                   },
                   "type": {

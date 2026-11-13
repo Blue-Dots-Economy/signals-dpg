@@ -1,5 +1,6 @@
 import z from 'zod';
 import { ItemLocationsArray } from '../api/item_schemas';
+import { PHONE_E164_PATTERN } from '../phone_rules';
 
 /**
  * Body for POST /api/v1/admin/participant: an upsert called by integrating
@@ -13,7 +14,7 @@ import { ItemLocationsArray } from '../api/item_schemas';
 
 const PhoneE164 = z
   .string()
-  .regex(/^\+\d{10,15}$/, 'must be E.164 (e.g. +911234567890)');
+  .regex(PHONE_E164_PATTERN, 'must be E.164; +91 numbers need 10 digits (e.g. +919876543210)');
 
 // Lookup accepts the number with or without the leading "+"; the handler
 // prepends "+" before matching the stored E.164 value.

@@ -135,6 +135,32 @@ describe('Guardian-OTP challenge/response (ActionHandler + GuardianOtpDialog)', 
     expect(screen.getByText(OTP_DIALOG_TITLE)).toBeInTheDocument();
   });
 
+  it('an unclassified failure (e.g. network) says what happened, never "Incorrect code"', async () => {
+    const onActionSubmit = vi.fn(
+      async (
+        _type: string,
+        _schema: DotActionSchema,
+        _formData: Record<string, unknown>,
+        _targetId: string,
+        guardianOtp?: string,
+      ) => {
+        if (!guardianOtp) throw guardianOtpError('GUARDIAN_OTP_REQUIRED');
+        throw new TypeError('Failed to fetch');
+      },
+    );
+    await renderHandler(onActionSubmit);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(screen.getByText(OTP_DIALOG_TITLE)).toBeInTheDocument());
+
+    typeOtp('000000');
+
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't reach the server. Check your connection and try again.")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/incorrect code/i)).toBeNull();
+  });
+
   it('does not open the guardian OTP dialog for a normal (adult) success result', async () => {
     const onActionSubmit = vi.fn().mockResolvedValue(undefined);
     await renderHandler(onActionSubmit);

@@ -830,7 +830,10 @@ describe('HomePage — bulk connect submit', () => {
     const user = userEvent.setup();
     signedInSeeker();
     bulk.respond = async () => {
-      throw new Error('Network unreachable');
+      throw Object.assign(new Error('Request failed with status code 403'), {
+        isAxiosError: true,
+        response: { status: 403, data: { error: 'FORBIDDEN' } },
+      });
     };
     renderHome('/?view=list&domain=provider');
     await findCard('Acme Welding');
@@ -840,7 +843,8 @@ describe('HomePage — bulk connect submit', () => {
     await submitBulkConnect(user, 2);
 
     expect(await screen.findByText('Could not send connection requests')).toBeInTheDocument();
-    expect(screen.getByText('Network unreachable')).toBeInTheDocument();
+    expect(screen.getByText("You don't have permission to do this.")).toBeInTheDocument();
+    expect(screen.queryByText(/status code 403/)).toBeNull();
     // The batch is still selected so the user can retry it.
     expect(screen.getByText('2 selected')).toBeInTheDocument();
   });
@@ -1183,7 +1187,9 @@ describe('HomePage — U18 first-login gate vs the profile consent prompt', () =
     expect(screen.getByText('This consent is for your profile: My Seeker')).toBeInTheDocument();
 
     const accept = screen.getByRole('button', { name: 'Accept & Continue' });
-    expect(accept).toBeDisabled();
+    await user.click(accept);
+    expect(consentAccept.calls).toHaveLength(0);
+    expect(screen.getByText('Tick the box to agree before you continue.')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox'));
     await user.click(accept);
 

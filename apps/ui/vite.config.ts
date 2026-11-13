@@ -400,6 +400,11 @@ export default defineConfig(({ mode }) => {
             '../../packages/schemas/src/export_eligibility.ts',
           ),
         },
+        // Dependency-free phone rules, as above.
+        {
+          find: '@dpg/schemas/phone_rules',
+          replacement: path.resolve(__dirname, '../../packages/schemas/src/phone_rules.ts'),
+        },
         {
           find: /^@dpg\/(.*)$/,
           replacement: path.resolve(__dirname, '../../packages/$1/src'),

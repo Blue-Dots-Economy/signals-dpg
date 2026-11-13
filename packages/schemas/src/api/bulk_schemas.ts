@@ -5,6 +5,8 @@ export const BulkItemErrorSchema = z.object({
   status: z.literal('error'),
   error: z.string().min(1),
   message: z.string(),
+  /** Per-field messages, keyed by dotted path, when the item failed a schema check. */
+  fields: z.record(z.string(), z.string()).optional(),
   /** Masked guardian contact, on GUARDIAN_OTP_REQUIRED. */
   sent_to: z.string().optional(),
 });

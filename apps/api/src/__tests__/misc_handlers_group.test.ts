@@ -139,6 +139,7 @@ vi.mock('@dpg/schemas', () => {
   const leaf: Record<string, () => unknown> = {
     min: () => leaf,
     email: () => leaf,
+    regex: () => leaf,
     optional: () => leaf,
   };
   return {
@@ -147,6 +148,7 @@ vi.mock('@dpg/schemas', () => {
       string: () => leaf,
       boolean: () => leaf,
     },
+    PHONE_INPUT_PATTERN: /./,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getDomainItemSchema: (...a: any[]) => getDomainItemSchema(a[0], a[1], a[2]),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
