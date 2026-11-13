@@ -14,6 +14,8 @@ interface BulkItemError {
   message: string;
   /** Per-field messages, keyed by dotted path, for a failed schema check. */
   fields?: Record<string, string>;
+  /** Masked guardian contact, on GUARDIAN_OTP_REQUIRED. */
+  sent_to?: string;
 }
 type BulkResult<T> = ({ index: number; status: 'success' } & T) | BulkItemError;
 
@@ -33,13 +35,27 @@ export class BulkSingleError extends Error {
   // checks never match a per-item failure.
   response: {
     status?: number;
-    data: { error: string; message: string; fields?: Record<string, string> };
+    data: { error: string; message: string; fields?: Record<string, string>; sent_to?: string };
   };
-  constructor(code: string, message: string, status?: number, fields?: Record<string, string>) {
+  constructor(
+    code: string,
+    message: string,
+    status?: number,
+    fields?: Record<string, string>,
+    sentTo?: string,
+  ) {
     super(message);
     this.name = 'BulkSingleError';
     this.code = code;
-    this.response = { status, data: { error: code, message, ...(fields ? { fields } : {}) } };
+    this.response = {
+      status,
+      data: {
+        error: code,
+        message,
+        ...(fields ? { fields } : {}),
+        ...(sentTo ? { sent_to: sentTo } : {}),
+      },
+    };
   }
 }
 
@@ -51,6 +67,7 @@ function envelopeToResult<T extends object>(env: BulkEnvelope<NoStatusField<T>>,
       first?.message ?? 'Request failed',
       status,
       first && first.status === 'error' ? first.fields : undefined,
+      first?.sent_to,
     );
   }
   // Strip envelope-only fields (`index`, `status`).

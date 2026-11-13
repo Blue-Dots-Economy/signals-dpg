@@ -237,6 +237,7 @@ const state = {
   consentConfig: null as ConsentConfigDocument | null,
   consentedProfileIds: new Set<string>(),
   u18Status: ADULT_STATUS as U18StatusResponse | null,
+  minorBulkActionsEnabled: undefined as boolean | undefined,
 };
 
 interface BulkCall {
@@ -496,6 +497,14 @@ vi.mock('@/contexts/auth-context', () => ({
   }),
 }));
 
+vi.mock('@/hooks/use-auth-config', () => ({
+  useAuthConfig: () => ({
+    config: { minorBulkActionsEnabled: state.minorBulkActionsEnabled },
+    isLoading: false,
+    isKeycloakLogin: true,
+  }),
+}));
+
 vi.mock('@/lib/consent-api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/consent-api')>();
   return {
@@ -731,6 +740,7 @@ beforeEach(() => {
   state.consentConfig = null;
   state.consentedProfileIds = new Set<string>();
   state.u18Status = ADULT_STATUS;
+  state.minorBulkActionsEnabled = undefined;
 });
 
 afterEach(() => {
@@ -1052,6 +1062,77 @@ describe('HomePage — batch guardian OTP for a minor ward', () => {
     expect(screen.queryByText('Guardian confirmation needed')).not.toBeInTheDocument();
     expect(bulk.calls).toHaveLength(1);
     expect(bulk.calls[0].otp).toBeUndefined();
+  });
+});
+
+describe('HomePage — bulk turned off for minors (#917)', () => {
+  it('shows the one-at-a-time note instead of sending, and keeps the selection', async () => {
+    const user = userEvent.setup();
+    signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'phone' };
+    state.minorBulkActionsEnabled = false;
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await enterSelectMode(user);
+    await pickCards(user, 'Acme Welding', 'Globex Foundry');
+    await user.click(screen.getByRole('button', { name: 'Connect all (2)' }));
+
+    const note = await screen.findByRole('dialog');
+    expect(within(note).getByText('One request at a time')).toBeInTheDocument();
+    expect(screen.queryByTestId('action-modal')).not.toBeInTheDocument();
+    expect(bulk.calls).toHaveLength(0);
+
+    fireEvent.click(within(note).getByRole('button', { name: 'Got it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+  });
+
+  it('keeps bulk for a minor whose guardian is on email', async () => {
+    const user = userEvent.setup();
+    signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'email' };
+    state.minorBulkActionsEnabled = false;
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await enterSelectMode(user);
+    await pickCards(user, 'Acme Welding', 'Globex Foundry');
+    await submitBulkConnect(user, 2);
+
+    expect(await screen.findByText('Guardian confirmation needed')).toBeInTheDocument();
+    expect(screen.queryByText('One request at a time')).not.toBeInTheDocument();
+  });
+
+  it('still opens the normal form for a single request', async () => {
+    const user = userEvent.setup();
+    signedInMinorSeeker();
+    state.u18Status = { ...MINOR_VERIFIED_STATUS, guardianContactType: 'phone' };
+    state.minorBulkActionsEnabled = false;
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await enterSelectMode(user);
+    await pickCards(user, 'Acme Welding');
+    await user.click(screen.getByRole('button', { name: 'Connect (1)' }));
+
+    expect(await screen.findByTestId('action-modal')).toBeInTheDocument();
+  });
+
+  it('shows the note when the API refuses the batch, keeping the refused cards selected', async () => {
+    const user = userEvent.setup();
+    signedInSeeker();
+    const blocked = { error: 'MINOR_BULK_ACTION_BLOCKED', message: 'one at a time' };
+    bulk.respond = async () => envelopeOf([blocked, blocked]);
+    renderHome('/?view=list&domain=provider');
+    await findCard('Acme Welding');
+
+    await enterSelectMode(user);
+    await pickCards(user, 'Acme Welding', 'Globex Foundry');
+    await submitBulkConnect(user, 2);
+
+    expect(await screen.findByText('One request at a time')).toBeInTheDocument();
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
   });
 });
 

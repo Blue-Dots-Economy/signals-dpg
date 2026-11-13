@@ -11,6 +11,7 @@ import type {
   DotCardConfig,
   MapMarker,
   MapViewport,
+  OpenSpotGroup,
   ViewMode,
 } from '@/engine/types';
 import { PageShell } from '@/components/layout/page-shell';
@@ -30,6 +31,9 @@ import {
 } from '@/components/ui/dialog';
 import { ActionHandler } from '@/components/actions/action-handler';
 import { MapView } from '@/components/map/map-container';
+import { SpotGroupCard } from '@/components/map/spot-group-card';
+import { SpotGroupBanner } from '@/components/map/spot-group-banner';
+import { ResponsiveDialog } from '@/components/ui/responsive-dialog';
 import { MapErrorBoundary } from '@/components/map/map-error-boundary';
 import { SEARCH_AREA_MIN_ZOOM } from '@/lib/map-caps';
 import { BrowseFiltersPanel } from '@/components/filters/browse-filters-panel';
@@ -70,6 +74,7 @@ import {
   excludeOwnItems,
   buildFilteredCardsForDomain,
   DEFAULT_BROWSE_AREA,
+  spotGroupArea,
   type DerivedBrowseParams,
   type BrowseArea,
   type BrowseSort,
@@ -113,6 +118,8 @@ import type { Marker as NetworkMarker } from '@/lib/network-api';
 import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/lib/query-keys';
 import { GuardianOtpDialog } from '@/components/actions/guardian-otp-dialog';
+import { MinorBulkNoteDialog } from '@/components/actions/minor-bulk-note-dialog';
+import { useMinorBulkBlocked } from '@/hooks/use-minor-bulk-blocked';
 import { GuardianOtpPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 import { isGuardianConsentRequiredDomain } from '@/lib/guardian-consent';
@@ -124,6 +131,9 @@ type TriggerAction = Parameters<React.ComponentProps<typeof ActionHandler>['chil
  * instruction. 120° is roughly a continental view.
  */
 const WIDE_VIEWPORT_LNG_SPAN_DEGREES = 120;
+
+const NO_DOMAINS: DotNetworkDomain[] = [];
+const MAP_FILL_HEIGHT = 'h-full min-h-[400px]';
 
 export function isWideViewport(viewport: MapViewport | null): boolean {
   if (viewport?.minLng === undefined || viewport?.maxLng === undefined) return false;
@@ -556,7 +566,7 @@ function resolveRelevanceApplied(
 
 export function HomePage() {
   const { t } = useTranslation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isLoading: authLoading } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [search, setSearch] = React.useState('');
@@ -584,6 +594,8 @@ export function HomePage() {
   // provider's popup. `null` = closed.
   const isMobile = useIsMobile();
   const [sheetMarker, setSheetMarker] = React.useState<MapMarker | null>(null);
+  const [sheetSpot, setSheetSpot] = React.useState<OpenSpotGroup | null>(null);
+  const [spotReturnView, setSpotReturnView] = React.useState<{ lat: number; lng: number; zoom: number } | null>(null);
   // Leaving the map closes it, so returning to the map does not re-open it.
   React.useEffect(() => {
     if (viewMode !== 'map') setSheetMarker(null);
@@ -617,7 +629,9 @@ export function HomePage() {
     // Non-guardian failures from a mixed batch, reselected once the guardian
     // dialog resolves so they can be retried.
     otherFailedIds?: string[];
+    sentTo?: string;
   } | null>(null);
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
   // Minor ward: the "a code will be sent to your guardian" confirm shown before
   // a bulk action dispatches the OTP. Holds the deferred submit and action type.
   const [bulkGuardianConfirm, setBulkGuardianConfirm] = React.useState<
@@ -679,6 +693,7 @@ export function HomePage() {
   // my-profiles settle. The ref stops a background refetch from resetting a
   // manual selection.
   const restoredForNetwork = React.useRef<string | null>(null);
+  const [profileRestoredFor, setProfileRestoredFor] = React.useState<string | null>(null);
   React.useEffect(() => {
     if (!user) {
       // Signed out: clear selection and any open consent gate; allow restore
@@ -686,11 +701,13 @@ export function HomePage() {
       setActiveProfileId(null);
       setPendingConsentProfileId(null);
       restoredForNetwork.current = null;
+      setProfileRestoredFor(null);
       return;
     }
     if (!network || !myItemsFetched) return;
     if (restoredForNetwork.current === network.id) return;
     restoredForNetwork.current = network.id;
+    setProfileRestoredFor(network.id);
 
     const storedId = getStoredActiveProfileId(network.id);
     if (storedId && myItems.some((p) => p.item_id === storedId)) {
@@ -703,6 +720,9 @@ export function HomePage() {
       clearStoredActiveProfileId(network.id);
     }
   }, [user, network, myItemsFetched, myItems]);
+
+  const browseReady =
+    !authLoading && (!user || (myItemsFetched && profileRestoredFor === network?.id));
 
   const myItem = React.useMemo(() => {
     if (!myItems.length) return null;
@@ -786,6 +806,7 @@ export function HomePage() {
   const handleLocationSourceChange = React.useCallback(
     (next: PreferredLocationSource) => {
       setPreferredSource(next);
+      setSpotReturnView(null);
       setRecenterNonce((n) => n + 1);
       // An explicit "Current location" click always retries: the auto-request
       // only fires from `idle`, and the browser re-prompts while permission is
@@ -998,7 +1019,13 @@ export function HomePage() {
   // The map fetches slim viewport markers per selected domain (empty selection
   // = all visible) and clusters them; free-text `search` and the facets are
   // applied server-side.
-  const mapMarkers = useMapMarkers(network, mapDomains, mapViewport, activeFieldFilters, search);
+  const mapMarkers = useMapMarkers(
+    network,
+    browseReady ? mapDomains : NO_DOMAINS,
+    mapViewport,
+    activeFieldFilters,
+    search,
+  );
 
   // Per-target-domain profile anchor: `anchorItemIdForTarget` consults the
   // interaction matrix to decide whether the active profile may anchor
@@ -1021,7 +1048,7 @@ export function HomePage() {
     mapDomains,
     activeFieldFilters,
     search,
-    viewMode === 'map',
+    viewMode === 'map' && browseReady,
     // The list's anchor too, or a typed query does not narrow this count.
     anchorFor,
   );
@@ -1114,7 +1141,9 @@ export function HomePage() {
       // `?domain=`, and fetching it wastes a request (or draws a 403 on the
       // anchor for a non-interacting domain).
       enabled:
-        selectedDomain !== null && visibleDomains.some((d) => d.id === selectedDomain),
+        browseReady &&
+        selectedDomain !== null &&
+        visibleDomains.some((d) => d.id === selectedDomain),
       ...browseHookOpts,
       anchorItemId: resolveSingleDomainAnchor(selectedDomain, anchorFor),
     },
@@ -1211,6 +1240,9 @@ export function HomePage() {
     [network, currentDomain, myItem]
   );
 
+  // Bulk off for minors (#917): say "one at a time" before anything is sent.
+  const minorBulkBlocked = useMinorBulkBlocked(network, wardDomain);
+
   const handleBulkConnect = React.useCallback(
     async (actionType: string, formData: Record<string, unknown>, confirmed = false) => {
       if (!myItem || !network) return;
@@ -1287,6 +1319,9 @@ export function HomePage() {
         if (outcome.kind === 'all') {
           toast.success(t('home.bulk_connected_all', { count: outcome.succeeded }));
           browseSelection.exitSelect();
+        } else if (outcome.kind === 'minor_bulk_blocked') {
+          setMinorBulkNoteOpen(true);
+          browseSelection.setSelected(outcome.failedIds);
         } else if (outcome.kind === 'guardian') {
           // A code has already gone to the guardian; the OTP dialog owns the
           // resubmit.
@@ -1296,6 +1331,7 @@ export function HomePage() {
             sourceInstanceUrl: sourceItemInstanceUrl,
             actionType,
             otherFailedIds: outcome.otherFailedIds,
+            sentTo: outcome.sentTo,
           });
         } else {
           toast.warning(
@@ -1461,7 +1497,51 @@ export function HomePage() {
     });
   };
 
+  const viewSpotGroup = (group: OpenSpotGroup) => {
+    const domain = group.breakdown.some((b) => b.domain === selectedDomain)
+      ? selectedDomain
+      : (group.breakdown[0]?.domain ?? selectedDomain);
+    setSheetSpot(null);
+    setSpotReturnView(
+      mapViewport?.zoom !== undefined ? { lat: mapViewport.lat, lng: mapViewport.lng, zoom: mapViewport.zoom } : null,
+    );
+    setArea(spotGroupArea(group));
+    if (domain) setSelectedDomain(domain);
+    setViewMode('list');
+    setSearchParams((prev) => {
+      prev.set('view', 'list');
+      if (domain) prev.set('domain', domain);
+      return prev;
+    });
+  };
+
+  const backToMapFromSpot = () => {
+    setArea(DEFAULT_BROWSE_AREA);
+    switchViewMode('map');
+  };
+
+  const spotGroupTitle = (group: OpenSpotGroup) =>
+    t(group.exact ? 'map.spot_title_exact' : 'map.spot_title_near', { n: group.count.toLocaleString() });
+
+  const renderSpotGroupCard = (group: OpenSpotGroup, close?: () => void, className?: string) => (
+    <SpotGroupCard
+      group={group}
+      className={className}
+      formatDomain={(d) => formatDomainLabel(d, network?.domains) || d}
+      onView={(g) => {
+        close?.();
+        viewSpotGroup(g);
+      }}
+      onClose={close}
+    />
+  );
+
   const handleViewModeChange = (mode: ViewMode) => {
+    setSpotReturnView(null);
+    switchViewMode(mode);
+  };
+
+  const switchViewMode = (mode: ViewMode) => {
     // The map is multi-domain and the list takes one, so on map → list collapse
     // the map's selection to one of its domains. Only when the list domain is
     // not already one of the map's, so toggling does not reshuffle a choice;
@@ -1658,10 +1738,15 @@ export function HomePage() {
     </Dialog>
   );
 
+  const minorBulkNoteModal = (
+    <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
+  );
+
   const bulkGuardianOtpModal = (
     <GuardianOtpDialog
       open={!!bulkGuardianChallenge}
       onOpenChange={(open) => { if (!open) setBulkGuardianChallenge(null); }}
+      sentTo={bulkGuardianChallenge?.sentTo}
       purpose={{
         kind: 'bulk',
         action: guardianActionKind(bulkGuardianChallenge?.actionType),
@@ -1731,6 +1816,7 @@ export function HomePage() {
         {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
       </>
     );
   }
@@ -1763,7 +1849,7 @@ export function HomePage() {
   // viewport count lives in its own pill.
   const contentCount = viewMode === 'map' ? browseTotals.total : singleDomainList.total;
   const contentLoading =
-    viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading;
+    !browseReady || (viewMode === 'map' ? browseTotals.isLoading : singleDomainList.isLoading);
 
   // Suppressed on an empty or loading list, where `BrowseEmptyState` or the
   // skeleton explains instead.
@@ -1988,6 +2074,7 @@ export function HomePage() {
         renderBrowseToolbar()
       }
     >
+      <div className={viewMode === 'map' ? 'flex h-full flex-col' : undefined}>
       {renderPageHeader()}
       {showLocationBanner && (
         <EnableLocationBanner
@@ -2079,6 +2166,9 @@ export function HomePage() {
           {(triggerAction) =>
             viewMode === 'list' ? (
               <>
+                {area.mode === 'viewport' && area.spot && (
+                  <SpotGroupBanner exact={area.spot.exact} onBackToMap={backToMapFromSpot} />
+                )}
                 {/* Federation degradation: some peer instances did not answer
                     in time, so the list is known-partial. In-flow here; the
                     map's banner is `fixed`. */}
@@ -2117,7 +2207,7 @@ export function HomePage() {
                   // `selectedDomain === null` is the transient state before the
                   // default domain resolves; the feed is disabled, so show
                   // loading rather than "no listings".
-                  loading={singleDomainList.isLoading || selectedDomain === null}
+                  loading={!browseReady || singleDomainList.isLoading || selectedDomain === null}
                   emptyState={
                     <BrowseEmptyState
                       search={search}
@@ -2156,6 +2246,10 @@ export function HomePage() {
                           type="button"
                           disabled={!connectAction || bulkConnectBusy}
                           onClick={() => {
+                            if (minorBulkBlocked && browseSelection.selected.size > 1) {
+                              setMinorBulkNoteOpen(true);
+                              return;
+                            }
                             setBulkConnectDraft(undefined);
                             setBulkConnectOpen(true);
                           }}
@@ -2179,13 +2273,16 @@ export function HomePage() {
                 })()}
               </>
             ) : (
-              <div data-tour="map" className="relative h-full">
-                <MapErrorBoundary>
+              <div data-tour="map" className="relative min-h-0 flex-1">
+                <MapErrorBoundary heightClassName={MAP_FILL_HEIGHT}>
                 <MapView
+                  heightClassName={MAP_FILL_HEIGHT}
                   schema={activeSchema!}
                   resolveMarkerLabel={resolveMarkerLabel}
                   items={mapItems}
-                  focusPoint={userLocation}
+                  loading={!browseReady || mapMarkers.isLoading}
+                  focusPoint={spotReturnView ?? userLocation}
+                  focusZoom={spotReturnView?.zoom}
                   focusNonce={recenterNonce}
                   closePopupNonce={closePopupNonce}
                   selfLocation={userLocation}
@@ -2207,8 +2304,24 @@ export function HomePage() {
                   // Phone: the tapped marker opens in the bottom sheet instead.
                   showPopup={!isMobile}
                   onMarkerSelect={isMobile ? setSheetMarker : undefined}
+                  renderSpotGroup={renderSpotGroupCard}
+                  onSpotGroupSelect={isMobile ? setSheetSpot : undefined}
                 />
                 </MapErrorBoundary>
+                {isMobile && (
+                  <ResponsiveDialog
+                    open={sheetSpot !== null}
+                    onOpenChange={(open) => {
+                      if (!open) setSheetSpot(null);
+                    }}
+                    title={sheetSpot ? spotGroupTitle(sheetSpot) : ''}
+                    contentClassName="max-w-xl"
+                  >
+                    <div className="p-6 pt-8">
+                      {sheetSpot && renderSpotGroupCard(sheetSpot, undefined, 'w-full border-0 p-0 shadow-none')}
+                    </div>
+                  </ResponsiveDialog>
+                )}
                 {isMobile && (
                   <MarkerDetailSheet
                     open={sheetMarker !== null}
@@ -2225,7 +2338,7 @@ export function HomePage() {
                       )}
                   </MarkerDetailSheet>
                 )}
-                {/* "Search this area": applies the map viewport as the list's
+                {/* "List what's in this view": applies the map viewport as the list's
                     area and switches to the list in one action. */}
                 {mapViewport?.minLat !== undefined &&
                   mapViewport.minLng !== undefined &&
@@ -2283,12 +2396,14 @@ export function HomePage() {
             )
           }
         </ActionHandler>
+      </div>
     </PageShell>
     {renderU18GuardianFlowModal()}
     {profileConsentModal}
     {consentAcceptDialogs}
         {bulkGuardianConfirmModal}
         {bulkGuardianOtpModal}
+        {minorBulkNoteModal}
     </>
   );
 }

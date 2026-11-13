@@ -467,8 +467,8 @@ describe('consent-api config and status reads', () => {
   it('fetchConsentConfigs keeps only consent_config entries and normalizes a missing brand', async () => {
     const { api, get } = await loadConsentApi([
       { kind: 'network', schema: { id: 'net' } },
-      { kind: 'consent_config', brand: 'upsdm', schema: { version: 3 } },
-      { kind: 'consent_config', schema: { version: 1 } },
+      { kind: 'consent_config', network: 'blue_dot', brand: 'upsdm', schema: { version: 3 } },
+      { kind: 'consent_config', network: 'blue_dot', schema: { version: 1 } },
     ]);
 
     await expect(api.fetchConsentConfigs('blue_dot')).resolves.toEqual([

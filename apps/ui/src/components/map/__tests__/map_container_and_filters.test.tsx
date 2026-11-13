@@ -56,6 +56,14 @@ vi.mock('@/hooks/use-mobile', () => {
  * plus a button per marker (so `onMarkerClick` wiring is exercised by a real
  * click) and a button that emits a viewport (so `onViewportChange` is too).
  */
+const SPOT_GROUP = {
+  key: 'c:1',
+  count: 2,
+  breakdown: [{ domain: 'seeker', count: 2 }],
+  exact: true,
+  bounds: { minLat: 10, minLng: 20, maxLat: 10, maxLng: 20 },
+};
+
 function makeFakeProvider(name: string) {
   return function FakeProvider({
     center,
@@ -71,6 +79,8 @@ function makeFakeProvider(name: string) {
     resolveIcon,
     resolveMarkerImage,
     onViewportChange,
+    renderSpotGroup,
+    onSpotGroupSelect,
   }: MapProviderProps) {
     return (
       <div>
@@ -87,6 +97,10 @@ function makeFakeProvider(name: string) {
         <button type="button" onClick={() => onViewportChange?.(EMITTED_VIEWPORT)}>
           emit viewport
         </button>
+        <button type="button" onClick={() => onSpotGroupSelect?.(SPOT_GROUP)}>
+          select spot
+        </button>
+        {renderSpotGroup ? renderSpotGroup(SPOT_GROUP, () => {}) : null}
         <ul>
           {markers.map((marker) => {
             const image = resolveMarkerImage?.(marker);
@@ -266,6 +280,13 @@ describe('MapView — center, zoom and focus point', () => {
     expect(screen.getByText(`self: ${BLR.lat},${BLR.lng}`)).toBeInTheDocument();
   });
 
+  it('centres on a focus point at the caller\'s focus zoom when one is given', async () => {
+    render(<MapView schema={NAME_SCHEMA} items={[]} focusPoint={BLR} focusZoom={17} />);
+
+    expect(await screen.findByText(`center: ${BLR.lat},${BLR.lng}`)).toBeInTheDocument();
+    expect(screen.getByText('zoom: 17')).toBeInTheDocument();
+  });
+
   it('normalises an undefined selfLocation to null and attaches no viewport listener when unset', async () => {
     render(<MapView schema={NAME_SCHEMA} items={[]} />);
 
@@ -421,7 +442,7 @@ describe('MapView — marker resolution from item_locations', () => {
     expect(screen.getByLabelText('icon for Acme')).toBeInTheDocument();
   });
 
-  it('nudges a marker sitting exactly on the self-location so "You" never hides it', async () => {
+  it('keeps a marker on the self-location at its own coordinate', async () => {
     render(
       <MapView
         schema={NAME_SCHEMA}
@@ -431,8 +452,7 @@ describe('MapView — marker resolution from item_locations', () => {
     );
 
     await screen.findByRole('button', { name: 'On top of you' });
-    const exact = `a#0 @ ${BLR.lat.toFixed(5)},${BLR.lng.toFixed(5)}`;
-    expect(screen.queryByText(exact)).not.toBeInTheDocument();
+    expect(screen.getByText(`a#0 @ ${BLR.lat.toFixed(5)},${BLR.lng.toFixed(5)}`)).toBeInTheDocument();
   });
 
   it('ignores a stale in-flight resolution when items change mid-flight', async () => {
@@ -534,20 +554,77 @@ describe('MapView — loading, empty state and maximize', () => {
     setActiveMapProvider('fake-alpha');
   });
 
-  it('shows the loading overlay first, then clears it once markers resolve', async () => {
-    render(
+  it('shows the loading message only while loading with no markers', async () => {
+    const { rerender } = render(<MapView schema={NAME_SCHEMA} items={[]} loading />);
+    expect(screen.getByText('Loading map data...')).toBeInTheDocument();
+
+    rerender(
       <MapView
         schema={NAME_SCHEMA}
         items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'Acme' })]}
+        loading
+      />,
+    );
+    expect(screen.queryByText('Loading map data...')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Acme' })).toBeInTheDocument();
+  });
+
+  it('hands the provider the built markers on the first render and the same array afterwards', () => {
+    const seen: MapMarker[][] = [];
+    registerMapProvider({
+      name: 'fake-capture',
+      component: ({ markers }: MapProviderProps) => {
+        seen.push(markers);
+        return null;
+      },
+    });
+    setActiveMapProvider('fake-capture');
+    const items = [itemAt('a', [{ lat: 10, lng: 20 }], { name: 'Acme' })];
+
+    const { rerender } = render(<MapView schema={NAME_SCHEMA} items={items} emptyMessage="one" />);
+    rerender(<MapView schema={NAME_SCHEMA} items={items} emptyMessage="two" />);
+
+    expect(seen[0]).toHaveLength(1);
+    expect(seen[seen.length - 1]).toBe(seen[0]);
+  });
+
+  it('hands the same-spot card renderer and selection handler to the provider', async () => {
+    const onSpotGroupSelect = vi.fn();
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' })]}
+        renderSpotGroup={(group) => <p>{`spot card ${group.count}`}</p>}
+        onSpotGroupSelect={onSpotGroupSelect}
       />,
     );
 
-    expect(screen.getByText('Loading map data...')).toBeInTheDocument();
+    expect(await screen.findByText('spot card 2')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'select spot' }));
+    expect(onSpotGroupSelect).toHaveBeenCalledWith(SPOT_GROUP);
+  });
 
-    await waitFor(() =>
-      expect(screen.queryByText('Loading map data...')).not.toBeInTheDocument(),
+  it('labels a marker "Item" when its title field holds an object', async () => {
+    render(<MapView schema={NAME_SCHEMA} items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: { first: 'A' } })]} />);
+
+    expect(await screen.findByRole('button', { name: 'Item' })).toBeInTheDocument();
+  });
+
+  it('keeps same-coordinate items at their shared coordinate', async () => {
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[
+          itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' }),
+          itemAt('b', [{ lat: 10, lng: 20 }], { name: 'Second' }),
+        ]}
+      />,
     );
-    expect(screen.getByRole('button', { name: 'Acme' })).toBeInTheDocument();
+
+    await screen.findByRole('button', { name: 'First' });
+    const positions = screen.getAllByText(/@ /).map((el) => el.textContent?.split('@ ')[1]);
+    expect(positions).toHaveLength(2);
+    expect(new Set(positions).size).toBe(1);
   });
 
   it('keeps the map mounted and overlays the default empty message when nothing resolves', async () => {
@@ -569,6 +646,25 @@ describe('MapView — loading, empty state and maximize', () => {
     expect(
       screen.queryByText('No items match the current filters.'),
     ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['a same-spot group', 'select spot'],
+    ['a listing', 'First'],
+  ])('leaves the maximized map when it hands %s to the page sheet', async (_label, button) => {
+    render(
+      <MapView
+        schema={NAME_SCHEMA}
+        items={[itemAt('a', [{ lat: 10, lng: 20 }], { name: 'First' })]}
+        onSpotGroupSelect={vi.fn()}
+        onMarkerSelect={vi.fn()}
+      />,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: 'Maximize map' }));
+
+    await userEvent.click(screen.getByRole('button', { name: button }));
+
+    expect(screen.getByRole('button', { name: 'Maximize map' })).toBeInTheDocument();
   });
 
   it('toggles maximize, revealing the filters slot only while maximized', async () => {

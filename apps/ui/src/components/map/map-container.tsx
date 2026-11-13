@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RJSFSchema } from '@rjsf/utils';
-import type { MapMarker, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport, OpenSpotGroup } from '@/engine/types';
 import { getActiveMapProvider } from '@/engine/map/map-registry';
 import { getRuntimeEnv } from '@/lib/runtime-env';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,8 @@ interface MapViewProps {
    * fits all markers.
    */
   focusPoint?: { lat: number; lng: number } | null;
+  /** Zoom for `focusPoint`; defaults to city zoom. */
+  focusZoom?: number;
   /**
    * Monotonic counter bumped on an explicit recenter intent (e.g. the user
    * picks a location source). Forwarded to the provider so the map snaps back
@@ -75,11 +77,17 @@ interface MapViewProps {
    * (see `useViewportReport`). Unset means no listener is attached.
    */
   onViewportChange?: (viewport: MapViewport) => void;
+  /** See `MapProviderProps.renderSpotGroup`. */
+  renderSpotGroup?: NonNullable<MapProviderProps['renderSpotGroup']>;
+  /** See `MapProviderProps.onSpotGroupSelect`. */
+  onSpotGroupSelect?: NonNullable<MapProviderProps['onSpotGroupSelect']>;
   /**
    * Overrides the empty-state text. A viewport-scoped map means "none in this
    * area", not "filtered out", so the home page passes an area message.
    */
   emptyMessage?: string;
+  /** True while the first markers are still loading; shows the loading message until any marker is drawn. */
+  loading?: boolean;
 }
 
 // Default map view when the viewer has no location. Set per deployment, not
@@ -127,6 +135,7 @@ export function MapView({
   center = DEFAULT_CENTER,
   zoom = DEFAULT_ZOOM,
   focusPoint,
+  focusZoom,
   focusNonce,
   closePopupNonce,
   selfLocation,
@@ -138,12 +147,13 @@ export function MapView({
   resolveMarkerIcon,
   resolveMarkerImage,
   onViewportChange,
+  renderSpotGroup,
+  onSpotGroupSelect,
   emptyMessage,
+  loading = false,
 }: MapViewProps) {
   const { t } = useTranslation();
   const MapProviderComponent = getActiveMapProvider();
-  const [markers, setMarkers] = React.useState<MapMarker[]>([]);
-  const [loading, setLoading] = React.useState(true);
   const [isMaximized, setIsMaximized] = React.useState(false);
 
   // Maximize changes the container size; dispatch a window 'resize' after the
@@ -170,72 +180,73 @@ export function MapView({
     }
     return {
       effectiveCenter: [focusPoint.lat, focusPoint.lng] as [number, number],
-      effectiveZoom: PROFILE_ZOOM,
+      effectiveZoom: focusZoom ?? PROFILE_ZOOM,
       initialViewSet: true,
     };
-  }, [focusPoint, center, zoom]);
+  }, [focusPoint, focusZoom, center, zoom]);
 
-  React.useEffect(() => {
-    let cancelled = false;
+  const markers = React.useMemo(() => {
+    const titleField = findTitleField(schema);
+    return items.flatMap((item): MapMarker[] => {
+      // One marker per stored `item_locations` entry.
+      const locs = Array.isArray((item.data as Record<string, unknown>).item_locations)
+        ? (
+            item.data as {
+              item_locations?: Array<{ lat: number; lng: number; label?: string }>;
+            }
+          ).item_locations ?? []
+        : [];
 
-    async function resolveMarkers() {
-      setLoading(true);
-      const titleField = findTitleField(schema);
+      // Locations are resolved server-side; the browser does not geocode
+      // (its Maps key is scoped to Maps JS and Places). Items with no stored
+      // location produce no marker.
+      if (locs.length === 0) return [];
 
-      const resolved = await Promise.all(
-        items.map((item) => {
-          // One marker per stored `item_locations` entry.
-          const locs = Array.isArray(
-            (item.data as Record<string, unknown>).item_locations
-          )
-            ? (
-                item.data as {
-                  item_locations?: Array<{ lat: number; lng: number; label?: string }>;
-                }
-              ).item_locations ?? []
-            : [];
+      // Per-domain title first, then the single-schema heuristic, then 'Item'.
+      const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
+      const baseLabel =
+        resolvedLabel || titleText(titleField ? item.data[titleField] : undefined);
 
-          // Locations are resolved server-side; the browser does not geocode
-          // (its Maps key is scoped to Maps JS and Places). Items with no stored
-          // location produce no marker.
-          const points: Array<{ lat: number; lng: number; label?: string }> = locs;
-
-          if (points.length === 0) return [];
-
-          // Per-domain title first, then the single-schema heuristic, then 'Item'.
-          const resolvedLabel = resolveMarkerLabel?.(item)?.trim();
-          const baseLabel =
-            resolvedLabel ||
-            (titleField ? String(item.data[titleField] ?? 'Item') : 'Item');
-
-          const precision: MapMarker['precision'] = 'exact';
-
-          return points.map(
-            (p, i) =>
-              ({
-                id: `${item.id}#${i}`,
-                lat: p.lat,
-                lng: p.lng,
-                label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
-                data: item.data,
-                precision,
-                geocodedFrom: undefined,
-                domain: item.domain,
-              }) satisfies MapMarker
-          );
-        })
+      return locs.map(
+        (p, i) =>
+          ({
+            id: `${item.id}#${i}`,
+            lat: p.lat,
+            lng: p.lng,
+            label: p.label ? `${baseLabel} — ${p.label}` : baseLabel,
+            data: item.data,
+            precision: 'exact',
+            geocodedFrom: undefined,
+            domain: item.domain,
+          }) satisfies MapMarker,
       );
+    });
+  }, [items, schema, resolveMarkerLabel]);
 
-      if (!cancelled) {
-        const valid: MapMarker[] = resolved.flat();
-        setMarkers(spreadCoLocatedMarkers(valid, selfLocation ?? null));
-        setLoading(false);
-      }
-    }
-
-    void resolveMarkers();
-    return () => { cancelled = true; };
-  }, [items, schema, resolveMarkerLabel, selfLocation]);
+  const markersById = React.useMemo(() => new Map(markers.map((m) => [m.id, m])), [markers]);
+  const handleMarkerClick = React.useMemo(
+    () =>
+      onMarkerSelect
+        ? (id: string) => {
+            onMarkerClick?.(id);
+            const marker = markersById.get(id);
+            if (!marker) return;
+            setIsMaximized(false);
+            onMarkerSelect(marker);
+          }
+        : onMarkerClick,
+    [onMarkerSelect, onMarkerClick, markersById],
+  );
+  const handleSpotGroupSelect = React.useMemo(
+    () =>
+      onSpotGroupSelect
+        ? (group: OpenSpotGroup) => {
+            setIsMaximized(false);
+            onSpotGroupSelect(group);
+          }
+        : undefined,
+    [onSpotGroupSelect],
+  );
 
   // Loading and empty states overlay the map rather than replacing it, so zero
   // markers never removes the map. The overlay is inside the maximized
@@ -256,15 +267,7 @@ export function MapView({
         markers={markers}
         // Passes a handler only when the caller gave one: the default popup
         // shows a "View details" link exactly when `onMarkerClick` is set.
-        onMarkerClick={
-          onMarkerSelect
-            ? (id) => {
-                onMarkerClick?.(id);
-                const marker = markers.find((m) => m.id === id);
-                if (marker) onMarkerSelect(marker);
-              }
-            : onMarkerClick
-        }
+        onMarkerClick={handleMarkerClick}
         showPopup={showPopup}
         initialViewSet={initialViewSet}
         focusNonce={focusNonce}
@@ -274,6 +277,8 @@ export function MapView({
         resolveIcon={resolveMarkerIcon}
         resolveMarkerImage={resolveMarkerImage}
         onViewportChange={onViewportChange}
+        renderSpotGroup={renderSpotGroup}
+        onSpotGroupSelect={handleSpotGroupSelect}
       />
       {/* Top-right, clear of the providers' top-left controls. */}
       <div className="absolute right-2 top-2 z-[1000] flex items-center gap-2">
@@ -293,7 +298,7 @@ export function MapView({
         </Button>
       </div>
       {/* Loading / empty-state overlay */}
-      {(loading || markers.length === 0) && (
+      {markers.length === 0 && (
         <div className="pointer-events-none absolute inset-0 z-[900] flex items-center justify-center">
           <p className="rounded-md bg-background/90 px-4 py-2 text-sm text-muted-foreground shadow-md backdrop-blur-sm">
             {loading
@@ -306,73 +311,10 @@ export function MapView({
   );
 }
 
-/**
- * Stable hash of a string to [0, 1) (FNV-1a, 32-bit), so a marker's fan-out
- * angle depends only on its id. Iterates code points with `for...of`; an
- * index loop with `codePointAt` would double-read surrogate pairs.
- */
-function hashToUnit(str: string): number {
-  let h = 2166136261;
-  for (const ch of str) {
-    h ^= ch.codePointAt(0) as number;
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) / 4294967296;
+function titleText(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return 'Item';
 }
-
-/**
- * Fans markers that share an exact coordinate onto a ~10 m circle so each is
- * clickable on both providers (the Google Maps clusterer has no spiderfy).
- * Zoomed out they still cluster; the offset is small next to city-centroid
- * imprecision.
- *
- * `selfLocation` counts as a virtual group member: a single item on the
- * viewer's own coordinate is also fanned out, so it is not hidden under the
- * "You are here" marker. The self-marker itself never moves.
- */
-export function spreadCoLocatedMarkers(
-  markers: MapMarker[],
-  selfLocation?: { lat: number; lng: number } | null,
-): MapMarker[] {
-  // ~10 metres expressed in degrees of latitude (1° lat ≈ 111_320 m).
-  const RADIUS_DEG = 10 / 111_320;
-
-  const groups = new Map<string, MapMarker[]>();
-  for (const marker of markers) {
-    const key = `${marker.lat.toFixed(6)},${marker.lng.toFixed(6)}`;
-    const group = groups.get(key);
-    if (group) group.push(marker);
-    else groups.set(key, [marker]);
-  }
-
-  const selfKey = selfLocation
-    ? `${selfLocation.lat.toFixed(6)},${selfLocation.lng.toFixed(6)}`
-    : null;
-
-  const result: MapMarker[] = [];
-  for (const [key, group] of groups) {
-    const isAtSelfLocation = selfKey !== null && key === selfKey;
-    if (group.length === 1 && !isAtSelfLocation) {
-      result.push(group[0]);
-      continue;
-    }
-    // The angle depends only on the marker id, so a pin does not move when
-    // filters change. Longitude is scaled by cos(lat) to stay circular.
-    const latRad = (group[0].lat * Math.PI) / 180;
-    const lngScale = Math.max(Math.cos(latRad), 0.01);
-    for (const marker of group) {
-      const angle = hashToUnit(marker.id) * 2 * Math.PI;
-      result.push({
-        ...marker,
-        lat: marker.lat + RADIUS_DEG * Math.cos(angle),
-        lng: marker.lng + (RADIUS_DEG * Math.sin(angle)) / lngScale,
-      });
-    }
-  }
-
-  return result;
-}
-
 
 function findTitleField(schema: RJSFSchema): string | null {
   if (!schema.properties) return null;

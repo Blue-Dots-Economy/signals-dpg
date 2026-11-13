@@ -23,7 +23,7 @@ export interface MapCountPillProps {
 export function MapCountPill({ total, shown, truncated }: Readonly<MapCountPillProps>) {
   const { t } = useTranslation();
 
-  if (total <= 0) return null;
+  if (total <= 0 && !truncated) return null;
 
   const label = truncated
     ? t('home.map_zoom_in_for_more', { count: total })

@@ -8,6 +8,8 @@ export class BulkItemFailure extends Error {
     message: string,
     /** Per-field messages, keyed by dotted path, for a failed schema check. */
     public readonly fields?: Record<string, string>,
+    /** Extra fields merged into the item's error result. */
+    public readonly details?: Record<string, string>,
   ) {
     super(message);
     this.name = 'BulkItemFailure';
@@ -70,6 +72,7 @@ export async function runBulk<T extends object>(
     } catch (err) {
       if (err instanceof BulkItemFailure) {
         results.push({
+          ...err.details,
           index,
           status: 'error',
           error: err.errorCode,

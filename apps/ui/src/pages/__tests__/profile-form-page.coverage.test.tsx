@@ -707,7 +707,9 @@ describe('ProfileFormPage submit failures', () => {
 
   it('a failing edit shows the update-failed title with the generic description', async () => {
     paramsMock = { id: 'item-1' };
-    editItemResult = { data: liveItem('live'), isSuccess: true, isError: false, error: null };
+    // A stored value that differs from what the form submits, so the save is sent.
+    const item = { ...liveItem('live'), item_state: { 'Full Name': 'Ravi' } } as Item;
+    editItemResult = { data: item, isSuccess: true, isError: false, error: null };
     updateItemMock.mockRejectedValue(httpError(500, {}));
 
     await renderPage('/profile/item-1');

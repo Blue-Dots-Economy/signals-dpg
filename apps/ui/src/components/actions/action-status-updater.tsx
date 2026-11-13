@@ -194,13 +194,9 @@ export function ActionStatusUpdater({
       },
       onError: (error: Error) => {
         // A minor ward needs guardian confirmation: open the OTP challenge
-        // instead of an error toast.
-        if (gate.captureIfGuardianRequired(error, payload)) {
-          // Close this dialog in favour of the OTP dialog, which stays mounted
-          // (it is driven by gate.challenge).
-          onOpenChange(false);
-          return;
-        }
+        // instead of an error toast. The form hides while the challenge is
+        // open; closing it here would unmount the OTP dialog with it.
+        if (gate.captureIfGuardianRequired(error, payload)) return;
         toast.error(t('actions.toast_update_failed', { message: apiErrorMessage(error, t) }));
       },
     });
@@ -282,16 +278,21 @@ export function ActionStatusUpdater({
   const guardianOtpDialog = (
     <GuardianOtpDialog
       open={!!gate.challenge}
-      onOpenChange={(o) => !o && gate.setChallenge(null)}
+      onOpenChange={(o) => {
+        if (o) return;
+        gate.setChallenge(null);
+        onOpenChange(false);
+      }}
       onSubmitOtp={gate.submitOtp}
       purpose={{ kind: 'accept' }}
+      sentTo={gate.sentTo}
     />
   );
 
   if (isMobile) {
     return (
       <>
-        <Drawer open={open} onOpenChange={onOpenChange}>
+        <Drawer open={open && !gate.challenge} onOpenChange={onOpenChange}>
           <DrawerContent className="max-h-[90dvh] overflow-hidden p-0">
             <div className="px-6 pt-6">{header}</div>
             <div className="px-6 pb-4 overflow-y-auto">{formContent}</div>
@@ -305,7 +306,7 @@ export function ActionStatusUpdater({
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog open={open && !gate.challenge} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-[520px] max-h-[90dvh] overflow-y-auto gap-0 p-6">
           {header}
           <div className="py-4">{formContent}</div>

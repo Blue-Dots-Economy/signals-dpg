@@ -26,6 +26,8 @@ export interface GuardianOtpDialogProps {
   onLogout?: () => void;
   /** What this OTP authorises, shown in the "Guardian approval for" panel. */
   purpose?: GuardianPurpose;
+  /** Masked guardian contact the code went to (`******7347`), from the API's `sent_to`. */
+  sentTo?: string;
 }
 
 interface InlineErrorState {
@@ -75,7 +77,7 @@ function messageForCode(
   }
 }
 
-export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, purpose }: GuardianOtpDialogProps) {
+export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, purpose, sentTo }: Readonly<GuardianOtpDialogProps>) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -109,10 +111,15 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, p
     'actions.guardian_otp_title',
     "This requires your guardian's confirmation via OTP",
   );
-  const description = t(
-    'actions.guardian_otp_desc',
-    'We sent a code to your guardian. Ask them for it and enter it below.',
-  );
+  const description = sentTo
+    ? t('actions.guardian_otp_desc_sent_to', {
+        sentTo,
+        defaultValue: 'We sent a code to your guardian at {{sentTo}}. Ask them for it and enter it below.',
+      })
+    : t(
+        'actions.guardian_otp_desc',
+        'We sent a code to your guardian. Ask them for it and enter it below.',
+      );
 
   const body = (
     <div className="flex flex-col gap-4">

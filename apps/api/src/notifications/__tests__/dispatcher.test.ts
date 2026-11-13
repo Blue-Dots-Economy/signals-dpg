@@ -170,4 +170,64 @@ describe('DirectDispatcher', () => {
     expect(calls[0]?.ctaUrl).toBe('https://seeker.example.org/auth/login');
     expect(skips).toContain('no_cta_url');
   });
+
+  describe('SMS', () => {
+    function smsDeps(overrides: Partial<DispatcherDeps> = {}) {
+      const sms: Parameters<NonNullable<DispatcherDeps['sendSms']>>[0][] = [];
+      const made = makeDeps({
+        sendSms: vi.fn(async (args) => {
+          sms.push(args);
+        }),
+        resolvePhone: vi.fn(async (userId: string) => (userId === 'user-source' ? '+919000000001' : '+919000000002')),
+        ...overrides,
+      });
+      return { ...made, sms };
+    }
+
+    it('sends one SMS per local owner side, under the same case as the email', async () => {
+      const { deps, sms } = smsDeps({ resolveCounterpartyName: vi.fn(async () => 'Asha Skills') });
+      await createDirectDispatcher(deps).dispatch(createEvent());
+
+      expect(sms).toHaveLength(2);
+      expect(sms).toContainEqual({
+        caseId: 'action.connect.provider.inbound_request',
+        to: '+919000000002',
+        network: 'blue_dot',
+        variables: { name: 'Asha Skills', url: 'https://provider.example.org' },
+      });
+      expect(sms.map((s) => s.caseId)).toContain('action.connect.seeker.outbound_request');
+    });
+
+    it('uses the status cases on a status change', async () => {
+      const { deps, sms } = smsDeps();
+      await createDirectDispatcher(deps).dispatch(createEvent({ lifecycle: 'status', status: 'accepted' }));
+      expect(sms.map((s) => s.caseId).sort()).toEqual([
+        'action.connect.provider.outbound_status',
+        'action.connect.seeker.inbound_status',
+      ]);
+    });
+
+    it('still texts a phone-only owner, and sends nothing to an owner without a verified phone', async () => {
+      const { deps, sms, calls } = smsDeps({
+        resolveEmail: vi.fn(async () => null),
+        resolvePhone: vi.fn(async (userId: string) => (userId === 'user-target' ? '+919000000002' : null)),
+      });
+      await createDirectDispatcher(deps).dispatch(createEvent());
+      expect(calls).toHaveLength(0);
+      expect(sms.map((s) => s.to)).toEqual(['+919000000002']);
+    });
+
+    it('still sends the email when the SMS side throws', async () => {
+      const { deps, calls } = smsDeps({ resolvePhone: vi.fn(async () => Promise.reject(new Error('db down'))) });
+      await createDirectDispatcher(deps).dispatch(createEvent());
+      expect(calls).toHaveLength(2);
+    });
+
+    it('sends no SMS when the SMS deps are not wired', async () => {
+      const { deps, calls } = makeDeps();
+      await createDirectDispatcher(deps).dispatch(createEvent());
+      expect(calls).toHaveLength(2);
+    });
+  });
 });
+

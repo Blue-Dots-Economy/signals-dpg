@@ -78,6 +78,7 @@ vi.mock('@/lib/action-api', () => ({
   updateActionStatus: mocks.updateActionStatus,
   updateActionStatusBulk: mocks.updateActionStatusBulk,
   // Faithful to the real classifier for the codes these components branch on.
+  guardianSentToFromThrown: () => undefined,
   guardianOtpErrorFromThrown: (err: unknown) => {
     const code = (err as { code?: string } | null | undefined)?.code;
     const known = [

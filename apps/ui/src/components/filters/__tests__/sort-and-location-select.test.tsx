@@ -350,6 +350,15 @@ describe('LocationSelect', () => {
   const open = () => userEvent.click(screen.getByRole('button', { name: /location/i }));
   const field = () => screen.getByRole('textbox', { name: /distance in kilometres/i });
 
+  it('names a same-spot group instead of the map area', async () => {
+    const bounds = { minLat: 1, minLng: 2, maxLat: 1, maxLng: 2 };
+    const { rerender } = render(<LocationSelect {...base} value={{ mode: 'viewport', bounds, spot: { exact: true } }} />);
+    expect(screen.getByRole('button', { name: /one spot on the map/i })).toBeInTheDocument();
+
+    rerender(<LocationSelect {...base} value={{ mode: 'viewport', bounds }} />);
+    expect(screen.getByRole('button', { name: /the area shown on the map/i })).toBeInTheDocument();
+  });
+
   it('reads as one sentence: a distance, of me', async () => {
     render(<LocationSelect {...base} />);
     await open();

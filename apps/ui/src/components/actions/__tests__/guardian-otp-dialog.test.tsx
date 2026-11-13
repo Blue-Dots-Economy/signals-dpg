@@ -13,6 +13,7 @@ vi.mock('@/contexts/auth-context', () => ({
 }));
 
 vi.mock('@/lib/action-api', () => ({
+  guardianSentToFromThrown: () => undefined,
   guardianOtpErrorFromThrown: (err: unknown) => {
     const code = (err as { code?: string } | null | undefined)?.code;
     const known = [
@@ -168,5 +169,19 @@ describe('Guardian-OTP challenge/response (ActionHandler + GuardianOtpDialog)', 
 
     await waitFor(() => expect(onActionSubmit).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(OTP_DIALOG_TITLE)).not.toBeInTheDocument();
+  });
+});
+
+describe('GuardianOtpDialog sentTo', () => {
+  it('names the masked guardian contact when the API reported one', async () => {
+    const { GuardianOtpDialog } = await import('../guardian-otp-dialog');
+    render(<GuardianOtpDialog open onOpenChange={() => {}} onSubmitOtp={async () => {}} sentTo="******7347" />);
+    expect(screen.getByText(/\*{6}7347/)).toBeInTheDocument();
+  });
+
+  it('falls back to the generic copy without one', async () => {
+    const { GuardianOtpDialog } = await import('../guardian-otp-dialog');
+    render(<GuardianOtpDialog open onOpenChange={() => {}} onSubmitOtp={async () => {}} />);
+    expect(screen.getByText(/We sent a code to your guardian\. Ask them/)).toBeInTheDocument();
   });
 });

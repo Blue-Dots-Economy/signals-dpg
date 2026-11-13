@@ -3,10 +3,11 @@ import type { FastifyBaseLogger } from 'fastify';
 import { resolveRecipientRole } from './action_copy';
 import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions';
 import { resolveOwnerNameEmail } from './resolve_owner';
+import { getDefaultSmsSender, smsLink } from './sms/dispatch_sms';
 
 /**
- * Owner-facing item-lifecycle emails: profile/offer create, update, pause,
- * retire, plus the aggregator-onboarding initiation email.
+ * Owner-facing item-lifecycle emails and SMS: profile/offer create, update,
+ * pause, retire, plus the aggregator-onboarding initiation message.
  *
  * A create under an aggregator acting org sends `account.aggregator_init.*`
  * instead of the create email, so the participant gets one email.
@@ -81,12 +82,28 @@ export async function dispatchItemLifecycleNotification(
       return;
     }
 
-    const { found, name, email } = await resolveOwnerNameEmail(event.ownerId);
+    const { found, name, email, phone, phoneVerified } = await resolveOwnerNameEmail(event.ownerId);
     if (!found) {
       // A missing user row for an owner id is a defect, not a benign skip.
       log.warn({ ownerId: event.ownerId, op: event.op }, 'item-lifecycle: owner user row not found — email skipped');
       return;
     }
+
+    // Before the email checks: a phone-only owner still gets the SMS. Skipped
+    // unless the instance's SMS template file names this case. Verified phones
+    // only, except the aggregator onboarding message: its recipient has not
+    // logged in yet, so the aggregator-supplied number is all there is.
+    const isOnboarding = caseId.startsWith('account.aggregator_init');
+    if (phone && (phoneVerified || isOnboarding)) {
+      const url = smsLink(config.resolveCtaUrl(event.domain));
+      await getDefaultSmsSender()?.dispatchSms({
+        caseId,
+        to: phone,
+        network: event.network,
+        variables: url ? { url } : {},
+      });
+    }
+
     if (!email) {
       // Phone-only owner. Log ownerId and op only (no PII).
       log.info({ ownerId: event.ownerId, op: event.op }, 'item-lifecycle: owner has no email — skipped');
@@ -100,7 +117,7 @@ export async function dispatchItemLifecycleNotification(
     const dedupeId = `item_lifecycle:${caseId}:${event.ownerId}${itemSegment}`;
 
     const variables: Record<string, string> = { name: name || 'there' };
-    if (caseId.startsWith('account.aggregator_init')) {
+    if (isOnboarding) {
       variables.aggregatorOrg = event.aggregatorOrgName || brandName;
       variables.networkName = brandName;
     }

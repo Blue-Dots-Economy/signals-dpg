@@ -8,6 +8,9 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain, DotNetworkSchema } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
 
+const toastMock = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toastMock }));
+
 // Task 3 — ProfileFormPage renders inside PageShell (variant='form') for the
 // role-picker, create and edit states, with ONE sticky action bar. This task
 // only relocates the layout + unifies the submit UI; consent SEMANTICS are
@@ -361,5 +364,53 @@ describe('ProfileFormPage inline consent on edit-of-draft (Task 5)', () => {
     await waitFor(() =>
       expect(acceptMock).toHaveBeenCalledWith(expect.objectContaining({ isMinor: true })),
     );
+  });
+});
+
+describe('ProfileFormPage edit with no changes', () => {
+  function liveEdit(state: Record<string, unknown>) {
+    return {
+      data: {
+        item_id: 'item-1',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_network: 'blue_dot',
+        item_state: state,
+        lifecycle_status: 'live',
+      } as unknown as Item,
+      isSuccess: true,
+      isError: false,
+      error: null,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    currentNetwork = buildNetwork([SEEKER_DOMAIN]);
+    getServedScope.mockReturnValue({ network: 'blue_dot', domains: ['seeker'] });
+    updateItemMock.mockResolvedValue({ item_id: 'item-1' });
+    consentConfigResult = { config: CONSENT_CONFIG, isLoading: false };
+    paramsMock = { id: 'item-1' };
+  });
+
+  it('blocks the save and says there is nothing to save', async () => {
+    // The mocked form submits { 'Full Name': 'Asha' }: the same as stored.
+    editItemResult = liveEdit({ 'Full Name': 'Asha' });
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('button', { name: /update/i }));
+
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith('No changes to save', expect.anything()));
+    expect(updateItemMock).not.toHaveBeenCalled();
+  });
+
+  it('saves when a field changed', async () => {
+    editItemResult = liveEdit({ 'Full Name': 'Ravi' });
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('button', { name: /update/i }));
+
+    await waitFor(() => expect(updateItemMock).toHaveBeenCalled());
+    expect(toastMock.info).not.toHaveBeenCalled();
   });
 });

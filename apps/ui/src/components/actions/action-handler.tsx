@@ -218,6 +218,7 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
           setModalHidden(false);
         }}
         onSubmitOtp={gate.submitOtp}
+        sentTo={gate.sentTo}
         purpose={
           gate.challenge
             ? gate.challenge.type === 'connect'

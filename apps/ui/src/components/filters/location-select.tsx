@@ -80,7 +80,7 @@ export function LocationSelect({
       case 'radius':
         return t('browse.area_radius_of', { km: km(value.meters), source: sourceLabel });
       case 'viewport':
-        return t('browse.area_viewport');
+        return t(viewportLabelKey(value));
       default:
         return t('browse.area_anywhere');
     }
@@ -190,8 +190,8 @@ export function LocationSelect({
             </span>
           </button>
 
-          {/* Shown only while active. A viewport comes from the map's "Search
-              this area"; it cannot be chosen from the list. */}
+          {/* Shown only while active. A viewport comes from the map's "List
+              what's in this view"; it cannot be chosen from the list. */}
           {value.mode === 'viewport' && (
             <div
               className={cn(rowClass, 'cursor-default hover:bg-transparent')}
@@ -200,7 +200,7 @@ export function LocationSelect({
             >
               <Check className="h-3 w-3 shrink-0" />
               <span>
-                <span className="font-semibold">{t('browse.area_viewport')}</span>
+                <span className="font-semibold">{t(viewportLabelKey(value))}</span>
                 <span className="block font-normal text-muted-foreground">
                   {t('browse.area_viewport_hint')}
                 </span>
@@ -356,4 +356,9 @@ export function LocationSelect({
       </PopoverContent>
     </Popover>
   );
+}
+
+function viewportLabelKey(area: Extract<BrowseArea, { mode: 'viewport' }>): string {
+  if (!area.spot) return 'browse.area_viewport';
+  return area.spot.exact ? 'browse.area_spot_exact' : 'browse.area_spot_near';
 }

@@ -14,6 +14,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { fetchMarkersAcrossInstances } from '@/utils/inter_instance_fetch';
 import { peer_instance_guard } from '@/middleware/peer_instance_guard';
 import { resolveTextSearchFields } from '@/utils/facet_guard';
+import { apiConfig } from '@/config';
 
 type FetchMarkersAggregateRequest = FastifyRequest<{
   Querystring: z.infer<typeof MarkersQuerySchema>;
@@ -121,7 +122,7 @@ const fetch_network_markers_handler = async (
         min_lng,
         max_lat,
         max_lng,
-        limit,
+        limit: Math.min(limit, apiConfig.markers_max_limit),
         offset,
         lifecycle_filter: 'live_only',
         text_search: q
@@ -179,6 +180,7 @@ const fetch_local_markers_handler = async (
       await fetchLocalMarkers(
         {
           ...body,
+          limit: Math.min(body.limit, apiConfig.markers_max_limit),
           lifecycle_filter: 'live_only',
           text_search: body.q ? { q: body.q, fields: textSearchFields } : undefined,
         },

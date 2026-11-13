@@ -14,16 +14,6 @@ export interface RawBbox {
   maxLng: number;
 }
 
-export type ZoomBand = 'clustered' | 'individual';
-
-/**
- * Zoom level at/above which the map disables clustering and shows individual
- * pins. This module only owns the cache-key zoom band and stays env-unaware;
- * `map-caps.ts` reads the env-configurable threshold
- * (`VITE_MAP_CLUSTER_DISABLE_ZOOM`, defaulting to this value).
- */
-export const DEFAULT_CLUSTER_DISABLE_ZOOM = 14;
-
 /** Floor for the snap grid cell (degrees, ~110m at the equator) so a tiny bbox does not re-key on floating-point noise. */
 const MIN_SNAP_CELL_DEG = 0.001;
 
@@ -57,37 +47,21 @@ export function snapBbox(bbox: RawBbox): RawBbox {
   };
 }
 
-/**
- * Bands a zoom level into `'clustered'` (below the cluster-disable zoom) or
- * `'individual'` (at/above it), so zooming within a band reuses the cache
- * entry while crossing it does not.
- */
-export function zoomBand(
-  zoom: number,
-  clusterDisableZoom: number = DEFAULT_CLUSTER_DISABLE_ZOOM,
-): ZoomBand {
-  return zoom >= clusterDisableZoom ? 'individual' : 'clustered';
-}
-
 /** The subset of `MapViewport` this module needs — avoids importing the full engine type. */
 export interface ViewportBboxInput {
   minLat?: number;
   minLng?: number;
   maxLat?: number;
   maxLng?: number;
-  zoom?: number;
 }
 
 /**
- * Builds the snapped-bbox + zoom-band key inputs from a viewport. Returns
- * `null` when the viewport has no bbox (radius-only viewports), so callers use
- * the radius-bucket key instead. A missing `zoom` bands as `'clustered'`.
+ * Builds the snapped-bbox key input from a viewport. Returns `null` when the
+ * viewport has no bbox (radius-only viewports), so callers use the
+ * radius-bucket key instead.
  */
-export function snapViewportForKey(
-  viewport: ViewportBboxInput,
-  clusterDisableZoom?: number,
-): { snappedBbox: RawBbox; zoomBand: ZoomBand } | null {
-  const { minLat, minLng, maxLat, maxLng, zoom } = viewport;
+export function snapViewportForKey(viewport: ViewportBboxInput): { snappedBbox: RawBbox } | null {
+  const { minLat, minLng, maxLat, maxLng } = viewport;
   if (
     minLat === undefined ||
     minLng === undefined ||
@@ -98,7 +72,6 @@ export function snapViewportForKey(
   }
   return {
     snappedBbox: snapBbox({ minLat, minLng, maxLat, maxLng }),
-    zoomBand: zoomBand(zoom ?? 0, clusterDisableZoom),
   };
 }
 
@@ -116,6 +89,11 @@ export function padBbox(bbox: RawBbox, factor = 0.25): RawBbox {
     maxLat: bbox.maxLat + latPad,
     maxLng: bbox.maxLng + lngPad,
   };
+}
+
+/** The area the map fetches for a view: 25% of its span added on each side, clamped. */
+export function expandBboxForFetch(bbox: RawBbox): RawBbox {
+  return clampBbox(padBbox(bbox, 0.5));
 }
 
 /** Whether `inner` is fully contained within `outer` on both the lat and lng axes. */
@@ -137,6 +115,9 @@ export interface RefetchDecisionInput {
   lastTruncated: boolean;
 }
 
+/** The furthest north or south a web map can show; a pole-to-pole box also fails the API's geography filter. */
+const MAX_MAP_LAT = 85.05112878;
+
 /**
  * Clamp a viewport bbox to real-world coordinates.
  *
@@ -147,8 +128,8 @@ export interface RefetchDecisionInput {
  * collapses to the whole world.
  */
 export function clampBbox(bbox: RawBbox): RawBbox {
-  const minLat = Math.max(-90, Math.min(90, bbox.minLat));
-  const maxLat = Math.max(-90, Math.min(90, bbox.maxLat));
+  const minLat = Math.max(-MAX_MAP_LAT, Math.min(MAX_MAP_LAT, bbox.minLat));
+  const maxLat = Math.max(-MAX_MAP_LAT, Math.min(MAX_MAP_LAT, bbox.maxLat));
   const spansWorld = bbox.maxLng - bbox.minLng >= 360 || bbox.minLng > bbox.maxLng;
   return spansWorld
     ? { minLat, minLng: -180, maxLat, maxLng: 180 }

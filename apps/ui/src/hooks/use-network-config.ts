@@ -1,5 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
-import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  fetchSchemaEntries,
+  networkConfigIn,
+  networkConfigsIn,
+  type CachedSchemaEntry,
+} from '@/lib/network-api';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { apiConfig } from '@/lib/api-config';
 import type { DotNetworkSchema } from '@/engine/types';
@@ -14,16 +19,28 @@ interface UseNetworkConfigResult {
   refetch: () => void;
 }
 
-/** Fetches and caches one network's config (config tier, 5 minutes). */
+const CONFIG_STALE_TIME = 5 * 60 * 1000;
+
+/** The deployment's schema entries, fetched once and shared by every config hook. */
+export function fetchSharedSchemaEntries(queryClient: QueryClient): Promise<CachedSchemaEntry[]> {
+  return queryClient.fetchQuery({
+    queryKey: queryKeys.networkSchemas(),
+    queryFn: fetchSchemaEntries,
+    staleTime: CONFIG_STALE_TIME,
+  });
+}
+
+/** One network's config (config tier, 5 minutes), read from the shared schema entries. */
 export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: networkId ? queryKeys.networkConfig(networkId) : ['network-config', null],
     queryFn: async () => {
       if (!networkId) return null;
-      return fetchNetworkConfig(networkId);
+      return networkConfigIn(await fetchSharedSchemaEntries(queryClient), networkId);
     },
     enabled: !!networkId,
-    staleTime: 5 * 60 * 1000,
+    staleTime: CONFIG_STALE_TIME,
   });
 
   return {
@@ -46,9 +63,10 @@ interface UseNetworkConfigsResult {
 /** Fetches the list of network configs this deployment serves (config tier). */
 export function useNetworkConfigs(): UseNetworkConfigsResult {
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.networkConfigs(),
-    queryFn: fetchNetworkConfigs,
-    staleTime: 5 * 60 * 1000,
+    queryKey: queryKeys.networkSchemas(),
+    queryFn: fetchSchemaEntries,
+    staleTime: CONFIG_STALE_TIME,
+    select: networkConfigsIn,
   });
   return { data: data ?? null, isLoading, isError };
 }

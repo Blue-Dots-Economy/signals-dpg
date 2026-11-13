@@ -82,6 +82,8 @@ const NETWORK_CONFIG = {
 const fetchNetworkConfig = vi.fn<() => Promise<typeof NETWORK_CONFIG>>();
 vi.mock('@/lib/network-api', () => ({
   fetchNetworkConfig: () => fetchNetworkConfig(),
+  fetchSchemaEntries: async () => [{ kind: 'network_config', schema: await fetchNetworkConfig() }],
+  networkConfigIn: (entries: { schema: unknown }[]) => entries[0].schema,
 }));
 /** Which domains this deployment serves. null = all (the default here). */
 let servedScope: { network: string; domains: string[] } | null = null;
