@@ -45,8 +45,7 @@ import {
 } from '@/lib/consent-api';
 import axios from 'axios';
 import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
-import { schemaNodeAt } from '@/components/forms/field-error-message';
-import { isFieldVisible } from '@/lib/show-if';
+import { schemaNodeAt, splitServerFieldErrors } from '@/components/forms/field-error-message';
 
 import {
   createItem,
@@ -622,20 +621,9 @@ export function ProfileFormPage() {
       const info = readApiError(err);
       const status = info.status;
 
-      const onForm: Record<string, string> = {};
-      const offForm: string[] = [];
-      for (const [path, message] of Object.entries(info.fields ?? {})) {
-        const segments = path.split('.').filter(Boolean);
-        const top = segments[0] ? schemaNodeAt(profileSchema, [segments[0]]) : undefined;
-        // On the form only if the schema has it and its show-if rule shows it now.
-        const shown =
-          message.trim() !== 'is not an allowed field' &&
-          top !== undefined &&
-          isFieldVisible(top, data) &&
-          schemaNodeAt(profileSchema, segments) !== undefined;
-        if (shown) onForm[path] = message;
-        else offForm.push(readableFieldName(profileSchema, segments));
-      }
+      const split = splitServerFieldErrors(info.fields ?? {}, profileSchema, data);
+      const onForm = split.onForm;
+      const offForm = split.offForm.map((path) => readableFieldName(profileSchema, path.split('.').filter(Boolean)));
 
       if (offForm.length > 0) {
         const names = [...new Set(offForm)];

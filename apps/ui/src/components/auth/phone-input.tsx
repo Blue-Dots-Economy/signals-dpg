@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { getRuntimeEnv } from '@/lib/runtime-env';
+import { isContactPhone } from '@dpg/schemas/phone_rules';
 
 /** A country a phone field can use. */
 export interface PhoneCountry {
@@ -173,11 +174,8 @@ export function joinPhone(code: string, national: string): string {
   return digits ? `${code}${digits}` : '';
 }
 
-/** A contact number (landlines too), by the same rule as the API's `isContactPhone`. */
-export function isAcceptedPhone(value: string): boolean {
-  const raw = value.replace(/[\s\-()]/g, '').replace(/^00/, '+');
-  return /^(\+91[1-9]\d{9}|0?[1-9]\d{9}|\+[1-8]\d{9,14}|\+9[02-9]\d{8,13})$/.test(raw);
-}
+/** A contact number (landlines too), by the API's own rule. */
+export const isAcceptedPhone = isContactPhone;
 
 export interface PhoneInputProps {
   id: string;

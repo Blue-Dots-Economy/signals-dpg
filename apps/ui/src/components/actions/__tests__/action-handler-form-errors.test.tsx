@@ -105,6 +105,39 @@ describe('ActionHandler requirement form errors', () => {
     expect(screen.getByLabelText(/Note/)).toHaveValue('Hi');
   });
 
+  it('falls back to the toast when no named field is on the form', async () => {
+    const { BulkSingleError } = await import('@/lib/bulk');
+    const onActionSubmit = vi.fn(async () => {
+      throw new BulkSingleError('INVALID_ACTION_REQUEST', 'Invalid action requirements', 422, {
+        budget: 'must be >= 10',
+        note: 'is not an allowed field',
+      });
+    });
+    await renderHandler(onActionSubmit);
+    await userEvent.type(screen.getByLabelText(/Note/), 'Hi');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/must be >= 10/)).toBeNull();
+    expect(screen.getByLabelText(/Note/)).toHaveValue('Hi');
+  });
+
+  it('shows what fits under its field and toasts the rest', async () => {
+    const { BulkSingleError } = await import('@/lib/bulk');
+    const onActionSubmit = vi.fn(async () => {
+      throw new BulkSingleError('INVALID_ACTION_REQUEST', 'Invalid action requirements', 422, {
+        note: 'Please write at least 10 characters.',
+        budget: 'must be >= 10',
+      });
+    });
+    await renderHandler(onActionSubmit);
+    await userEvent.type(screen.getByLabelText(/Note/), 'Hi');
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findAllByText(/Please write at least 10 characters/)).toHaveLength(1);
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps what was typed when a minor's guardian confirmation is cancelled", async () => {
     const onActionSubmit = vi.fn(async () => {});
     await renderHandler(onActionSubmit, true);

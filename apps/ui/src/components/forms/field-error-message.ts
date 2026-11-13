@@ -1,3 +1,5 @@
+import { isFieldVisible } from '@/lib/show-if';
+
 /**
  * Readable copy for a failed AJV `pattern`, whose own message is the raw
  * regex. The regex comes from network.json, so the copy does too. Most
@@ -144,6 +146,8 @@ const SERVER_LIMIT_RULES: ReadonlyArray<readonly [RegExp, RuleKind]> = [
   [/^must be < ?(\S+)/, 'exclusiveMaximum'],
 ];
 
+const NOT_ALLOWED_FIELD = 'is not an allowed field';
+
 /** The API's per-field message in the form's wording; null when the user can't fix it in the form. */
 export function serverFieldMessage(
   path: string,
@@ -156,7 +160,7 @@ export function serverFieldMessage(
   const label = labelOf(schema, node, segments);
   const m = message.trim();
   if (m === 'is required') return copy.required(label);
-  if (m === 'is not an allowed field') return null;
+  if (m === NOT_ALLOWED_FIELD) return null;
   const rule = (kind: RuleKind, limit: string) =>
     copy.invalid(withStop(copy.rule ? copy.rule(kind, label, limit) : copy.validValue(label)));
   for (const [pattern, kind] of SERVER_LIMIT_RULES) {
@@ -168,4 +172,29 @@ export function serverFieldMessage(
   // field's authored pattern copy, already a sentence.
   const detail = m.startsWith('must') ? copy.validValue(label) : m;
   return copy.invalid(withStop(detail));
+}
+
+/**
+ * Splits the API's per-field messages into those a field on the form can show
+ * (`onForm`) and the paths the form has no visible field for (`offForm`).
+ */
+export function splitServerFieldErrors(
+  fields: Record<string, string>,
+  schema: unknown,
+  data: Record<string, unknown>,
+): { onForm: Record<string, string>; offForm: string[] } {
+  const onForm: Record<string, string> = {};
+  const offForm: string[] = [];
+  for (const [path, message] of Object.entries(fields)) {
+    const segments = path.split('.').filter(Boolean);
+    const top = segments[0] ? schemaNodeAt(schema, [segments[0]]) : undefined;
+    const shown =
+      message.trim() !== NOT_ALLOWED_FIELD &&
+      top !== undefined &&
+      isFieldVisible(top, data) &&
+      schemaNodeAt(schema, segments) !== undefined;
+    if (shown) onForm[path] = message;
+    else offForm.push(path);
+  }
+  return { onForm, offForm };
 }

@@ -6,6 +6,8 @@ import { GuardianOtpDialog } from './guardian-otp-dialog';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 import { ActionAbortedError } from '@/lib/action-abort';
 import { apiErrorMessage, readApiError } from '@/lib/api-error';
+import { resolveRefs } from '@/engine/schema/resolve-schema';
+import { splitServerFieldErrors } from '@/components/forms/field-error-message';
 import { useGuardianOtpGate } from '@/hooks/use-guardian-otp-gate';
 import type { TFunction } from 'i18next';
 import { toast } from 'sonner';
@@ -145,11 +147,14 @@ export function ActionHandler({ children, onActionSubmit, guardianConfirmRequire
     try {
       return (await submitWithGuardianGate(type, schema, formData, targetItemId)) ? 'ok' : 'guardian';
     } catch (err) {
-      // A rejection that names the form's fields is shown on them, not in a toast.
+      // Messages the form can show go under their fields; the toast covers the rest.
       const { fields } = readApiError(err);
-      if (fields && Object.keys(fields).length > 0 && schema.requirement_schema) {
-        setServerErrors(fields);
-        return 'error';
+      const req = schema.requirement_schema;
+      if (fields && Object.keys(fields).length > 0 && req) {
+        const formSchema = '$ref' in req ? await resolveRefs(req).catch(() => null) : req;
+        const { onForm, offForm } = splitServerFieldErrors(fields, formSchema, formData);
+        if (Object.keys(onForm).length > 0) setServerErrors(onForm);
+        if (offForm.length === 0) return 'error';
       }
       showActionError(err, t);
       return 'error';

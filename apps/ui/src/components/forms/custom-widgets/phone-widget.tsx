@@ -4,7 +4,7 @@ import { PhoneInput, joinPhone, phoneValueMode, splitPhone } from '@/components/
 
 /** The stored value in this widget's own layout, or `undefined` when it already is. */
 function tidyPhone(value: unknown, nationalOnly: boolean): string | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
+  if (typeof value !== 'string' || !/^[\d+\s\-().]+$/.test(value)) return undefined; // free text stays as typed
   const { code, national } = splitPhone(value);
   const next = nationalOnly ? national : joinPhone(code, national);
   return next && next !== value ? next : undefined;
@@ -17,7 +17,7 @@ export function PhoneWidget({ id, value, onChange, onBlur, disabled, readonly, r
   const nationalOnly = phoneValueMode(schema.pattern) === 'national';
   // A value saved in another layout (`+91 98765 43210`, `919876543210`) is
   // stored in the form this widget writes, so it is checked as shown.
-  const tidy = tidyPhone(value, nationalOnly);
+  const tidy = disabled || readonly ? undefined : tidyPhone(value, nationalOnly);
   React.useEffect(() => {
     if (tidy !== undefined) onChange(tidy);
   }, [tidy, onChange]);
