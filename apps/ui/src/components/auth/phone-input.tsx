@@ -1,24 +1,61 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { getRuntimeEnv } from '@/lib/runtime-env';
 
 /** A country a phone field can use. */
 export interface PhoneCountry {
+  /** ISO 3166-1 alpha-2 code, e.g. `IN`. */
+  iso: string;
   /** Dial code with its plus, e.g. `+91`. */
   code: string;
   flag: string;
-  name: string;
-  /** Digits in a national number. */
-  nationalDigits: number;
+  /** Digits in a national number, when known. */
+  nationalDigits?: number;
+  /** A valid national number, used to test a field's pattern. */
+  sample: string;
 }
 
-/** Countries a phone field offers; the first is the default. Add an entry to offer another. */
-export const PHONE_COUNTRIES: readonly [PhoneCountry, ...PhoneCountry[]] = [
-  { code: '+91', flag: '🇮🇳', name: 'India', nationalDigits: 10 },
-];
+/** Known national lengths and sample numbers; other countries get the E.164 cap. */
+const KNOWN_COUNTRIES: Partial<Record<string, { nationalDigits: number; sample: string }>> = {
+  IN: { nationalDigits: 10, sample: '9876543210' },
+  GB: { nationalDigits: 10, sample: '7911123456' },
+  US: { nationalDigits: 10, sample: '2025550123' },
+  CA: { nationalDigits: 10, sample: '4165550123' },
+};
+const GENERIC_SAMPLE = '2345678901';
+
+const INDIA: PhoneCountry = { iso: 'IN', code: '+91', flag: '🇮🇳', nationalDigits: 10, sample: '9876543210' };
+
+function flagOf(iso: string): string {
+  return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+}
+
+/**
+ * Reads the deployment's country list, `IN:+91,GB:+44` (ISO code and dial code,
+ * first is the default). Bad or repeated entries are skipped; none left means India.
+ */
+export function parsePhoneCountries(raw: string | undefined): [PhoneCountry, ...PhoneCountry[]] {
+  const list: PhoneCountry[] = [];
+  for (const entry of (raw ?? '').split(',')) {
+    const m = /^([A-Za-z]{2})\s*:\s*\+?([1-9]\d{0,2})$/.exec(entry.trim());
+    if (!m) continue;
+    const iso = m[1].toUpperCase();
+    const code = `+${m[2]}`;
+    if (list.some((c) => c.code === code)) continue;
+    list.push({ iso, code, flag: flagOf(iso), ...(KNOWN_COUNTRIES[iso] ?? { sample: GENERIC_SAMPLE }) });
+  }
+  return list.length > 0 ? (list as [PhoneCountry, ...PhoneCountry[]]) : [INDIA];
+}
+
+/** Countries a phone field offers (runtime `VITE_PHONE_COUNTRIES`); the first is the default. */
+export const PHONE_COUNTRIES = parsePhoneCountries(getRuntimeEnv('VITE_PHONE_COUNTRIES'));
+
+/** India's dial code: a bare 10-digit number is read as Indian, as the API does. */
+export const IN_DIAL_CODE = INDIA.code;
 
 /** Country code a phone field starts with. */
-export const IN_DIAL_CODE = PHONE_COUNTRIES[0].code;
+export const DEFAULT_DIAL_CODE = PHONE_COUNTRIES[0].code;
 
 /** The listed country for `code`, if any. */
 export function phoneCountry(code: string): PhoneCountry | undefined {
@@ -47,19 +84,24 @@ export function isPhoneFieldName(name: string): boolean {
   return PHONE_WORDS.has(last) || (NUMBER_WORDS.has(last) && PHONE_WORDS.has(words.at(-2) ?? ''));
 }
 
-/**
- * True when a schema `pattern` accepts an Indian mobile, with or without +91.
- * Only such fields get the +91 phone box; a phone-named field with no pattern
- * stays a plain text box, so a foreign number is never rewritten as +91.
- */
-export function isIndianPhonePattern(pattern: unknown): boolean {
-  if (typeof pattern !== 'string') return false;
+function patternTest(pattern: unknown): ((v: string) => boolean) | null {
+  if (typeof pattern !== 'string') return null;
   try {
     const re = new RegExp(pattern);
-    return re.test('+919876543210') || re.test('9876543210');
+    return (v) => re.test(v);
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * True when a schema `pattern` accepts a number from a listed country, with or
+ * without its code. Only such fields get the phone box; a phone-named field with
+ * no pattern stays a plain text box, so its number is never rewritten.
+ */
+export function acceptsListedPhone(pattern: unknown): boolean {
+  const test = patternTest(pattern);
+  return !!test && PHONE_COUNTRIES.some((c) => test(`${c.code}${c.sample}`) || test(c.sample));
 }
 
 /**
@@ -67,14 +109,9 @@ export function isIndianPhonePattern(pattern: unknown): boolean {
  * country code (`+91…`), or as the bare number when the pattern only accepts that.
  */
 export function phoneValueMode(pattern: unknown): 'international' | 'national' {
-  if (typeof pattern !== 'string') return 'international';
-  try {
-    const re = new RegExp(pattern);
-    if (re.test('+919876543210')) return 'international';
-    return re.test('9876543210') ? 'national' : 'international';
-  } catch {
-    return 'international';
-  }
+  const test = patternTest(pattern);
+  if (!test || PHONE_COUNTRIES.some((c) => test(`${c.code}${c.sample}`))) return 'international';
+  return PHONE_COUNTRIES.some((c) => test(c.sample)) ? 'national' : 'international';
 }
 
 /** Most national digits the number box accepts after `code`. */
@@ -136,11 +173,10 @@ export function joinPhone(code: string, national: string): string {
   return digits ? `${code}${digits}` : '';
 }
 
-/** True for any number accepted as a contact (10-15 digits, landlines too); `+91` needs exactly 10 after the code. */
+/** A contact number (landlines too), by the same rule as the API's `isContactPhone`. */
 export function isAcceptedPhone(value: string): boolean {
-  const raw = value.replace(/[\s\-()]/g, '');
-  if (!/^\+?\d{10,15}$/.test(raw)) return false;
-  return !raw.startsWith('+91') || raw.length === 3 + IN_NATIONAL_DIGITS;
+  const raw = value.replace(/[\s\-()]/g, '').replace(/^00/, '+');
+  return /^(\+91[1-9]\d{9}|0?[1-9]\d{9}|\+[1-8]\d{9,14}|\+9[02-9]\d{8,13})$/.test(raw);
 }
 
 export interface PhoneInputProps {
@@ -156,7 +192,7 @@ export interface PhoneInputProps {
   describedBy?: string;
   onBlur?: () => void;
   className?: string;
-  /** Store only the 10-digit number (fields whose pattern takes no code); the code stays at the default. */
+  /** Store only the national number (fields whose pattern takes no code); the code stays at the default. */
   nationalOnly?: boolean;
 }
 
@@ -179,14 +215,14 @@ export function PhoneInput({
 }: Readonly<PhoneInputProps>) {
   const { t } = useTranslation();
   // The picked country, kept while the number box is empty.
-  const [picked, setPicked] = React.useState(() => (value ? splitPhone(value).code : IN_DIAL_CODE));
+  const [picked, setPicked] = React.useState(() => (value ? splitPhone(value).code : DEFAULT_DIAL_CODE));
   const parts = splitPhone(value);
   const typedCode = value ? parts.code : picked;
-  const code = nationalOnly ? IN_DIAL_CODE : typedCode;
+  const code = nationalOnly ? DEFAULT_DIAL_CODE : typedCode;
   const country = phoneCountry(code);
   const apply = (raw: string) => {
     const next = nationalFromInput(raw, code);
-    const nextCode = nationalOnly ? IN_DIAL_CODE : next.code;
+    const nextCode = nationalOnly ? DEFAULT_DIAL_CODE : next.code;
     setPicked(nextCode);
     onChange(nationalOnly ? next.national : joinPhone(nextCode, next.national));
   };

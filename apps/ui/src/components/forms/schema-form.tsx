@@ -15,7 +15,7 @@ import type {
 import { applyUriPatterns, collectUriFieldKeys, URI_FIELD_MARKER } from '@dpg/schemas/uri_fields';
 import { DatePickerWidget } from './custom-widgets/date-picker-widget';
 import { PhoneWidget } from './custom-widgets/phone-widget';
-import { isIndianPhonePattern, isPhoneFieldName } from '@/components/auth/phone-input';
+import { acceptsListedPhone, isPhoneFieldName } from '@/components/auth/phone-input';
 import { LocationAutocompleteWidget } from './custom-widgets/location-autocomplete-widget';
 import { MultiLocationAutocompleteWidget } from './custom-widgets/multi-location-autocomplete-widget';
 import { ReferenceAutocompleteWidget } from './custom-widgets/reference-autocomplete-widget';
@@ -288,7 +288,7 @@ function generateUiSchema(
       uiSchema[key] = { 'ui:widget': 'date' };
     }
 
-    if (typed.type === 'string' && isPhoneFieldName(key) && isIndianPhonePattern(typed.pattern)) {
+    if (typed.type === 'string' && isPhoneFieldName(key) && acceptsListedPhone(typed.pattern)) {
       uiSchema[key] = { 'ui:widget': 'phone' };
     }
 

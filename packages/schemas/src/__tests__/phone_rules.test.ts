@@ -21,4 +21,13 @@ describe('phone rules', () => {
     expect(isContactPhone('+91935350600')).toBe(false);
     expect(isContactPhone('12345')).toBe(false);
   });
+
+  it('matches the schema contact pattern: no leading-zero national number, 00 reads as +', () => {
+    for (const ok of ['01123456789', '1123456789', '0044 7911 123456', '+12025550123']) {
+      expect(isContactPhone(ok)).toBe(true);
+    }
+    for (const bad of ['0000000000', '0123456789', '+910000000000', '919876543210', '123456789012345']) {
+      expect(isContactPhone(bad)).toBe(false);
+    }
+  });
 });

@@ -49,6 +49,8 @@ interface ImportMetaEnv {
   // chart's ui.runtimeConfig. Read through getRuntimeEnv (network-api.ts).
   readonly VITE_PROFILE_FETCH_LIMIT?: string;
   readonly VITE_ENABLED_LANGUAGES: string;
+  /** Phone country list, ISO:dial code pairs, e.g. "IN:+91,GB:+44"; first is the default. Unset = India. */
+  readonly VITE_PHONE_COUNTRIES?: string;
   /** Browser tab title override for the tourist app. Falls back to the resolved brand title, else "Signals". */
   readonly VITE_TOURIST_APP_TITLE?: string;
   /** Dev/preview server port. Falls back to 5173. */

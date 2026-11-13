@@ -6,10 +6,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import {
   PhoneInput,
   isAcceptedPhone,
-  isIndianPhonePattern,
+  acceptsListedPhone,
   isPhoneFieldName,
   joinPhone,
   nationalFromInput,
+  parsePhoneCountries,
   phoneValueMode,
   splitPhone,
 } from '../phone-input';
@@ -118,13 +119,16 @@ describe('PhoneInput', () => {
     }
     const contact = patternOf('hiringManagerPhoneNumber');
     for (const ok of ['+911123456789', '01123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
-    for (const bad of ['+91935350002', '12345']) expect(contact.test(bad)).toBe(false);
+    for (const bad of ['+91935350002', '12345', '0000000000', '0123456789', '+910000000000']) {
+      expect(contact.test(bad)).toBe(false);
+    }
   });
 
-  it('gives the +91 box only to fields whose pattern accepts an Indian mobile', () => {
-    expect(isIndianPhonePattern('^[0-9]{10}$')).toBe(true);
-    expect(isIndianPhonePattern(undefined)).toBe(false);
-    expect(isIndianPhonePattern('^[A-Z]{3}$')).toBe(false);
+  it('gives the phone box only to fields whose pattern accepts a listed country', () => {
+    expect(acceptsListedPhone('^[0-9]{10}$')).toBe(true);
+    expect(acceptsListedPhone(undefined)).toBe(false);
+    expect(acceptsListedPhone('^[A-Z]{3}$')).toBe(false);
+    expect(acceptsListedPhone('^\\+44[0-9]{10}$')).toBe(false);
     expect(splitPhone('09876543210')).toEqual({ code: '+91', national: '9876543210' });
   });
 
@@ -135,5 +139,53 @@ describe('PhoneInput', () => {
     expect(isAcceptedPhone('+91935350600')).toBe(false);
     expect(isAcceptedPhone('+9193535060012')).toBe(false);
     expect(isAcceptedPhone('+447911123456')).toBe(true);
+    for (const bad of ['0000000000', '0123456789', '+910000000000']) expect(isAcceptedPhone(bad)).toBe(false);
+  });
+});
+
+describe('phone country list from runtime config', () => {
+  it('reads ISO:dial code pairs in order and skips bad or repeated entries', () => {
+    const list = parsePhoneCountries(' in:+91, GB:44 ,XX, US:+1, CA:+1, FR:+0');
+    expect(list.map((c) => `${c.iso}${c.code}`)).toEqual(['IN+91', 'GB+44', 'US+1']);
+    expect(list[0]).toMatchObject({ flag: '🇮🇳', nationalDigits: 10 });
+    expect(parsePhoneCountries('AE:+971')[0]).toMatchObject({ code: '+971', flag: '🇦🇪' });
+  });
+
+  it('defaults to India when unset or unreadable', () => {
+    for (const raw of [undefined, '', 'nonsense']) {
+      expect(parsePhoneCountries(raw).map((c) => c.code)).toEqual(['+91']);
+    }
+  });
+
+  async function loadWith(countries: string | undefined) {
+    vi.resetModules();
+    (window as { __DPG_UI_CONFIG__?: Record<string, string> }).__DPG_UI_CONFIG__ =
+      countries === undefined ? undefined : { VITE_PHONE_COUNTRIES: countries };
+    return import('../phone-input');
+  }
+
+  it('shows a code list only when more than one country is configured, starting at the first', async () => {
+    try {
+      const multi = await loadWith('GB:+44,IN:+91');
+      render(<multi.PhoneInput id="p" value="" onChange={vi.fn()} />);
+      const select = screen.getByRole('combobox') as HTMLSelectElement;
+      expect(select.value).toBe('+44');
+      expect([...select.options].map((o) => o.value)).toEqual(['+44', '+91']);
+      expect(multi.acceptsListedPhone('^\\+44[0-9]{10}$')).toBe(true);
+    } finally {
+      await loadWith(undefined);
+    }
+  });
+
+  it('keeps fixed code text for a single configured country', async () => {
+    try {
+      const single = await loadWith('AE:+971');
+      render(<single.PhoneInput id="p" value="" onChange={vi.fn()} />);
+      expect(screen.queryByRole('combobox')).toBeNull();
+      expect(screen.getByLabelText('Country code')).toHaveTextContent('+971');
+      expect(single.nationalMaxLength('+971')).toBe(12);
+    } finally {
+      await loadWith(undefined);
+    }
   });
 });

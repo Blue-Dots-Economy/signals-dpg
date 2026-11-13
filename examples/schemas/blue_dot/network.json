@@ -884,8 +884,8 @@
             },
             "hiringManagerPhoneNumber": {
               "type": "string",
-              "title": "Hiring Manager Mobile Number",
-              "pattern": "^(\\+91[0-9]{10}|0?[0-9]{10}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$",
+              "title": "Hiring Manager Phone Number",
+              "pattern": "^(\\+91[1-9][0-9]{9}|0?[1-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$",
               "private": true
             },
             "hiringManagerEmail": {
