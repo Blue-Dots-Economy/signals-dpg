@@ -20,12 +20,12 @@ Verified is a separate field alongside `lifecycle_status`, not a new lifecycle s
 | **What is verified** | Configured per domain in `network.json`: `verification.required_attributes` and `verification.optional_attributes` |
 | **Token contents** | Issuer (the instance), the profile, the verifying org, each attribute as a **salted hash (not the raw value)**, issue time. The header carries the signing key's `kid` |
 | **Where state lives** | signals-dpg only. aggregator-dpg provides the screen and calls Signals |
-| **Who sees the status** | The aggregator portal (dashboard icon) and the **participant**, on their own profile in the Signals UI |
+| **Who sees the status** | The aggregator portal (dashboard icon) and the **participant**, on their own profile in the Signals UI. Rejected attributes are **highlighted** on the participant's details page |
 
 ## Flow
 
 1. **Config:** the domain lists its verifiable attributes in `network.json`. The config is rejected at load time if an attribute isn't in the item schema.
-2. **Verify:** the coordinator marks each attribute verified or rejected in the portal. Signals checks ownership and `live` status, then stores the check with a hash of the current value.
+2. **Verify:** the coordinator marks each attribute verified or rejected in the portal. Signals checks ownership and `live` status, then stores the check with a hash of the current value. A **rejected** attribute blocks issuing and is highlighted on the participant's details page, so they can correct it; the coordinator then re-checks it.
 3. **Issue:** when the last required attribute is verified, Signals signs and stores the token automatically.
 4. **Read:** profile reads return `verification: {status, issued_at, issued_by_org_id}`. The full token comes from a separate endpoint.
 5. **Revoke:** each event changes the verification as follows:
@@ -87,5 +87,3 @@ Things to be aware of:
 
 1. **Coordinator identity.** Signals only knows the org. Should aggregator-dpg send the coordinator's name or id to be included in the token?
 2. **Private attributes.** To verify a private field (e.g. phone), the coordinator must see its value. How is that access granted, and should each reveal be logged?
-3. **Rejected attributes.** Does a rejection only block issuing, or is it also shown to the participant?
-4. **Per-profile ownership (#661).** Ownership is per account today. When #661 lands, the ownership check must move with it.
