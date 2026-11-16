@@ -71,6 +71,7 @@ Tokens have no expiry, so rotation **re-signs** them rather than keeping old key
 | signals-dpg | New optional `verification` field on profile reads, admin participant reads, and dashboard/export |
 | signals-dpg | Participant's own profile in the Signals UI shows the verified status |
 | aggregator-dpg | New Signals client methods, API and BFF routes, the coordinator verification screen, and a real value behind the existing verified icon |
+| aggregator-dpg | **`profiles.verify` granted to the built-in `coordinator` role by default**, via a new RBAC seed migration |
 
 ## Breaking changes
 
@@ -79,6 +80,7 @@ Tokens have no expiry, so rotation **re-signs** them rather than keeping old key
 Things to be aware of:
 
 - **New required secret for issuing tokens.** If `VERIFICATION_SIGNING_KEY` is not set, issuing fails with `VERIFICATION_SIGNING_UNAVAILABLE`. Everything else keeps working.
+- **Every coordinator gains `profiles.verify`.** This is a permission increase for all existing and new coordinators.
 - **aggregator-dpg starts writing to Signals beyond bulk create.** Its docs need updating.
 
 ## Open questions
