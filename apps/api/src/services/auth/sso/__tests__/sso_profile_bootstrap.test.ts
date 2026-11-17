@@ -3,6 +3,11 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { SsoIdentity } from '../types.js';
 
 const tx = { tag: 'tx' };
+const ensureItemPartition = vi.fn(async () => undefined);
+vi.mock('@dpg/database', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@dpg/database')>()),
+  ensureItemPartition: (...a: unknown[]) => ensureItemPartition(...(a as [])),
+}));
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: { transaction: async (fn: (t: unknown) => unknown) => fn(tx) },
 }));
@@ -192,6 +197,15 @@ describe('bootstrapSsoProfile', () => {
     expect(publishItemEvent).toHaveBeenCalledWith(
       expect.objectContaining({ item_id: 'item-1', op: 'upsert', item_domain: 'seeker' }),
       log
+    );
+  });
+
+  it('ensures the network/domain item partition before the insert', async () => {
+    await bootstrapSsoProfile('user-1', IDENTITY, MAPPING, log);
+
+    expect(ensureItemPartition).toHaveBeenCalledWith(expect.anything(), 'blue_dot', 'seeker');
+    expect(ensureItemPartition.mock.invocationCallOrder[0]).toBeLessThan(
+      create_profile_item.mock.invocationCallOrder[0]
     );
   });
 

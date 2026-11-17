@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type { SsoNcsMapping } from '@dpg/config';
 import { getDomainItemSchema, validateAgainstJsonSchema } from '@dpg/schemas';
+import { ensureItemPartition } from '@dpg/database';
 import { db } from '@api/db/postgres/drizzle_config';
 import { getNetworkConfigById } from '@/network_configs';
 import { create_profile_item } from '@/lib/profile_item';
@@ -177,6 +178,8 @@ export async function bootstrapSsoProfile(
       mapping.item_type
     ) as Record<string, unknown>;
     const payload = keepValidFields(mapFields(identity, mapping), itemSchema, log);
+
+    await ensureItemPartition(db, network, domain); // first write for a network/domain
 
     const itemId = await db.transaction(async (tx) => {
       if ((await countActiveProfiles(tx, scope)) > 0) return null;
