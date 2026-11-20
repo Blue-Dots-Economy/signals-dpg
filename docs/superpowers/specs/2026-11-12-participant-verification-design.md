@@ -35,6 +35,7 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 | **Who can verify** | Only the aggregator that onboarded the participant (`user.onboarded_by_org_id` = acting org). The profile must be `draft`, `live` or `paused` (not `retired`) |
 | **Private attributes** | Verifying a private attribute (e.g. phone) needs `profiles.view_pii`. All coordinators get it by default; a coordinator without it can verify only the non-private attributes |
 | **Token contents** | Issuer (the instance), the profile, the verifying **org (org level only, no coordinator id)**, each attribute as a **salted hash (not the raw value)**, issue time. The header carries the signing key's `kid` |
+| **Who verified (audit)** | Stored in `profile_verifications`, **not in the token**: for each attribute check, issue and revocation, the org **and the coordinator id** (aggregator-dpg `users.id`). aggregator-dpg sends the coordinator id with each call (see Recording the coordinator) |
 | **Where state lives** | signals-dpg only. aggregator-dpg provides the screen and calls Signals |
 | **Who sees the status** | The aggregator portal and the **participant**, on their own profile in the Signals UI |
 
@@ -45,9 +46,10 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 | **Config loader** | Reads `verification` from `network.json`. Rejects at load time any attribute that isn't in the item schema. A domain with no block is `not_applicable` |
 | **Verification service** | Records attribute checks, computes the status, and issues the token once all required attributes are verified |
 | **Signer** | Loads the key at boot, signs with `jose`, serves the JWKS. If the key is missing, issuing fails and nothing else does |
-| **Change hook** | Runs inside `updateItemInternal`, the single path every `item_state` write goes through. It compares the new value hashes with the verified ones and invalidates the checks that changed |
+| **Change hook** | Runs inside `updateItemInternal`, the single path every `item_state` write goes through. It compares the new value hashes with the verified ones and calls the revoke function for the attributes that changed |
 | **Go-live gate** | `verification_required` in `PROFILE_GO_LIVE_GATES` (`packages/schemas/src/network_workflow.ts`) and one entry in `GO_LIVE_GATE_CHECKS` (`apps/api/src/services/items/go_live_gates.ts`). Passes when the status is `verified` or the profile is exempt. Like `owner_required`, it reads state the caller loads into the gate context |
-| **Lifecycle hook** | On retire, revokes the token and clears the hashes and token |
+| **Revoke function** | One service function, `revokeVerification({ item, attributes, reason, actor })`, used by every revocation. It invalidates the named checks (or all), clears the token, recomputes the status and records who revoked and why. Built as a standalone function so a revoke endpoint can wrap it later without new logic (see Revocation) |
+| **Lifecycle hook** | On retire, calls the revoke function with `reason: profile_retired`, then clears the hashes |
 | **Read projection** | Adds the `verification` summary to profile, participant and dashboard reads |
 
 ## Status model
@@ -73,11 +75,11 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 ## Individual verification flow
 
 1. **Open:** `GET …/verification?item_id=` returns the configured attributes, their current values (private ones only with `view_pii`), each attribute's check, and the status.
-2. **Check:** `POST …/verification/checks` with `{ item_id, attribute, seen_updated_at }` (marks the attribute verified). Signals then:
+2. **Check:** `POST …/verification/checks` with `{ item_id, attribute, seen_updated_at, coordinator_id }` (marks the attribute verified). Signals then:
    - checks ownership and that the profile is not retired;
    - locks the item row (`SELECT … FOR UPDATE`);
    - refuses with `409 VALUE_CHANGED` if the profile changed after the coordinator viewed it;
-   - stores the check with a hash of the value.
+   - stores the check with a hash of the value, the org and the coordinator id.
 3. **Issue:** when the last required attribute is verified, the token is signed and stored in the same transaction, the status becomes `verified`, and the go-live classifier re-runs, so the profile goes live if every other gate passes.
 4. **Re-check:** after a verified attribute changes, the coordinator checks only that attribute again. Once all required attributes are verified, a new token is issued.
 
@@ -100,10 +102,10 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
   - Upload-start gets a second, **optional** box: "I have verified the verification attributes for these users". The existing mandatory upload-permission box is unchanged.
   - The box has its own versioned document in `consent.json` and is recorded in aggregator-dpg's consent ledger next to the existing attestation.
   - If that ledger write fails, the upload is rejected, as it is today for the existing box.
-- **Worker to Signals:** for each row, the worker adds an optional `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version }`.
+- **Worker to Signals:** for each row, the worker adds an optional `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version, coordinator_id }`. `coordinator_id` is the upload's `bulk_uploads.uploaded_by`.
 - **Signals:**
   - Marks attributes verified **only from this block**, never from `channel`. It accepts the block only from an aggregator acting org that owns the participant.
-  - Each attribute filled in the row and on the domain's list is recorded as verified, with the uploading org and the upload as the source, at upload time.
+  - Each attribute filled in the row and on the domain's list is recorded as verified, with the uploading org, the uploading coordinator and the upload as the source, at upload time.
   - When every required attribute is present, the token is issued (org level; it also names the upload).
 
 **Failure scenarios:**
@@ -118,6 +120,29 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
 | Signing key missing when the last attribute is checked | The check is saved, the status stays `partially_verified`, and the response is `VERIFICATION_SIGNING_UNAVAILABLE`. Checking again after the key is set issues the token |
 | The verification write fails (DB error) | It runs in the same transaction as the profile write, so the whole write fails and is reported as today's onboarding error. Profile data and verification never disagree |
 | Profile retired by a later upload | Token revoked; hashes and token cleared |
+
+## Recording the coordinator
+
+Signals knows only the aggregator **org** (`x-acting-org-id`) and its service API key. The coordinator is an aggregator-dpg user, so aggregator-dpg must tell Signals who it is.
+
+- **How:** aggregator-dpg sends `coordinator_id` (its `users.id`, taken from the logged-in session) in the body of each check, and in the CSV `verification` block.
+- **Trust:** Signals cannot check this id itself. It records it as asserted by the authenticated aggregator org, the same way `item_actions.performed_by_service_user_id` is recorded today. It is required on these calls; a call without it is rejected with `400`.
+- **Where it is stored:** in `profile_verifications`, per attribute check (`attribute_checks[attr].verified_by_coordinator_id`), for the issued token (`issued_by_coordinator_id`) and for a revocation (`revoked_by_coordinator_id`, empty when the system revoked it).
+- **Not in the token.** The token stays org level: the coordinator id would be handed to anyone holding the token, and it says nothing a verifier can check.
+- **Reads:** the aggregator portal gets the coordinator id per attribute and shows the coordinator's name from its own `users` table. The participant sees only the org.
+
+## Revocation
+
+In v1 revocation is **system-triggered only**, but it goes through one function that a revoke endpoint can wrap later.
+
+| Trigger (v1) | Calls | `reason` | Actor recorded |
+|---|---|---|---|
+| A verified attribute's value changes (any channel) | `revokeVerification` for the changed attributes | `attribute_changed` | The org / coordinator / participant that made the edit, as known to the write path |
+| Profile retired | `revokeVerification` for all attributes | `profile_retired` | The caller of the retire |
+
+**What the function does,** in the caller's transaction: invalidates the named checks, clears the token if one exists, recomputes the status (`partially_verified` or `unverified`), re-runs the go-live gate, and stores `revoked_at`, `revoke_reason` and the actor on the row. The item event is published after commit by the caller, as for any lifecycle change.
+
+**Later endpoint:** `POST /api/v1/aggregator/item/verification/revoke` with `{ item_id, attributes?, reason, coordinator_id }`. It needs only the route, the ownership and `profiles.verify` checks, and a new `reason` value (`manual`); the function, the storage and the read projection are already in place.
 
 ## Signals-to-aggregator APIs: all users
 
@@ -143,9 +168,10 @@ Today the dashboard and export return only `draft` and `live` profiles. aggregat
 | Column | Holds |
 |---|---|
 | `item_network`, `item_domain`, `item_type`, `item_id` | The profile (primary key). FK to `items` with `ON DELETE CASCADE` |
-| `attribute_checks` (jsonb) | Per attribute: decision, value hash, verifying org, time |
+| `attribute_checks` (jsonb) | Per attribute: decision, value hash, verifying org, **verifying coordinator id**, source (individual / CSV upload id), time |
 | `status` | `unverified`, `partially_verified` or `verified` |
-| `token`, `kid`, `issued_at`, `issued_by_org_id` | The signed token and its details, filled once verified |
+| `token`, `kid`, `issued_at`, `issued_by_org_id`, `issued_by_coordinator_id` | The signed token and its details, filled once verified |
+| `revoked_at`, `revoke_reason`, `revoked_by_org_id`, `revoked_by_coordinator_id` | The last revocation, if any |
 
 - **New column for exemption:** `go_live_exempt` (boolean, default false) on this table.
 - **Backfill only when a domain switches the gate on:** a one-off script inserts an `unverified`, `go_live_exempt = true` row for each profile that is `live` or `paused` at that time. Run it **before** adding `verification_required` to the domain's config, so no profile is demoted. Every other profile with no row reads as `unverified` and not exempt.
@@ -166,7 +192,7 @@ Tokens have no expiry, so rotation **re-signs** them rather than keeping old key
 
 | Repo | Change |
 |---|---|
-| signals-dpg | New routes under `/api/v1/aggregator/item/verification`: get status and attributes, submit a check, get the token |
+| signals-dpg | New routes under `/api/v1/aggregator/item/verification`: get status and attributes, submit a check (with `coordinator_id`), get the token. No revoke route in v1 |
 | signals-dpg | New public route `GET /.well-known/jwks.json` |
 | signals-dpg | A `verification` summary on onboarding responses (`/admin/participant`, self-register, link / QR submission) |
 | signals-dpg | `POST /api/v1/admin/participant`: an optional `verification` block for CSV rows uploaded with the checkbox ticked |
@@ -201,6 +227,8 @@ Things to be aware of:
 
 **Multi-select verification.** Select several profiles in the portal and confirm them in one go, with a batch-size limit enforced by the API. The CSV verification checkbox is already in v1.
 
+**Manual revoke endpoint.** A coordinator revokes a verification on purpose (e.g. fraud found later). Wraps the existing revoke function; see Revocation.
+
 **Rejection flow.** A verifier rejects an attribute, the participant sees it highlighted on their details page, corrects it, and the attribute goes back for re-checking. The `attribute_checks` jsonb can carry a `rejected` decision later without a schema change.
 
 **Verified status on the map.** To be picked up once v1 is complete.
@@ -209,3 +237,17 @@ Things to be aware of:
 - signals-search (separate repo) adds a verified field to `item_search`. The native fallback path reads `profile_verifications` directly.
 - The `/markers` response carries the verified flag, and the map pin shows the verified icon.
 - The same indexing also makes it possible to show the icon on search/discover results later.
+
+## Review findings (must fix)
+
+From the outside review of this design against `origin/feature` in both repos. To be resolved before implementation.
+
+| # | Issue | Suggested fix |
+|---|---|---|
+| 1 | **Unpause and the backfill script ignore the new gate.** Unpause calls `classify_item` with default gates only (`lifecycle.ts`), so a verified profile can be paused, edited, and unpaused straight to `live` while unverified. `backfill_lifecycle.ts` would promote unverified drafts | Both must evaluate `verification_required`; exempt profiles still pass |
+| 2 | **Not every classifier call site is listed:** create, update, consent acceptance (incl. U18 guardian), unpause, backfill. If one misses the verification state, accepting consent could promote an unverified draft | List them all; treat missing verification state as unverified (fail closed); add one shared context loader |
+| 3 | **An edit racing a verification check can leave a stale value verified.** `update_item` calls `updateItemInternal` outside a transaction and without a row lock | Lock the item in `updateItemInternal` and wrap `update_item` in a transaction (item row first, then verification row) |
+| 4 | **Self-signups can be stuck in draft forever.** Without a default aggregator nominated for the binding, `onboarded_by_org_id` stays null and nobody can verify them | Reject `verification_required` at config load unless a default aggregator is nominated and a `verification` block exists |
+| 6 | **Permission checks fail open.** `RBAC_MODE` defaults to `off`, so `profiles.verify` is not enforced, and the in-handler PII check does not exist yet. Upload-start only needs `profiles.onboard`, so anyone who can onboard can tick the verify box | Require `profiles.verify` for the checkbox and for checks; define fail-closed behaviour when RBAC is off |
+| 7 | **The CSV "existing profile updated" path does not exist.** The worker never sends `item_id`, so a re-upload creates a **new** profile. Retried requests can duplicate a profile and its verification | Rewrite the CSV rows to match real behaviour; add an idempotency key (upload id + row) |
+| 8 | **Exemption script gaps.** A profile that goes live between the script and the config change is not exempt; re-runs don't update existing rows; how long exemption lasts is undefined | Make the script idempotent (`ON CONFLICT DO UPDATE`), run it before and after the config change on each instance, and define when exemption ends |
