@@ -153,6 +153,7 @@ import { SchemaFetchError, type NetworkConfigDocument } from '@dpg/schemas';
 import {
   buildNetworkItemSchemaUrl,
   clearNetworkSchemaCache,
+  createCacheKey,
   getCachedSchemaForItemType,
   getCachedSchemas,
   getConfiguredNetworkSchemas,
@@ -378,8 +379,12 @@ describe('getCachedSchemas', () => {
 
 describe('getOrFetchSchemaByUrl', () => {
   it('serves a cached schema without refetching', async () => {
+    const cacheKey = createCacheKey([
+      'item_schema_url',
+      'https://s/profile.json',
+    ]);
     seedCacheEntry(
-      { cache_key: 'cached', kind: 'item_schema_url', schema_url: 'https://s/profile.json' },
+      { cache_key: cacheKey, kind: 'item_schema_url', schema_url: 'https://s/profile.json' },
       { cached: true }
     );
 
@@ -387,6 +392,37 @@ describe('getOrFetchSchemaByUrl', () => {
       getOrFetchSchemaByUrl({ schemaUrl: 'https://s/profile.json' })
     ).resolves.toEqual({ cached: true });
     expect(fetchedUrls).toEqual([]);
+  });
+
+  it('isolates cache entries by provenance so a schema cached under one network is not returned for another', async () => {
+    const yellowKey = createCacheKey([
+      'item_schema_url',
+      'yellow_dot',
+      'student',
+      'profile_1.0',
+      'https://s/profile.json',
+    ]);
+    seedCacheEntry(
+      {
+        cache_key: yellowKey,
+        kind: 'item_schema_url',
+        network: 'yellow_dot',
+        domain: 'student',
+        item_type: 'profile_1.0',
+        schema_url: 'https://s/profile.json',
+      },
+      { network: 'yellow_dot' }
+    );
+
+    // Caller with different network should NOT hit the yellow_dot cache
+    const result = await getOrFetchSchemaByUrl({
+      schemaUrl: 'https://s/profile.json',
+      network: 'blue_dot',
+      domain: 'student',
+      itemType: 'profile_1.0',
+    });
+    expect(result).toEqual({ fetched_from: 'https://s/profile.json' });
+    expect(fetchedUrls).toEqual(['https://s/profile.json']);
   });
 
   it('fetches, caches as item_schema_url/remote, and serves the second call from disk', async () => {

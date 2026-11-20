@@ -180,7 +180,7 @@ const NetworkDomainSchema = z.object({
   contact_fields: ContactFieldsSchema.optional(),
 }).superRefine((domain, ctx) => {
   const last = domain.status_rules[domain.status_rules.length - 1];
-  if (last.when !== 'default') {
+  if (last && last.when !== 'default') {
     ctx.addIssue({
       code: 'custom',
       message: 'status_rules must end with a `{ when: "default" }` tail rule',

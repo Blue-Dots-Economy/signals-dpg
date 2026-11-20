@@ -177,22 +177,23 @@ describe('status_rules tail rule', () => {
     ).toHaveLength(3);
   });
 
-  // DEFECT (pinned, not endorsed): `status_rules` carries `.min(1)`, but zod v4
-  // still runs the domain-level superRefine after that inner check fails, and
-  // the refine dereferences `last.when` on the (undefined) tail element. So an
-  // empty `status_rules` array escapes as a thrown TypeError instead of a
-  // ZodError — `safeParse` does not shield the caller from it. The fix is
-  // `last?.when !== 'default'` in network_workflow.ts (~line 126); until then a
-  // network.json with `status_rules: []` crashes config load rather than
-  // reporting "must contain at least 1 element".
-  it('crashes instead of returning a ZodError for an empty status_rules array', () => {
-    expect(() =>
-      NetworkConfigSchema.safeParse({
-        id: 'yellow_dot',
-        domains: [{ id: 'student', status_rules: [] }],
-        actions: {},
-      }),
-    ).toThrow(TypeError);
+  it('returns a ZodError instead of crashing for an empty status_rules array', () => {
+    const result = NetworkConfigSchema.safeParse({
+      id: 'yellow_dot',
+      domains: [{ id: 'student', status_rules: [] }],
+      actions: {},
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            path: ['domains', 0, 'status_rules'],
+            code: 'too_small',
+          }),
+        ])
+      );
+    }
   });
 
   it('rejects a status_rules entry with a non-canonical status', () => {

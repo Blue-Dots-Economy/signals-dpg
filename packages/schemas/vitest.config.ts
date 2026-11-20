@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   test: {
@@ -20,7 +21,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@dpg/database': new URL('../../packages/database/src', import.meta.url).pathname,
+      '@dpg/database': fileURLToPath(new URL('../../packages/database/src', import.meta.url)),
     },
   },
 });
