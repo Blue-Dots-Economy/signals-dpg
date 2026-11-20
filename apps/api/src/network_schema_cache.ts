@@ -103,7 +103,7 @@ async function cacheSchemaDocument(
   return nextEntry;
 }
 
-function createCacheKey(parts: Array<string | undefined | null>) {
+export function createCacheKey(parts: Array<string | undefined | null>) {
   return createHash('sha256')
     .update(parts.filter(Boolean).join('::'))
     .digest('hex');
@@ -298,7 +298,15 @@ export async function getOrFetchSchemaByUrl(input: {
   kind?: Extract<CachedSchemaKind, 'instance_custom_item_schema' | 'item_schema_url'>;
 }) {
   const index = await readIndex();
-  const cachedEntry = index.entries.find((entry) => entry.schema_url === input.schemaUrl);
+  const cacheKey = createCacheKey([
+    input.kind ?? 'item_schema_url',
+    input.network,
+    input.domain,
+    input.itemType,
+    input.instanceUrl,
+    input.schemaUrl,
+  ]);
+  const cachedEntry = index.entries.find((entry) => entry.cache_key === cacheKey);
 
   if (cachedEntry) {
     return readSchemaFile(cachedEntry.file_name);
@@ -316,14 +324,7 @@ export async function getOrFetchSchemaByUrl(input: {
 
   await cacheSchemaDocument(
     {
-      cache_key: createCacheKey([
-        input.kind ?? 'item_schema_url',
-        input.network,
-        input.domain,
-        input.itemType,
-        input.instanceUrl,
-        input.schemaUrl,
-      ]),
+      cache_key: cacheKey,
       kind: input.kind ?? 'item_schema_url',
       network: input.network,
       domain: input.domain,

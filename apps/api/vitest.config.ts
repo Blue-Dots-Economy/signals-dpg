@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
   test: {
@@ -42,23 +43,24 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': new URL('./src', import.meta.url).pathname,
-      '@api': new URL('./', import.meta.url).pathname,
-      '@dpg/auth': new URL('../../packages/auth/src', import.meta.url).pathname,
-      '@dpg/notification': new URL(
-        '../../packages/notification/src',
-        import.meta.url,
-      ).pathname,
-      '@dpg/schemas': new URL('../../packages/schemas/src', import.meta.url)
-        .pathname,
-      '@dpg/config': new URL('../../packages/config/src', import.meta.url)
-        .pathname,
-      '@dpg/database': new URL('../../packages/database/src', import.meta.url)
-        .pathname,
-      '@dpg/match_score': new URL(
-        '../../packages/match_score/src',
-        import.meta.url,
-      ).pathname,
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@api': fileURLToPath(new URL('./', import.meta.url)),
+      '@dpg/auth': fileURLToPath(new URL('../../packages/auth/src', import.meta.url)),
+      '@dpg/notification': fileURLToPath(
+        new URL('../../packages/notification/src', import.meta.url),
+      ),
+      '@dpg/schemas': fileURLToPath(
+        new URL('../../packages/schemas/src', import.meta.url),
+      ),
+      '@dpg/config': fileURLToPath(
+        new URL('../../packages/config/src', import.meta.url),
+      ),
+      '@dpg/database': fileURLToPath(
+        new URL('../../packages/database/src', import.meta.url),
+      ),
+      '@dpg/match_score': fileURLToPath(
+        new URL('../../packages/match_score/src', import.meta.url),
+      ),
     },
   },
 });
