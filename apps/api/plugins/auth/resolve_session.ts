@@ -195,8 +195,9 @@ const MISSING_REALM_ROLE: AuthFailure = {
  * signed in as: both apps share one realm, so an aggregator login leaves an SSO
  * session that Keycloak silently reuses here.
  *
- * Recognised positively from `aggregator_id` / the `org_owner` realm role, not
- * inferred from the absence of signals roles.
+ * Recognised positively from `user_id` or `aggregator_id` (the same coordinator
+ * id under its new and former claim names) / the `org_owner` realm role, not
+ * inferred from the absence of signals roles. No signals client maps `user_id`.
  */
 const AGGREGATOR_ACCOUNT: AuthFailure = {
   status: 403,
@@ -335,7 +336,9 @@ export async function resolveHumanSession(
     // token here means the shared-realm SSO session was reused silently, which
     // the caller cannot tell from a broken account unless we say so.
     const isAggregatorAccount =
-      typeof claims['aggregator_id'] === 'string' || hasRealmRole(claims, 'org_owner');
+      typeof claims['user_id'] === 'string' ||
+      typeof claims['aggregator_id'] === 'string' ||
+      hasRealmRole(claims, 'org_owner');
     request.log.warn(
       { azp, roles: realmRoles(claims), required, aggregator_account: isAggregatorAccount },
       isAggregatorAccount
