@@ -13,11 +13,11 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 - the **individual** verification flow;
 - onboarding APIs (CSV upload, self-register, registration link / QR) reporting verification state and failures;
 - an optional **verification checkbox on CSV upload**, which marks the uploaded rows verified or partially verified;
-- Signals-to-aggregator APIs returning **all** users.
+- Signals-to-aggregator APIs returning **all** users;
+- the **UI screens** (aggregator portal and the participant's status in the Signals UI), built from the screen designs shared by the design team.
 
 **Not in v1:**
 - multi-select verification in the portal (see Further enhancements);
-- UI screens, which are designed after this design is shared;
 - map and search/discover results.
 
 ## Key details
@@ -34,8 +34,8 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 | **Existing profiles** | Keep their current lifecycle status. Profiles already `live` or `paused` when the gate is switched on are marked **exempt** and stay live (and can be unpaused) while `unverified`. Existing drafts need verification to go live |
 | **Who can verify** | Only the aggregator that onboarded the participant (`user.onboarded_by_org_id` = acting org). The profile must be `draft`, `live` or `paused` (not `retired`) |
 | **Private attributes** | Verifying a private attribute (e.g. phone) needs `profiles.view_pii`. All coordinators get it by default; a coordinator without it can verify only the non-private attributes |
-| **Token contents** | Issuer (the instance), the profile, the verifying **org (org level only, no coordinator id)**, each attribute as a **salted hash (not the raw value)**, issue time. The header carries the signing key's `kid` |
-| **Who verified (audit)** | Stored in `profile_verifications`, **not in the token**: for each attribute check, issue and revocation, the org **and the coordinator id** (aggregator-dpg `users.id`). aggregator-dpg sends the coordinator id with each call (see Recording the coordinator) |
+| **Token contents** | Issuer (the instance), the profile, the **aggregator organisation** the verifying coordinator belongs to (aggregator-dpg `organisations.id`, not the coordinator), each attribute as a **salted hash (not the raw value)**, issue time. The header carries the signing key's `kid` |
+| **Who verified (audit)** | Stored in `profile_verifications`: for each attribute check, issue and revocation, the aggregator organisation **and, in its own column, the coordinator id** (aggregator-dpg `users.id`). The coordinator is **not in the token**. aggregator-dpg sends both ids with each call (see Recording the coordinator and the aggregator organisation) |
 | **Where state lives** | signals-dpg only. aggregator-dpg provides the screen and calls Signals |
 | **Who sees the status** | The aggregator portal and the **participant**, on their own profile in the Signals UI |
 
@@ -75,11 +75,11 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 ## Individual verification flow
 
 1. **Open:** `GET …/verification?item_id=` returns the configured attributes, their current values (private ones only with `view_pii`), each attribute's check, and the status.
-2. **Check:** `POST …/verification/checks` with `{ item_id, attribute, seen_updated_at, coordinator_id }` (marks the attribute verified). Signals then:
+2. **Check:** `POST …/verification/checks` with `{ item_id, attribute, seen_updated_at, coordinator_id, aggregator_org_id }` (marks the attribute verified). Signals then:
    - checks ownership and that the profile is not retired;
    - locks the item row (`SELECT … FOR UPDATE`);
    - refuses with `409 VALUE_CHANGED` if the profile changed after the coordinator viewed it;
-   - stores the check with a hash of the value, the org and the coordinator id.
+   - stores the check with a hash of the value, the aggregator organisation and the coordinator id.
 3. **Issue:** when the last required attribute is verified, the token is signed and stored in the same transaction, the status becomes `verified`, and the go-live classifier re-runs, so the profile goes live if every other gate passes.
 4. **Re-check:** after a verified attribute changes, the coordinator checks only that attribute again. Once all required attributes are verified, a new token is issued.
 
@@ -102,11 +102,11 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
   - Upload-start gets a second, **optional** box: "I have verified the verification attributes for these users". The existing mandatory upload-permission box is unchanged.
   - The box has its own versioned document in `consent.json` and is recorded in aggregator-dpg's consent ledger next to the existing attestation.
   - If that ledger write fails, the upload is rejected, as it is today for the existing box.
-- **Worker to Signals:** for each row, the worker adds an optional `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version, coordinator_id }`. `coordinator_id` is the upload's `bulk_uploads.uploaded_by`.
+- **Worker to Signals:** for each row, the worker adds an optional `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version, coordinator_id, aggregator_org_id }`. `coordinator_id` is the upload's `bulk_uploads.uploaded_by`; `aggregator_org_id` is that coordinator's organisation.
 - **Signals:**
   - Marks attributes verified **only from this block**, never from `channel`. It accepts the block only from an aggregator acting org that owns the participant.
-  - Each attribute filled in the row and on the domain's list is recorded as verified, with the uploading org, the uploading coordinator and the upload as the source, at upload time.
-  - When every required attribute is present, the token is issued (org level; it also names the upload).
+  - Each attribute filled in the row and on the domain's list is recorded as verified, with the uploading coordinator's aggregator organisation, the uploading coordinator and the upload as the source, at upload time.
+  - When every required attribute is present, the token is issued (aggregator organisation level; it also names the upload).
 
 **Failure scenarios:**
 
@@ -121,15 +121,16 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
 | The verification write fails (DB error) | It runs in the same transaction as the profile write, so the whole write fails and is reported as today's onboarding error. Profile data and verification never disagree |
 | Profile retired by a later upload | Token revoked; hashes and token cleared |
 
-## Recording the coordinator
+## Recording the coordinator and the aggregator organisation
 
-Signals knows only the aggregator **org** (`x-acting-org-id`) and its service API key. The coordinator is an aggregator-dpg user, so aggregator-dpg must tell Signals who it is.
+Signals knows only the acting Signals org (`x-acting-org-id`) and its service API key. Each aggregator-dpg coordinator is its own Signals org, so Signals knows neither the coordinator's aggregator-dpg user id nor the aggregator organisation the coordinator belongs to. aggregator-dpg must tell Signals both.
 
-- **How:** aggregator-dpg sends `coordinator_id` (its `users.id`, taken from the logged-in session) in the body of each check, and in the CSV `verification` block.
-- **Trust:** Signals cannot check this id itself. It records it as asserted by the authenticated aggregator org, the same way `item_actions.performed_by_service_user_id` is recorded today. It is required on these calls; a call without it is rejected with `400`.
-- **Where it is stored:** in `profile_verifications`, per attribute check (`attribute_checks[attr].verified_by_coordinator_id`), for the issued token (`issued_by_coordinator_id`) and for a revocation (`revoked_by_coordinator_id`, empty when the system revoked it).
-- **Not in the token.** The token stays org level: the coordinator id would be handed to anyone holding the token, and it says nothing a verifier can check.
-- **Reads:** the aggregator portal gets the coordinator id per attribute and shows the coordinator's name from its own `users` table. The participant sees only the org.
+- **How:** aggregator-dpg sends `coordinator_id` (its `users.id`) and `aggregator_org_id` (the coordinator's `organisations.id`), both taken from the logged-in session, in the body of each check and in the CSV `verification` block.
+- **Trust:** Signals cannot check these ids itself. It records them as asserted by the authenticated aggregator, the same way `item_actions.performed_by_service_user_id` is recorded today. Both are required on these calls; a call without them is rejected with `400`.
+- **In the token:** the aggregator organisation, not the coordinator. A participant can be moved to another coordinator of the same organisation; the token still describes who verified them, so the verification stays.
+- **Where the coordinator is stored:** in its own columns of `profile_verifications`: per attribute check (`attribute_checks[attr].verified_by_coordinator_id`), for the issued token (`issued_by_coordinator_id`) and for a revocation (`revoked_by_coordinator_id`, empty when the system revoked it).
+- **Moving to another aggregator organisation:** the verification was not made by the new organisation, so it must be withdrawn. Moves are not built yet; the move, when built, calls the revoke function with a new reason (e.g. `aggregator_changed`).
+- **Reads:** the aggregator portal gets the coordinator id per attribute and shows the coordinator's name from its own `users` table. The participant sees only the aggregator organisation.
 
 ## Revocation
 
@@ -168,10 +169,10 @@ Today the dashboard and export return only `draft` and `live` profiles. aggregat
 | Column | Holds |
 |---|---|
 | `item_network`, `item_domain`, `item_type`, `item_id` | The profile (primary key). FK to `items` with `ON DELETE CASCADE` |
-| `attribute_checks` (jsonb) | Per attribute: decision, value hash, verifying org, **verifying coordinator id**, source (individual / CSV upload id), time |
+| `attribute_checks` (jsonb) | Per attribute: decision, value hash, verifying aggregator organisation, **verifying coordinator id**, source (individual / CSV upload id), time |
 | `status` | `unverified`, `partially_verified` or `verified` |
-| `token`, `kid`, `issued_at`, `issued_by_org_id`, `issued_by_coordinator_id` | The signed token and its details, filled once verified |
-| `revoked_at`, `revoke_reason`, `revoked_by_org_id`, `revoked_by_coordinator_id` | The last revocation, if any |
+| `token`, `kid`, `issued_at`, `issued_by_aggregator_org_id`, `issued_by_coordinator_id` | The signed token and its details, filled once verified |
+| `revoked_at`, `revoke_reason`, `revoked_by_aggregator_org_id`, `revoked_by_coordinator_id` | The last revocation, if any |
 
 - **New column for exemption:** `go_live_exempt` (boolean, default false) on this table.
 - **Backfill only when a domain switches the gate on:** a one-off script inserts an `unverified`, `go_live_exempt = true` row for each profile that is `live` or `paused` at that time. Run it **before** adding `verification_required` to the domain's config, so no profile is demoted. Every other profile with no row reads as `unverified` and not exempt.
@@ -203,12 +204,12 @@ Tokens have no expiry, so rotation **re-signs** them rather than keeping old key
 | aggregator-dpg | Dashboard/export: widened `lifecycle` filter, verification status passthrough, and per-row verification outcome in bulk-upload results |
 | aggregator-dpg | **`profiles.verify` and `profiles.view_pii` granted to the built-in `coordinator` role by default**, via a new RBAC seed migration |
 
-## UI (planned after this design is shared)
+## UI (v1)
 
 - **aggregator-dpg:** the verification screen, the verification checkbox on CSV upload, status badges and filters on the dashboard, and the warnings in bulk-upload results.
 - **Signals UI:** the participant's verification status.
 
-The APIs above already return everything these screens need.
+The screens are built from the screen designs shared by the design team. The APIs above already return everything these screens need.
 
 ## Breaking changes
 
