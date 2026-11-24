@@ -332,6 +332,9 @@ importers:
       drizzle-zod:
         specifier: ^0.8.3
         version: 0.8.3(drizzle-orm@0.45.4(@types/pg@8.23.1)(pg@8.23.1))(zod@4.6.7)
+      libphonenumber-js:
+        specifier: ^1.13.16
+        version: 1.13.16
       zod:
         specifier: ^4.6.7
         version: 4.6.7
@@ -3560,6 +3563,9 @@ packages:
 
   leaflet@1.9.4:
     resolution: {integrity: sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==}
+
+  libphonenumber-js@1.13.16:
+    resolution: {integrity: sha512-tIOCM9yx2Go6d5/ZANe0K+G4AZek1Ymx81HxQpf19Sri4zMP95eQbKdnUGHAvFQ4nx0PeLhFqvAfisTADXj3tQ==}
 
   light-my-request@6.8.0:
     resolution: {integrity: sha512-5Q8PjoSEdtGIB8fikZsTem5vgRo4F2mR6vUKTDW/H1g6MtAt8e3duQbg/QxL5yzg6BZhor2KOUm3hhWMWLTZwg==}
@@ -7598,6 +7604,8 @@ snapshots:
   kdbush@4.1.0: {}
 
   leaflet@1.9.4: {}
+
+  libphonenumber-js@1.13.16: {}
 
   light-my-request@6.8.0:
     dependencies:

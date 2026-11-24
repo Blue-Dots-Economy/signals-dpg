@@ -72,6 +72,8 @@ export const authConfig = {
   create_test_otp: auth.CREATE_TEST_OTP,
   allow_self_signup: auth.SELF_SIGNUP_MODE === 'allowed',
   login_channels: parseLoginChannels(auth.LOGIN_CHANNELS),
+  /** Accepted phone countries from `PHONE_COUNTRIES`; the first is the default. */
+  phone_countries: auth.PHONE_COUNTRIES,
   // Identity provider. Read this; never re-parse process.env.
   provider: auth.AUTH_PROVIDER,
   /** Always `true`: Keycloak is the only provider. Kept because call sites read it. */

@@ -76,6 +76,7 @@ vi.mock('@/config', () => ({
     middleware_enabled: false,
     url: 'http://source.local/api/auth',
     create_test_otp: false,
+    phone_countries: ['IN'],
   },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },

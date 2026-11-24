@@ -43,6 +43,7 @@ function mockDeps(cfg: {
       attachmentMaxFiles: cfg.attachmentMaxFiles ?? 3,
     },
     instance: { INSTANCE_NAME: 'Blue Dot' },
+    authConfig: { phone_countries: ['IN'] },
   }));
   vi.doMock('@api/db/postgres/drizzle_config', () => ({
     db: {

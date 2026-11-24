@@ -31,6 +31,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { createParticipantKeycloakIdentity } from '@/services/auth/participant_identity';
 import { insertLocalUser } from '@/services/auth/user_writer';
+import { parseMobilePhone } from '@/services/phone';
 
 /**
  * POST /api/v1/admin/participant
@@ -1008,7 +1009,15 @@ export const participant_handler = async (
 ) => {
   const body = request.body;
   const email_norm = body.email?.trim().toLowerCase() ?? null;
-  const phone_norm = body.phone_number?.trim() ?? null;
+  const phone = body.phone_number ? parseMobilePhone(body.phone_number) : null;
+  if (phone && !phone.ok) {
+    return failureReply(reply, {
+      status: 400,
+      error: 'INVALID_PHONE',
+      message: phone.error.message,
+    });
+  }
+  const phone_norm = phone?.value ?? null;
 
   const payloadFailure = validateParticipantPayload(body, email_norm, phone_norm);
   if (payloadFailure) return failureReply(reply, payloadFailure);
