@@ -15,8 +15,12 @@ describe('isValidPhoneNumber', () => {
   it('rejects +91 whose subscriber part starts below 6', () => {
     expect(isValidPhoneNumber('+915620421129')).toBe(false);
   });
-  it('still accepts a generic non-91 E.164 number', () => {
-    expect(isValidPhoneNumber('+14155552671')).toBe(true);
+  it('rejects a number from a country the deployment does not list', () => {
+    expect(isValidPhoneNumber('+14155552671')).toBe(false);
+    expect(isValidPhoneNumber('+447911123456')).toBe(false);
+  });
+  it('rejects an Indian landline', () => {
+    expect(isValidPhoneNumber('+918022334455')).toBe(false);
   });
   it('rejects empty / no-plus non-10-digit input', () => {
     expect(isValidPhoneNumber('')).toBe(false);
@@ -25,6 +29,10 @@ describe('isValidPhoneNumber', () => {
 });
 
 describe('normalizePhoneNumber', () => {
+  it('sends the number as the API stores it, without a trunk 0', () => {
+    expect(normalizePhoneNumber('+91 09876 543210')).toBe('+919876543210');
+  });
+
   it('prepends +91 to a bare 10-digit Indian number', () => {
     expect(normalizePhoneNumber('9876543210')).toBe('+919876543210');
   });

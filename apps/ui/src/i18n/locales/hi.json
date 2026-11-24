@@ -579,7 +579,7 @@
     "signup_dob_how_title": "यह कैसे काम करता है",
     "signup_dob_how_desc": "अपना जन्म वर्ष चुनें। यदि आप 18 वर्ष से अधिक हैं, तो हम आपको खाता बनाने के पृष्ठ पर ले जाएंगे। यदि आप 18 वर्ष से कम उम्र के नाबालिग हैं, तो हम पहले आपके अभिभावक से सहमति लेंगे।",
     "toast_invalid_phone": "अमान्य मोबाइल नंबर",
-    "toast_invalid_phone_desc": "एक मान्य 10-अंकों का मोबाइल नंबर दर्ज करें (6, 7, 8 या 9 से शुरू)।",
+    "toast_invalid_phone_desc": "एक मान्य मोबाइल नंबर दर्ज करें।",
     "toast_invalid_email": "अमान्य ईमेल",
     "toast_invalid_email_desc": "एक मान्य ईमेल पता दर्ज करें (उदा. name@example.com)।"
   },
@@ -842,7 +842,7 @@
   "consent.agree_required_error": "आगे बढ़ने से पहले सहमति के लिए बॉक्स पर टिक करें।",
   "auth.oidc_error_desc": "साइन इन करते समय कुछ गलत हो गया। कृपया फिर से प्रयास करें।",
   "auth.toast_invalid_email_desc": "मान्य ईमेल पता दर्ज करें (जैसे name@example.com)।",
-  "auth.toast_invalid_phone_desc": "मान्य 10-अंकों का मोबाइल नंबर दर्ज करें (6, 7, 8 या 9 से शुरू)।",
+  "auth.toast_invalid_phone_desc": "मान्य मोबाइल नंबर दर्ज करें।",
   "u18.dob_error_generic": "आपका जन्म वर्ष सहेजा नहीं जा सका। कृपया फिर से प्रयास करें।",
   "u18.dob_error_invalid": "यह जन्म वर्ष मान्य नहीं लगता।",
   "u18.guardian_error_contact_required": "अपने अभिभावक का ईमेल या फ़ोन नंबर दर्ज करें।",

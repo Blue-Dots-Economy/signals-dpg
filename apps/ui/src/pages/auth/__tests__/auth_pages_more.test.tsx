@@ -482,7 +482,7 @@ describe('LoginPage — client-side identifier validation', () => {
     expect(mocks.checkUser).not.toHaveBeenCalled();
   });
 
-  it('rejects a 10-digit number that is not a valid Indian mobile prefix', async () => {
+  it('rejects a 10-digit number that is not a valid mobile number', async () => {
     await renderLogin();
     await userEvent.type(screen.getByLabelText(/mobile number/i), '1234567890');
     // Ten digits, so the CTA is enabled — validation happens on submit.
@@ -490,7 +490,7 @@ describe('LoginPage — client-side identifier validation', () => {
     await userEvent.click(cta());
 
     expect(
-      await screen.findByText(/enter a valid 10-digit mobile number \(starting with 6, 7, 8, or 9\)/i),
+      await screen.findByText(/enter a valid mobile number\./i),
     ).toBeInTheDocument();
     expect(mocks.checkUser).not.toHaveBeenCalled();
   });

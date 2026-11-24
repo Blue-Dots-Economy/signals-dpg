@@ -193,12 +193,3 @@ export function phoneCountryInfo(iso: CountryCode): PhoneCountryInfo {
     sample,
   };
 }
-
-
-/** Contact numbers (landlines too); same as the blue_dot `hiringManagerPhoneNumber` pattern. */
-export const CONTACT_PHONE_PATTERN = /^(\+91[1-9]\d{9}|0?[1-9]\d{9}|\+[1-8]\d{9,14}|\+9[02-9]\d{8,13})$/;
-
-/** A contact number after dropping spaces, dashes and brackets; a leading `00` reads as `+`. */
-export function isContactPhone(value: string): boolean {
-  return CONTACT_PHONE_PATTERN.test(value.replace(/[\s\-()]/g, '').replace(/^00/, '+'));
-}
