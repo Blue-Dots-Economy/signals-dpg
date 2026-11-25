@@ -12,7 +12,7 @@ Verification is a **new go-live check**: on domains that enable it, a profile go
 - the core framework end to end: config, verification states, signing, revocation and reads;
 - the **individual** verification flow;
 - onboarding APIs (CSV upload, self-register, registration link / QR) reporting verification state and failures;
-- an optional **verification checkbox on CSV upload**, which marks the uploaded rows verified or partially verified;
+- a mandatory **verification checkbox on CSV upload**, which marks the uploaded rows verified or partially verified;
 - Signals-to-aggregator APIs returning **all** users;
 - the **UI screens** (aggregator portal and the participant's status in the Signals UI), built from the screen designs shared by the design team.
 
@@ -91,7 +91,7 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
 
 | Channel | New profile | Existing profile updated |
 |---|---|---|
-| **CSV bulk upload** (`/admin/participant`, `channel=bulk`) | **Checkbox ticked:** the verification attributes filled in the row are marked verified, so the status is `verified` (all required present, token issued, can go live) or `partially_verified` (stays `draft` in gated domains). **Not ticked:** `unverified`; stays `draft` in gated domains | **Ticked:** the row's filled verification attributes are re-verified at their new values. **Not ticked:** unchanged values keep their status; a changed verified attribute invalidates that check and revokes the token, so the status becomes `partially_verified` (or `unverified` if no verified attribute remains) |
+| **CSV bulk upload** (`/admin/participant`, `channel=bulk`) | The checkbox is mandatory, so every upload is attested: the verification attributes filled in the row are marked verified, so the status is `verified` (all required present, token issued, can go live) or `partially_verified` (stays `draft` in gated domains) | The row's filled verification attributes are re-verified at their new values |
 | **Self-register** (Signals UI, voice) | `unverified`; stays `draft` in gated domains | Same rule when the participant edits their profile |
 | **Registration link / QR** | `unverified`; stays `draft` in gated domains | Same rule |
 | **Account-only** (no profile) | `not_applicable` | — |
@@ -99,10 +99,10 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
 **CSV verification checkbox:**
 
 - **aggregator-dpg:**
-  - Upload-start gets a second, **optional** box: "I have verified the verification attributes for these users". The existing mandatory upload-permission box is unchanged.
+  - Upload-start gets a second, **mandatory** box: "I have verified the verification attributes for these users". The upload cannot start until it is ticked, like the existing upload-permission box, which is unchanged.
   - The box has its own versioned document in `consent.json` and is recorded in aggregator-dpg's consent ledger next to the existing attestation.
   - If that ledger write fails, the upload is rejected, as it is today for the existing box.
-- **Worker to Signals:** for each row, the worker adds an optional `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version, coordinator_id, aggregator_org_id }`. `coordinator_id` is the upload's `bulk_uploads.uploaded_by`; `aggregator_org_id` is that coordinator's organisation.
+- **Worker to Signals:** for each row, the worker always adds the `verification` block to `POST /api/v1/admin/participant`: `{ attested: true, upload_id, attestation_version, coordinator_id, aggregator_org_id }`. `coordinator_id` is the upload's `bulk_uploads.uploaded_by`; `aggregator_org_id` is that coordinator's organisation.
 - **Signals:**
   - Marks attributes verified **only from this block**, never from `channel`. It accepts the block only from an aggregator acting org that owns the participant.
   - Each attribute filled in the row and on the domain's list is recorded as verified, with the uploading coordinator's aggregator organisation, the uploading coordinator and the upload as the source, at upload time.
@@ -115,8 +115,8 @@ Verification **never blocks onboarding**. Every onboarding response carries the 
 | Domain has no verification config | Onboarding succeeds; status `not_applicable` |
 | Re-upload or edit with values that only differ in format | Values are normalised before hashing, so the status is kept |
 | Re-upload changes a verified attribute | Onboarding succeeds. In gated domains the profile returns to `draft`. The row result reports `verification_revoked`, names the attributes, and returns the new lifecycle status. aggregator-dpg shows this in the upload's row results and `errors.csv` as a warning, not an error |
-| Checkbox ticked but a row leaves some verification attributes empty | Row onboarded as `partially_verified` (`unverified` if none are filled). The row result lists the missing attributes as a warning |
-| Checkbox ticked, but a value fails schema validation | The row fails as today; nothing is verified |
+| A row leaves some verification attributes empty | Row onboarded as `partially_verified` (`unverified` if none are filled). The row result lists the missing attributes as a warning |
+| A value fails schema validation | The row fails as today; nothing is verified |
 | Signing key missing when the last attribute is checked | The check is saved, the status stays `partially_verified`, and the response is `VERIFICATION_SIGNING_UNAVAILABLE`. Checking again after the key is set issues the token |
 | The verification write fails (DB error) | It runs in the same transaction as the profile write, so the whole write fails and is reported as today's onboarding error. Profile data and verification never disagree |
 | Profile retired by a later upload | Token revoked; hashes and token cleared |
@@ -196,11 +196,11 @@ Tokens have no expiry, so rotation **re-signs** them rather than keeping old key
 | signals-dpg | New routes under `/api/v1/aggregator/item/verification`: get status and attributes, submit a check (with `coordinator_id`), get the token. No revoke route in v1 |
 | signals-dpg | New public route `GET /.well-known/jwks.json` |
 | signals-dpg | A `verification` summary on onboarding responses (`/admin/participant`, self-register, link / QR submission) |
-| signals-dpg | `POST /api/v1/admin/participant`: an optional `verification` block for CSV rows uploaded with the checkbox ticked |
+| signals-dpg | `POST /api/v1/admin/participant`: an optional `verification` block, sent by the worker with every CSV row |
 | signals-dpg | A `verification` summary on profile reads, admin participant reads, and dashboard/export |
 | signals-dpg | Dashboard/export: all lifecycles plus `account_only`, and a `verification_status` filter |
 | aggregator-dpg | New Signals client methods, API and BFF routes for individual verification |
-| aggregator-dpg | Upload-start: the optional verification checkbox (`consent.json` document and ledger entry). The worker sends the `verification` block |
+| aggregator-dpg | Upload-start: the mandatory verification checkbox (`consent.json` document and ledger entry). The worker sends the `verification` block |
 | aggregator-dpg | Dashboard/export: widened `lifecycle` filter, verification status passthrough, and per-row verification outcome in bulk-upload results |
 | aggregator-dpg | **`profiles.verify` and `profiles.view_pii` granted to the built-in `coordinator` role by default**, via a new RBAC seed migration |
 
@@ -215,7 +215,7 @@ The screens are built from the screen designs shared by the design team. The API
 
 **None on the wire.** All API and DB changes are additive, the new response fields are optional, and the Signals dashboard default is unchanged.
 
-**Behaviour change on domains that switch the gate on:** new profiles from every channel (CSV, self-register, link / QR, voice) stay `draft` until verified, unless a CSV upload with the checkbox ticked verifies them. A live profile whose verified attribute changes returns to `draft`. Run the exemption script first.
+**Behaviour change on domains that switch the gate on:** new profiles from every channel (CSV, self-register, link / QR, voice) stay `draft` until verified, unless a CSV upload verifies them (every upload carries the mandatory checkbox). A live profile whose verified attribute changes returns to `draft`. Run the exemption script first.
 
 Things to be aware of:
 
@@ -249,6 +249,6 @@ From the outside review of this design against `origin/feature` in both repos. T
 | 2 | **Not every classifier call site is listed:** create, update, consent acceptance (incl. U18 guardian), unpause, backfill. If one misses the verification state, accepting consent could promote an unverified draft | List them all; treat missing verification state as unverified (fail closed); add one shared context loader |
 | 3 | **An edit racing a verification check can leave a stale value verified.** `update_item` calls `updateItemInternal` outside a transaction and without a row lock | Lock the item in `updateItemInternal` and wrap `update_item` in a transaction (item row first, then verification row) |
 | 4 | **Self-signups can be stuck in draft forever.** Without a default aggregator nominated for the binding, `onboarded_by_org_id` stays null and nobody can verify them | Reject `verification_required` at config load unless a default aggregator is nominated and a `verification` block exists |
-| 6 | **Permission checks fail open.** `RBAC_MODE` defaults to `off`, so `profiles.verify` is not enforced, and the in-handler PII check does not exist yet. Upload-start only needs `profiles.onboard`, so anyone who can onboard can tick the verify box | Require `profiles.verify` for the checkbox and for checks; define fail-closed behaviour when RBAC is off |
+| 6 | **Permission checks fail open.** `RBAC_MODE` defaults to `off`, so `profiles.verify` is not enforced, and the in-handler PII check does not exist yet. Upload-start only needs `profiles.onboard`, so anyone who can onboard can tick the verify box | Require `profiles.verify` for upload-start (the box is mandatory, so a role without it cannot bulk upload) and for checks; define fail-closed behaviour when RBAC is off |
 | 7 | **The CSV "existing profile updated" path does not exist.** The worker never sends `item_id`, so a re-upload creates a **new** profile. Retried requests can duplicate a profile and its verification | Rewrite the CSV rows to match real behaviour; add an idempotency key (upload id + row) |
 | 8 | **Exemption script gaps.** A profile that goes live between the script and the config change is not exempt; re-runs don't update existing rows; how long exemption lasts is undefined | Make the script idempotent (`ON CONFLICT DO UPDATE`), run it before and after the config change on each instance, and define when exemption ends |
