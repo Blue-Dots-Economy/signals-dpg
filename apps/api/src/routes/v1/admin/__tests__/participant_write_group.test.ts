@@ -687,6 +687,43 @@ describe('POST /admin/participant — write/failure paths', () => {
     expect(state.txCalls).toBe(0);
   });
 
+  it('existing user stored with a landline-range number is still found and updated', async () => {
+    state.userRows = [{ ...EXISTING_USER, email: null, phoneNumber: '+918020123456' }];
+
+    const res = await run({ body: { phone_number: '+918020123456', age: 24 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user_id).toBe(EXISTING_USER.id);
+  });
+
+  it('existing user from a country no longer listed is still found and updated', async () => {
+    state.userRows = [{ ...EXISTING_USER, email: null, phoneNumber: '+447400123456' }];
+
+    const res = await run({ body: { phone_number: '+447400123456', age: 24 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user_id).toBe(EXISTING_USER.id);
+  });
+
+  it('new user with a landline-range number → 400 INVALID_PHONE and nothing written', async () => {
+    const res = await run({ body: { phone_number: '+918020123456', item_state: { x: 1 } } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
+    expect(state.txCalls).toBe(0);
+    expect(state.userInserts).toHaveLength(0);
+  });
+
+  it('a number that is not valid anywhere → 400 INVALID_PHONE before the lookup', async () => {
+    state.userRows = [{ ...EXISTING_USER }];
+
+    const res = await run({ body: { phone_number: '+9112345', age: 24 } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
+    expect(state.txCalls).toBe(0);
+  });
+
   it('account_only existing user with age only (no compliance) → age persisted, drafts promoted, no consent write', async () => {
     state.userRows = [{ ...EXISTING_USER }];
     state.itemsRows = [itemRow()];

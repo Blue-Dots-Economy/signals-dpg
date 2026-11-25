@@ -1,4 +1,9 @@
-import z, { parsePhone, PHONE_INPUT_SHAPE, type PhoneParseResult } from '@dpg/schemas';
+import z, {
+  ALL_PHONE_COUNTRIES,
+  parsePhone,
+  PHONE_INPUT_SHAPE,
+  type PhoneParseResult,
+} from '@dpg/schemas';
 import { authConfig } from '@/config';
 
 /** Longest typed phone accepted: 15 digits plus room for spacing and punctuation. */
@@ -7,6 +12,14 @@ const PHONE_INPUT_MAX_LENGTH = 32;
 /** Checks an identity phone (sign-in, OTP, participant): a mobile in a listed country. */
 export function parseMobilePhone(raw: string): PhoneParseResult {
   return parsePhone(raw, { countries: authConfig.phone_countries, kind: 'mobile' });
+}
+
+/** Reads a phone that finds a stored user: any valid number, since older rules allowed more. */
+export function parseKnownPhone(raw: string): PhoneParseResult {
+  return parsePhone(raw, {
+    countries: [authConfig.phone_countries[0], ...ALL_PHONE_COUNTRIES],
+    kind: 'any',
+  });
 }
 
 /** Checks a contact phone (a number to call back), where landlines are fine. */

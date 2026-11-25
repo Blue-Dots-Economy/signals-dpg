@@ -6,6 +6,7 @@
  */
 
 import {
+  getCountries,
   getCountryCallingCode,
   getExampleNumber,
   isSupportedCountry,
@@ -46,6 +47,12 @@ export type PhoneParseResult =
 
 /** Countries used when the country list is blank. */
 export const DEFAULT_PHONE_COUNTRIES: PhoneCountryList = ['IN'];
+
+/** Every country the library knows, India first; for numbers stored before the current list. */
+export const ALL_PHONE_COUNTRIES: PhoneCountryList = [
+  'IN',
+  ...getCountries().filter((c) => c !== 'IN'),
+];
 
 /** Number types a mobile field accepts; US and CA do not tell mobiles from landlines. */
 const MOBILE_TYPES: ReadonlySet<PhoneNumberType> = new Set<PhoneNumberType>([

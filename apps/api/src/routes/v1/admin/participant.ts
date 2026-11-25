@@ -31,7 +31,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { guardianConsentRequired, isMinor } from '@/services/minor';
 import { createParticipantKeycloakIdentity } from '@/services/auth/participant_identity';
 import { insertLocalUser } from '@/services/auth/user_writer';
-import { parseMobilePhone } from '@/services/phone';
+import { parseKnownPhone, parseMobilePhone } from '@/services/phone';
 
 /**
  * POST /api/v1/admin/participant
@@ -377,13 +377,13 @@ function userLevelPair(body: UpsertBody) {
   return { terms, privacy };
 }
 
-/** The phone in E.164 form (null when absent), or the 400 for a bad number. */
+/** The phone in E.164 form (null when absent), or the 400 for a number that is not valid. */
 function normalisePhone(raw: string | null | undefined): {
   phone_norm: string | null;
   failure: ParticipantFailure | null;
 } {
   if (!raw) return { phone_norm: null, failure: null };
-  const phone = parseMobilePhone(raw);
+  const phone = parseKnownPhone(raw);
   if (!phone.ok) {
     return {
       phone_norm: null,
@@ -391,6 +391,17 @@ function normalisePhone(raw: string | null | undefined): {
     };
   }
   return { phone_norm: phone.value, failure: null };
+}
+
+/** A new user's phone must be a mobile in one of the deployment's countries. */
+function newUserPhoneFailure(
+  raw: string | null | undefined,
+  existing: ExistingUser | null,
+): ParticipantFailure | null {
+  if (existing || !raw) return null;
+  const phone = parseMobilePhone(raw);
+  if (phone.ok) return null;
+  return { status: 400, error: 'INVALID_PHONE', message: phone.error.message };
 }
 
 /** Identifier presence + consent-payload validation. Null = acceptable. */
@@ -1072,9 +1083,11 @@ export const participant_handler = async (
     });
   }
 
-  // Effective age: what this call supplies, else what's already on file.
-  const ageFailure = await checkAgeGates(ctx, body.age ?? existing?.age ?? null);
-  if (ageFailure) return failureReply(reply, ageFailure);
+  // A new user's phone, then the age gates (age from this call, else what's on file).
+  const gateFailure =
+    newUserPhoneFailure(body.phone_number, existing) ??
+    (await checkAgeGates(ctx, body.age ?? existing?.age ?? null));
+  if (gateFailure) return failureReply(reply, gateFailure);
 
   if (verdict.kind === 'account_only') {
     return existing
