@@ -18,19 +18,12 @@ import {
   validateSupportAttachments,
 } from '@/support/attachments';
 import { incrWithinWindow } from '@/utils/rate_window';
-import { parseContactPhone } from '@/services/phone';
+import { ContactPhoneField } from '@/services/phone';
 
 const SubmitSupportBody = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().email().max(320).optional(),
-  phone: z
-    .string()
-    .max(20)
-    .superRefine((v, ctx) => {
-      const phone = v.trim() === '' ? null : parseContactPhone(v);
-      if (phone && !phone.ok) ctx.addIssue({ code: 'custom', message: phone.error.message });
-    })
-    .optional(),
+  phone: z.string().trim().pipe(z.literal('').or(ContactPhoneField)).optional(), // blank = none
   type: z.enum(['complaint', 'support_request']),
   details: z.string().trim().min(1).max(5000),
   consent: z.literal(true),

@@ -42,3 +42,6 @@ function phoneField(parse: (raw: string) => PhoneParseResult) {
 
 /** A request field holding an identity phone; parses to E.164. */
 export const MobilePhoneField = phoneField(parseMobilePhone);
+
+/** A request field holding a callback phone (landlines allowed); parses to E.164. */
+export const ContactPhoneField = phoneField(parseContactPhone);

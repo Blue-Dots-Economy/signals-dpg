@@ -143,6 +143,65 @@ describe('POST /api/v1/support', () => {
     await app.close();
   });
 
+  it('sends the phone to the team in E.164 form, however it was typed', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        name: 'Asha',
+        phone: '098765 43210',
+        type: 'complaint',
+        details: 'x',
+        consent: true,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const table = dispatchEmailMock.mock.calls[0][0].variables.detailsTable;
+    expect(table).toContain('+919876543210');
+    expect(table).not.toContain('098765 43210');
+    await app.close();
+  });
+
+  it('returns 400 for a phone with letters in it', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        name: 'Asha',
+        phone: '9876543210abc',
+        type: 'complaint',
+        details: 'x',
+        consent: true,
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(dispatchEmailMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('treats a blank phone as none', async () => {
+    mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: {
+        name: 'Asha',
+        email: 'asha@example.com',
+        phone: '  ',
+        type: 'complaint',
+        details: 'x',
+        consent: true,
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    await app.close();
+  });
+
   it('returns 400 CONTACT_REQUIRED when neither email nor phone is given', async () => {
     mockDeps({ recipients: 'support@org.com', fromEmail: 'from@org.com' });
     const app = await buildApp();
