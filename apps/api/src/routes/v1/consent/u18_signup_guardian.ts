@@ -17,6 +17,7 @@ import {
   type SignupIdentifier,
 } from '@/services/signup_guardian';
 import { GuardianOtpError } from '@/services/guardian_otp';
+import { cleanMobilePhone } from '@/services/phone';
 
 // Per-IP fixed window on this PUBLIC, unauthenticated send route (mirrors
 // u18_precheck) — a first line against OTP-send abuse before the per-scope /
@@ -40,9 +41,16 @@ async function overIpLimit(ip: string): Promise<boolean> {
 type StartReq = FastifyRequest<{ Body: SignupGuardianBody }>;
 type VerifyReq = FastifyRequest<{ Body: SignupGuardianVerifyBody }>;
 
-function identifierFrom(body: { email?: string; phoneNumber?: string }): SignupIdentifier {
+/** The ward's identifier; a phone is cleaned to E.164, the form sign-up stores it in. */
+function identifierFrom(body: {
+  email?: string;
+  phoneNumber?: string;
+}): { ok: true; value: SignupIdentifier } | { ok: false; message: string } {
   // Schema-enforced: exactly one of email/phoneNumber is present.
-  return body.email ? { email: body.email } : { phoneNumber: body.phoneNumber as string };
+  if (body.email) return { ok: true, value: { email: body.email } };
+  const phone = cleanMobilePhone(body.phoneNumber);
+  if (!phone.ok) return phone;
+  return { ok: true, value: { phoneNumber: phone.value as string } };
 }
 
 const SIGNUP_GUARDIAN_ERROR_STATUS: Record<SignupGuardianError['code'], number> = {
@@ -104,16 +112,22 @@ const start_handler = async (request: StartReq, reply: FastifyReply) => {
       message: `Network/domain "${body.network}/${body.domain}" is not served`,
     });
   }
+  const identifier = identifierFrom(body);
+  if (!identifier.ok) {
+    return reply.code(400).send({ error: 'INVALID_PHONE', message: identifier.message });
+  }
+  const phone = cleanMobilePhone(body.guardianPhone);
+  if (!phone.ok) return reply.code(400).send({ error: 'INVALID_PHONE', message: phone.message });
 
   try {
     await startSignupGuardian({
       network: body.network,
       domain: body.domain,
-      identifier: identifierFrom(body),
+      identifier: identifier.value,
       age: body.age,
       guardianName: body.guardianName,
       guardianEmail: body.guardianEmail,
-      guardianPhone: body.guardianPhone,
+      guardianPhone: phone.value,
       guardianDeclarationAccepted: body.guardianDeclarationAccepted,
       sameContactAcknowledged: body.sameContactAcknowledged,
     });
@@ -137,8 +151,13 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
   }
 
+  const identifier = identifierFrom(body);
+  if (!identifier.ok) {
+    return reply.code(400).send({ error: 'INVALID_PHONE', message: identifier.message });
+  }
+
   try {
-    await verifySignupGuardian({ identifier: identifierFrom(body), otp: body.otp });
+    await verifySignupGuardian({ identifier: identifier.value, otp: body.otp });
   } catch (err) {
     if (err instanceof SignupGuardianError) {
       return reply.code(SIGNUP_GUARDIAN_ERROR_STATUS[err.code]).send({ error: err.code, message: err.code });
