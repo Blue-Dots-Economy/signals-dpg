@@ -714,6 +714,15 @@ describe('POST /admin/participant — write/failure paths', () => {
     expect(state.userInserts).toHaveLength(0);
   });
 
+  it('new user from a country not listed → 400 INVALID_PHONE and nothing written', async () => {
+    const res = await run({ body: { phone_number: '+447400123456', item_state: { x: 1 } } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
+    expect(state.txCalls).toBe(0);
+    expect(state.userInserts).toHaveLength(0);
+  });
+
   it('a number that is not valid anywhere → 400 INVALID_PHONE before the lookup', async () => {
     state.userRows = [{ ...EXISTING_USER }];
 
