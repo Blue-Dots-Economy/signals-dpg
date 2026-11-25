@@ -12,7 +12,7 @@ import {
   Metadata,
   parsePhoneNumberFromString,
   type CountryCode,
-  type NumberType,
+  type PhoneNumberType,
 } from 'libphonenumber-js/max';
 import mobileExamples from 'libphonenumber-js/mobile/examples';
 
@@ -48,7 +48,7 @@ export type PhoneParseResult =
 export const DEFAULT_PHONE_COUNTRIES: PhoneCountryList = ['IN'];
 
 /** Number types a mobile field accepts; US and CA do not tell mobiles from landlines. */
-const MOBILE_TYPES: ReadonlySet<NumberType> = new Set<NumberType>([
+const MOBILE_TYPES: ReadonlySet<PhoneNumberType> = new Set<PhoneNumberType>([
   'MOBILE',
   'FIXED_LINE_OR_MOBILE',
 ]);

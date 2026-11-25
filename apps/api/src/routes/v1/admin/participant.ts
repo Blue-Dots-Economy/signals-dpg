@@ -377,6 +377,22 @@ function userLevelPair(body: UpsertBody) {
   return { terms, privacy };
 }
 
+/** The phone in E.164 form (null when absent), or the 400 for a bad number. */
+function normalisePhone(raw: string | null | undefined): {
+  phone_norm: string | null;
+  failure: ParticipantFailure | null;
+} {
+  if (!raw) return { phone_norm: null, failure: null };
+  const phone = parseMobilePhone(raw);
+  if (!phone.ok) {
+    return {
+      phone_norm: null,
+      failure: { status: 400, error: 'INVALID_PHONE', message: phone.error.message },
+    };
+  }
+  return { phone_norm: phone.value, failure: null };
+}
+
 /** Identifier presence + consent-payload validation. Null = acceptable. */
 function validateParticipantPayload(
   body: UpsertBody,
@@ -1009,17 +1025,9 @@ export const participant_handler = async (
 ) => {
   const body = request.body;
   const email_norm = body.email?.trim().toLowerCase() ?? null;
-  const phone = body.phone_number ? parseMobilePhone(body.phone_number) : null;
-  if (phone && !phone.ok) {
-    return failureReply(reply, {
-      status: 400,
-      error: 'INVALID_PHONE',
-      message: phone.error.message,
-    });
-  }
-  const phone_norm = phone?.value ?? null;
+  const { phone_norm, failure: phoneFailure } = normalisePhone(body.phone_number);
 
-  const payloadFailure = validateParticipantPayload(body, email_norm, phone_norm);
+  const payloadFailure = phoneFailure ?? validateParticipantPayload(body, email_norm, phone_norm);
   if (payloadFailure) return failureReply(reply, payloadFailure);
 
   const ctx: ParticipantCtx = { request, reply, body, email_norm, phone_norm };
