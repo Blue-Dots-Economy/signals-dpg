@@ -27,7 +27,6 @@ export function cleanMobilePhone(
   raw: string | undefined,
 ): { ok: true; value: string | undefined } | { ok: false; message: string } {
   if (!raw) return { ok: true, value: undefined };
-  if (!PHONE_INPUT_SHAPE.test(raw)) return { ok: false, message: 'phone is not a phone number' };
   const phone = parseMobilePhone(raw);
   return phone.ok ? { ok: true, value: phone.value } : { ok: false, message: phone.error.message };
 }

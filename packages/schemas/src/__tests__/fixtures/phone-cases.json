@@ -32,7 +32,9 @@
     { "input": "", "countries": ["IN"], "kind": "mobile", "reason": "empty" },
     { "input": "   ", "countries": ["IN"], "kind": "mobile", "reason": "empty" },
     { "input": "abc", "countries": ["IN"], "kind": "mobile", "reason": "not_a_number" },
-    { "input": "++91 98", "countries": ["IN"], "kind": "mobile", "reason": "not_a_number" }
+    { "input": "++91 98", "countries": ["IN"], "kind": "mobile", "reason": "not_a_number" },
+    { "input": "9876543210abc", "countries": ["IN"], "kind": "mobile", "reason": "not_a_number" },
+    { "input": "98765 43210 ext 5", "countries": ["IN"], "kind": "mobile", "reason": "not_a_number" }
   ],
   "countryLists": [
     { "input": "", "value": ["IN"] },
@@ -40,6 +42,7 @@
     { "input": "IN:+91,GB:+44", "value": ["IN", "GB"] },
     { "input": " gb:44 , IN:+91", "value": ["GB", "IN"] },
     { "input": "IN:+91,GB:+44,", "valid": false },
+    { "input": "IN=+91,GB:+44", "valid": false },
     { "input": "IN:+92", "valid": false },
     { "input": "XX:+1", "valid": false },
     { "input": "IN:+91,IN:+91", "valid": false },

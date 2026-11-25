@@ -71,6 +71,10 @@ function refuse(reason: PhoneParseReason, message: string): PhoneParseResult {
  */
 export function parsePhone(raw: string, rules: PhoneRules): PhoneParseResult {
   if (!raw?.trim()) return refuse('empty', 'phone is empty');
+  // The library drops letters ("9876543210abc", "ext 5"), so they are refused here.
+  if (!PHONE_INPUT_SHAPE.test(raw.trim())) {
+    return refuse('not_a_number', 'phone is not a phone number');
+  }
   const phone = parsePhoneNumberFromString(raw, rules.countries[0]);
   if (!phone) return refuse('not_a_number', 'phone is not a phone number');
 
