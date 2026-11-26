@@ -581,8 +581,8 @@ describe('POST /api/v1/action/update-status — uncovered branches', () => {
       interactionMock.mockReturnValue({ ...GATED_INTERACTION });
       vi.mocked(guardianBulkActionGate).mockResolvedValue(
         new Map([
-          [0, { status: 'challenge_issued' as const }],
-          [1, { status: 'challenge_issued' as const }],
+          [0, { status: 'challenge_issued' as const, sentTo: '******7347' }],
+          [1, { status: 'challenge_issued' as const, sentTo: '******7347' }],
         ]),
       );
       vi.mocked(guardianGateFailure).mockReturnValue(

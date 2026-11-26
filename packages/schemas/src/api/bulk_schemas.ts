@@ -5,6 +5,8 @@ export const BulkItemErrorSchema = z.object({
   status: z.literal('error'),
   error: z.string().min(1),
   message: z.string(),
+  /** Masked guardian contact, on GUARDIAN_OTP_REQUIRED. */
+  sent_to: z.string().optional(),
 });
 
 export const BulkSummarySchema = z.object({

@@ -7,6 +7,7 @@ import { user } from '@api/db/postgres/schema/auth';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { instance, supportConfig } from '@/config';
 import { getDefaultEmailSender } from '@/notifications/email/dispatch_email';
+import { getDefaultSmsSender } from '@/notifications/sms/dispatch_sms';
 import {
   buildSupportDetailsTable,
   generateSupportReference,
@@ -131,9 +132,9 @@ export const submit_support_handler = async (
   }
 
   // The submitted contact details are the source of truth for the email; the
-  // user row is only looked up to confirm the account still exists.
+  // user row confirms the account still exists and gives the SMS recipient.
   const [row] = await db
-    .select({ id: user.id })
+    .select({ id: user.id, phone: user.phoneNumber, phoneVerified: user.phoneNumberVerified })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
@@ -188,6 +189,16 @@ export const submit_support_handler = async (
     return reply.code(502).send({
       error: 'SUPPORT_SEND_FAILED',
       message: 'Failed to send your message. Please try again later.',
+    });
+  }
+
+  // Confirmation to the requester's verified account phone. Best-effort, and
+  // skipped unless the SMS template file names `support.request`.
+  if (row.phoneVerified && row.phone) {
+    await getDefaultSmsSender()?.dispatchSms({
+      caseId: 'support.request',
+      to: row.phone,
+      variables: { type: TYPE_LABELS[type].toLowerCase(), reference },
     });
   }
 

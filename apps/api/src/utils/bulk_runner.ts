@@ -6,6 +6,8 @@ export class BulkItemFailure extends Error {
   constructor(
     public readonly errorCode: string,
     message: string,
+    /** Extra fields merged into the item's error result. */
+    public readonly details?: Record<string, string>,
   ) {
     super(message);
     this.name = 'BulkItemFailure';
@@ -66,7 +68,7 @@ export async function runBulk<T extends object>(
       succeeded += 1;
     } catch (err) {
       if (err instanceof BulkItemFailure) {
-        results.push({ index, status: 'error', error: err.errorCode, message: err.message });
+        results.push({ ...err.details, index, status: 'error', error: err.errorCode, message: err.message });
       } else {
         opts.onUnexpectedError?.(err, index);
         results.push({

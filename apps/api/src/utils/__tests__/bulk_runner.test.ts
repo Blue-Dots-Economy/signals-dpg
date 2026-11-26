@@ -56,6 +56,23 @@ describe('runBulk', () => {
     expect(spy).toHaveBeenCalledTimes(0);
   });
 
+  it('merges BulkItemFailure details into the error result without overriding its fields', async () => {
+    const out = await runBulk(
+      ['bad'],
+      async () => {
+        throw new BulkItemFailure('NOPE', 'bad item', { sent_to: '******7347', error: 'IGNORED' });
+      },
+      opts,
+    );
+    expect(out.results?.[0]).toEqual({
+      index: 0,
+      status: 'error',
+      error: 'NOPE',
+      message: 'bad item',
+      sent_to: '******7347',
+    });
+  });
+
   it('returns 422 when every item fails', async () => {
     const out = await runBulk(
       ['x'],

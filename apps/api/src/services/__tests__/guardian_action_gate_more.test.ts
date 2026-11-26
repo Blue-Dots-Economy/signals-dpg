@@ -173,11 +173,11 @@ describe('guardianActionGate — template variables and the u18 boundary', () =>
     getWardAge.mockResolvedValue(11);
     getGuardianNamePlaintext.mockResolvedValue(null);
     resolveProviderServiceName.mockResolvedValue(null);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const result = await guardianActionGate(baseInput);
 
-    expect(result).toEqual({ status: 'challenge_issued' });
+    expect(result).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
     expect(issueGuardianOtp.mock.calls[0][0].variables).toEqual({});
   });
 
@@ -185,7 +185,7 @@ describe('guardianActionGate — template variables and the u18 boundary', () =>
     getWardAge.mockResolvedValue(11);
     getGuardianNamePlaintext.mockResolvedValue(null);
     resolveProviderServiceName.mockResolvedValue('Globex');
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianActionGate(baseInput);
 
@@ -193,10 +193,10 @@ describe('guardianActionGate — template variables and the u18 boundary', () =>
   });
 
   it('treats age 18 as a minor (whole boundary year is gated) and 19 as an adult', async () => {
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     getWardAge.mockResolvedValue(18);
-    expect(await guardianActionGate(baseInput)).toEqual({ status: 'challenge_issued' });
+    expect(await guardianActionGate(baseInput)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
 
     getWardAge.mockResolvedValue(19);
     expect(await guardianActionGate(baseInput)).toEqual({ status: 'not_required' });
@@ -220,7 +220,7 @@ describe('guardianActionGate — template variables and the u18 boundary', () =>
 describe('guardianBulkActionGate — batch scope (#393)', () => {
   it('hashes the SORTED tuple set, so resubmitting the same batch reordered re-uses one scope', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const a = bulkItem({ index: 0, targetItemId: 'tgt-a' });
     const b = bulkItem({ index: 1, targetItemId: 'tgt-b' });
@@ -238,7 +238,7 @@ describe('guardianBulkActionGate — batch scope (#393)', () => {
 
   it('sorts tuples by code point, not locale collation, so the scope is locale-stable', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianBulkActionGate({
       items: [
@@ -258,13 +258,19 @@ describe('guardianBulkActionGate — batch scope (#393)', () => {
 
   it('produces a different scope when the batch membership changes', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
-    await guardianBulkActionGate({ items: [bulkItem({ index: 0, targetItemId: 'tgt-a' })] });
     await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, targetItemId: 'tgt-a' }),
         bulkItem({ index: 1, targetItemId: 'tgt-b' }),
+      ],
+    });
+    await guardianBulkActionGate({
+      items: [
+        bulkItem({ index: 0, targetItemId: 'tgt-a' }),
+        bulkItem({ index: 1, targetItemId: 'tgt-b' }),
+        bulkItem({ index: 2, targetItemId: 'tgt-c' }),
       ],
     });
 
@@ -277,27 +283,30 @@ describe('guardianBulkActionGate — batch scope (#393)', () => {
 describe('guardianBulkActionGate — grouping, caching and gating decisions', () => {
   it('buckets per ward+network: one OTP each, with a scope covering only that ward’s tuples', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const map = await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1', targetItemId: 'tgt-a' }),
         bulkItem({ index: 1, wardUserId: 'ward-2', targetItemId: 'tgt-b' }),
         bulkItem({ index: 2, wardUserId: 'ward-1', network: 'yellow_dot', targetItemId: 'tgt-c' }),
+        bulkItem({ index: 3, wardUserId: 'ward-1', targetItemId: 'tgt-d' }),
+        bulkItem({ index: 4, wardUserId: 'ward-2', targetItemId: 'tgt-e' }),
+        bulkItem({ index: 5, wardUserId: 'ward-1', network: 'yellow_dot', targetItemId: 'tgt-f' }),
       ],
     });
 
     expect(issueGuardianOtp).toHaveBeenCalledTimes(3);
     const scopes = issueGuardianOtp.mock.calls.map((c) => c[0].scope);
-    expect(scopes).toContain(expectedBulkScope('ward-1', 'blue_dot', ['apply|src|tgt-a']));
-    expect(scopes).toContain(expectedBulkScope('ward-2', 'blue_dot', ['apply|src|tgt-b']));
-    expect(scopes).toContain(expectedBulkScope('ward-1', 'yellow_dot', ['apply|src|tgt-c']));
-    expect([...map.keys()].sort()).toEqual([0, 1, 2]);
+    expect(scopes).toContain(expectedBulkScope('ward-1', 'blue_dot', ['apply|src|tgt-a', 'apply|src|tgt-d']));
+    expect(scopes).toContain(expectedBulkScope('ward-2', 'blue_dot', ['apply|src|tgt-b', 'apply|src|tgt-e']));
+    expect(scopes).toContain(expectedBulkScope('ward-1', 'yellow_dot', ['apply|src|tgt-c', 'apply|src|tgt-f']));
+    expect([...map.keys()].sort()).toEqual([0, 1, 2, 3, 4, 5]);
   });
 
   it('resolves the network config once per network and the age once per ward', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianBulkActionGate({
       items: [
@@ -327,17 +336,19 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
     getWardAge.mockImplementation((ward: string) =>
       Promise.resolve(ward === 'minor' ? 11 : ward === 'adult' ? 30 : null),
     );
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     const map = await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, wardUserId: 'minor' }),
         bulkItem({ index: 1, wardUserId: 'adult' }),
         bulkItem({ index: 2, wardUserId: 'unknown' }),
+        bulkItem({ index: 3, wardUserId: 'minor', targetItemId: 'tgt-2' }),
       ],
     });
 
-    expect(map.get(0)).toEqual({ status: 'challenge_issued' });
+    expect(map.get(0)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
+    expect(map.get(3)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
     expect(map.has(1)).toBe(false);
     expect(map.has(2)).toBe(false);
     expect(issueGuardianOtp).toHaveBeenCalledTimes(1);
@@ -349,7 +360,7 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
     resolveProviderServiceName.mockImplementation((id: string) =>
       Promise.resolve(id === 'tgt-c' ? null : id === 'tgt-b' ? 'Acme' : 'Acme'),
     );
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
     await guardianBulkActionGate({
       items: [
@@ -367,9 +378,14 @@ describe('guardianBulkActionGate — grouping, caching and gating decisions', ()
 
   it('sets jobs:false for a non-blue_dot network (opportunities copy)', async () => {
     getWardAge.mockResolvedValue(11);
-    issueGuardianOtp.mockResolvedValue(undefined);
+    issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
 
-    await guardianBulkActionGate({ items: [bulkItem({ index: 0, network: 'yellow_dot' })] });
+    await guardianBulkActionGate({
+      items: [
+        bulkItem({ index: 0, network: 'yellow_dot' }),
+        bulkItem({ index: 1, network: 'yellow_dot', targetItemId: 'tgt-2' }),
+      ],
+    });
 
     expect(issueGuardianOtp.mock.calls[0][0].scenario).toMatchObject({
       kind: 'action_bulk',
@@ -398,18 +414,20 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     issueGuardianOtp.mockImplementation((args: { scope: string }) =>
       args.scope.includes('ward-1')
         ? Promise.reject(new GuardianOtpError('RATE_LIMITED'))
-        : Promise.resolve(undefined),
+        : Promise.resolve({ sentTo: '******7347' }),
     );
 
     const map = await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
     });
 
     expect(map.get(0)).toEqual({ status: 'rate_limited' });
-    expect(map.get(1)).toEqual({ status: 'challenge_issued' });
+    expect(map.get(1)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
   });
 
   it('maps a NO_OTP_PROVIDER raised by the issuer to no_provider for that bucket only', async () => {
@@ -417,25 +435,28 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     issueGuardianOtp.mockImplementation((args: { scope: string }) =>
       args.scope.includes('ward-1')
         ? Promise.reject(new GuardianOtpError('NO_OTP_PROVIDER'))
-        : Promise.resolve(undefined),
+        : Promise.resolve({ sentTo: '******7347' }),
     );
 
     const map = await guardianBulkActionGate({
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
     });
 
     expect(map.get(0)).toEqual({ status: 'no_provider' });
-    expect(map.get(1)).toEqual({ status: 'challenge_issued' });
+    expect(map.get(1)).toEqual({ status: 'challenge_issued', sentTo: '******7347' });
   });
 
   it('re-throws a non-GuardianOtpError from the bulk issuer', async () => {
     getWardAge.mockResolvedValue(11);
     issueGuardianOtp.mockRejectedValue(new Error('notifier exploded'));
 
-    await expect(guardianBulkActionGate({ items: [bulkItem({ index: 0 })] })).rejects.toThrow(
+    const items = [bulkItem({ index: 0 }), bulkItem({ index: 1, targetItemId: 'tgt-2' })];
+    await expect(guardianBulkActionGate({ items })).rejects.toThrow(
       'notifier exploded',
     );
   });
@@ -445,7 +466,7 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     assertVerifyAttemptAllowed.mockImplementation((scope: string) =>
       scope.includes('ward-1')
         ? Promise.reject(new GuardianOtpError('VERIFY_THROTTLED'))
-        : Promise.resolve(undefined),
+        : Promise.resolve({ sentTo: '******7347' }),
     );
     verifyGuardianOtp.mockResolvedValue(true);
 
@@ -453,6 +474,8 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
       items: [
         bulkItem({ index: 0, wardUserId: 'ward-1' }),
         bulkItem({ index: 1, wardUserId: 'ward-2' }),
+        bulkItem({ index: 2, wardUserId: 'ward-1', targetItemId: 'tgt-2' }),
+        bulkItem({ index: 3, wardUserId: 'ward-2', targetItemId: 'tgt-2' }),
       ],
       otp: '123456',
     });
@@ -468,7 +491,10 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
     assertVerifyAttemptAllowed.mockRejectedValue(new GuardianOtpError('RATE_LIMITED'));
 
     await expect(
-      guardianBulkActionGate({ items: [bulkItem({ index: 0 })], otp: '123456' }),
+      guardianBulkActionGate({
+        items: [bulkItem({ index: 0 }), bulkItem({ index: 1, targetItemId: 'tgt-2' })],
+        otp: '123456',
+      }),
     ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
     expect(verifyGuardianOtp).not.toHaveBeenCalled();
   });
@@ -484,7 +510,7 @@ describe('guardianBulkActionGate — per-bucket failure isolation', () => {
 
 describe('guardianGateFailure — remaining status mappings', () => {
   it('maps challenge_issued to GUARDIAN_OTP_REQUIRED', () => {
-    const failure = guardianGateFailure({ status: 'challenge_issued' });
+    const failure = guardianGateFailure({ status: 'challenge_issued', sentTo: '******7347' });
     expect(failure?.errorCode).toBe('GUARDIAN_OTP_REQUIRED');
     expect(failure?.message).toContain('guardian_otp');
   });
@@ -534,7 +560,23 @@ describe('guardian_otp primitives (real module)', () => {
     // Same string, different contactType → its own counter, so this still sends.
     await expect(
       otp.issueGuardianOtp({ scope: 'w-phone', contact: 'shared@x.co', contactType: 'phone', send }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ sentTo: '******' });
+  });
+
+  it('returns the masked contact it sent to', async () => {
+    const otp = await loadReal();
+    const send = vi.fn(async () => {});
+    await expect(
+      otp.issueGuardianOtp({ scope: 'w-mask', contact: '+919019877347', contactType: 'phone', send }),
+    ).resolves.toEqual({ sentTo: '******7347' });
+  });
+
+  it('masks a phone to its last 4 digits and an email to 2 letters plus the domain', async () => {
+    const otp = await loadReal();
+    expect(otp.maskGuardianContact('+91 90198 77347', 'phone')).toBe('******7347');
+    expect(otp.maskGuardianContact('abhishek@gmail.com', 'email')).toBe('ab***@gmail.com');
+    expect(otp.maskGuardianContact('a@x.co', 'email')).toBe('a***@x.co');
+    expect(otp.maskGuardianContact('no-at-sign', 'email')).toBe('***');
   });
 
   it('maps every GuardianOtpError code to its HTTP reply and returns null otherwise', async () => {

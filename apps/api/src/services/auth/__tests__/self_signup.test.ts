@@ -312,8 +312,8 @@ describe('phone attributes must actually persist', () => {
 });
 
 describe('rate limiting', () => {
-  it('blocks a fourth attempt on the same identifier', async () => {
-    for (let i = 0; i < 3; i += 1) {
+  it('blocks an eleventh attempt on the same identifier', async () => {
+    for (let i = 0; i < 10; i += 1) {
       expect((await selfSignup(INPUT, makeLog())).ok).toBe(true);
     }
 

@@ -52,5 +52,6 @@ export const u18_status_handler = async (request: Req, reply: FastifyReply) => {
     hasBirthData: age !== null,
     isMinor: age !== null && isMinor(age),
     guardianVerified: mg?.guardianVerified ?? false,
+    guardianContactType: mg?.guardianContactType ?? null,
   });
 };

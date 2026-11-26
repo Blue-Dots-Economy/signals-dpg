@@ -225,6 +225,8 @@ export interface AuthConfigResponse {
    */
   authProvider?: 'betterauth' | 'keycloak';
   keycloak?: KeycloakPublicConfig | null;
+  /** False: a minor sends or accepts one request at a time (#917). Absent on older APIs. */
+  minorBulkActionsEnabled?: boolean;
 }
 
 export interface SignupResponse {

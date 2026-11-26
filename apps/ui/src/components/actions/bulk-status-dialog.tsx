@@ -3,12 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   guardianOtpErrorOf,
+  MINOR_BULK_ACTION_BLOCKED,
   type Action,
   type UpdateActionStatusPayload,
 } from '@/lib/action-api';
 import { BulkSingleError } from '@/lib/bulk';
 import { useAuth } from '@/contexts/auth-context';
 import { GuardianOtpDialog } from './guardian-otp-dialog';
+import { MinorBulkNoteDialog } from './minor-bulk-note-dialog';
 import { useUpdateActionStatusBulk } from '@/hooks/use-actions';
 import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
@@ -56,7 +58,10 @@ export function BulkStatusDialog({
     // Non-guardian failures from a mixed batch, reselected once the OTP dialog
     // resolves (they still need a retry).
     otherFailedIds?: string[];
+    sentTo?: string;
   } | null>(null);
+
+  const [minorBulkNoteOpen, setMinorBulkNoteOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
@@ -141,6 +146,14 @@ export function BulkStatusDialog({
       }
 
       const failedResults = env.results.filter((r) => r.status === 'error');
+      // Minor with bulk turned off: no OTP was sent; keep the selection so
+      // each request can be done on its own.
+      if (failedResults.some((r) => (r as { error?: string }).error === MINOR_BULK_ACTION_BLOCKED)) {
+        onOpenChange(false);
+        onSettled(env.summary.succeeded, env.summary.total, failedResults.map((r) => ids[r.index]));
+        setMinorBulkNoteOpen(true);
+        return;
+      }
       const guardianResults = failedResults.filter(
         (r) => guardianOtpErrorOf(r) === 'GUARDIAN_OTP_REQUIRED',
       );
@@ -155,6 +168,7 @@ export function BulkStatusDialog({
         setBulkGuardianChallenge({
           payloads: guardianResults.map((r) => payloads[r.index]),
           otherFailedIds: otherFailedIds.length > 0 ? otherFailedIds : undefined,
+          sentTo: (guardianResults[0] as { sent_to?: string }).sent_to,
         });
         onOpenChange(false); // the guardian OTP dialog owns the resubmit
         return;
@@ -188,6 +202,7 @@ export function BulkStatusDialog({
       onOpenChange={(next) => {
         if (!next) setBulkGuardianChallenge(null);
       }}
+      sentTo={bulkGuardianChallenge?.sentTo}
       onLogout={() => {
         void signOut();
       }}
@@ -263,6 +278,7 @@ export function BulkStatusDialog({
       </div>
     </ResponsiveDialog>
     {bulkGuardianOtpModal}
+    <MinorBulkNoteDialog open={minorBulkNoteOpen} onOpenChange={setMinorBulkNoteOpen} />
     </>
   );
 }

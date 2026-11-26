@@ -156,7 +156,7 @@ function primeMinor() {
   resolveConsentVersion.mockResolvedValue(3);
   verifyGuardianOtp.mockResolvedValue(true);
   assertVerifyAttemptAllowed.mockResolvedValue(undefined);
-  issueGuardianOtp.mockResolvedValue(undefined);
+  issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
   upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
   guardianOtpErrorReply.mockReturnValue(null);
   redisMock.getdel.mockResolvedValue('1');
@@ -259,7 +259,7 @@ describe('precreate/issue', () => {
   it('issues an OTP scoped to ward+network+domain and returns otpSent', async () => {
     const reply = await call(url, PRECREATE);
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ otpSent: true });
+    expect(reply.body).toEqual({ otpSent: true, sent_to: '******7347' });
     expect(issueGuardianOtp).toHaveBeenCalledWith({
       scope: 'u1:profile_create:blue_dot:seeker',
       contact: 'g@example.com',
@@ -418,7 +418,7 @@ describe('profile-consent/issue', () => {
   it('issues an OTP scoped to ward+item id', async () => {
     const reply = await call(url, ITEM);
     expect(reply.statusCode).toBe(200);
-    expect(reply.body).toEqual({ otpSent: true });
+    expect(reply.body).toEqual({ otpSent: true, sent_to: '******7347' });
     expect(issueGuardianOtp).toHaveBeenCalledWith({
       scope: `u1:profile:${ITEM.item_id}`,
       contact: 'g@example.com',

@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 
 const dispatchEmailMock = vi.fn();
+const dispatchSmsMock = vi.fn(async () => ({ ok: true }));
 /** Running count the mocked fixed-window counter returns (rate-limit tests). */
 const incrWithinWindowMock = vi.fn(async () => 1);
 
@@ -15,6 +16,8 @@ function mockDeps(cfg: {
   client?: boolean;
   attachmentMaxTotalBytes?: number;
   attachmentMaxFiles?: number;
+  /** The requester's user row; defaults to one with no phone. */
+  userRow?: { id: string; phone?: string | null; phoneVerified?: boolean | null };
 }) {
   vi.doMock('@/utils/rate_window', () => ({ incrWithinWindow: incrWithinWindowMock }));
   vi.doMock('@api/plugins/auth/auth_middleware', () => ({
@@ -25,6 +28,9 @@ function mockDeps(cfg: {
   vi.doMock('@/notifications/email/dispatch_email', () => ({
     getDefaultEmailSender: () =>
       cfg.client === false ? null : { dispatchEmail: dispatchEmailMock },
+  }));
+  vi.doMock('@/notifications/sms/dispatch_sms', () => ({
+    getDefaultSmsSender: () => (cfg.client === false ? null : { dispatchSms: dispatchSmsMock }),
   }));
   vi.doMock('@/config', () => ({
     supportConfig: {
@@ -43,7 +49,7 @@ function mockDeps(cfg: {
       select: () => ({
         from: () => ({
           where: () => ({
-            limit: () => Promise.resolve([{ id: 'u1' }]),
+            limit: () => Promise.resolve([cfg.userRow ?? { id: 'u1' }]),
           }),
         }),
       }),
@@ -435,6 +441,55 @@ describe('POST /api/v1/support — rate limit (#551)', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
     expect(res.statusCode).toBe(503);
     expect(incrWithinWindowMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+});
+
+describe('POST /api/v1/support — confirmation SMS', () => {
+  const configured = { recipients: 'support@org.com', fromEmail: 'from@org.com' };
+
+  beforeEach(() => {
+    vi.resetModules();
+    dispatchEmailMock.mockReset();
+    dispatchEmailMock.mockResolvedValue({ ok: true });
+    dispatchSmsMock.mockClear();
+    incrWithinWindowMock.mockReset();
+    incrWithinWindowMock.mockResolvedValue(1);
+  });
+
+  it('texts the requester\'s verified account phone with the type they picked and the reference', async () => {
+    mockDeps({ ...configured, userRow: { id: 'u1', phone: '+919111111111', phoneVerified: true } });
+    const app = await buildApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/support',
+      payload: { ...validPayload, type: 'support_request' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(dispatchSmsMock).toHaveBeenCalledWith({
+      caseId: 'support.request',
+      to: '+919111111111',
+      variables: { type: 'support request', reference: res.json().reference },
+    });
+    await app.close();
+  });
+
+  it('sends no SMS to an unverified account phone, nor to the phone typed in the form', async () => {
+    mockDeps({ ...configured, userRow: { id: 'u1', phone: '+919111111111', phoneVerified: false } });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(201);
+    expect(dispatchSmsMock).not.toHaveBeenCalled();
+    await app.close();
+  });
+
+  it('sends no SMS when the support email fails', async () => {
+    dispatchEmailMock.mockRejectedValue(new Error('smtp down'));
+    mockDeps({ ...configured, userRow: { id: 'u1', phone: '+919111111111', phoneVerified: true } });
+    const app = await buildApp();
+    const res = await app.inject({ method: 'POST', url: '/api/v1/support', payload: validPayload });
+    expect(res.statusCode).toBe(502);
+    expect(dispatchSmsMock).not.toHaveBeenCalled();
     await app.close();
   });
 });
