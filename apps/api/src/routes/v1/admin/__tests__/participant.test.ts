@@ -144,6 +144,7 @@ const dbState: {
     email: string | null;
     phoneNumber: string | null;
     onboardedByOrgId: string | null;
+    age?: number | null;
   }>;
   itemsByUser: Map<string, ItemRow[]>;
   itemOwnerLookup: Map<string, string>; // item_id -> user_id
@@ -1762,6 +1763,40 @@ describe('POST /admin/participant', () => {
   // changed what search must return, and the account_only branch published nothing
   // at all — so the profiles stayed `draft` in item_search: invisible in every
   // ranked feed and every map viewport while `items` said live.
+  async function accountOnlyAge(ageOnFile: number | null) {
+    const user_id = 'usr_age_msg_' + String(ageOnFile);
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1', age: ageOnFile },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({
+      promoted: [],
+      blockedItemIds: ['itm_held'],
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    return app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_state: undefined, age: 31 }),
+    });
+  }
+
+  it('account_only + age: no limit message when an adult age was already on file (nothing newly unblocked)', async () => {
+    const res = await accountOnlyAge(30);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('message');
+  });
+
+  it('account_only + age: limit message when the age could unblock drafts (none on file before)', async () => {
+    const res = await accountOnlyAge(null);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toBe('LIVE_LIMIT_DRAFT');
+  });
+
   it('account_only branch: publishes an upsert for each draft the age write promoted', async () => {
     const user_id = 'usr_age_promotes_drafts';
     dbState.existingUserRows = [

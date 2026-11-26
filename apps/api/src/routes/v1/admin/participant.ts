@@ -729,8 +729,11 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
         if (body.age != null) {
           const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
           promotedDrafts = sweep.promoted;
-          // No profile named: say so if any draft the age unblocked was kept back.
-          blockedByLiveLimit = sweep.blockedItemIds.length > 0;
+          // No profile named: say so only when this age could have unblocked a
+          // draft (none on file, or a minor's), not for drafts the limit was
+          // already holding before this call.
+          const ageWasBlocking = existing.age == null || isMinor(existing.age);
+          blockedByLiveLimit = ageWasBlocking && sweep.blockedItemIds.length > 0;
         }
       });
     } catch (err) {
