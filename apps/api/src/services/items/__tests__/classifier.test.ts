@@ -252,3 +252,47 @@ describe('owner_required through classify_item (SS-3, #640)', () => {
     ).toBe('live');
   });
 });
+
+describe('classify_item — live_limit gate', () => {
+  const gates = ['schema_required', 'live_limit'] as const;
+  const complete = { a: 'x', b: 'y' };
+  const run = (
+    current_status: 'draft' | 'live',
+    merged_state: Record<string, unknown>,
+    live_slot_free?: boolean,
+  ) =>
+    classify_item({
+      schema: schema(['a', 'b']),
+      merged_state,
+      current_status,
+      consent_accepted: true,
+      gates,
+      live_slot_free,
+    });
+
+  it('goes live when a slot is free', () => {
+    expect(run('draft', complete, true)).toEqual({ lifecycle_status: 'live' });
+  });
+
+  it('holds a complete profile in draft when no slot is free', () => {
+    expect(run('draft', complete, false)).toEqual({
+      lifecycle_status: 'draft',
+      held_by_live_limit: true,
+    });
+  });
+
+  it('does not flag an incomplete profile as held by the limit', () => {
+    expect(run('draft', { a: 'x' }, false)).toEqual({ lifecycle_status: 'draft' });
+  });
+
+  it('keeps a live profile live when no slot is free', () => {
+    expect(run('live', complete, false)).toEqual({ lifecycle_status: 'live' });
+  });
+
+  it('fails closed when the gate is configured but no slot context is passed', () => {
+    expect(run('draft', complete, undefined)).toEqual({
+      lifecycle_status: 'draft',
+      held_by_live_limit: true,
+    });
+  });
+});

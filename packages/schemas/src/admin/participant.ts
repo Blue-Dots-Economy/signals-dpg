@@ -134,6 +134,9 @@ export const UpsertParticipantResponse = z.object({
   // consent_record rows written this call. Omitted on the rejected and
   // owned-elsewhere branches.
   consent_recorded: z.number().int().optional(),
+  // Present only when the live profile limit kept a profile that would have
+  // gone live in draft.
+  message: z.string().optional(),
   // Who owns this participant. The owner is not always the acting org: a
   // `network_service` caller gets the instance's default aggregator, or null
   // when no single default is nominated. Omitted on the rejected and

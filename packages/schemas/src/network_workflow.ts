@@ -10,10 +10,13 @@ const JsonSchemaDocumentSchema = z.record(z.string(), z.unknown());
 // domain always enforces `consent_required`.
 // `owner_required` (the owner has an owning aggregator) is not a pure function
 // of the item's state; see `GO_LIVE_GATE_CHECKS.owner_required` in apps/api.
+// `live_limit` is added automatically from a domain's `profile_limits` and may
+// not be listed in `go_live_required`.
 export const PROFILE_GO_LIVE_GATES = [
   'schema_required',
   'consent_required',
   'owner_required',
+  'live_limit',
 ] as const;
 export type GoLiveGate = (typeof PROFILE_GO_LIVE_GATES)[number];
 
@@ -135,8 +138,12 @@ const NetworkDomainSchema = z.object({
   // `PROFILE_GO_LIVE_GATES`). Omitted means `schema_required`. An empty array
   // is rejected: a profile with no gates would go live instantly.
   go_live_required: z.array(z.enum(PROFILE_GO_LIVE_GATES)).min(1).optional(),
-  // Per-domain cap on profiles one user may own; overrides MAX_PROFILES_PER_USER.
-  max_profiles_per_user: z.number().int().positive().optional(),
+  // Per-user profile limits: `live` caps live profiles, `total` caps every
+  // non-retired one. Omitted: no live limit, total = MAX_PROFILES_PER_USER.
+  profile_limits: z
+    .object({ live: z.number().int().positive(), total: z.number().int().positive() })
+    .refine((l) => l.live <= l.total, { message: 'profile_limits.live must be <= total' })
+    .optional(),
   item_schemas: z
     .record(z.string(), JsonSchemaDocumentSchema)
     .optional()
@@ -169,6 +176,13 @@ const NetworkDomainSchema = z.object({
       code: 'custom',
       message:
         'a guardian_consent_required domain must keep "consent_required" in go_live_required',
+      path: ['go_live_required'],
+    });
+  }
+  if (domain.go_live_required?.includes('live_limit')) {
+    ctx.addIssue({
+      code: 'custom',
+      message: '"live_limit" is added from profile_limits; do not list it in go_live_required',
       path: ['go_live_required'],
     });
   }

@@ -25,7 +25,16 @@ describe('network_workflow go_live_required', () => {
       'schema_required',
       'consent_required',
       'owner_required',
+      'live_limit',
     ]);
+  });
+
+  it('rejects live_limit listed in go_live_required (it comes from profile_limits)', () => {
+    expect(() =>
+      parseNetworkConfigDocument(
+        configWithDomain({ go_live_required: ['schema_required', 'live_limit'] }),
+      ),
+    ).toThrow(/live_limit/);
   });
 
   it('omitted go_live_required parses (undefined — resolver applies the default)', () => {
@@ -78,5 +87,39 @@ describe('network_workflow go_live_required', () => {
       }),
     );
     expect(parsed.domains[0].go_live_required).toContain('consent_required');
+  });
+});
+
+describe('network_workflow profile_limits', () => {
+  it('is optional', () => {
+    const parsed = parseNetworkConfigDocument(configWithDomain({}));
+    expect(parsed.domains[0].profile_limits).toBeUndefined();
+  });
+
+  it('accepts live <= total', () => {
+    const parsed = parseNetworkConfigDocument(
+      configWithDomain({ profile_limits: { live: 200, total: 300 } }),
+    );
+    expect(parsed.domains[0].profile_limits).toEqual({ live: 200, total: 300 });
+  });
+
+  it('rejects live > total', () => {
+    expect(() =>
+      parseNetworkConfigDocument(configWithDomain({ profile_limits: { live: 301, total: 300 } })),
+    ).toThrow(/live must be <= total/);
+  });
+
+  it('rejects a missing or non-positive limit', () => {
+    expect(() =>
+      parseNetworkConfigDocument(configWithDomain({ profile_limits: { live: 200 } })),
+    ).toThrow();
+    expect(() =>
+      parseNetworkConfigDocument(configWithDomain({ profile_limits: { live: 0, total: 300 } })),
+    ).toThrow();
+  });
+
+  it('ignores the removed max_profiles_per_user key', () => {
+    const parsed = parseNetworkConfigDocument(configWithDomain({ max_profiles_per_user: 200 }));
+    expect(parsed.domains[0]).not.toHaveProperty('max_profiles_per_user');
   });
 });

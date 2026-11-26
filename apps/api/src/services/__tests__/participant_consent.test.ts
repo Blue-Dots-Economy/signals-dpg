@@ -22,12 +22,14 @@ vi.mock('@dpg/database', () => ({ items: { __table: 'items' } }));
 
 import { recordParticipantConsent } from '@/services/participant_consent';
 
-// helper to build a tx whose select().from().where() resolves to `draftRows`
+// helper to build a tx whose select().from().where().orderBy() resolves to `draftRows`
 function makeSelectTx(draftRows: Array<Record<string, unknown>>) {
+  const orderBy = vi.fn(async (..._a: unknown[]) => draftRows);
   return {
+    orderBy,
     select: vi.fn(() => ({
       from: vi.fn(() => ({
-        where: vi.fn(async () => draftRows),
+        where: vi.fn(() => ({ orderBy })),
       })),
     })),
   };
@@ -74,7 +76,7 @@ describe('recordParticipantConsent', () => {
     resolveConsentVersion.mockResolvedValue(1);
     hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
     hasAcceptedProfileConsent.mockResolvedValue(false);
-    promoteItemOnProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
   });
 
   it('returns zero when compliance is absent', async () => {
@@ -82,7 +84,7 @@ describe('recordParticipantConsent', () => {
     const res = await recordParticipantConsent(tx as never, {
       userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
     });
-    expect(res).toEqual({ recorded: 0, promoted: false });
+    expect(res).toEqual({ recorded: 0, promoted: false, heldByLiveLimit: false });
     expect(inserted).toHaveLength(0);
   });
 
@@ -206,7 +208,7 @@ describe('recordParticipantConsent', () => {
   });
 
   it('reports promoted:false when the item does not go live (e.g. minor gate)', async () => {
-    promoteItemOnProfileConsent.mockResolvedValue(false);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, heldByLiveLimit: false });
     const { tx } = makeTx();
     const res = await recordParticipantConsent(tx as never, {
       compliance: [
@@ -248,10 +250,10 @@ describe('recordParticipantConsent', () => {
 
   it('promoteEligibleDraftsForUser promotes only drafts that have profile_creation consent', async () => {
     hasAcceptedProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => itemId === 'has-consent');
-    promoteItemOnProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
     const tx = makeSelectTx([{ item_id: 'has-consent' }, { item_id: 'no-consent' }]);
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
-    const promoted = await promoteEligibleDraftsForUser(tx as never, 'u1');
+    const { promoted } = await promoteEligibleDraftsForUser(tx as never, 'u1');
     expect(promoted).toHaveLength(1);
     expect(promoteItemOnProfileConsent).toHaveBeenCalledWith(tx, 'has-consent');
     expect(promoteItemOnProfileConsent).not.toHaveBeenCalledWith(tx, 'no-consent');
@@ -263,16 +265,17 @@ describe('recordParticipantConsent', () => {
   // so the caller doesn't otherwise know which items moved.
   it('promoteEligibleDraftsForUser returns the full key of every item it promoted', async () => {
     hasAcceptedProfileConsent.mockResolvedValue(true);
-    promoteItemOnProfileConsent.mockImplementation(
-      async (_tx: unknown, itemId: string) => itemId === 'promoted',
-    );
+    promoteItemOnProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => ({
+      promoted: itemId === 'promoted',
+      heldByLiveLimit: false,
+    }));
     const tx = makeSelectTx([
       { item_id: 'promoted', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' },
       { item_id: 'blocked', item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0' },
     ]);
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
 
-    const promoted = await promoteEligibleDraftsForUser(tx as never, 'u1');
+    const { promoted } = await promoteEligibleDraftsForUser(tx as never, 'u1');
 
     // Only the item that actually flipped to live, with the columns publishItemEvent needs.
     expect(promoted).toEqual([
@@ -283,5 +286,25 @@ describe('recordParticipantConsent', () => {
         item_id: 'promoted',
       },
     ]);
+  });
+
+  it('promoteEligibleDraftsForUser sweeps newest first and reports a draft held by the live limit', async () => {
+    hasAcceptedProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => ({
+      promoted: itemId === 'newest',
+      heldByLiveLimit: itemId === 'older',
+    }));
+    const tx = makeSelectTx([
+      { item_id: 'newest', item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0' },
+      { item_id: 'older', item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0' },
+    ]);
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+
+    const res = await promoteEligibleDraftsForUser(tx as never, 'u1');
+
+    expect(tx.orderBy).toHaveBeenCalledTimes(1);
+    expect(tx.orderBy.mock.calls[0]).toHaveLength(2); // created_at DESC, item_id DESC
+    expect(res.promoted.map((k) => k.item_id)).toEqual(['newest']);
+    expect(res.heldByLiveLimit).toBe(true);
   });
 });

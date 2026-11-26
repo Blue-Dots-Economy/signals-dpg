@@ -1,4 +1,5 @@
-import { and, count, eq, ne, sql } from 'drizzle-orm';
+import { isDeepStrictEqual } from 'node:util';
+import { and, count, eq, ne, sql, type SQL } from 'drizzle-orm';
 import {
   getDomainItemSchema,
   getDomainItemTypes,
@@ -194,9 +195,9 @@ export interface CreateItemServiceParams {
    */
   consent_accepted?: boolean;
   /**
-   * Skip the per-user profile cap (MAX_PROFILES_PER_USER / the domain's
-   * `max_profiles_per_user`). For trusted internal callers such as seed
-   * scripts only; every request-driven create path is capped.
+   * Skip the per-user profile limits (the domain's `profile_limits`, else
+   * MAX_PROFILES_PER_USER). For trusted internal callers such as seed scripts
+   * only; every request-driven create path is capped.
    */
   skip_profile_limit?: boolean;
 }
@@ -292,31 +293,74 @@ async function resolveSchema(params: {
   return { itemSchemaUrl, itemState, itemInstanceUrl, itemSchema };
 }
 
-/**
- * Effective per-user profile cap for a (network, domain): the domain's
- * `max_profiles_per_user` when set, otherwise the global
- * `MAX_PROFILES_PER_USER` default. Returns null when no finite cap applies.
- */
-async function resolveProfileLimit(
-  network: string,
-  domain: string,
-): Promise<number | null> {
-  let domainLimit: number | undefined;
-  try {
-    const cfg = await getNetworkConfigById(network);
-    domainLimit = cfg.domains.find((d) => d.id === domain)?.max_profiles_per_user;
-  } catch {
-    // Fall back to the global default if the config can't be read here.
-  }
-  const limit = domainLimit ?? apiConfig.max_profiles_per_user;
-  return typeof limit === 'number' && Number.isFinite(limit) ? limit : null;
+const LIVE_LIMIT_DRAFT_MESSAGE =
+  'Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it.';
+export const LIVE_LIMIT_UNPAUSE_MESSAGE =
+  'Live profile limit reached. Pause or retire any live profile to unpause this one.';
+/** Response extra for a write the live limit kept in draft; empty otherwise. */
+export function liveLimitMessage(r: { heldByLiveLimit: boolean }): { message?: string } {
+  return r.heldByLiveLimit ? { message: LIVE_LIMIT_DRAFT_MESSAGE } : {};
+}
+const TOTAL_LIMIT_MESSAGE =
+  'This account has reached its profile limit. Retire any profile to add another.';
+
+interface ProfileLimits {
+  /** Max live profiles, or null when the domain sets no live limit. */
+  live: number | null;
+  /** Max non-retired profiles. */
+  total: number;
 }
 
 /**
- * Enforce the per-user profile cap atomically, inside the caller's transaction.
- * A transaction-scoped advisory lock on (user, network, domain, item_type)
- * serializes concurrent creates so two racing inserts can't both pass the
- * count check. Throws 409 PROFILE_LIMIT_REACHED at the cap.
+ * Per-user profile limits for a (network, domain): the domain's
+ * `profile_limits`, else no live limit and `MAX_PROFILES_PER_USER` as total.
+ */
+async function resolveProfileLimits(network: string, domain: string): Promise<ProfileLimits> {
+  try {
+    const cfg = await getNetworkConfigById(network);
+    const limits = cfg.domains.find((d) => d.id === domain)?.profile_limits;
+    if (limits) return limits;
+  } catch {
+    // Fall back to the global default if the config can't be read here.
+  }
+  return { live: null, total: apiConfig.max_profiles_per_user };
+}
+
+type ProfileScope = Pick<
+  CreateItemServiceParams,
+  'created_by' | 'item_network' | 'item_domain' | 'item_type'
+>;
+
+/**
+ * Transaction-scoped advisory lock on (user, network, domain, item_type), so
+ * concurrent writes can't both pass a limit count. Re-entrant within one
+ * transaction; under autocommit it releases at once, so callers must be in one.
+ */
+async function lockProfileScope(exec: DbOrTx, scope: ProfileScope): Promise<void> {
+  const key = `${scope.created_by}:${scope.item_network}:${scope.item_domain}:${scope.item_type}`;
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+}
+
+/** Count the owner's profiles in this scope matching `status`. */
+async function countProfiles(exec: DbOrTx, scope: ProfileScope, status: SQL): Promise<number> {
+  const [row] = await exec
+    .select({ n: count() })
+    .from(items)
+    .where(
+      and(
+        eq(items.created_by, scope.created_by),
+        eq(items.item_network, scope.item_network),
+        eq(items.item_domain, scope.item_domain),
+        eq(items.item_type, scope.item_type),
+        status,
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+/**
+ * Enforce the total profile limit on create, inside the caller's transaction.
+ * Throws 409 PROFILE_LIMIT_REACHED (`limit_type: 'total'`) at the limit.
  *
  * Retired rows do not hold a slot: retiring is the remedy the 409 message
  * offers. This is safe only because `retired` is terminal (no
@@ -327,39 +371,35 @@ async function resolveProfileLimit(
  * retired items: it protects the per-account tenancy key, which retire does not
  * reset.
  */
-async function assertProfileLimit(
-  exec: DbOrTx,
-  params: Pick<
-    CreateItemServiceParams,
-    'created_by' | 'item_network' | 'item_domain' | 'item_type'
-  >,
-): Promise<void> {
-  const limit = await resolveProfileLimit(params.item_network, params.item_domain);
-  if (limit === null) return;
+async function assertProfileLimit(exec: DbOrTx, params: ProfileScope): Promise<void> {
+  const { total } = await resolveProfileLimits(params.item_network, params.item_domain);
+  if (!Number.isFinite(total)) return;
+  await lockProfileScope(exec, params);
 
-  const scope = `${params.created_by}:${params.item_network}:${params.item_domain}:${params.item_type}`;
-  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scope}))`);
-
-  const [row] = await exec
-    .select({ n: count() })
-    .from(items)
-    .where(
-      and(
-        eq(items.created_by, params.created_by),
-        eq(items.item_network, params.item_network),
-        eq(items.item_domain, params.item_domain),
-        eq(items.item_type, params.item_type),
-        ne(items.lifecycle_status, 'retired'),
-      ),
-    );
-
-  if ((row?.n ?? 0) >= limit) {
-    throw new ItemServiceError(
-      409,
-      'PROFILE_LIMIT_REACHED',
-      `This user already has the maximum of ${limit} ${params.item_domain} profile(s) allowed. Retire an existing profile to create a new one.`,
-    );
+  if ((await countProfiles(exec, params, ne(items.lifecycle_status, 'retired'))) >= total) {
+    throw new ItemServiceError(409, 'PROFILE_LIMIT_REACHED', TOTAL_LIMIT_MESSAGE, {
+      limit_type: 'total',
+    });
   }
+}
+
+/**
+ * The `live_limit` gate context: whether the owner has a free live slot in this
+ * scope. Takes the scope lock first so two writes can't both take the last
+ * slot. Returns undefined when the gate is not configured.
+ */
+export async function resolveLiveSlotFree(
+  exec: DbOrTx,
+  gates: readonly GoLiveGate[],
+  scope: ProfileScope,
+): Promise<boolean | undefined> {
+  if (!gates.includes('live_limit')) return undefined;
+  const { live } = await resolveProfileLimits(scope.item_network, scope.item_domain);
+  // The gate comes from `profile_limits`, so a missing limit here means the
+  // config could not be read: fail closed (stay draft) rather than publish.
+  if (live === null) return false;
+  await lockProfileScope(exec, scope);
+  return (await countProfiles(exec, scope, eq(items.lifecycle_status, 'live'))) < live;
 }
 
 /**
@@ -447,6 +487,9 @@ export async function createItemInternal(
     // gated minor.
     consent_accepted: params.consent_accepted ?? false,
     gates: goLiveGates,
+    live_slot_free: params.skip_profile_limit
+      ? true
+      : await resolveLiveSlotFree(exec, goLiveGates, params),
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
@@ -489,7 +532,7 @@ export async function createItemInternal(
       'An item with the same type and id already exists'
     );
   }
-  return result[0];
+  return { ...result[0], heldByLiveLimit: classification.held_by_live_limit === true };
 }
 
 export interface UpdateItemInternalResult {
@@ -508,6 +551,10 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+  /** The live limit kept a profile that would have gone live in `draft`. */
+  heldByLiveLimit: boolean;
+  /** Fields, locations or lifecycle status changed; false for a no-op save. */
+  changed: boolean;
 }
 
 /** Whether a domain's configured gate set includes the `owner_required` gate. */
@@ -546,11 +593,14 @@ export async function resolveGoLiveGates(
 ): Promise<readonly GoLiveGate[]> {
   const networkConfig = await getNetworkConfigById(network);
   const domainConfig = networkConfig.domains.find((d) => d.id === domain);
-  const gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
+  let gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
   // The U18 guardian check lives in `consent_required`, so a guardian-gated
   // domain always gets that gate: the age gate must never be droppable by config.
   if (domainConfig?.guardian_consent_required && !gates.includes('consent_required')) {
-    return [...gates, 'consent_required'];
+    gates = [...gates, 'consent_required'];
+  }
+  if (domainConfig?.profile_limits) {
+    gates = [...gates, 'live_limit'];
   }
   return gates;
 }
@@ -600,11 +650,20 @@ export async function guardianGateBlocksGoLive(
   return !guardianRow;
 }
 
+export interface PromotionResult {
+  /** The profile flipped `draft → live`. */
+  promoted: boolean;
+  /** The live limit kept a profile that would have gone live in `draft`. */
+  heldByLiveLimit: boolean;
+}
+
+const NOT_PROMOTED: PromotionResult = { promoted: false, heldByLiveLimit: false };
+
 /**
  * Promote a `draft` profile to `live` after its owner accepts
  * `profile_creation` consent, re-running the write-path classifier so the
  * completeness rules stay in one place. `paused` is sticky and `live` needs no
- * change. Returns true if it flipped to live.
+ * change.
  *
  * The caller must already have recorded the consent row and verified ownership;
  * this only re-evaluates lifecycle.
@@ -612,7 +671,7 @@ export async function guardianGateBlocksGoLive(
 export async function promoteItemOnProfileConsent(
   exec: DbOrTx,
   itemId: string
-): Promise<boolean> {
+): Promise<PromotionResult> {
   const [item] = await exec
     .select({
       item_id: items.item_id,
@@ -629,7 +688,7 @@ export async function promoteItemOnProfileConsent(
     .where(eq(items.item_id, itemId))
     .limit(1);
 
-  if (!item || item.lifecycle_status !== 'draft') return false;
+  if (!item || item.lifecycle_status !== 'draft') return NOT_PROMOTED;
 
   const itemSchema = await getOrFetchSchemaByUrl({
     schemaUrl: item.item_schema_url,
@@ -653,7 +712,7 @@ export async function promoteItemOnProfileConsent(
   // The caller recorded the consent row, so `consent_required` reduces to the
   // U18 guardian check (fail-closed for a gated minor or null age).
   const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
-  const { lifecycle_status } = classify_item({
+  const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
     current_status: 'draft',
@@ -666,15 +725,18 @@ export async function promoteItemOnProfileConsent(
       item.item_network,
       item.item_domain,
     ),
+    live_slot_free: await resolveLiveSlotFree(exec, goLiveGates, item),
   });
 
-  if (lifecycle_status !== 'live') return false;
+  if (classification.lifecycle_status !== 'live') {
+    return { promoted: false, heldByLiveLimit: classification.held_by_live_limit === true };
+  }
 
   await exec
     .update(items)
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
     .where(eq(items.item_id, itemId));
-  return true;
+  return { promoted: true, heldByLiveLimit: false };
 }
 
 /**
@@ -685,7 +747,7 @@ export async function promoteItemOnProfileConsent(
 export async function upsertGuardianProfileConsentAndPromote(
   tx: DbOrTx,
   args: { userId: string; itemId: string; network: string; brand?: string | null; documentVersion: number },
-): Promise<boolean> {
+): Promise<PromotionResult> {
   await tx
     .insert(consent_record)
     .values(guardianProfileConsentRow(args))
@@ -736,6 +798,8 @@ async function computeItemStateUpdate(
   mergedFullState: Record<string, unknown>;
   addressChanged: boolean;
   writes: { item_state: unknown; item_private_state: string; lifecycle_status: string };
+  heldByLiveLimit: boolean;
+  changed: boolean;
 }> {
   const priorPrivate =
     existingItem.item_private_state === ''
@@ -811,12 +875,21 @@ async function computeItemStateUpdate(
             existingItem.item_domain,
           )
         : undefined,
+    // Same as above: `live_limit` passes for an already-live item.
+    live_slot_free:
+      existingItem.lifecycle_status === 'draft'
+        ? await resolveLiveSlotFree(exec, goLiveGates, existingItem)
+        : undefined,
   });
 
   return {
     mergedFullState,
     addressChanged,
     writes: { item_state, item_private_state, lifecycle_status: classification.lifecycle_status },
+    heldByLiveLimit: classification.held_by_live_limit === true,
+    changed:
+      !isDeepStrictEqual(priorFullState, mergedFullState) ||
+      classification.lifecycle_status !== existingItem.lifecycle_status,
   };
 }
 
@@ -874,6 +947,8 @@ export async function updateItemInternal(
   const updateValues: Record<string, unknown> = {
     updated_at: sql`now()`,
   };
+  let heldByLiveLimit = false;
+  let changed = false;
 
   // The schema is needed to merge/validate state, classify lifecycle, and
   // jitter a private location field.
@@ -933,6 +1008,8 @@ export async function updateItemInternal(
       );
       mergedFullState = stateUpdate.mergedFullState;
       addressChanged = stateUpdate.addressChanged;
+      heldByLiveLimit = stateUpdate.heldByLiveLimit;
+      changed = stateUpdate.changed;
       Object.assign(updateValues, stateUpdate.writes);
     }
 
@@ -946,6 +1023,10 @@ export async function updateItemInternal(
     );
     if (locationUpdate !== undefined) {
       updateValues.item_locations = locationUpdate;
+      changed ||= !sameLocations(
+        (existingItem.item_locations as ItemLocation[] | null) ?? [],
+        locationUpdate,
+      );
     }
   }
 
@@ -978,5 +1059,5 @@ export async function updateItemInternal(
   }
   const row = updateResult[0];
 
-  return { row };
+  return { row, heldByLiveLimit, changed };
 }

@@ -106,7 +106,11 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 }));
 
 vi.mock('@dpg/schemas', () => ({
-  default: { object: () => ({}), number: () => ({ int: () => ({}) }) },
+  default: {
+    object: () => ({}),
+    number: () => ({ int: () => ({}) }),
+    string: () => ({ optional: () => ({}) }),
+  },
   ConsentAcceptBodySchema: {},
   ConsentAcceptResponseSchema: {},
   ProfileConsentAcceptBodySchema: {},
@@ -139,6 +143,8 @@ vi.mock('@/services/consent_acceptance', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { heldByLiveLimit?: boolean }) =>
+    r.heldByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   isItemOwnedBy: (...a: unknown[]) => isItemOwnedBy(...a),
   promoteItemOnProfileConsent: (...a: unknown[]) =>
     promoteItemOnProfileConsent(...a),
@@ -216,7 +222,7 @@ beforeEach(() => {
   hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
   resolveConsentVersion.mockResolvedValue(2);
   resolveUserConsentVariant.mockResolvedValue('adult');
-  promoteItemOnProfileConsent.mockResolvedValue(false);
+  promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, heldByLiveLimit: false });
   invalidateItemFetchCache.mockResolvedValue(undefined);
 });
 
@@ -398,7 +404,7 @@ describe('accept_profile_consent_handler', () => {
   });
 
   it('does NOT sweep the item-fetch caches when nothing was promoted', async () => {
-    promoteItemOnProfileConsent.mockResolvedValue(false);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, heldByLiveLimit: false });
 
     const reply = await call(accept_profile_consent_handler, {
       user: { id: 'u1' },
@@ -411,7 +417,7 @@ describe('accept_profile_consent_handler', () => {
   });
 
   it('sweeps the item-fetch caches after a draft->live promotion (#464)', async () => {
-    promoteItemOnProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
 
     const reply = await call(accept_profile_consent_handler, {
       user: { id: 'u1' },
@@ -424,7 +430,7 @@ describe('accept_profile_consent_handler', () => {
   });
 
   it('still returns recorded:1 when the cache sweep fails (best-effort)', async () => {
-    promoteItemOnProfileConsent.mockResolvedValue(true);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
     invalidateItemFetchCache.mockRejectedValue(new Error('redis down'));
 
     const reply = await call(accept_profile_consent_handler, {

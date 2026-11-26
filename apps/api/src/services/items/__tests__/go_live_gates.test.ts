@@ -20,6 +20,7 @@ const ctx = (over: Partial<GoLiveContext> = {}): GoLiveContext => ({
   hasOwner: true,
   defaultConfigured: true,
   currentStatus: 'draft',
+  liveSlotFree: true,
   ...over,
 });
 
@@ -104,5 +105,22 @@ describe('passesGoLiveGates', () => {
 
   it('with consent_required alone, completeness is ignored', () => {
     expect(passesGoLiveGates(['consent_required'], ctx({ state: {} }))).toBe(true);
+  });
+});
+
+describe('GO_LIVE_GATE_CHECKS.live_limit', () => {
+  it('passes a draft when a live slot is free', () => {
+    expect(GO_LIVE_GATE_CHECKS.live_limit(ctx({ liveSlotFree: true }))).toBe(true);
+  });
+
+  it('blocks a draft when no live slot is free', () => {
+    expect(GO_LIVE_GATE_CHECKS.live_limit(ctx({ liveSlotFree: false }))).toBe(false);
+  });
+
+  // An edit to a live profile must not demote it while the limit is full.
+  it('passes an already-live profile even when no slot is free', () => {
+    expect(
+      GO_LIVE_GATE_CHECKS.live_limit(ctx({ liveSlotFree: false, currentStatus: 'live' })),
+    ).toBe(true);
   });
 });

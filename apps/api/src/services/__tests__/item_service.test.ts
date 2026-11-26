@@ -784,30 +784,82 @@ describe('createItemInternal — profile cap', () => {
     expect(where).toContain('items.item_type');
   });
 
-  it('names retire, not delete, in the 409 message (#737)', async () => {
+  it('names retire, not delete, in the 409 message, with no numbers (#737, #927)', async () => {
     // Retire is the action that exists (per-row control in the UI, #347) and,
-    // with the count above, the one that actually frees the slot. Telling a
-    // capped participant to "delete" pointed at nothing they could do.
+    // with the count above, the one that actually frees the slot.
     apiConfig.max_profiles_per_user = 1;
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
 
     const err = await createItemInternal(exec, createParams()).catch((e: Error) => e);
 
-    expect((err as Error).message).toContain('Retire an existing profile to create a new one.');
-    expect((err as Error).message).not.toContain('Delete an existing profile');
+    expect((err as Error).message).toBe(
+      'This account has reached its profile limit. Retire any profile to add another.',
+    );
+    expect((err as Error).message).not.toMatch(/\d/);
+    expect(err).toMatchObject({ details: { limit_type: 'total' } });
   });
 
-  it("prefers the domain's max_profiles_per_user over the global default", async () => {
+  it("uses the domain's profile_limits.total over the global default", async () => {
     apiConfig.max_profiles_per_user = 50;
     getNetworkConfigById.mockResolvedValue({
-      domains: [{ id: 'student', max_profiles_per_user: 1 }],
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 1 } }],
     });
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
 
-    await expect(createItemInternal(exec, createParams())).rejects.toThrow(
-      /maximum of 1 student profile\(s\)/,
+    await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: 'PROFILE_LIMIT_REACHED',
+    });
+  });
+
+  it('checks the live slot and passes it to the classifier when profile_limits is set', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 2, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ n: 2 }]); // total count: under 3
+    queue.push([{ n: 2 }]); // live count: at 2, no slot
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams());
+
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gates: ['schema_required', 'live_limit'],
+        live_slot_free: false,
+      }),
+    );
+    expect(JSON.stringify(rec.selectWheres[1])).toContain('live');
+  });
+
+  it('reports heldByLiveLimit when the classifier holds the profile in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    const { exec, queue } = makeExec();
+    queue.push([{ n: 1 }]);
+    queue.push([{ n: 1 }]);
+    queue.push([ROW]);
+
+    await expect(createItemInternal(exec, createParams())).resolves.toMatchObject({
+      heldByLiveLimit: true,
+    });
+  });
+
+  it('gives a free live slot without counting for skip_profile_limit callers', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 1 } }],
+    });
+    const { exec, queue } = makeExec();
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams({ skip_profile_limit: true }));
+
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: true }),
     );
   });
 
@@ -879,7 +931,7 @@ describe('createItemInternal — storage shape', () => {
     expect(values.item_private_state).toBe('enc:{"phone":"9990001111"}');
     expect(values.item_locations).toEqual([{ lat: 12.901, lng: 77.6, label: 'home' }]);
     expect(values.lifecycle_status).toBe('live');
-    expect(out).toEqual(ROW);
+    expect(out).toEqual({ ...ROW, heldByLiveLimit: false });
   });
 
   it('stores an empty private blob (no encryption) when nothing is private', async () => {
@@ -1012,7 +1064,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(true);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: true, heldByLiveLimit: false });
     expect(rec.updates[0].set).toMatchObject({ lifecycle_status: 'live' });
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ current_status: 'draft', consent_accepted: true }),
@@ -1021,7 +1073,7 @@ describe('promoteItemOnProfileConsent', () => {
 
   it('returns false when the item does not exist', async () => {
     const { exec, rec } = makeExec();
-    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1029,7 +1081,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ ...draftItem, lifecycle_status: 'paused' }]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).not.toHaveBeenCalled();
   });
@@ -1039,7 +1091,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1068,10 +1120,50 @@ describe('promoteItemOnProfileConsent', () => {
     queue.push([{ age: 15 }]);
     queue.push([]); // no guardian consent row
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ consent_accepted: false }),
+    );
+  });
+});
+
+describe('promoteItemOnProfileConsent — live limit', () => {
+  it('fails closed (no free slot) when the limits cannot be re-read', async () => {
+    const cfg = { domains: [{ id: 'student', profile_limits: { live: 5, total: 9 } }] };
+    getNetworkConfigById
+      .mockResolvedValueOnce(cfg) // resolveGoLiveGates
+      .mockResolvedValueOnce(cfg) // guardianGateBlocksGoLive
+      .mockRejectedValueOnce(new Error('config down')); // resolveLiveSlotFree
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+
+    await promoteItemOnProfileConsent(exec, 'i1');
+
+    expect(classify_item).toHaveBeenCalledWith(expect.objectContaining({ live_slot_free: false }));
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('reports a complete draft the live limit kept in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([{ n: 1 }]); // live count: limit reached
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      heldByLiveLimit: true,
+    });
+    expect(rec.updates).toHaveLength(0);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gates: ['schema_required', 'live_limit'],
+        live_slot_free: false,
+      }),
     );
   });
 });
@@ -1089,7 +1181,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
       documentVersion: 2,
     });
 
-    expect(promoted).toBe(true);
+    expect(promoted).toEqual({ promoted: true, heldByLiveLimit: false });
     expect(rec.inserts[0].values).toEqual({ userId: 'u1', itemId: 'i1', source: 'guardian' });
     // Idempotent on a repeat guardian acceptance for the same item.
     expect(JSON.stringify(rec.conflicts[0])).toContain('cr.source');
@@ -1106,7 +1198,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
         network: 'blue_dot',
         documentVersion: 1,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
     expect(rec.inserts).toHaveLength(1);
   });
 });
@@ -1182,6 +1274,79 @@ describe('updateItemInternal — ownership scoping', () => {
 });
 
 describe('updateItemInternal — state edits', () => {
+  it('reports heldByLiveLimit for a draft the live limit keeps in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([{ n: 1 }]); // live count: limit reached
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
+
+    expect(res.heldByLiveLimit).toBe(true);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: false }),
+    );
+  });
+
+  it('reports changed:false when the save leaves fields and status as they were', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, {
+      item_state: { ...existingItem.item_state },
+    });
+
+    expect(res.changed).toBe(false);
+  });
+
+  it('reports changed:true when an unchanged draft goes live', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, {
+      item_state: { ...existingItem.item_state },
+    });
+
+    expect(res.changed).toBe(true);
+  });
+
+  it('reports changed:true when a field changed', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'Zed' } });
+
+    expect(res.changed).toBe(true);
+  });
+
+  it('does not count live slots when editing an already-live profile', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ ...existingItem, lifecycle_status: 'live' }]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
+
+    expect(res.heldByLiveLimit).toBe(false);
+    expect(rec.executes).toHaveLength(0); // no advisory lock taken
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: undefined }),
+    );
+  });
+
   it('409 ITEM_RETIRED — a retired item can never be re-edited (retire is terminal)', async () => {
     const { exec, queue } = makeExec();
     queue.push([{ ...existingItem, lifecycle_status: 'retired' }]);

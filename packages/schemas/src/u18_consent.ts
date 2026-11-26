@@ -70,6 +70,8 @@ export const U18ProfileConsentVerifyBodySchema = U18ProfileConsentBodySchema.ext
 export const U18ProfileConsentVerifyResponseSchema = z.object({
   verified: z.boolean(),
   promoted: z.boolean(),
+  // Present only when the live profile limit kept the profile in draft.
+  message: z.string().optional(),
 });
 
 export type U18ProfileConsentBody = z.infer<typeof U18ProfileConsentBodySchema>;
@@ -93,7 +95,11 @@ export const U18ProfilePrecreateVerifyResponseSchema = z.object({ verified: z.bo
 // Called right after the item is created: consumes the pre-create token,
 // writes the guardian profile_creation row and promotes the item to live.
 export const U18ProfileFinalizeBodySchema = U18ProfileConsentBodySchema;
-export const U18ProfileFinalizeResponseSchema = z.object({ promoted: z.boolean() });
+export const U18ProfileFinalizeResponseSchema = z.object({
+  promoted: z.boolean(),
+  // Present only when the live profile limit kept the profile in draft.
+  message: z.string().optional(),
+});
 
 export type U18ProfilePrecreateBody = z.infer<typeof U18ProfilePrecreateBodySchema>;
 export type U18ProfilePrecreateVerifyBody = z.infer<typeof U18ProfilePrecreateVerifyBodySchema>;

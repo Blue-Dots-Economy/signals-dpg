@@ -87,8 +87,19 @@ const {
   };
 });
 
+const { dispatchItemLifecycleNotification } = vi.hoisted(() => ({
+  dispatchItemLifecycleNotification: vi.fn(async (..._a: unknown[]) => {}),
+}));
+// update_item lazy-imports this; the mock intercepts the dynamic import.
+vi.mock('@/notifications/notify_item_lifecycle', () => ({
+  dispatchItemLifecycleNotification: (...a: unknown[]) => dispatchItemLifecycleNotification(...a),
+}));
+
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
+    // update_item runs updateItemInternal inside a transaction; the fake hands
+    // the callback a stand-in tx (updateItemInternal itself is mocked).
+    transaction: (fn: (tx: unknown) => unknown) => fn({ kind: 'tx' }),
     delete: (table: unknown) => ({
       where: (where: unknown) => ({
         returning: (cols: unknown) => {
@@ -125,6 +136,7 @@ vi.mock('@dpg/schemas', () => {
       object: (shape: unknown) => ({ shape }),
       number: () => leaf,
       null: () => leaf,
+      string: () => ({ optional: () => leaf }),
     },
     ItemResponseSchema: leaf,
     UpdateItemBodySchema: { kind: 'update-body' },
@@ -139,6 +151,8 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { heldByLiveLimit?: boolean }) =>
+    r.heldByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   ItemServiceError,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateItemInternal: (...a: any[]) => updateItemInternal(...a),
@@ -267,7 +281,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   // Deterministic defaults, re-applied every test (clearAllMocks keeps
   // implementations, but a per-test override must not survive).
-  updateItemInternal.mockImplementation(async () => ({ row: baseUpdatedRow() }));
+  updateItemInternal.mockImplementation(async () => ({ row: baseUpdatedRow(), changed: true }));
   publishItemEvent.mockImplementation(async () => {});
   invalidateItemFetchCache.mockImplementation(async () => {});
   decryptItemPrivate.mockImplementation((row: Record<string, unknown>) => ({
@@ -367,6 +381,54 @@ describe('update_item_handler', () => {
     expect(invalidateItemFetchCache).toHaveBeenCalledWith('yellow_dot', 'student');
   });
 
+  it('runs the update in a transaction and returns the live-limit message when held', async () => {
+    updateItemInternal.mockImplementation(async () => ({
+      row: baseUpdatedRow(),
+      heldByLiveLimit: true,
+    }));
+
+    const reply = await callHandler(update_item_handler, {
+      params,
+      body,
+      user: { id: 'user-1', role: 'user' },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    expect(updateItemInternal.mock.calls[0][0]).toEqual({ kind: 'tx' });
+    expect((reply.body as { message?: string }).message).toBe('LIVE_LIMIT_DRAFT');
+  });
+
+  it('sends the owner the update email when something changed', async () => {
+    await callHandler(update_item_handler, { params, body, user: { id: 'user-1', role: 'user' } });
+
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalledTimes(1));
+    expect(dispatchItemLifecycleNotification.mock.calls[0][0]).toMatchObject({ op: 'update' });
+  });
+
+  it('sends no email/SMS for a no-op save (e.g. re-saving a parked draft)', async () => {
+    updateItemInternal.mockImplementation(async () => ({ row: baseUpdatedRow(), changed: false }));
+
+    const reply = await callHandler(update_item_handler, {
+      params,
+      body,
+      user: { id: 'user-1', role: 'user' },
+    });
+
+    expect(reply.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dispatchItemLifecycleNotification).not.toHaveBeenCalled();
+  });
+
+  it('omits message when the update was not held by the live limit', async () => {
+    const reply = await callHandler(update_item_handler, {
+      params,
+      body,
+      user: { id: 'user-1', role: 'user' },
+    });
+
+    expect(reply.body).not.toHaveProperty('message');
+  });
+
   it('passes isAdmin=true through for an admin caller', async () => {
     await callHandler(update_item_handler, {
       params,
@@ -377,7 +439,7 @@ describe('update_item_handler', () => {
   });
 
   it('drops item_private_state and returns the decrypted merged state', async () => {
-    updateItemInternal.mockImplementation(async () => ({ row: baseUpdatedRow() }));
+    updateItemInternal.mockImplementation(async () => ({ row: baseUpdatedRow(), changed: true }));
     decryptItemPrivate.mockImplementation(() => ({
       mergedState: { name: 'Ada', phone: '+15550000' },
     }));

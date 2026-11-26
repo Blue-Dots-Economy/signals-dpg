@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { items } from '@dpg/database';
 import { resolveConsentVersion } from '@/services/consent_version';
 import {
@@ -53,12 +53,12 @@ const PROFILE_CREATION_KEY = 'profile_creation';
 export async function recordParticipantConsent(
   tx: DbOrTx,
   args: RecordParticipantConsentArgs,
-): Promise<{ recorded: number; promoted: boolean }> {
+): Promise<{ recorded: number; promoted: boolean; heldByLiveLimit: boolean }> {
   const { compliance, userId, itemId, network, channel, acceptedAt } = args;
   const brand = args.brand ?? null;
 
   if (!compliance || compliance.length === 0) {
-    return { recorded: 0, promoted: false };
+    return { recorded: 0, promoted: false, heldByLiveLimit: false };
   }
 
   const accepted = new Set(
@@ -67,6 +67,7 @@ export async function recordParticipantConsent(
 
   let recorded = 0;
   let promoted = false;
+  let heldByLiveLimit = false;
 
   // 1. User-level terms / privacy.
   for (const [key, category] of Object.entries(USER_LEVEL_KEYS)) {
@@ -145,12 +146,12 @@ export async function recordParticipantConsent(
         }
       }
       if (profileConsentPresent) {
-        promoted = await promoteItemOnProfileConsent(tx, itemId);
+        ({ promoted, heldByLiveLimit } = await promoteItemOnProfileConsent(tx, itemId));
       }
     }
   }
 
-  return { recorded, promoted };
+  return { recorded, promoted, heldByLiveLimit };
 }
 
 /**
@@ -160,12 +161,13 @@ export async function recordParticipantConsent(
  *
  * Returns the key of every item flipped to `live`; the caller must publish an
  * item event for each so signals-search re-indexes it, after the surrounding
- * transaction commits.
+ * transaction commits. Newest first, so when the live limit has fewer free
+ * slots than drafts, the newest drafts take them.
  */
 export async function promoteEligibleDraftsForUser(
   tx: DbOrTx,
   userId: string,
-): Promise<PromotedItemKey[]> {
+): Promise<{ promoted: PromotedItemKey[]; heldByLiveLimit: boolean }> {
   // Sweeps drafts across all networks; each promotion still passes the
   // per-item guardian/completeness/consent gate.
   const drafts = await tx
@@ -176,11 +178,15 @@ export async function promoteEligibleDraftsForUser(
       item_type: items.item_type,
     })
     .from(items)
-    .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')));
+    .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')))
+    .orderBy(desc(items.created_at), desc(items.item_id));
   const promoted: PromotedItemKey[] = [];
+  let heldByLiveLimit = false;
   for (const d of drafts) {
     if (await hasAcceptedProfileConsent(tx, d.item_id)) {
-      if (await promoteItemOnProfileConsent(tx, d.item_id)) {
+      const result = await promoteItemOnProfileConsent(tx, d.item_id);
+      heldByLiveLimit ||= result.heldByLiveLimit;
+      if (result.promoted) {
         promoted.push({
           item_network: d.item_network,
           item_domain: d.item_domain,
@@ -190,5 +196,5 @@ export async function promoteEligibleDraftsForUser(
       }
     }
   }
-  return promoted;
+  return { promoted, heldByLiveLimit };
 }

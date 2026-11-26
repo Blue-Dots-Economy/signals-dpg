@@ -1,6 +1,6 @@
 import type { JSONSchemaLike } from '../metrics/profile_completion.js';
 import type { GoLiveGate } from '@dpg/schemas';
-import { passesGoLiveGates } from './go_live_gates.js';
+import { passesGoLiveGates, type GoLiveContext } from './go_live_gates.js';
 
 export type LifecycleStatus = 'draft' | 'live' | 'paused' | 'retired';
 export type { GoLiveGate };
@@ -40,10 +40,17 @@ export interface ClassifierInput {
    * recoverable, rather than silently publishing unowned profiles.
    */
   owner_context?: { has_owner: boolean; default_configured: boolean };
+  /**
+   * For `live_limit` only: whether the owner has a free live slot. Omitted
+   * fails closed (no slot), so a forgotten context leaves profiles in `draft`.
+   */
+  live_slot_free?: boolean;
 }
 
 export interface ClassifierResult {
   lifecycle_status: LifecycleStatus;
+  /** Set when `live_limit` is the only gate that kept the profile in `draft`. */
+  held_by_live_limit?: true;
 }
 
 /**
@@ -65,7 +72,7 @@ export const classify_item = (input: ClassifierInput): ClassifierResult => {
   }
 
   const gates = input.gates ?? DEFAULT_GO_LIVE_GATES;
-  const live = passesGoLiveGates(gates, {
+  const ctx: GoLiveContext = {
     schema: input.schema,
     state: input.merged_state ?? {},
     consentSatisfied: input.consent_accepted,
@@ -74,6 +81,15 @@ export const classify_item = (input: ClassifierInput): ClassifierResult => {
     hasOwner: input.owner_context?.has_owner ?? false,
     defaultConfigured: input.owner_context?.default_configured ?? true,
     currentStatus: input.current_status,
-  });
-  return { lifecycle_status: live ? 'live' : 'draft' };
+    liveSlotFree: input.live_slot_free ?? false,
+  };
+  if (passesGoLiveGates(gates, ctx)) {
+    return { lifecycle_status: 'live' };
+  }
+  const heldByLiveLimit =
+    gates.includes('live_limit') &&
+    passesGoLiveGates(gates.filter((g) => g !== 'live_limit'), ctx);
+  return heldByLiveLimit
+    ? { lifecycle_status: 'draft', held_by_live_limit: true }
+    : { lifecycle_status: 'draft' };
 };

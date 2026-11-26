@@ -11,11 +11,20 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
-import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
+import {
+  promoteItemOnProfileConsent,
+  isItemOwnedBy,
+  liveLimitMessage,
+  type PromotionResult,
+} from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 
-const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
+const ProfileConsentAcceptResponseSchema = z.object({
+  recorded: z.number().int(),
+  // Present only when the live profile limit kept the profile in draft.
+  message: z.string().optional(),
+});
 
 type Req = FastifyRequest<{ Body: ProfileConsentAcceptBody }>;
 
@@ -136,7 +145,7 @@ export const accept_profile_consent_handler = async (
     });
   }
 
-  let promoted = false;
+  let promotion: PromotionResult = { promoted: false, heldByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
       await tx.insert(consent_record).values({
@@ -152,7 +161,7 @@ export const accept_profile_consent_handler = async (
       });
       // Profile consent can make a complete draft live. Promote in the same
       // transaction so the ledger write and lifecycle flip are atomic.
-      promoted = await promoteItemOnProfileConsent(tx, body.item_id);
+      promotion = await promoteItemOnProfileConsent(tx, body.item_id);
     });
   } catch (err) {
     // The idempotency check and insert are not atomic, so a concurrent
@@ -178,7 +187,7 @@ export const accept_profile_consent_handler = async (
   // A promotion leaves a stale `draft` in both item read caches (the 1 s local
   // one and the domain-TTL inter-instance ones). Best-effort: a cache failure
   // must never fail an already-recorded consent.
-  if (promoted) {
+  if (promotion.promoted) {
     await invalidateItemFetchCache(body.network, body.item_domain).catch((err) =>
       request.log.warn(
         { err },
@@ -204,5 +213,5 @@ export const accept_profile_consent_handler = async (
     );
   }
 
-  return reply.code(200).send({ recorded: 1 });
+  return reply.code(200).send({ recorded: 1, ...liveLimitMessage(promotion) });
 };

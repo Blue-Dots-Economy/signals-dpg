@@ -22,7 +22,13 @@ const {
   dispatchItemLifecycleNotification,
   publishItemEvent,
   invalidateItemFetchCache,
+  resolveGoLiveGates,
+  resolveLiveSlotFree,
 } = vi.hoisted(() => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveGoLiveGates: vi.fn(async (..._a: any[]) => ['schema_required'] as string[]),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveLiveSlotFree: vi.fn(async (..._a: any[]) => undefined as boolean | undefined),
   rowQueue: [] as unknown[][],
   updates: [] as { table: unknown; values: Record<string, unknown>; where: unknown }[],
   // Resettable failure flag — never monkey-patch the shared row queue, an
@@ -46,8 +52,12 @@ const {
   decryptItemPrivate: vi.fn((..._a: any[]) => ({ mergedState: { name: 'Ada' } })),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   hasAcceptedProfileConsent: vi.fn(async (..._a: any[]) => true),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  classify_item: vi.fn((..._a: any[]) => ({ lifecycle_status: 'live' })),
+  classify_item: vi.fn(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (..._a: any[]): { lifecycle_status: string; held_by_live_limit?: true } => ({
+      lifecycle_status: 'live',
+    }),
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   buildRetiredItemState: vi.fn((..._a: any[]) => ({ scrubbed: true })),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,8 +168,17 @@ vi.mock('@/services/consent_acceptance', () => ({
 }));
 
 vi.mock('@/services/items/classifier', () => ({
+  DEFAULT_GO_LIVE_GATES: ['schema_required'],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   classify_item: (...a: any[]) => classify_item(...a),
+}));
+
+vi.mock('@/services/item_service', () => ({
+  LIVE_LIMIT_UNPAUSE_MESSAGE: 'LIVE_LIMIT_UNPAUSE',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveGoLiveGates: (...a: any[]) => resolveGoLiveGates(...a),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveLiveSlotFree: (...a: any[]) => resolveLiveSlotFree(...a),
 }));
 
 vi.mock('@/services/items/retire_pii', () => ({
@@ -288,6 +307,8 @@ beforeEach(() => {
   updates.length = 0;
   dbState.failWith = null;
   vi.clearAllMocks();
+  resolveGoLiveGates.mockResolvedValue(['schema_required']);
+  resolveLiveSlotFree.mockResolvedValue(undefined);
   getNetworkConfigById.mockResolvedValue({ pause_enabled: true });
   getOrFetchSchemaByUrl.mockResolvedValue({
     required: ['name'],
@@ -571,8 +592,41 @@ describe('item_lifecycle_handler — pause / unpause', () => {
       merged_state: { name: 'Ada' },
       current_status: 'draft',
       consent_accepted: true,
+      gates: ['schema_required'],
+      live_slot_free: undefined,
     });
     expect(updates[0]?.values.lifecycle_status).toBe('live');
+  });
+
+  it('opts into the live limit only, when the domain sets profile_limits', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    resolveGoLiveGates.mockResolvedValue(['schema_required', 'consent_required', 'live_limit']);
+    resolveLiveSlotFree.mockResolvedValue(true);
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(200);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ gates: ['schema_required', 'live_limit'], live_slot_free: true }),
+    );
+  });
+
+  it('unpause with the live limit full: 409 PROFILE_LIMIT_REACHED, stays paused', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
+    resolveLiveSlotFree.mockResolvedValue(false);
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(409);
+    expect(reply.body).toEqual({
+      error: 'PROFILE_LIMIT_REACHED',
+      limit_type: 'live',
+      message: 'LIVE_LIMIT_UNPAUSE',
+    });
+    expect(updates).toHaveLength(0);
+    expect(publishItemEvent).not.toHaveBeenCalled();
   });
 
   it('unpause of an incomplete/unconsented profile lands back in draft', async () => {

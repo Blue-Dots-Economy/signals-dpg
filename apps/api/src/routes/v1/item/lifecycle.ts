@@ -9,7 +9,12 @@ import { eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import { getNetworkConfigById } from '@/network_configs';
-import { classify_item } from '@/services/items/classifier';
+import { classify_item, DEFAULT_GO_LIVE_GATES } from '@/services/items/classifier';
+import {
+  LIVE_LIMIT_UNPAUSE_MESSAGE,
+  resolveGoLiveGates,
+  resolveLiveSlotFree,
+} from '@/services/item_service';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { buildRetiredItemState } from '@/services/items/retire_pii';
@@ -195,15 +200,26 @@ const item_lifecycle_handler = async (
           itemType: existing.item_type,
         });
         const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
-        // No `gates` here, so only DEFAULT_GO_LIVE_GATES apply and
-        // `owner_required` is not evaluated: resuming a profile that was live
-        // must not be stricter than leaving it alone.
-        next_status = classify_item({
+        // Only DEFAULT_GO_LIVE_GATES, so `owner_required` is not evaluated:
+        // resuming a profile that was live must not be stricter than leaving it
+        // alone. The one exception is the live limit, which unpause must respect.
+        const domainGates = await resolveGoLiveGates(existing.item_network, existing.item_domain);
+        const gates = domainGates.includes('live_limit')
+          ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
+          : DEFAULT_GO_LIVE_GATES;
+        const classification = classify_item({
           schema: itemSchema as { required?: string[] },
           merged_state: mergedState,
           current_status: 'draft',
           consent_accepted,
-        }).lifecycle_status;
+          gates,
+          live_slot_free: await resolveLiveSlotFree(tx, gates, existing),
+        });
+        // Unpause exists only to go live: refuse rather than turn it into a draft.
+        if (classification.held_by_live_limit) {
+          return { liveLimitReached: true } as const;
+        }
+        next_status = classification.lifecycle_status;
       }
 
       await tx
@@ -237,6 +253,14 @@ const item_lifecycle_handler = async (
       return reply.code(403).send({
         error: 'ITEM_NOT_OWNED_BY_USER',
         message: 'You do not own this item',
+      });
+    }
+
+    if ('liveLimitReached' in result) {
+      return reply.code(409).send({
+        error: 'PROFILE_LIMIT_REACHED',
+        limit_type: 'live',
+        message: LIVE_LIMIT_UNPAUSE_MESSAGE,
       });
     }
 
