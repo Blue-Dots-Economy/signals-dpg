@@ -628,14 +628,17 @@ export function ProfileFormPage() {
         // Minor on a gated domain: consume the pre-create token the guardian
         // verified to record guardian profile_creation consent and promote the
         // fresh draft to live.
+        let liveLimitMessage = created.message;
         if (minorGatedCreate) {
-          await finalizeProfileConsent({
+          const finalized = await finalizeProfileConsent({
             network: network.id,
             brand: brand === 'standard' ? null : brand,
             item_domain: selectedDomain,
             item_type: defaultItemType ?? 'profile',
             item_id: created.item_id,
           });
+          // The guardian promotion is where a minor's profile meets the live limit.
+          liveLimitMessage ??= finalized.message;
         }
         // Invalidate after the minor promotion above, so my-items does not
         // refetch the still-draft status.
@@ -644,8 +647,8 @@ export function ProfileFormPage() {
         // domain's browse cache for this network.
         void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         // The live profile limit kept it in draft: say so instead of "you're visible".
-        if (created.message) {
-          toast.warning(t('profile.toast_saved_as_draft'), { description: created.message });
+        if (liveLimitMessage) {
+          toast.warning(t('profile.toast_saved_as_draft'), { description: liveLimitMessage });
         } else {
           toast.success(t('profile.toast_created'), {
             description: t('profile.toast_created_desc'),

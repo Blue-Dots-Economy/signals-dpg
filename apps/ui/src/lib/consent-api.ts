@@ -292,8 +292,9 @@ export async function verifyProfilePrecreateOtp(
 
 export async function finalizeProfileConsent(
   body: ProfileConsentOtpItemRef,
-): Promise<{ promoted: boolean }> {
-  const response = await apiClient.post<{ promoted: boolean }>(
+): Promise<{ promoted: boolean; message?: string }> {
+  // `message` is set when the live profile limit kept the profile in draft.
+  const response = await apiClient.post<{ promoted: boolean; message?: string }>(
     '/api/v1/consent/u18/profile-consent/finalize',
     body,
   );

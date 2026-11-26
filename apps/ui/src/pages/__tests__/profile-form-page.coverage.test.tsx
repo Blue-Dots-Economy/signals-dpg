@@ -148,7 +148,8 @@ const verifyOtpMock = vi.fn(
     Promise.resolve({ verified: true }),
 );
 const finalizeMock = vi.fn(
-  (_ref: FinalizeRef): Promise<{ promoted: boolean }> => Promise.resolve({ promoted: true }),
+  (_ref: FinalizeRef): Promise<{ promoted: boolean; message?: string }> =>
+    Promise.resolve({ promoted: true }),
 );
 
 // ---- Mocks ----------------------------------------------------------------
@@ -824,6 +825,29 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     );
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/?network=blue_dot'));
     expect(await screen.findByText('Profile created!')).toBeInTheDocument();
+  });
+
+  it('a minor\u2019s profile held back by the live limit at finalize says "Saved as draft", not "visible"', async () => {
+    finalizeMock.mockResolvedValue({
+      promoted: false,
+      message: 'Live profile limit reached. Saved as a draft.',
+    });
+    await renderPage();
+
+    await tickConsent();
+    const notice = await screen.findByRole('dialog');
+    fireEvent.click(within(notice).getByRole('button', { name: /send code to guardian/i }));
+    expect(await screen.findByText(OTP_TITLE)).toBeInTheDocument();
+    typeOtp('123456');
+    await waitFor(() => expect(screen.queryByText(OTP_TITLE)).not.toBeInTheDocument());
+    const publish = screen.getByRole('button', { name: 'Save & publish' });
+    await waitFor(() => expect(publish).toBeEnabled());
+    await ui().click(publish);
+
+    await waitFor(() => expect(finalizeMock).toHaveBeenCalled());
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile created!')).toBeNull();
   });
 
   it('backing out of the interstitial sends no code and unticks consent', async () => {
