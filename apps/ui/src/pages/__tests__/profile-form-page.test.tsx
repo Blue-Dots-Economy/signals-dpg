@@ -352,6 +352,17 @@ describe('ProfileFormPage inline consent on edit-of-draft (Task 5)', () => {
     );
   });
 
+  it('edit-of-draft: once consent is recorded, returns to the network home', async () => {
+    acceptMock.mockImplementation(async (opts: { onDone: () => void }) => opts.onDone());
+
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('checkbox', { name: /agree/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /save & publish/i }));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/?network=blue_dot'));
+  });
+
   it('edit-of-draft submit (minor, gated) routes through the guardian flow', async () => {
     getU18StatusMock.mockResolvedValue({ isMinor: true });
 
