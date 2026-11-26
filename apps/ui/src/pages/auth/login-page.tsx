@@ -225,7 +225,7 @@ function OtpLoginPage() {
     pendingConsent?: PendingConsent,
   ) => {
     await requestOtp(resolvedIdentifier);
-    navigate('/auth/otp', {
+    void navigate('/auth/otp', {
       state: {
         ...resolvedIdentifier,
         userExists: resolvedUserExists,

@@ -233,7 +233,7 @@ export function OidcCallbackPage() {
             // Still reached when no end-session redirect happens. Both paths
             // share the `wrong-portal-block` toast id, so the user sees one
             // message.
-            navigate('/auth/login', {
+            void navigate('/auth/login', {
               replace: true,
               state: { wrongPortalDomain: gate.heldDomain },
             });
@@ -273,7 +273,7 @@ export function OidcCallbackPage() {
         // this page and may run the effect cleanup, and gating on the flag
         // stranded authenticated users on the spinner. The flag only prevents
         // setState after unmount (see the catch).
-        navigate(landing, { replace: true });
+        void navigate(landing, { replace: true });
       } catch (err) {
         if (cancelled) return;
         setErrorCode(extractCode(err));
@@ -301,7 +301,7 @@ export function OidcCallbackPage() {
       console.error('could not persist accepted consent', consentErr);
       toast.error(t('auth.toast_consent_persist_error'));
     }
-    navigate(returnTo, { replace: true });
+    void navigate(returnTo, { replace: true });
   };
 
   // Blocking guardian gate for a minor, so the ward never sees home until the
@@ -319,7 +319,7 @@ export function OidcCallbackPage() {
           onNotMinor={() => navigate(guardianGate.returnTo, { replace: true })}
           onLogout={() => {
             void signOut();
-            navigate('/auth/login', { replace: true });
+            void navigate('/auth/login', { replace: true });
           }}
         />
       </AuthShell>
@@ -373,9 +373,9 @@ export function OidcCallbackPage() {
       const ended = await endBffSession();
       // `endBffSession` navigates to Keycloak itself on success. `false` means
       // the server did not end the session and nothing is navigating.
-      if (!ended) navigate('/auth/login', { replace: true });
+      if (!ended) void navigate('/auth/login', { replace: true });
     } catch {
-      navigate('/auth/login', { replace: true });
+      void navigate('/auth/login', { replace: true });
     }
   };
 

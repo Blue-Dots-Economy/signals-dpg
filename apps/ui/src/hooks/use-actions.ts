@@ -146,7 +146,7 @@ export function useUpdateActionStatus() {
       return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: actionKeys.all });
+      void queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },
   });
 }
@@ -167,7 +167,7 @@ export function useUpdateActionStatusBulk() {
   >({
     mutationFn: ({ payloads, guardianOtp }) => updateActionStatusBulk(payloads, guardianOtp),
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: actionKeys.all });
+      void queryClient.invalidateQueries({ queryKey: actionKeys.all });
     },
   });
 }

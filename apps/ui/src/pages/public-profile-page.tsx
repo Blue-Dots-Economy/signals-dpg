@@ -285,7 +285,7 @@ function ProfileActionRow({
       );
 
       // Surface the new action without waiting for the poll.
-      queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
       toast.success(
         t('public_profile.action_sent', '{{action}} request sent', {
           action: actionType.charAt(0).toUpperCase() + actionType.slice(1),
@@ -396,8 +396,8 @@ export function PublicProfilePage() {
   // Back: the previous in-app page when there is history; a freshly opened
   // share link (`location.key === 'default'`) lands on the map view.
   const handleBack = React.useCallback(() => {
-    if (location.key !== 'default') navigate(-1);
-    else navigate(`/?network=${encodeURIComponent(network ?? '')}&view=map`);
+    if (location.key !== 'default') void navigate(-1);
+    else void navigate(`/?network=${encodeURIComponent(network ?? '')}&view=map`);
   }, [location.key, navigate, network]);
 
   // Keep the theme on the link's network (the provider reads `?network=`);
@@ -624,7 +624,7 @@ export function PublicProfilePage() {
         userSchemas={userSchemas}
         selectedNetwork={network ?? undefined}
         onProfilesChanged={() => {
-          if (net) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(net.id) });
+          if (net) void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(net.id) });
         }}
       />
       <div className="flex h-svh min-w-0 flex-1 flex-col">

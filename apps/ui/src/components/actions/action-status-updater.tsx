@@ -66,7 +66,7 @@ export function ActionStatusUpdater({
   // the guardian's code.
   const gate = useGuardianOtpGate<UpdateActionStatusPayload>(async (payload, otp) => {
     await updateActionStatus(payload, otp);
-    queryClient.invalidateQueries({ queryKey: actionKeys.all });
+    void queryClient.invalidateQueries({ queryKey: actionKeys.all });
     toast.success(successTitleByStatus[payload.action_status] ?? t('actions.toast_status_accepted_title'), {
       description: t('actions.toast_updated_desc'),
     });
