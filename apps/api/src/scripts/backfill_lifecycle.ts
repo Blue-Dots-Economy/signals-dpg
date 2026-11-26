@@ -5,9 +5,9 @@
  *
  * Only the default `schema_required` gate applies: `consent_accepted` is
  * computed but has no effect, and the consent and owner gates a domain may
- * declare are not evaluated. The exception is `live_limit`: a draft is never
- * promoted past a domain's live profile limit (counted as the run goes, so a
- * `--dry-run` may report more promotions than a real run makes).
+ * declare are not evaluated. In a domain with `profile_limits` a draft is never
+ * promoted: it goes live on its next save, where the live limit is checked
+ * under the owner lock.
  *
  * No decryption is needed: the public `item_state` carries masks for provided
  * private fields, which count as populated, so completeness matches write time.
@@ -19,12 +19,8 @@
 import { and, eq, asc, sql, type SQL } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
-import {
-  classify_item,
-  DEFAULT_GO_LIVE_GATES,
-  type LifecycleStatus,
-} from '@/services/items/classifier';
-import { resolveGoLiveGates, resolveLiveSlotFree } from '@/services/item_service';
+import { classify_item, type LifecycleStatus } from '@/services/items/classifier';
+import { resolveGoLiveGates } from '@/services/item_service';
 import { get_item_schema, type JSONSchemaLike } from '@/services/metrics/schema_lookup';
 
 const BATCH_SIZE = 1000;
@@ -65,6 +61,22 @@ async function schemaFor(network: string, domain: string, itemType: string): Pro
   }
   schemaCache.set(key, schema);
   return schema;
+}
+
+// Per network/domain: whether the domain sets `profile_limits`. Null means its
+// config can't be read; those items are skipped rather than stopping the run.
+const liveLimitCache = new Map<string, boolean | null>();
+async function hasLiveLimit(network: string, domain: string): Promise<boolean | null> {
+  const key = `${network}/${domain}`;
+  if (liveLimitCache.has(key)) return liveLimitCache.get(key)!;
+  let limited: boolean | null = null;
+  try {
+    limited = (await resolveGoLiveGates(network, domain)).includes('live_limit');
+  } catch {
+    limited = null;
+  }
+  liveLimitCache.set(key, limited);
+  return limited;
 }
 
 async function main() {
@@ -108,7 +120,6 @@ async function main() {
         item_id: items.item_id,
         item_state: items.item_state,
         lifecycle_status: items.lifecycle_status,
-        created_by: items.created_by,
       })
       .from(items)
       .where(whereScope)
@@ -125,22 +136,23 @@ async function main() {
         skipped++;
         continue;
       }
+      const limited = await hasLiveLimit(row.item_network, row.item_domain); // NOSONAR typescript:S9382 — rows run one at a time, like schemaFor above; cached per domain
+      if (limited === null) {
+        skipped++;
+        continue;
+      }
       const current = row.lifecycle_status as LifecycleStatus;
-      // Default gates only: a backfill must not demote a population for want of
-      // an owning aggregator (`owner_required`). The live limit is the exception.
-      // Row by row on purpose: each promotion changes the live count the next
-      // row is checked against.
-      const limited = (await resolveGoLiveGates(row.item_network, row.item_domain)).includes('live_limit'); // NOSONAR typescript:S9382 — sequential by design (see above)
-      const gates = limited ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const] : undefined;
-      const next = classify_item({
+      // No `gates`: a backfill must not demote a population for want of an
+      // owning aggregator (`owner_required`).
+      const classified = classify_item({
         schema,
         merged_state: (row.item_state ?? {}) as Record<string, unknown>,
         current_status: current,
         consent_accepted: consented.has(row.item_id),
-        gates,
-        live_slot_free:
-          gates && current === 'draft' ? await resolveLiveSlotFree(db, gates, row) : undefined, // NOSONAR typescript:S9382 — sequential by design (see above)
       }).lifecycle_status;
+      // Never promote past a live profile limit: the draft goes live on its next
+      // save, where the limit is checked under the owner lock.
+      const next = limited && current === 'draft' && classified === 'live' ? current : classified;
 
       if (next !== current) {
         transitions[`${current}->${next}`] = (transitions[`${current}->${next}`] ?? 0) + 1;

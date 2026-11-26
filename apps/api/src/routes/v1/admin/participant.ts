@@ -575,6 +575,7 @@ async function existingUserOk(
   user_id: string,
   consent_recorded: number,
   blockedByLiveLimit = false,
+  namesProfile = true,
 ) {
   const itemsList = await readItemsForUser(user_id);
   return reply.code(200).send({
@@ -584,7 +585,7 @@ async function existingUserOk(
     onboarded_at: null,
     items: itemsList,
     consent_recorded,
-    ...liveLimitMessage({ blockedByLiveLimit }),
+    ...liveLimitMessage({ blockedByLiveLimit }, namesProfile),
   });
 }
 
@@ -750,7 +751,7 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
   // pre-commit lets the worker index the row before the promotion is visible.
   await publishItemEvents(promotedDrafts, 'upsert', request.log);
 
-  return existingUserOk(reply, existing.id, consent_recorded, blockedByLiveLimit);
+  return existingUserOk(reply, existing.id, consent_recorded, blockedByLiveLimit, false);
 }
 
 /** `update_item`: update the named item, record consent, publish. */
@@ -802,6 +803,14 @@ async function handleUpdateItem(
   let blockedByLiveLimit = false;
   try {
     await db.transaction(async (tx) => {
+      // Age first, as insert_item does: the user row, then the owner lock the
+      // profile write takes. One order on both paths, so they cannot deadlock.
+      if (body.age != null) {
+        await tx
+          .update(user)
+          .set({ age: body.age, updatedAt: new Date() })
+          .where(eq(user.id, existing.id));
+      }
       // Coordinates alone are a valid update: a caller re-sending a profile's
       // exact point (e.g. the address was re-picked from an autocomplete) need
       // not re-send the whole item_state to have it stored.
@@ -818,12 +827,6 @@ async function handleUpdateItem(
         );
         itemWritten = true;
         blockedByLiveLimit = updated.blockedByLiveLimit;
-      }
-      if (body.age != null) {
-        await tx
-          .update(user)
-          .set({ age: body.age, updatedAt: new Date() })
-          .where(eq(user.id, existing.id));
       }
       const consent = await recordParticipantConsent(tx, {
         compliance: body.compliance,

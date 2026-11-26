@@ -81,4 +81,4 @@ export const failedGoLiveGates = (
 export const passesGoLiveGates = (
   gates: readonly GoLiveGate[],
   ctx: GoLiveContext,
-): boolean => gates.every((gate) => GO_LIVE_GATE_CHECKS[gate](ctx));
+): boolean => failedGoLiveGates(gates, ctx).length === 0;

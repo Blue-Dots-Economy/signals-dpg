@@ -60,12 +60,13 @@ export const update_item_handler = async (
   }
 
   try {
-    // A transaction so the live-limit advisory lock holds until the write commits.
-    const { row: updated, blockedByLiveLimit, changed } = await db.transaction((tx) =>
-      updateItemInternal(tx, itemId, callerId, isAdmin, {
-        item_state: body.item_state,
-        item_locations: body.item_locations,
-      }),
+    // updateItemInternal opens its own short transaction for the lock and write.
+    const { row: updated, blockedByLiveLimit, changed } = await updateItemInternal(
+      db,
+      itemId,
+      callerId,
+      isAdmin,
+      { item_state: body.item_state, item_locations: body.item_locations },
     );
 
     await publishItemEvent(

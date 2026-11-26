@@ -315,6 +315,8 @@ function makeExec() {
         },
       }),
     }),
+    // A nested transaction (savepoint) runs on the same fake executor.
+    transaction: (fn: (tx: unknown) => unknown) => fn(exec),
   };
 
   return { exec: exec as unknown as DbOrTx, rec, queue, state };
@@ -1315,6 +1317,7 @@ describe('updateItemInternal — state edits', () => {
     const { exec, queue } = makeExec();
     queue.push([existingItem]);
     queue.push([{ n: 1 }]); // live count: limit reached
+    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
     queue.push([updatedRow]);
 
     const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
@@ -1360,6 +1363,33 @@ describe('updateItemInternal — state edits', () => {
     const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'Zed' } });
 
     expect(res.changed).toBe(true);
+  });
+
+  it('409 ITEM_CHANGED when the draft moved on while waiting for the lock (never overwrite)', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([existingItem]);
+    queue.push([{ n: 0 }]);
+    queue.push([{ lifecycle_status: 'retired' }]); // retired by a concurrent request
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } }),
+    ).rejects.toMatchObject({ statusCode: 409, errorCode: 'ITEM_CHANGED' });
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('409 ITEM_CHANGED when the write finds the item no longer in the status it read', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ ...existingItem, lifecycle_status: 'live' }]);
+    queue.push([]); // the guarded UPDATE matched nothing: paused or retired meanwhile
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } }),
+    ).rejects.toMatchObject({ statusCode: 409, errorCode: 'ITEM_CHANGED' });
+    expect(JSON.stringify(rec.updates[0].where)).toContain('items.lifecycle_status');
   });
 
   it('does not count live slots when editing an already-live profile', async () => {

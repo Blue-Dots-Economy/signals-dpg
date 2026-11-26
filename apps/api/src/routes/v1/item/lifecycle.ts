@@ -13,9 +13,8 @@ import { classify_item, DEFAULT_GO_LIVE_GATES } from '@/services/items/classifie
 import {
   LIVE_LIMIT_UNPAUSE_MESSAGE,
   isBlockedOnlyByLiveLimit,
-  readLifecycleStatus,
+  liveSlotForTransition,
   resolveGoLiveGates,
-  resolveLiveSlotFree,
 } from '@/services/item_service';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
@@ -73,19 +72,17 @@ async function classifyUnpause(
   const gates = domainGates.includes('live_limit')
     ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
     : DEFAULT_GO_LIVE_GATES;
-  // Takes the owner lock. Re-read under it: a concurrent unpause or retire of
-  // the same item may have committed while this one waited.
-  const liveSlotFree = await resolveLiveSlotFree(tx, gates, existing);
-  if (liveSlotFree !== undefined && (await readLifecycleStatus(tx, existing.item_id)) !== 'paused') {
-    return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' };
-  }
+  // A concurrent unpause or retire of the same item may have committed while
+  // this one waited for the owner lock.
+  const slot = await liveSlotForTransition(tx, gates, existing, 'paused');
+  if (slot.stale) return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' };
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedState,
     current_status: 'draft',
     consent_accepted,
     gates,
-    live_slot_free: liveSlotFree,
+    live_slot_free: slot.liveSlotFree,
   });
   // Unpause exists only to go live: refuse rather than turn it into a draft.
   if (isBlockedOnlyByLiveLimit(classification)) return { liveLimitReached: true };

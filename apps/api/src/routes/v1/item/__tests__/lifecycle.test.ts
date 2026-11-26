@@ -186,8 +186,14 @@ vi.mock('@/services/item_service', () => ({
   LIVE_LIMIT_UNPAUSE_MESSAGE: 'LIVE_LIMIT_UNPAUSE',
   isBlockedOnlyByLiveLimit: (c: { failed_gates?: string[] }) =>
     c.failed_gates?.length === 1 && c.failed_gates[0] === 'live_limit',
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readLifecycleStatus: (...a: any[]) => readLifecycleStatus(...a),
+  // Same contract as the real helper, over the two mocks below.
+  liveSlotForTransition: async (_tx: unknown, gates: unknown, item: { item_id: string }, expected: string) => {
+    const liveSlotFree = await resolveLiveSlotFree(_tx, gates, item);
+    if (liveSlotFree !== undefined && (await readLifecycleStatus(_tx, item.item_id)) !== expected) {
+      return { stale: true };
+    }
+    return { stale: false, liveSlotFree };
+  },
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolveGoLiveGates: (...a: any[]) => resolveGoLiveGates(...a),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -97,9 +97,6 @@ vi.mock('@/notifications/notify_item_lifecycle', () => ({
 
 vi.mock('@api/db/postgres/drizzle_config', () => ({
   db: {
-    // update_item runs updateItemInternal inside a transaction; the fake hands
-    // the callback a stand-in tx (updateItemInternal itself is mocked).
-    transaction: (fn: (tx: unknown) => unknown) => fn({ kind: 'tx' }),
     delete: (table: unknown) => ({
       where: (where: unknown) => ({
         returning: (cols: unknown) => {
@@ -381,7 +378,7 @@ describe('update_item_handler', () => {
     expect(invalidateItemFetchCache).toHaveBeenCalledWith('yellow_dot', 'student');
   });
 
-  it('runs the update in a transaction and returns the live-limit message when held', async () => {
+  it('returns the live-limit message when held', async () => {
     updateItemInternal.mockImplementation(async () => ({
       row: baseUpdatedRow(),
       blockedByLiveLimit: true,
@@ -394,7 +391,6 @@ describe('update_item_handler', () => {
     });
 
     expect(reply.statusCode).toBe(200);
-    expect(updateItemInternal.mock.calls[0][0]).toEqual({ kind: 'tx' });
     expect((reply.body as { message?: string }).message).toBe('LIVE_LIMIT_DRAFT');
   });
 

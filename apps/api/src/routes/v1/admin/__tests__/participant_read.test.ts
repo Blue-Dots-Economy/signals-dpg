@@ -105,26 +105,14 @@ describe('GET /api/v1/admin/participant (unit)', () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it('rejects an unknown lifecycle_status value with 400', async () => {
+  it.each([
+    ['an unknown value', 'live,active'],
+    ['retired, which is not a filter value', 'live,retired'],
+    ['an empty value', ''],
+  ])('rejects lifecycle_status with %s with 400', async (_label, value) => {
     const res = await app.inject({
       method: 'GET',
-      url: '/participant?email=test@example.com&lifecycle_status=live,active',
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('rejects retired as a lifecycle_status filter value with 400', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/participant?email=test@example.com&lifecycle_status=live,retired',
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it('rejects an empty lifecycle_status with 400', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/participant?email=test@example.com&lifecycle_status=',
+      url: `/participant?email=test@example.com&lifecycle_status=${value}`,
     });
     expect(res.statusCode).toBe(400);
   });
