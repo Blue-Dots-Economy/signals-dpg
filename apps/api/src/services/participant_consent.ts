@@ -53,12 +53,12 @@ const PROFILE_CREATION_KEY = 'profile_creation';
 export async function recordParticipantConsent(
   tx: DbOrTx,
   args: RecordParticipantConsentArgs,
-): Promise<{ recorded: number; promoted: boolean; heldByLiveLimit: boolean }> {
+): Promise<{ recorded: number; promoted: boolean; blockedByLiveLimit: boolean }> {
   const { compliance, userId, itemId, network, channel, acceptedAt } = args;
   const brand = args.brand ?? null;
 
   if (!compliance || compliance.length === 0) {
-    return { recorded: 0, promoted: false, heldByLiveLimit: false };
+    return { recorded: 0, promoted: false, blockedByLiveLimit: false };
   }
 
   const accepted = new Set(
@@ -67,7 +67,7 @@ export async function recordParticipantConsent(
 
   let recorded = 0;
   let promoted = false;
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
 
   // 1. User-level terms / privacy.
   for (const [key, category] of Object.entries(USER_LEVEL_KEYS)) {
@@ -146,12 +146,12 @@ export async function recordParticipantConsent(
         }
       }
       if (profileConsentPresent) {
-        ({ promoted, heldByLiveLimit } = await promoteItemOnProfileConsent(tx, itemId));
+        ({ promoted, blockedByLiveLimit } = await promoteItemOnProfileConsent(tx, itemId));
       }
     }
   }
 
-  return { recorded, promoted, heldByLiveLimit };
+  return { recorded, promoted, blockedByLiveLimit };
 }
 
 /**
@@ -167,7 +167,7 @@ export async function recordParticipantConsent(
 export async function promoteEligibleDraftsForUser(
   tx: DbOrTx,
   userId: string,
-): Promise<{ promoted: PromotedItemKey[]; heldByLiveLimit: boolean }> {
+): Promise<{ promoted: PromotedItemKey[]; blockedByLiveLimit: boolean }> {
   // Sweeps drafts across all networks; each promotion still passes the
   // per-item guardian/completeness/consent gate.
   const drafts = await tx
@@ -181,11 +181,11 @@ export async function promoteEligibleDraftsForUser(
     .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')))
     .orderBy(desc(items.created_at), desc(items.item_id));
   const promoted: PromotedItemKey[] = [];
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
   for (const d of drafts) {
     if (await hasAcceptedProfileConsent(tx, d.item_id)) {
       const result = await promoteItemOnProfileConsent(tx, d.item_id);
-      heldByLiveLimit ||= result.heldByLiveLimit;
+      blockedByLiveLimit ||= result.blockedByLiveLimit;
       if (result.promoted) {
         promoted.push({
           item_network: d.item_network,
@@ -196,5 +196,5 @@ export async function promoteEligibleDraftsForUser(
       }
     }
   }
-  return { promoted, heldByLiveLimit };
+  return { promoted, blockedByLiveLimit };
 }

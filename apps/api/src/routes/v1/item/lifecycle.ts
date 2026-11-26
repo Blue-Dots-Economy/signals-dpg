@@ -216,7 +216,7 @@ const item_lifecycle_handler = async (
           live_slot_free: await resolveLiveSlotFree(tx, gates, existing),
         });
         // Unpause exists only to go live: refuse rather than turn it into a draft.
-        if (classification.held_by_live_limit) {
+        if (classification.blocked_by_live_limit) {
           return { liveLimitReached: true } as const;
         }
         next_status = classification.lifecycle_status;

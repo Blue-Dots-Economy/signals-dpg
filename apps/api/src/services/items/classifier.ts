@@ -50,7 +50,7 @@ export interface ClassifierInput {
 export interface ClassifierResult {
   lifecycle_status: LifecycleStatus;
   /** Set when `live_limit` is the only gate that kept the profile in `draft`. */
-  held_by_live_limit?: true;
+  blocked_by_live_limit?: true;
 }
 
 /**
@@ -86,10 +86,10 @@ export const classify_item = (input: ClassifierInput): ClassifierResult => {
   if (passesGoLiveGates(gates, ctx)) {
     return { lifecycle_status: 'live' };
   }
-  const heldByLiveLimit =
+  const blockedByLiveLimit =
     gates.includes('live_limit') &&
     passesGoLiveGates(gates.filter((g) => g !== 'live_limit'), ctx);
-  return heldByLiveLimit
-    ? { lifecycle_status: 'draft', held_by_live_limit: true }
+  return blockedByLiveLimit
+    ? { lifecycle_status: 'draft', blocked_by_live_limit: true }
     : { lifecycle_status: 'draft' };
 };

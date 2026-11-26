@@ -223,7 +223,7 @@ const finalize_handler = async (
     return reply.code(400).send({ error: 'CONSENT_VERSION_UNCONFIGURED', message: 'u18 profile_creation not configured' });
   }
 
-  let result: PromotionResult = { promoted: false, heldByLiveLimit: false };
+  let result: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
       result = await upsertGuardianProfileConsentAndPromote(tx, {
@@ -300,7 +300,7 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
   const ok = await verifyGuardianOtp({ scope, otp: body.otp });
   if (!ok) return reply.code(400).send({ error: 'INVALID_OTP', message: 'OTP is invalid or expired' });
 
-  let result: PromotionResult = { promoted: false, heldByLiveLimit: false };
+  let result: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
       result = await upsertGuardianProfileConsentAndPromote(tx, {

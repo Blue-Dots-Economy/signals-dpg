@@ -332,7 +332,7 @@ export const create_item_handler = async (
     // the resolved owner on both paths. `lifecycleStatus` picks "you're live"
     // vs "complete your profile", since a 201 can commit a draft. A profile the
     // live limit kept in draft is complete, so neither copy fits: no email.
-    if (!created.heldByLiveLimit) {
+    if (!created.blockedByLiveLimit) {
       void import('@/notifications/notify_item_lifecycle')
         .then(({ dispatchItemLifecycleNotification }) =>
           dispatchItemLifecycleNotification(

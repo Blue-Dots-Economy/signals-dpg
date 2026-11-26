@@ -36,7 +36,7 @@ export interface CreateProfileItemInput {
 export interface CreateProfileItemResult {
   item_id: string;
   /** The live limit kept a profile that would have gone live in `draft`. */
-  heldByLiveLimit: boolean;
+  blockedByLiveLimit: boolean;
 }
 
 export const create_profile_item = async (
@@ -62,5 +62,5 @@ export const create_profile_item = async (
     created_by: input.user_id,
   });
 
-  return { item_id: result.itemId, heldByLiveLimit: result.heldByLiveLimit };
+  return { item_id: result.itemId, blockedByLiveLimit: result.blockedByLiveLimit };
 };

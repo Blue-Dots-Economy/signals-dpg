@@ -274,10 +274,10 @@ describe('classify_item — live_limit gate', () => {
     expect(run('draft', complete, true)).toEqual({ lifecycle_status: 'live' });
   });
 
-  it('holds a complete profile in draft when no slot is free', () => {
+  it('blocks a complete profile from going live when no slot is free', () => {
     expect(run('draft', complete, false)).toEqual({
       lifecycle_status: 'draft',
-      held_by_live_limit: true,
+      blocked_by_live_limit: true,
     });
   });
 
@@ -292,7 +292,7 @@ describe('classify_item — live_limit gate', () => {
   it('fails closed when the gate is configured but no slot context is passed', () => {
     expect(run('draft', complete, undefined)).toEqual({
       lifecycle_status: 'draft',
-      held_by_live_limit: true,
+      blocked_by_live_limit: true,
     });
   });
 });

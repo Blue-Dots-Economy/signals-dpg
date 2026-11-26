@@ -298,8 +298,8 @@ const LIVE_LIMIT_DRAFT_MESSAGE =
 export const LIVE_LIMIT_UNPAUSE_MESSAGE =
   'Live profile limit reached. Pause or retire any live profile to unpause this one.';
 /** Response extra for a write the live limit kept in draft; empty otherwise. */
-export function liveLimitMessage(r: { heldByLiveLimit: boolean }): { message?: string } {
-  return r.heldByLiveLimit ? { message: LIVE_LIMIT_DRAFT_MESSAGE } : {};
+export function liveLimitMessage(r: { blockedByLiveLimit: boolean }): { message?: string } {
+  return r.blockedByLiveLimit ? { message: LIVE_LIMIT_DRAFT_MESSAGE } : {};
 }
 const TOTAL_LIMIT_MESSAGE =
   'This account has reached its profile limit. Retire any profile to add another.';
@@ -532,7 +532,7 @@ export async function createItemInternal(
       'An item with the same type and id already exists'
     );
   }
-  return { ...result[0], heldByLiveLimit: classification.held_by_live_limit === true };
+  return { ...result[0], blockedByLiveLimit: classification.blocked_by_live_limit === true };
 }
 
 export interface UpdateItemInternalResult {
@@ -552,7 +552,7 @@ export interface UpdateItemInternalResult {
     updated_at: Date;
   };
   /** The live limit kept a profile that would have gone live in `draft`. */
-  heldByLiveLimit: boolean;
+  blockedByLiveLimit: boolean;
   /** Fields, locations or lifecycle status changed; false for a no-op save. */
   changed: boolean;
 }
@@ -654,10 +654,10 @@ export interface PromotionResult {
   /** The profile flipped `draft → live`. */
   promoted: boolean;
   /** The live limit kept a profile that would have gone live in `draft`. */
-  heldByLiveLimit: boolean;
+  blockedByLiveLimit: boolean;
 }
 
-const NOT_PROMOTED: PromotionResult = { promoted: false, heldByLiveLimit: false };
+const NOT_PROMOTED: PromotionResult = { promoted: false, blockedByLiveLimit: false };
 
 /**
  * Promote a `draft` profile to `live` after its owner accepts
@@ -729,14 +729,14 @@ export async function promoteItemOnProfileConsent(
   });
 
   if (classification.lifecycle_status !== 'live') {
-    return { promoted: false, heldByLiveLimit: classification.held_by_live_limit === true };
+    return { promoted: false, blockedByLiveLimit: classification.blocked_by_live_limit === true };
   }
 
   await exec
     .update(items)
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
     .where(eq(items.item_id, itemId));
-  return { promoted: true, heldByLiveLimit: false };
+  return { promoted: true, blockedByLiveLimit: false };
 }
 
 /**
@@ -798,7 +798,7 @@ async function computeItemStateUpdate(
   mergedFullState: Record<string, unknown>;
   addressChanged: boolean;
   writes: { item_state: unknown; item_private_state: string; lifecycle_status: string };
-  heldByLiveLimit: boolean;
+  blockedByLiveLimit: boolean;
   changed: boolean;
 }> {
   const priorPrivate =
@@ -886,7 +886,7 @@ async function computeItemStateUpdate(
     mergedFullState,
     addressChanged,
     writes: { item_state, item_private_state, lifecycle_status: classification.lifecycle_status },
-    heldByLiveLimit: classification.held_by_live_limit === true,
+    blockedByLiveLimit: classification.blocked_by_live_limit === true,
     changed:
       !isDeepStrictEqual(priorFullState, mergedFullState) ||
       classification.lifecycle_status !== existingItem.lifecycle_status,
@@ -947,7 +947,7 @@ export async function updateItemInternal(
   const updateValues: Record<string, unknown> = {
     updated_at: sql`now()`,
   };
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
   let changed = false;
 
   // The schema is needed to merge/validate state, classify lifecycle, and
@@ -1008,7 +1008,7 @@ export async function updateItemInternal(
       );
       mergedFullState = stateUpdate.mergedFullState;
       addressChanged = stateUpdate.addressChanged;
-      heldByLiveLimit = stateUpdate.heldByLiveLimit;
+      blockedByLiveLimit = stateUpdate.blockedByLiveLimit;
       changed = stateUpdate.changed;
       Object.assign(updateValues, stateUpdate.writes);
     }
@@ -1059,5 +1059,5 @@ export async function updateItemInternal(
   }
   const row = updateResult[0];
 
-  return { row, heldByLiveLimit, changed };
+  return { row, blockedByLiveLimit, changed };
 }

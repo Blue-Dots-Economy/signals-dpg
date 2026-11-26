@@ -76,7 +76,7 @@ describe('recordParticipantConsent', () => {
     resolveConsentVersion.mockResolvedValue(1);
     hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
     hasAcceptedProfileConsent.mockResolvedValue(false);
-    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
   });
 
   it('returns zero when compliance is absent', async () => {
@@ -84,7 +84,7 @@ describe('recordParticipantConsent', () => {
     const res = await recordParticipantConsent(tx as never, {
       userId: 'u1', network: 'blue_dot', channel: 'voice', acceptedAt: new Date(),
     });
-    expect(res).toEqual({ recorded: 0, promoted: false, heldByLiveLimit: false });
+    expect(res).toEqual({ recorded: 0, promoted: false, blockedByLiveLimit: false });
     expect(inserted).toHaveLength(0);
   });
 
@@ -208,7 +208,7 @@ describe('recordParticipantConsent', () => {
   });
 
   it('reports promoted:false when the item does not go live (e.g. minor gate)', async () => {
-    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, heldByLiveLimit: false });
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, blockedByLiveLimit: false });
     const { tx } = makeTx();
     const res = await recordParticipantConsent(tx as never, {
       compliance: [
@@ -250,7 +250,7 @@ describe('recordParticipantConsent', () => {
 
   it('promoteEligibleDraftsForUser promotes only drafts that have profile_creation consent', async () => {
     hasAcceptedProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => itemId === 'has-consent');
-    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, heldByLiveLimit: false });
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
     const tx = makeSelectTx([{ item_id: 'has-consent' }, { item_id: 'no-consent' }]);
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
     const { promoted } = await promoteEligibleDraftsForUser(tx as never, 'u1');
@@ -267,7 +267,7 @@ describe('recordParticipantConsent', () => {
     hasAcceptedProfileConsent.mockResolvedValue(true);
     promoteItemOnProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => ({
       promoted: itemId === 'promoted',
-      heldByLiveLimit: false,
+      blockedByLiveLimit: false,
     }));
     const tx = makeSelectTx([
       { item_id: 'promoted', item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0' },
@@ -288,11 +288,11 @@ describe('recordParticipantConsent', () => {
     ]);
   });
 
-  it('promoteEligibleDraftsForUser sweeps newest first and reports a draft held by the live limit', async () => {
+  it('promoteEligibleDraftsForUser sweeps newest first and reports a draft blocked by the live limit', async () => {
     hasAcceptedProfileConsent.mockResolvedValue(true);
     promoteItemOnProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => ({
       promoted: itemId === 'newest',
-      heldByLiveLimit: itemId === 'older',
+      blockedByLiveLimit: itemId === 'older',
     }));
     const tx = makeSelectTx([
       { item_id: 'newest', item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0' },
@@ -305,6 +305,6 @@ describe('recordParticipantConsent', () => {
     expect(tx.orderBy).toHaveBeenCalledTimes(1);
     expect(tx.orderBy.mock.calls[0]).toHaveLength(2); // created_at DESC, item_id DESC
     expect(res.promoted.map((k) => k.item_id)).toEqual(['newest']);
-    expect(res.heldByLiveLimit).toBe(true);
+    expect(res.blockedByLiveLimit).toBe(true);
   });
 });

@@ -54,7 +54,7 @@ const {
   hasAcceptedProfileConsent: vi.fn(async (..._a: any[]) => true),
   classify_item: vi.fn(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (..._a: any[]): { lifecycle_status: string; held_by_live_limit?: true } => ({
+    (..._a: any[]): { lifecycle_status: string; blocked_by_live_limit?: true } => ({
       lifecycle_status: 'live',
     }),
   ),
@@ -615,7 +615,7 @@ describe('item_lifecycle_handler — pause / unpause', () => {
     rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
     resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
     resolveLiveSlotFree.mockResolvedValue(false);
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
 
     const reply = await call(ownerRequest('unpause'));
 

@@ -151,8 +151,8 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
-  liveLimitMessage: (r: { heldByLiveLimit?: boolean }) =>
-    r.heldByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   ItemServiceError,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   updateItemInternal: (...a: any[]) => updateItemInternal(...a),
@@ -384,7 +384,7 @@ describe('update_item_handler', () => {
   it('runs the update in a transaction and returns the live-limit message when held', async () => {
     updateItemInternal.mockImplementation(async () => ({
       row: baseUpdatedRow(),
-      heldByLiveLimit: true,
+      blockedByLiveLimit: true,
     }));
 
     const reply = await callHandler(update_item_handler, {
@@ -419,7 +419,7 @@ describe('update_item_handler', () => {
     expect(dispatchItemLifecycleNotification).not.toHaveBeenCalled();
   });
 
-  it('omits message when the update was not held by the live limit', async () => {
+  it('omits message when the update was not blocked by the live limit', async () => {
     const reply = await callHandler(update_item_handler, {
       params,
       body,

@@ -574,7 +574,7 @@ async function existingUserOk(
   reply: FastifyReply,
   user_id: string,
   consent_recorded: number,
-  heldByLiveLimit = false,
+  blockedByLiveLimit = false,
 ) {
   const itemsList = await readItemsForUser(user_id);
   return reply.code(200).send({
@@ -584,7 +584,7 @@ async function existingUserOk(
     onboarded_at: null,
     items: itemsList,
     consent_recorded,
-    ...liveLimitMessage({ heldByLiveLimit }),
+    ...liveLimitMessage({ blockedByLiveLimit }),
   });
 }
 
@@ -701,7 +701,7 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
   // Drafts promoted as a side effect of the age write. Age is user-level, so it
   // can unblock several of the user's profiles at once.
   let promotedDrafts: ItemEventKey[] = [];
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
 
   const hasCompliance = Boolean(body.compliance && body.compliance.length > 0);
   if (hasCompliance || body.age != null) {
@@ -726,7 +726,7 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
           consent_recorded = consent.recorded;
         }
         if (body.age != null) {
-          ({ promoted: promotedDrafts, heldByLiveLimit } = await promoteEligibleDraftsForUser(
+          ({ promoted: promotedDrafts, blockedByLiveLimit } = await promoteEligibleDraftsForUser(
             tx,
             existing.id,
           ));
@@ -750,7 +750,7 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
   // pre-commit lets the worker index the row before the promotion is visible.
   await publishItemEvents(promotedDrafts, 'upsert', request.log);
 
-  return existingUserOk(reply, existing.id, consent_recorded, heldByLiveLimit);
+  return existingUserOk(reply, existing.id, consent_recorded, blockedByLiveLimit);
 }
 
 /** `update_item`: update the named item, record consent, publish. */
@@ -799,7 +799,7 @@ async function handleUpdateItem(
   const hasItemLocations = Boolean(body.item_locations?.length);
   let itemWritten = false;
   let itemPromoted = false;
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
   try {
     await db.transaction(async (tx) => {
       // Coordinates alone are a valid update: a caller re-sending a profile's
@@ -817,7 +817,7 @@ async function handleUpdateItem(
           },
         );
         itemWritten = true;
-        heldByLiveLimit = updated.heldByLiveLimit;
+        blockedByLiveLimit = updated.blockedByLiveLimit;
       }
       if (body.age != null) {
         await tx
@@ -840,11 +840,11 @@ async function handleUpdateItem(
       // only signal for that (promoteEligibleDraftsForUser no longer sees a
       // draft), and without it item_search would keep the profile as `draft`.
       itemPromoted = consent.promoted;
-      heldByLiveLimit ||= consent.heldByLiveLimit;
+      blockedByLiveLimit ||= consent.blockedByLiveLimit;
       if (body.age != null) {
         const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
         promotedDrafts = sweep.promoted;
-        heldByLiveLimit ||= sweep.heldByLiveLimit;
+        blockedByLiveLimit ||= sweep.blockedByLiveLimit;
       }
     });
   } catch (err) {
@@ -864,7 +864,7 @@ async function handleUpdateItem(
     request.log,
   );
 
-  return existingUserOk(reply, existing.id, consent_recorded, heldByLiveLimit);
+  return existingUserOk(reply, existing.id, consent_recorded, blockedByLiveLimit);
 }
 
 /** `insert_item`: add another profile to an existing user. */
@@ -880,7 +880,7 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
   if (partitionFailure) return failureReply(reply, partitionFailure);
 
   let insertedItemId: string | undefined;
-  let heldByLiveLimit = false;
+  let blockedByLiveLimit = false;
   try {
     // Must run inside a transaction: the profile-cap guard takes a
     // transaction-scoped advisory lock, which would release immediately under
@@ -906,7 +906,7 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
       });
       const { item_id } = created;
       insertedItemId = item_id;
-      heldByLiveLimit = created.heldByLiveLimit;
+      blockedByLiveLimit = created.blockedByLiveLimit;
       const consent = await recordParticipantConsent(tx, {
         compliance: body.compliance,
         userId: existing.id,
@@ -917,13 +917,13 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
         acceptedAt: new Date(),
       });
       consent_recorded = consent.recorded;
-      heldByLiveLimit ||= consent.heldByLiveLimit;
+      blockedByLiveLimit ||= consent.blockedByLiveLimit;
       // A newly-known age can also unblock the user's other consented drafts
       // (age is user-level) — sweep them, mirroring the update_item branch.
       if (body.age != null) {
         const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
         promotedDrafts = sweep.promoted;
-        heldByLiveLimit ||= sweep.heldByLiveLimit;
+        blockedByLiveLimit ||= sweep.blockedByLiveLimit;
       }
     });
   } catch (err) {
@@ -944,7 +944,7 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
     request.log,
   );
 
-  return existingUserOk(reply, existing.id, consent_recorded, heldByLiveLimit);
+  return existingUserOk(reply, existing.id, consent_recorded, blockedByLiveLimit);
 }
 
 /** `create_new_user`: onboard the account and its first profile together. */

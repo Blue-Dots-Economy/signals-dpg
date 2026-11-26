@@ -193,8 +193,8 @@ vi.mock('@/lib/profile_item', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
-  liveLimitMessage: (r: { heldByLiveLimit?: boolean }) =>
-    r.heldByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   updateItemInternal: vi.fn(async (..._a: unknown[]) => {
     if (state.updateItemFail) throw state.updateItemFail;
     return {
@@ -211,13 +211,13 @@ vi.mock('@/services/item_service', () => ({
 vi.mock('@/services/participant_consent', () => ({
   recordParticipantConsent: vi.fn(async (..._a: unknown[]) => {
     if (state.consentFail) throw state.consentFail;
-    return { recorded: state.consentRecorded, promoted: false, heldByLiveLimit: false };
+    return { recorded: state.consentRecorded, promoted: false, blockedByLiveLimit: false };
   }),
   // Returns the keys of the drafts it promoted (#557) — the route publishes one
   // item event per key, so `promoted` must be an array, not void.
   promoteEligibleDraftsForUser: vi.fn(async (_tx: unknown, _userId: string) => ({
     promoted: [] as Array<{ item_network: string; item_domain: string; item_type: string; item_id: string }>,
-    heldByLiveLimit: false,
+    blockedByLiveLimit: false,
   })),
 }));
 

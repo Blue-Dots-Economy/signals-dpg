@@ -61,7 +61,7 @@ export const update_item_handler = async (
 
   try {
     // A transaction so the live-limit advisory lock holds until the write commits.
-    const { row: updated, heldByLiveLimit, changed } = await db.transaction((tx) =>
+    const { row: updated, blockedByLiveLimit, changed } = await db.transaction((tx) =>
       updateItemInternal(tx, itemId, callerId, isAdmin, {
         item_state: body.item_state,
         item_locations: body.item_locations,
@@ -112,7 +112,7 @@ export const update_item_handler = async (
 
     return reply.code(200).send({
       item: { ...rest, item_state: mergedState },
-      ...liveLimitMessage({ heldByLiveLimit }),
+      ...liveLimitMessage({ blockedByLiveLimit }),
     });
   } catch (err) {
     if (err instanceof ItemServiceError) {

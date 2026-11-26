@@ -159,8 +159,8 @@ vi.mock('@/utils/publish_item_event', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
-  liveLimitMessage: (r: { heldByLiveLimit?: boolean }) =>
-    r.heldByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   ItemServiceError: FakeItemServiceError,
   createItemInternal: (...a: unknown[]) => {
     order.push('createItem');
@@ -629,7 +629,7 @@ describe('create_item_handler — lifecycle notification seam', () => {
       itemId: 'item-1',
       itemType: 'profile_1.0',
       lifecycleStatus: 'draft',
-      heldByLiveLimit: true,
+      blockedByLiveLimit: true,
     });
 
     const reply = await call({

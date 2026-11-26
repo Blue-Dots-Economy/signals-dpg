@@ -834,18 +834,18 @@ describe('createItemInternal — profile cap', () => {
     expect(JSON.stringify(rec.selectWheres[1])).toContain('live');
   });
 
-  it('reports heldByLiveLimit when the classifier holds the profile in draft', async () => {
+  it('reports blockedByLiveLimit when the classifier holds the profile in draft', async () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
     queue.push([{ n: 1 }]);
     queue.push([ROW]);
 
     await expect(createItemInternal(exec, createParams())).resolves.toMatchObject({
-      heldByLiveLimit: true,
+      blockedByLiveLimit: true,
     });
   });
 
@@ -931,7 +931,7 @@ describe('createItemInternal — storage shape', () => {
     expect(values.item_private_state).toBe('enc:{"phone":"9990001111"}');
     expect(values.item_locations).toEqual([{ lat: 12.901, lng: 77.6, label: 'home' }]);
     expect(values.lifecycle_status).toBe('live');
-    expect(out).toEqual({ ...ROW, heldByLiveLimit: false });
+    expect(out).toEqual({ ...ROW, blockedByLiveLimit: false });
   });
 
   it('stores an empty private blob (no encryption) when nothing is private', async () => {
@@ -1064,7 +1064,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: true, heldByLiveLimit: false });
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: true, blockedByLiveLimit: false });
     expect(rec.updates[0].set).toMatchObject({ lifecycle_status: 'live' });
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ current_status: 'draft', consent_accepted: true }),
@@ -1073,7 +1073,7 @@ describe('promoteItemOnProfileConsent', () => {
 
   it('returns false when the item does not exist', async () => {
     const { exec, rec } = makeExec();
-    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
+    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1081,7 +1081,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ ...draftItem, lifecycle_status: 'paused' }]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).not.toHaveBeenCalled();
   });
@@ -1091,7 +1091,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1120,7 +1120,7 @@ describe('promoteItemOnProfileConsent', () => {
     queue.push([{ age: 15 }]);
     queue.push([]); // no guardian consent row
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ consent_accepted: false }),
@@ -1135,7 +1135,7 @@ describe('promoteItemOnProfileConsent — live limit', () => {
       .mockResolvedValueOnce(cfg) // resolveGoLiveGates
       .mockResolvedValueOnce(cfg) // guardianGateBlocksGoLive
       .mockRejectedValueOnce(new Error('config down')); // resolveLiveSlotFree
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
@@ -1149,14 +1149,14 @@ describe('promoteItemOnProfileConsent — live limit', () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
     queue.push([{ n: 1 }]); // live count: limit reached
 
     await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
       promoted: false,
-      heldByLiveLimit: true,
+      blockedByLiveLimit: true,
     });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).toHaveBeenCalledWith(
@@ -1181,7 +1181,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
       documentVersion: 2,
     });
 
-    expect(promoted).toEqual({ promoted: true, heldByLiveLimit: false });
+    expect(promoted).toEqual({ promoted: true, blockedByLiveLimit: false });
     expect(rec.inserts[0].values).toEqual({ userId: 'u1', itemId: 'i1', source: 'guardian' });
     // Idempotent on a repeat guardian acceptance for the same item.
     expect(JSON.stringify(rec.conflicts[0])).toContain('cr.source');
@@ -1198,7 +1198,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
         network: 'blue_dot',
         documentVersion: 1,
       }),
-    ).resolves.toEqual({ promoted: false, heldByLiveLimit: false });
+    ).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.inserts).toHaveLength(1);
   });
 });
@@ -1274,11 +1274,11 @@ describe('updateItemInternal — ownership scoping', () => {
 });
 
 describe('updateItemInternal — state edits', () => {
-  it('reports heldByLiveLimit for a draft the live limit keeps in draft', async () => {
+  it('reports blockedByLiveLimit for a draft the live limit keeps in draft', async () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', held_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
     const { exec, queue } = makeExec();
     queue.push([existingItem]);
     queue.push([{ n: 1 }]); // live count: limit reached
@@ -1286,7 +1286,7 @@ describe('updateItemInternal — state edits', () => {
 
     const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
 
-    expect(res.heldByLiveLimit).toBe(true);
+    expect(res.blockedByLiveLimit).toBe(true);
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ live_slot_free: false }),
     );
@@ -1340,7 +1340,7 @@ describe('updateItemInternal — state edits', () => {
 
     const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
 
-    expect(res.heldByLiveLimit).toBe(false);
+    expect(res.blockedByLiveLimit).toBe(false);
     expect(rec.executes).toHaveLength(0); // no advisory lock taken
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ live_slot_free: undefined }),

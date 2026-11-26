@@ -145,7 +145,7 @@ export const accept_profile_consent_handler = async (
     });
   }
 
-  let promotion: PromotionResult = { promoted: false, heldByLiveLimit: false };
+  let promotion: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
       await tx.insert(consent_record).values({
