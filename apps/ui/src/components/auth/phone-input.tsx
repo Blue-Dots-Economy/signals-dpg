@@ -2,58 +2,56 @@ import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { getRuntimeEnv } from '@/lib/runtime-env';
-import { isContactPhone } from '@dpg/schemas/phone_rules';
+import {
+  parsePhone,
+  phoneCountryInfo,
+  readPhoneCountries,
+  DEFAULT_PHONE_COUNTRIES as DEFAULT_COUNTRY_CODES,
+  type CountryCode,
+  type PhoneCountryList,
+} from '@dpg/schemas/phone_rules';
 
 /** A country a phone field can use. */
 export interface PhoneCountry {
   /** ISO 3166-1 alpha-2 code, e.g. `IN`. */
-  iso: string;
+  iso: CountryCode;
   /** Dial code with its plus, e.g. `+91`. */
   code: string;
   flag: string;
-  /** Digits in a national number, when known. */
-  nationalDigits?: number;
+  /** Digits in a mobile number after the dial code. */
+  nationalDigits: number;
   /** A valid national number, used to test a field's pattern. */
   sample: string;
 }
-
-/** Known national lengths and sample numbers; other countries get the E.164 cap. */
-const KNOWN_COUNTRIES: Partial<Record<string, { nationalDigits: number; sample: string }>> = {
-  IN: { nationalDigits: 10, sample: '9876543210' },
-  GB: { nationalDigits: 10, sample: '7911123456' },
-  US: { nationalDigits: 10, sample: '2025550123' },
-  CA: { nationalDigits: 10, sample: '4165550123' },
-};
-const GENERIC_SAMPLE = '2345678901';
-
-const INDIA: PhoneCountry = { iso: 'IN', code: '+91', flag: '🇮🇳', nationalDigits: 10, sample: '9876543210' };
 
 function flagOf(iso: string): string {
   return String.fromCodePoint(...[...iso].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
 }
 
+function toPhoneCountries(list: PhoneCountryList): [PhoneCountry, ...PhoneCountry[]] {
+  const describe = (iso: CountryCode): PhoneCountry => ({
+    ...phoneCountryInfo(iso),
+    flag: flagOf(iso),
+  });
+  const [first, ...rest] = list;
+  return [describe(first), ...rest.map((iso) => describe(iso))];
+}
+
+const INDIA: PhoneCountry = toPhoneCountries(DEFAULT_COUNTRY_CODES)[0];
+
 /**
- * Reads the deployment's country list, `IN:+91,GB:+44` (ISO code and dial code,
- * first is the default). Bad or repeated entries are skipped; none left means India.
+ * Reads the deployment's country list, `IN:+91,GB:+44` (first is the default),
+ * with the same rules as the API. A bad value is logged and falls back to India.
  */
 export function parsePhoneCountries(raw: string | undefined): [PhoneCountry, ...PhoneCountry[]] {
-  const list: PhoneCountry[] = [];
-  for (const entry of (raw ?? '').split(',')) {
-    const m = /^([A-Za-z]{2})\s*:\s*\+?([1-9]\d{0,2})$/.exec(entry.trim());
-    if (!m) continue;
-    const iso = m[1].toUpperCase();
-    const code = `+${m[2]}`;
-    if (list.some((c) => c.code === code)) continue;
-    list.push({ iso, code, flag: flagOf(iso), ...(KNOWN_COUNTRIES[iso] ?? { sample: GENERIC_SAMPLE }) });
-  }
-  return list.length > 0 ? (list as [PhoneCountry, ...PhoneCountry[]]) : [INDIA];
+  const read = readPhoneCountries(raw);
+  if (read.ok) return toPhoneCountries(read.value);
+  console.error(`VITE_PHONE_COUNTRIES: ${read.error.message}; using India only`);
+  return [INDIA];
 }
 
 /** Countries a phone field offers (runtime `VITE_PHONE_COUNTRIES`); the first is the default. */
 export const PHONE_COUNTRIES = parsePhoneCountries(getRuntimeEnv('VITE_PHONE_COUNTRIES'));
-
-/** India's dial code: a bare 10-digit number is read as Indian, as the API does. */
-export const IN_DIAL_CODE = INDIA.code;
 
 /** Country code a phone field starts with. */
 export const DEFAULT_DIAL_CODE = PHONE_COUNTRIES[0].code;
@@ -121,22 +119,24 @@ export function nationalMaxLength(code: string): number {
 }
 
 /**
- * Splits a stored value into code and number. A bare 10-digit value is read as
- * an Indian number, and `+91…` always as India.
+ * Splits a stored value into code and number. A value without `+` is read in
+ * the first listed country, as the API does.
  */
 export function splitPhone(value: string | null | undefined): { code: string; national: string } {
   const raw = (value ?? '').replace(/[\s\-()]/g, '');
   const digits = raw.replace(/\D/g, '');
   if (!raw.startsWith('+')) {
-    // `919876543210` is the +91 number without its plus.
-    if (digits.length === 2 + IN_NATIONAL_DIGITS && digits.startsWith('91')) {
-      return { code: IN_DIAL_CODE, national: digits.slice(2) };
+    const [home] = PHONE_COUNTRIES;
+    const homeDigits = home.code.slice(1);
+    // `919876543210` is the default country's number without its plus.
+    if (digits.length === homeDigits.length + home.nationalDigits && digits.startsWith(homeDigits)) {
+      return { code: home.code, national: digits.slice(homeDigits.length) };
     }
     // `09876543210` carries the trunk 0.
-    if (digits.length === 1 + IN_NATIONAL_DIGITS && digits.startsWith('0')) {
-      return { code: IN_DIAL_CODE, national: digits.slice(1) };
+    if (digits.length === 1 + home.nationalDigits && digits.startsWith('0')) {
+      return { code: home.code, national: digits.slice(1) };
     }
-    return { code: IN_DIAL_CODE, national: digits };
+    return { code: home.code, national: digits };
   }
   const listed = PHONE_COUNTRIES.find((c) => digits.startsWith(c.code.slice(1)));
   if (listed) return { code: listed.code, national: digits.slice(listed.code.length - 1) };
@@ -152,9 +152,10 @@ export function splitPhone(value: string | null | undefined): { code: string; na
  * with an unlisted code keeps all its digits, so it fails validation.
  */
 export function nationalFromInput(raw: string, code: string): { code: string; national: string } {
-  const trimmed = raw.trim();
+  const trimmed = raw.trim().replace(/^00(?=[1-9])/, '+'); // `0091…` dials +91
   if (trimmed.startsWith('+')) {
-    const parts = splitPhone(trimmed);
+    const parsed = parsePhone(trimmed, { countries: isoCodes(), kind: 'any' });
+    const parts = splitPhone(parsed.ok ? parsed.value : trimmed); // drops a trunk 0
     if (phoneCountry(parts.code)) {
       return { code: parts.code, national: parts.national.slice(0, nationalMaxLength(parts.code)) };
     }
@@ -174,8 +175,26 @@ export function joinPhone(code: string, national: string): string {
   return digits ? `${code}${digits}` : '';
 }
 
-/** A contact number (landlines too), by the API's own rule. */
-export const isAcceptedPhone = isContactPhone;
+function isoCodes(): PhoneCountryList {
+  const [first, ...rest] = PHONE_COUNTRIES;
+  return [first.iso, ...rest.map((c) => c.iso)];
+}
+
+/** A mobile in one of {@link PHONE_COUNTRIES}, by the API's own rule. */
+export function isMobilePhone(value: string): boolean {
+  return parsePhone(value, { countries: isoCodes(), kind: 'mobile' }).ok;
+}
+
+/** The number as the API stores it (E.164), or null when it is not valid in a listed country. */
+export function storedPhone(value: string): string | null {
+  const parsed = parsePhone(value, { countries: isoCodes(), kind: 'any' });
+  return parsed.ok ? parsed.value : null;
+}
+
+/** A contact number (landlines too) in one of {@link PHONE_COUNTRIES}, by the API's own rule. */
+export function isAcceptedPhone(value: string): boolean {
+  return parsePhone(value, { countries: isoCodes(), kind: 'any' }).ok;
+}
 
 export interface PhoneInputProps {
   id: string;

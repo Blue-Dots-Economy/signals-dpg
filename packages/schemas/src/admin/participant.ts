@@ -1,6 +1,6 @@
 import z from 'zod';
 import { ItemLocationsArray } from '../api/item_schemas';
-import { PHONE_E164_PATTERN } from '../phone_rules';
+import { PHONE_E164_SHAPE } from '../phone_rules';
 
 /**
  * Body for POST /api/v1/admin/participant: an upsert called by integrating
@@ -12,9 +12,10 @@ import { PHONE_E164_PATTERN } from '../phone_rules';
  * `source_id` is opaque to Signals.
  */
 
+// The per-country check runs in the handler, which knows PHONE_COUNTRIES.
 const PhoneE164 = z
   .string()
-  .regex(PHONE_E164_PATTERN, 'must be E.164; +91 numbers need 10 digits (e.g. +919876543210)');
+  .regex(PHONE_E164_SHAPE, 'must be E.164: + and 10-15 digits (e.g. +919876543210)');
 
 // Lookup accepts the number with or without the leading "+"; the handler
 // prepends "+" before matching the stored E.164 value.

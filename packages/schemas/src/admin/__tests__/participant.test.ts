@@ -62,17 +62,21 @@ describe('UpsertParticipantRequest — phone_number must be E.164', () => {
     ['too long', '+1234567890123456'],
     ['spaces', '+91 98765 43210'],
     ['letters', '+91abcdefghij'],
-    ['+91 and 9 digits', '+91935350600'],
-    ['+91 and a number not starting 6-9', '+911234567890'],
+    ['+91 and 7 digits', '+919876543'],
   ])('rejects a phone_number with %s', (_label, phone_number) => {
     const result = UpsertParticipantRequest.safeParse({ ...base, phone_number });
 
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.issues[0].message).toBe(
-        'must be E.164; +91 numbers need 10 digits (e.g. +919876543210)',
+        'must be E.164: + and 10-15 digits (e.g. +919876543210)',
       );
     }
+  });
+
+  it('leaves the per-country check (e.g. a +91 landline) to the handler', () => {
+    const stored = { ...base, phone_number: '+911234567890' };
+    expect(UpsertParticipantRequest.safeParse(stored).success).toBe(true);
   });
 });
 

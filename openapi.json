@@ -6226,7 +6226,7 @@
                   },
                   "phone_number": {
                     "type": "string",
-                    "pattern": "^\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})$"
+                    "pattern": "^\\+[1-9]\\d{9,14}$"
                   },
                   "name": {
                     "type": "string",
@@ -9003,7 +9003,8 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   },
                   "domain": {
                     "type": "string",
@@ -9183,7 +9184,8 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   }
                 },
                 "required": [
@@ -9469,8 +9471,7 @@
                     "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "phone": {
-                    "type": "string",
-                    "maxLength": 20
+                    "type": "string"
                   },
                   "type": {
                     "type": "string",

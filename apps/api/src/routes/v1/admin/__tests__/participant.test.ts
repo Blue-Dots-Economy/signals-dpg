@@ -27,6 +27,7 @@ const mockAuthConfig = vi.hoisted(() => ({
   url: 'http://source.local/api/auth',
   create_test_otp: false,
   keycloak_enabled: true,
+  phone_countries: ['IN'],
 }));
 
 // --- mock @/config so loadEnv() never runs ---

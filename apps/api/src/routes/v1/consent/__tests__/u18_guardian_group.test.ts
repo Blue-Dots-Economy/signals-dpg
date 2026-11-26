@@ -148,25 +148,31 @@ vi.mock('drizzle-orm', () => ({
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
 }));
 
-vi.mock('@dpg/schemas', () => ({
-  default: { object: () => ({}), string: () => ({ min: () => ({}) }) },
-  U18DobBodySchema: {},
-  U18DobResponseSchema: {},
-  U18GuardianBodySchema: {},
-  U18GuardianResponseSchema: {},
-  U18GuardianVerifyBodySchema: {},
-  U18GuardianVerifyResponseSchema: {},
-  SignupGuardianBodySchema: {},
-  SignupGuardianResponseSchema: {},
-  SignupGuardianVerifyBodySchema: {},
-  SignupGuardianVerifyResponseSchema: {},
-}));
+vi.mock('@dpg/schemas', async () => {
+  // Any zod chain (z.string().max().regex()...) returns the same stub.
+  const chain: object = new Proxy({}, { get: () => () => chain });
+  return {
+    ...(await vi.importActual<Record<string, unknown>>('@dpg/schemas/phone_rules')),
+    default: { object: () => ({}), string: () => chain },
+    U18DobBodySchema: {},
+    U18DobResponseSchema: {},
+    U18GuardianBodySchema: {},
+    U18GuardianResponseSchema: {},
+    U18GuardianVerifyBodySchema: {},
+    U18GuardianVerifyResponseSchema: {},
+    SignupGuardianBodySchema: {},
+    SignupGuardianResponseSchema: {},
+    SignupGuardianVerifyBodySchema: {},
+    SignupGuardianVerifyResponseSchema: {},
+  };
+});
 
 vi.mock('@/config', () => ({
   apiConfig: {
     served_domains: [{ network: 'blue_dot', domain: 'student' }],
     max_wards_per_guardian: 3,
   },
+  authConfig: { phone_countries: ['IN'] },
 }));
 
 vi.mock('@/services/minor', () => ({ isMinor: (age: number) => age < 18 }));
@@ -528,7 +534,33 @@ describe('u18_guardian_handler', () => {
       body: { ...body, guardianPhone: '8880002222' },
     });
 
-    expect(isGuardianWardLimitReached).toHaveBeenCalledWith('8880002222', 'u1');
+    expect(isGuardianWardLimitReached).toHaveBeenCalledWith('+918880002222', 'u1');
+  });
+
+  it('compares and stores a spaced guardian phone in E.164', async () => {
+    getWardAge.mockResolvedValue(15);
+    rowQueue.push([{ email: 'ward@example.com', phoneNumber: '+919990001111' }]);
+
+    await call(u18_guardian_handler, {
+      user: { id: 'u1' },
+      body: { ...body, guardianPhone: '99900 01111' },
+    });
+
+    expect(guardianContactMatchesWard).toHaveBeenCalledWith(
+      expect.objectContaining({ wardPhone: '+919990001111', guardianPhone: '+919990001111' }),
+    );
+  });
+
+  it('400 INVALID_PHONE for a landline guardian phone, before anything else', async () => {
+    const reply = await call(u18_guardian_handler, {
+      user: { id: 'u1' },
+      body: { ...body, guardianPhone: '+918020123456' },
+    });
+
+    expect(reply.statusCode).toBe(400);
+    expect(errOf(reply)).toBe('INVALID_PHONE');
+    expect(getWardAge).not.toHaveBeenCalled();
+    expect(upsertGuardianDetails).not.toHaveBeenCalled();
   });
 
   it('400 CONSENT_VERSION_UNCONFIGURED when guardian_declaration has no version', async () => {
@@ -876,10 +908,28 @@ describe('u18_signup_guardian (PRE-AUTH)', () => {
         age: 15,
         guardianName: 'Parent One',
         guardianEmail: 'parent@example.com',
-        guardianPhone: '8880002222',
+        guardianPhone: '+918880002222',
         guardianDeclarationAccepted: true,
         sameContactAcknowledged: true,
       });
+    });
+
+    it('400 INVALID_PHONE for a guardian phone with letters', async () => {
+      const reply = await callStart({ body: { ...startBody, guardianPhone: '9876543210abc' } });
+
+      expect(reply.statusCode).toBe(400);
+      expect(errOf(reply)).toBe('INVALID_PHONE');
+      expect(startSignupGuardian).not.toHaveBeenCalled();
+    });
+
+    it('400 INVALID_PHONE for a ward phone that is not a mobile', async () => {
+      const { email: _email, ...rest } = startBody;
+
+      const reply = await callStart({ body: { ...rest, phoneNumber: '+918020123456' } });
+
+      expect(reply.statusCode).toBe(400);
+      expect(errOf(reply)).toBe('INVALID_PHONE');
+      expect(startSignupGuardian).not.toHaveBeenCalled();
     });
 
     it('uses the phoneNumber identifier when no email is supplied', async () => {
@@ -888,7 +938,7 @@ describe('u18_signup_guardian (PRE-AUTH)', () => {
       await callStart({ body: { ...rest, phoneNumber: '9990001111' } });
 
       expect(startSignupGuardian.mock.calls[0][0].identifier).toEqual({
-        phoneNumber: '9990001111',
+        phoneNumber: '+919990001111',
       });
     });
 
@@ -974,7 +1024,7 @@ describe('u18_signup_guardian (PRE-AUTH)', () => {
       await callVerify({ body: { phoneNumber: '9990001111', otp: '000000' } });
 
       expect(verifySignupGuardian.mock.calls[0][0].identifier).toEqual({
-        phoneNumber: '9990001111',
+        phoneNumber: '+919990001111',
       });
     });
 

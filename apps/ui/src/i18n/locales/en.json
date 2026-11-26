@@ -46,7 +46,7 @@
   "auth.toast_send_code_error": "Couldn't send verification code",
   "auth.toast_send_code_error_desc": "Check your connection and make sure the number or email is correct, then try again.",
   "auth.toast_invalid_phone": "Invalid mobile number",
-  "auth.toast_invalid_phone_desc": "Enter a valid 10-digit mobile number (starting with 6, 7, 8, or 9).",
+  "auth.toast_invalid_phone_desc": "Enter a valid mobile number.",
   "auth.toast_invalid_email": "Invalid email",
   "auth.toast_invalid_email_desc": "Enter a valid email address (e.g. name@example.com).",
   "auth.otp_heading": "Enter verification code",
