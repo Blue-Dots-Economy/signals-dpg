@@ -32,10 +32,15 @@ export const servedNetworks = (): string[] => {
 /**
  * Every item this user owns in a served network, ordered by
  * {@link ITEMS_NEWEST_FIRST}, with private state merged in and the raw
- * encrypted blob dropped.
+ * encrypted blob dropped. `statuses` narrows to those lifecycle statuses;
+ * omitted returns all of them.
  */
-export async function readItemsForUser(user_id: string) {
+export async function readItemsForUser(user_id: string, statuses?: readonly string[]) {
   const networks = servedNetworks();
+  const scope =
+    networks.length > 0
+      ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
+      : eq(items.created_by, user_id);
   const rows = await db
     .select({
       item_id: items.item_id,
@@ -50,11 +55,7 @@ export async function readItemsForUser(user_id: string) {
       updated_at: items.updated_at,
     })
     .from(items)
-    .where(
-      networks.length > 0
-        ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
-        : eq(items.created_by, user_id),
-    )
+    .where(statuses ? and(scope, inArray(items.lifecycle_status, [...statuses])) : scope)
     .orderBy(...ITEMS_NEWEST_FIRST);
 
   return rows.map((r) => {

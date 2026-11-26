@@ -6515,6 +6515,15 @@
           },
           {
             "schema": {
+              "type": "string",
+              "pattern": "^(draft|live|paused)(,(draft|live|paused))*$"
+            },
+            "in": "query",
+            "name": "lifecycle_status",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "header",

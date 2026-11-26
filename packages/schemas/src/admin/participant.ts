@@ -155,6 +155,19 @@ export const GetParticipantRequest = z
      * a multi-network one.
      */
     network: z.string().min(1).optional(),
+    /**
+     * Only return items in these lifecycle statuses, comma-separated (e.g.
+     * `live,draft`). Retired is not a filter value. Omitted returns every
+     * status, retired included: an empty list reads as "owned elsewhere" to
+     * aggregator-dpg, so an all-retired user must still list something.
+     */
+    lifecycle_status: z
+      .string()
+      .regex(
+        /^(draft|live|paused)(,(draft|live|paused))*$/,
+        'lifecycle_status must be a comma-separated list of draft, live, paused',
+      )
+      .optional(),
   })
   .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
     message: 'either email or phone_number is required',

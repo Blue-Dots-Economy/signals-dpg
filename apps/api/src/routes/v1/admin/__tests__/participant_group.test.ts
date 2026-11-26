@@ -821,6 +821,23 @@ describe('participant_read_handler — item + consent projection', () => {
     });
   });
 
+  it('narrows the items read to the requested lifecycle statuses', async () => {
+    configState.served_domains = [];
+    rowQueue.push(onboarded);
+    rowQueue.push([{ age: 25 }]);
+    rowQueue.push([]);
+    rowQueue.push([]);
+    consentVersionState.current = { terms: 1, privacy: 1, profile_creation: 1 };
+
+    await call(participant_read_handler, {
+      acting_org: AGG,
+      query: { email: 'a@b.com', network: 'blue_dot', lifecycle_status: 'live,draft' },
+    });
+
+    expect(JSON.stringify(queries[2].where)).toContain('items.lifecycle_status');
+    expect(JSON.stringify(queries[2].where)).toContain('"live","draft"');
+  });
+
   // ---------------------------------------------------------------------------
   // #692 — the flags are version-scoped, and the U18 gate
   // ---------------------------------------------------------------------------

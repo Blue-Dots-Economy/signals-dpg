@@ -482,6 +482,13 @@ or every entry was `false`/unrecognised).
   per-item `profile_consent_accepted` + `lifecycle_status`, so callers can see
   what's outstanding and which profile is usable. It replaced
   `user_consent { terms_accepted, … }` in #692.
+- `GET /admin/participant?lifecycle_status=live,draft` returns only items in
+  those statuses (**additive, #927**; any of `draft`, `live`, `paused`,
+  comma-separated). Omitted, every item comes back as before, retired included.
+  A user who owns no item in the requested statuses gets `items: []` with the
+  real `compliance` values; a user owned by another aggregator gets
+  `items: []` with every flag `false`, so do not read an empty filtered list as
+  "owned elsewhere". An unknown value (or `retired`) is a `400`.
 - **Every consent flag is version-scoped** (#692). `value` is `true` only when
   the consent was accepted at the document version this instance currently
   serves — resolved with the **same three discriminators the write side uses**:
