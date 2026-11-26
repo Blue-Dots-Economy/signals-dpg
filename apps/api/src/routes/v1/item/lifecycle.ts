@@ -233,16 +233,12 @@ const item_lifecycle_handler = async (
         };
       }
 
-      if (action === 'pause') {
-        next_status = 'paused';
-      } else {
-        const unpaused = await classifyUnpause(tx, existing);
-        // Unpause exists only to go live: refuse rather than turn it into a draft.
-        if (unpaused === null) {
-          return { liveLimitReached: true } as const;
-        }
-        next_status = unpaused;
+      const next = action === 'pause' ? 'paused' : await classifyUnpause(tx, existing);
+      // Unpause exists only to go live: refuse rather than turn it into a draft.
+      if (next === null) {
+        return { liveLimitReached: true } as const;
       }
+      next_status = next;
 
       await tx
         .update(items)
