@@ -625,3 +625,19 @@ describe('GetParticipantRequest — lifecycle_status filter', () => {
     expect(parse(v).success).toBe(false);
   });
 });
+
+describe('GetParticipantRequest — limit', () => {
+  const parse = (limit?: string) => GetParticipantRequest.safeParse({ email: 'a@b.co', limit });
+
+  it('is optional', () => {
+    expect(parse().success).toBe(true);
+  });
+
+  it.each(['1', '20', '100', '1000'])('accepts %s', (v) => {
+    expect(parse(v).success).toBe(true);
+  });
+
+  it.each(['0', '1001', '-5', '2.5', 'abc'])('rejects %s', (v) => {
+    expect(parse(v).success).toBe(false);
+  });
+});

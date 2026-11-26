@@ -489,6 +489,9 @@ or every entry was `false`/unrecognised).
   real `compliance` values; a user owned by another aggregator gets
   `items: []` with every flag `false`, so do not read an empty filtered list as
   "owned elsewhere". An unknown value (or `retired`) is a `400`.
+- `GET /admin/participant?limit=20` returns only the newest 20 items, after any
+  `lifecycle_status` filter (**additive, #927**; 1–1000). Omitted, every item
+  comes back. The POST response is never limited.
 - **Every consent flag is version-scoped** (#692). `value` is `true` only when
   the consent was accepted at the document version this instance currently
   serves — resolved with the **same three discriminators the write side uses**:

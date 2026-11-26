@@ -6524,6 +6524,16 @@
           },
           {
             "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "header",

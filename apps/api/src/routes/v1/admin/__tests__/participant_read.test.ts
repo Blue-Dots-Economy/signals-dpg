@@ -117,6 +117,14 @@ describe('GET /api/v1/admin/participant (unit)', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it.each(['0', '1001', 'abc'])('rejects limit=%s with 400', async (value) => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/participant?email=test@example.com&limit=${value}`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('rejects missing acting_org with 403', async () => {
     const app2 = Fastify().withTypeProvider<ZodTypeProvider>();
     app2.setValidatorCompiler(validatorCompiler);

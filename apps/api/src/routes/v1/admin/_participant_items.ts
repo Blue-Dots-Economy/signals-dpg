@@ -32,16 +32,20 @@ export const servedNetworks = (): string[] => {
 /**
  * Every item this user owns in a served network, ordered by
  * {@link ITEMS_NEWEST_FIRST}, with private state merged in and the raw
- * encrypted blob dropped. `statuses` narrows to those lifecycle statuses;
- * omitted returns all of them.
+ * encrypted blob dropped. `statuses` narrows to those lifecycle statuses and
+ * `limit` keeps only the newest that many; omitted, every item comes back.
  */
-export async function readItemsForUser(user_id: string, statuses?: readonly string[]) {
+export async function readItemsForUser(
+  user_id: string,
+  filter: { statuses?: readonly string[]; limit?: number } = {},
+) {
+  const { statuses, limit } = filter;
   const networks = servedNetworks();
   const scope =
     networks.length > 0
       ? and(eq(items.created_by, user_id), inArray(items.item_network, networks))
       : eq(items.created_by, user_id);
-  const rows = await db
+  const query = db
     .select({
       item_id: items.item_id,
       item_network: items.item_network,
@@ -57,6 +61,7 @@ export async function readItemsForUser(user_id: string, statuses?: readonly stri
     .from(items)
     .where(statuses ? and(scope, inArray(items.lifecycle_status, [...statuses])) : scope)
     .orderBy(...ITEMS_NEWEST_FIRST);
+  const rows = await (limit === undefined ? query : query.limit(limit));
 
   return rows.map((r) => {
     const { item_private_state: _drop, ...rest } = r;

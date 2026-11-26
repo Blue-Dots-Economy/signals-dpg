@@ -168,6 +168,8 @@ export const GetParticipantRequest = z
         'lifecycle_status must be a comma-separated list of draft, live, paused',
       )
       .optional(),
+    /** Return only the newest `limit` items (after `lifecycle_status`). Omitted returns all. */
+    limit: z.coerce.number().int().min(1).max(1000).optional(),
   })
   .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
     message: 'either email or phone_number is required',
