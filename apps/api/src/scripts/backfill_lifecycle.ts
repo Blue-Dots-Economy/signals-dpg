@@ -128,7 +128,9 @@ async function main() {
       const current = row.lifecycle_status as LifecycleStatus;
       // Default gates only: a backfill must not demote a population for want of
       // an owning aggregator (`owner_required`). The live limit is the exception.
-      const limited = (await resolveGoLiveGates(row.item_network, row.item_domain)).includes('live_limit');
+      // Row by row on purpose: each promotion changes the live count the next
+      // row is checked against.
+      const limited = (await resolveGoLiveGates(row.item_network, row.item_domain)).includes('live_limit'); // NOSONAR typescript:S9382 — sequential by design (see above)
       const gates = limited ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const] : undefined;
       const next = classify_item({
         schema,
@@ -137,7 +139,7 @@ async function main() {
         consent_accepted: consented.has(row.item_id),
         gates,
         live_slot_free:
-          gates && current === 'draft' ? await resolveLiveSlotFree(db, gates, row) : undefined,
+          gates && current === 'draft' ? await resolveLiveSlotFree(db, gates, row) : undefined, // NOSONAR typescript:S9382 — sequential by design (see above)
       }).lifecycle_status;
 
       if (next !== current) {

@@ -348,7 +348,8 @@ type ProfileScope = Pick<
  * callers must be in one.
  */
 async function lockProfileOwner(exec: DbOrTx, ownerId: string): Promise<void> {
-  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`profile-limit:${ownerId}`}))`);
+  const key = `profile-limit:${ownerId}`;
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
 }
 
 /** Count the owner's profiles in this scope matching `status`. */
@@ -817,17 +818,16 @@ interface ExistingItemForUpdate {
  *          downstream location resolution) and the column writes to apply.
  * @throws {ItemServiceError} 400 INVALID_ITEM_STATE / 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE.
  */
-async function computeItemStateUpdate(
-  exec: DbOrTx,
+function computeItemStateUpdate(
   existingItem: ExistingItemForUpdate,
   itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
   bodyState: Record<string, unknown>,
-): Promise<{
+): {
   mergedFullState: Record<string, unknown>;
   addressChanged: boolean;
   writes: { item_state: unknown; item_private_state: string };
   stateChanged: boolean;
-}> {
+} {
   const priorPrivate =
     existingItem.item_private_state === ''
       ? {}
@@ -1040,8 +1040,7 @@ export async function updateItemInternal(
     let addressChanged = false;
 
     if (body.item_state) {
-      const stateUpdate = await computeItemStateUpdate(
-        exec,
+      const stateUpdate = computeItemStateUpdate(
         existingItem,
         itemSchema,
         body.item_state,
