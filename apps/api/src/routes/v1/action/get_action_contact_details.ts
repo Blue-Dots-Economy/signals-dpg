@@ -14,6 +14,7 @@ import { getCurrentApiBaseUrl } from '@/config';
 import { getNetworkConfigById } from '@/network_configs';
 import { fetchLocalItems } from '@/utils/item_fetch_runtime';
 import { fetchLocalItemSnapshot } from '@/utils/action_event_runtime';
+import { resolve_caller_id } from './_resolve_acting_actor.js';
 
 type Params = z.infer<typeof ActionContactDetailsParamsSchema>;
 
@@ -39,13 +40,21 @@ export const get_action_contact_details_handler = async (
   request: Req,
   reply: FastifyReply
 ) => {
-  const userId = request.user?.id;
-  if (!userId) {
+  if (!request.user?.id) {
     return reply.code(401).send({
       error: 'UNAUTHORIZED',
       message: 'Authenticated user is required',
     });
   }
+
+  // YellowDot patch: an acting org may send `x-acting-as-user-id` to read the
+  // counterparty's contact details as one of its users. Participant checks and
+  // the pii_reveal_audit row then apply to that user, not the service user.
+  const caller = await resolve_caller_id(request);
+  if (!caller.ok) {
+    return reply.code(caller.status).send({ error: caller.error, message: caller.message });
+  }
+  const userId = caller.caller_id;
 
   const { action_id } = request.params;
 

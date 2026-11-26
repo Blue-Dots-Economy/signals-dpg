@@ -35,6 +35,7 @@ import {
   type GateResult,
 } from '@/services/guardian_action_gate';
 import { guardianActionConsentRow, actionConsentRow } from '@/services/guardian_consent_rows';
+import { resolve_caller_id } from './_resolve_acting_actor.js';
 
 const BulkUpdateActionStatusBodySchema = z.array(z.unknown());
 
@@ -143,12 +144,21 @@ async function buildBulkGuardianAcceptGate(
  * `acting_as_user_id` was removed by spec
  * 2026-05-23-action-on-behalf-of-network-service-tier-design.md — audit columns
  * on `item_actions` are populated only at create-time (by `/action/perform`).
+ *
+ * YellowDot patch: an acting org (x-acting-org-id) may send `x-acting-as-user-id`
+ * to run the whole request as one of its users (see `resolve_caller_id`). Every
+ * ownership check below then applies to that user exactly as if they had called
+ * it themselves; without the header nothing changes.
  */
 export const update_action_status_handler = async (
   request: FastifyRequest<{ Body: unknown[] }>,
   reply: FastifyReply,
 ) => {
-  const callerId = request.user.id;
+  const caller = await resolve_caller_id(request);
+  if (!caller.ok) {
+    return reply.code(caller.status).send({ error: caller.error, message: caller.message });
+  }
+  const callerId = caller.caller_id;
 
   // Only a genuine batch (>1 row) within the bulk limit uses the one-OTP-per-
   // batch accept gate; a single update keeps the per-item gate untouched, and an

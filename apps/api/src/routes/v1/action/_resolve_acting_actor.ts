@@ -156,3 +156,50 @@ export const action_error_messages: Record<ResolveErr['error'], string> = {
   USER_NOT_FOUND:
     'acting_as_user_id does not resolve to any user.',
 };
+
+/**
+ * Header a `network_service` / `aggregator` / `voice` acting org sends to make
+ * `/action/update-status` and `/action/:id/contact-details` run as one of its
+ * users. Those two routes are receiver/participant-side, so they have to be
+ * driven by the item owner; a channel that owns the whole registration flow
+ * (YellowDot) has no per-user credential to present, so it names the user here
+ * instead. It is a header rather than a body field because contact-details is a
+ * GET and update-status takes a bare array.
+ *
+ * Omitted -> unchanged self-acted behaviour (the caller is `request.user`), so
+ * existing clients are unaffected. Present -> the same tier matrix `/perform`
+ * applies to `acting_as_user_id`, including the aggregator ownership check.
+ */
+export const ACTING_AS_USER_HEADER = 'x-acting-as-user-id';
+
+export type ResolveCallerResult =
+  | { ok: true; caller_id: string }
+  | { ok: false; status: 400 | 403 | 404; error: ResolveErr['error']; message: string };
+
+export const resolve_caller_id = async (request: {
+  acting_org?: ActingOrg;
+  user?: { id: string };
+  headers: Record<string, string | string[] | undefined>;
+}): Promise<ResolveCallerResult> => {
+  const request_user_id = request.user?.id ?? '';
+  const raw = request.headers[ACTING_AS_USER_HEADER];
+  const acting_as_user_id = (Array.isArray(raw) ? raw[0] : raw)?.trim() || undefined;
+
+  if (!acting_as_user_id) return { ok: true, caller_id: request_user_id };
+
+  const actor = await resolve_acting_actor({
+    acting_org: request.acting_org,
+    request_user_id,
+    acting_as_user_id,
+    lookup_user: lookup_user_for_acting,
+  });
+  if (!actor.ok) {
+    return {
+      ok: false,
+      status: actor.status,
+      error: actor.error,
+      message: action_error_messages[actor.error].replace(/acting_as_user_id/g, ACTING_AS_USER_HEADER),
+    };
+  }
+  return { ok: true, caller_id: actor.effective_user_id };
+};

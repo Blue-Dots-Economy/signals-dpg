@@ -66,6 +66,7 @@ const SERVICES = [
   { slug: 'aggregator-dpg', user_email: 'aggregator-dpg-svc@signals.local', apikey: false },
   { slug: 'raya-voice-bot', user_email: 'raya-voice-bot-svc@signals.local', apikey: true },
   { slug: 'signals-search', user_email: 'signals-search-svc@signals.local', apikey: true },
+  { slug: 'yellowdot-backend', user_email: 'yellowdot-backend-svc@signals.local', apikey: true },
 ] as const;
 
 const env_for = (slug: string, suffix: string): string | undefined =>
