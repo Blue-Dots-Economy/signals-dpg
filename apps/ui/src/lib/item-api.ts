@@ -18,6 +18,8 @@ export interface CreateItemPayload {
 export interface CreateItemResponse {
   item_type: string;
   item_id: string;
+  /** Set when the live profile limit kept the profile in draft. */
+  message?: string;
 }
 
 export interface FetchItemsQuery {
@@ -76,6 +78,8 @@ export interface UpdateItemPayload {
 
 export interface UpdateItemResponse {
   item: Item;
+  /** Set when the live profile limit kept the profile in draft. */
+  message?: string;
 }
 
 export interface ApiError {
@@ -105,6 +109,22 @@ export async function fetchItems(query: FetchItemsQuery, signal?: AbortSignal): 
 
   const response = await apiClient.get<FetchItemsResponse>('/api/v1/item/fetch', { params, signal });
   return response.data;
+}
+
+// Page size for fetchAllItems: 300 profiles (the provider total limit) is 3 requests.
+const FETCH_PAGE_SIZE = 100;
+
+/** Every item matching `query`, fetched page by page until `meta.total` is reached. */
+export async function fetchAllItems(
+  query: Omit<FetchItemsQuery, 'limit' | 'offset'>,
+  signal?: AbortSignal,
+): Promise<Item[]> {
+  const all: Item[] = [];
+  for (;;) {
+    const res = await fetchItems({ ...query, limit: FETCH_PAGE_SIZE, offset: all.length }, signal);
+    all.push(...res.items);
+    if (res.items.length === 0 || all.length >= res.meta.total) return all;
+  }
 }
 
 export async function updateItem(itemId: string, payload: UpdateItemPayload): Promise<UpdateItemResponse> {

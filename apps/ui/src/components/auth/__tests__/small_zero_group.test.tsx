@@ -30,6 +30,9 @@ vi.mock('@/lib/network-api', () => ({
 const mockFetchItems = vi.fn();
 vi.mock('@/lib/item-api', () => ({
   fetchItems: (query: FetchItemsQuery) => mockFetchItems(query),
+  // login-profiles pages through everything; one mocked page stands in for all.
+  fetchAllItems: (query: FetchItemsQuery) =>
+    mockFetchItems(query).then((r: FetchItemsResponse) => r.items),
 }));
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -303,7 +306,6 @@ describe('fetchMyProfilesLite', () => {
       item_type: 'profile_1.0',
       created_by_me: true,
       include_retired: true,
-      limit: 100,
     });
     expect(mockFetchItems).toHaveBeenCalledWith(
       expect.objectContaining({ item_domain: 'provider', item_type: 'profile' }),

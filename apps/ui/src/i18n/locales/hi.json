@@ -365,6 +365,7 @@
   "profile.no_networks": "कोई नेटवर्क उपलब्ध नहीं।",
   "profile.toast_created": "प्रोफ़ाइल बन गई!",
   "profile.toast_created_desc": "आप अब नेटवर्क पर दिखाई दे रहे हैं। दूसरे आपको खोज कर जुड़ सकते हैं।",
+  "profile.toast_saved_as_draft": "ड्राफ़्ट के रूप में सहेजा गया",
   "profile.toast_load_error": "प्रोफ़ाइल लोड नहीं हो सकी",
   "profile.toast_load_error_desc": "आपका प्रोफ़ाइल डेटा लाने में समस्या हुई। अपना कनेक्शन जांचें और फिर कोशिश करें।",
   "profile.toast_not_found_desc": "चुने गए नेटवर्क पर यह प्रोफ़ाइल मौजूद नहीं है। आपने पुराना लिंक खोला होगा।",

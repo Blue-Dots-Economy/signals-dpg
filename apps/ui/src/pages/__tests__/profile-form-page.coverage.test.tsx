@@ -591,25 +591,27 @@ describe('ProfileFormPage submit failures', () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it('a 409 PROFILE_LIMIT_REACHED surfaces the cap message, not "already exists"', async () => {
+  it('a 409 PROFILE_LIMIT_REACHED toasts the cap message, not "already exists"', async () => {
     // Every 409 used to render the duplicate copy, so a participant at the cap
     // was told they "already have a profile for this role" — wrong, and it hid
-    // the one instruction that works (#737).
+    // the one instruction that works (#737). A toast, because the banner sits
+    // at the top of the form, out of sight of the Save button (#927).
     createItemMock.mockRejectedValue(
       httpError(409, {
         error: 'PROFILE_LIMIT_REACHED',
-        message:
-          'This user already has the maximum of 5 seeker profile(s) allowed. Retire an existing profile to create a new one.',
+        limit_type: 'total',
+        message: 'This account has reached its profile limit. Retire any profile to add another.',
       }),
     );
 
     await renderPage();
     await submitCreate();
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Retire an existing profile to create a new one.');
-    expect(alert).not.toHaveTextContent('Profile already exists');
-    expect(alert).not.toHaveTextContent('already have a profile for this role');
+    expect(
+      await screen.findByText('This account has reached its profile limit. Retire any profile to add another.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Profile already exists')).toBeNull();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
@@ -644,12 +646,12 @@ describe('ProfileFormPage submit failures', () => {
   });
 
   it('a readable 4xx message from the server is shown as is', async () => {
-    createItemMock.mockRejectedValue(httpError(409, { error: 'PROFILE_LIMIT_REACHED', message: 'You already have the maximum number of profiles.' }));
+    createItemMock.mockRejectedValue(httpError(409, { error: 'ITEM_RETIRED', message: 'This profile is retired and can no longer be edited' }));
 
     await renderPage();
     await submitCreate();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('You already have the maximum number of profiles.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('This profile is retired and can no longer be edited');
   });
 
   it('server field errors go to the form fields, with no banner', async () => {
