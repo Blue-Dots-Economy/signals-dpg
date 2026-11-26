@@ -22,10 +22,58 @@ import { cancelItemConnections } from '@/services/items/retire_connections';
 import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
 import { dispatchRetireCancelNotifications } from '@/notifications/notify_retire';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import type { DbOrTx } from '@/services/db_types';
 
 type ItemLifecycleRequest = FastifyRequest<{
   Body: z.infer<typeof ItemLifecycleBody>;
 }>;
+
+interface PausedItem {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_schema_url: string;
+  item_state: unknown;
+  item_private_state: string | null;
+  created_by: string;
+}
+
+/**
+ * Unpause recomputes draft/live from the current (decrypted) data. Only
+ * DEFAULT_GO_LIVE_GATES apply, so `owner_required` is not evaluated: resuming a
+ * profile that was live must not be stricter than leaving it alone. The one
+ * exception is the live limit, which unpause must respect.
+ *
+ * @returns The status to write, or null when the live limit blocks going live.
+ */
+async function classifyUnpause(tx: DbOrTx, existing: PausedItem): Promise<'draft' | 'live' | null> {
+  const { mergedState } = decryptItemPrivate({
+    item_state: existing.item_state as Record<string, unknown>,
+    item_private_state: existing.item_private_state ?? '',
+  });
+  const itemSchema = await getOrFetchSchemaByUrl({
+    schemaUrl: existing.item_schema_url,
+    network: existing.item_network,
+    domain: existing.item_domain,
+    itemType: existing.item_type,
+  });
+  const consent_accepted = await hasAcceptedProfileConsent(tx, existing.item_id);
+  const domainGates = await resolveGoLiveGates(existing.item_network, existing.item_domain);
+  const gates = domainGates.includes('live_limit')
+    ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
+    : DEFAULT_GO_LIVE_GATES;
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: mergedState,
+    current_status: 'draft',
+    consent_accepted,
+    gates,
+    live_slot_free: await resolveLiveSlotFree(tx, gates, existing),
+  });
+  if (classification.blocked_by_live_limit) return null;
+  return classification.lifecycle_status === 'live' ? 'live' : 'draft';
+}
 
 export const item_lifecycle: FastifyPluginAsyncZod = async function (fastify) {
   // Order matters: auth populates `request.user`, which
@@ -188,38 +236,12 @@ const item_lifecycle_handler = async (
       if (action === 'pause') {
         next_status = 'paused';
       } else {
-        // unpause: recompute draft/live from the current (decrypted) data.
-        const { mergedState } = decryptItemPrivate({
-          item_state: existing.item_state as Record<string, unknown>,
-          item_private_state: existing.item_private_state ?? '',
-        });
-        const itemSchema = await getOrFetchSchemaByUrl({
-          schemaUrl: existing.item_schema_url,
-          network: existing.item_network,
-          domain: existing.item_domain,
-          itemType: existing.item_type,
-        });
-        const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
-        // Only DEFAULT_GO_LIVE_GATES, so `owner_required` is not evaluated:
-        // resuming a profile that was live must not be stricter than leaving it
-        // alone. The one exception is the live limit, which unpause must respect.
-        const domainGates = await resolveGoLiveGates(existing.item_network, existing.item_domain);
-        const gates = domainGates.includes('live_limit')
-          ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
-          : DEFAULT_GO_LIVE_GATES;
-        const classification = classify_item({
-          schema: itemSchema as { required?: string[] },
-          merged_state: mergedState,
-          current_status: 'draft',
-          consent_accepted,
-          gates,
-          live_slot_free: await resolveLiveSlotFree(tx, gates, existing),
-        });
+        const unpaused = await classifyUnpause(tx, existing);
         // Unpause exists only to go live: refuse rather than turn it into a draft.
-        if (classification.blocked_by_live_limit) {
+        if (unpaused === null) {
           return { liveLimitReached: true } as const;
         }
-        next_status = classification.lifecycle_status;
+        next_status = unpaused;
       }
 
       await tx

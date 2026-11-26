@@ -688,7 +688,7 @@ export async function promoteItemOnProfileConsent(
     .where(eq(items.item_id, itemId))
     .limit(1);
 
-  if (!item || item.lifecycle_status !== 'draft') return NOT_PROMOTED;
+  if (item?.lifecycle_status !== 'draft') return NOT_PROMOTED;
 
   const itemSchema = await getOrFetchSchemaByUrl({
     schemaUrl: item.item_schema_url,

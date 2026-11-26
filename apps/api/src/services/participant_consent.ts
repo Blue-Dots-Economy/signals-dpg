@@ -182,9 +182,11 @@ export async function promoteEligibleDraftsForUser(
     .orderBy(desc(items.created_at), desc(items.item_id));
   const promoted: PromotedItemKey[] = [];
   let blockedByLiveLimit = false;
+  // Sequential on purpose: drafts take free live slots newest first, and every
+  // call shares the one transaction connection.
   for (const d of drafts) {
     if (await hasAcceptedProfileConsent(tx, d.item_id)) {
-      const result = await promoteItemOnProfileConsent(tx, d.item_id);
+      const result = await promoteItemOnProfileConsent(tx, d.item_id); // NOSONAR typescript:S9382 — order matters (see above)
       blockedByLiveLimit ||= result.blockedByLiveLimit;
       if (result.promoted) {
         promoted.push({
