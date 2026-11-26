@@ -534,18 +534,19 @@ export function ProfileFormPage() {
           void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         };
 
-        // Editing a draft with a configured statement: record profile_creation
-        // consent, which promotes it to live. `onDone` runs immediately for an
-        // adult, or after guardian OTP success for a minor on a gated domain;
-        // list refresh and navigation are deferred to it.
         // The live limit kept it in draft. The API only reports that once every
         // other gate passed, consent included, so there is nothing to accept.
         if (needsConsent && profileDoc && updated.message) {
           refreshLists();
           toast.warning(t('profile.toast_saved_as_draft'), { description: updated.message });
-          navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+          void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
           return;
         }
+
+        // Editing a draft with a configured statement: record profile_creation
+        // consent, which promotes it to live. `onDone` runs immediately for an
+        // adult, or after guardian OTP success for a minor on a gated domain;
+        // list refresh and navigation are deferred to it.
         if (needsConsent && profileDoc) {
           await acceptProfileConsentFlow({
             network: network.id,
