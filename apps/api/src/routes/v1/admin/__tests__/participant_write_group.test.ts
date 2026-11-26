@@ -217,7 +217,7 @@ vi.mock('@/services/participant_consent', () => ({
   // item event per key, so `promoted` must be an array, not void.
   promoteEligibleDraftsForUser: vi.fn(async (_tx: unknown, _userId: string) => ({
     promoted: [] as Array<{ item_network: string; item_domain: string; item_type: string; item_id: string }>,
-    blockedByLiveLimit: false,
+    blockedItemIds: [] as string[],
   })),
 }));
 

@@ -726,10 +726,10 @@ async function handleAccountOnlyExistingUser(ctx: ParticipantCtx, existing: Exis
           consent_recorded = consent.recorded;
         }
         if (body.age != null) {
-          ({ promoted: promotedDrafts, blockedByLiveLimit } = await promoteEligibleDraftsForUser(
-            tx,
-            existing.id,
-          ));
+          const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
+          promotedDrafts = sweep.promoted;
+          // No profile named: say so if any draft the age unblocked was kept back.
+          blockedByLiveLimit = sweep.blockedItemIds.length > 0;
         }
       });
     } catch (err) {
@@ -844,7 +844,8 @@ async function handleUpdateItem(
       if (body.age != null) {
         const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
         promotedDrafts = sweep.promoted;
-        blockedByLiveLimit ||= sweep.blockedByLiveLimit;
+        // The message names this profile, so only its own outcome counts.
+        blockedByLiveLimit ||= sweep.blockedItemIds.includes(item_id);
       }
     });
   } catch (err) {
@@ -923,7 +924,8 @@ async function handleInsertItem(ctx: ParticipantCtx, existing: ExistingUser) {
       if (body.age != null) {
         const sweep = await promoteEligibleDraftsForUser(tx, existing.id);
         promotedDrafts = sweep.promoted;
-        blockedByLiveLimit ||= sweep.blockedByLiveLimit;
+        // The message names the inserted profile, so only its own outcome counts.
+        blockedByLiveLimit ||= sweep.blockedItemIds.includes(item_id);
       }
     });
   } catch (err) {

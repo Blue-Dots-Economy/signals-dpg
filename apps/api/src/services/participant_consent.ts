@@ -162,12 +162,13 @@ export async function recordParticipantConsent(
  * Returns the key of every item flipped to `live`; the caller must publish an
  * item event for each so signals-search re-indexes it, after the surrounding
  * transaction commits. Newest first, so when the live limit has fewer free
- * slots than drafts, the newest drafts take them.
+ * slots than drafts, the newest drafts take them. `blockedItemIds` are the
+ * drafts the live limit kept back.
  */
 export async function promoteEligibleDraftsForUser(
   tx: DbOrTx,
   userId: string,
-): Promise<{ promoted: PromotedItemKey[]; blockedByLiveLimit: boolean }> {
+): Promise<{ promoted: PromotedItemKey[]; blockedItemIds: string[] }> {
   // Sweeps drafts across all networks; each promotion still passes the
   // per-item guardian/completeness/consent gate.
   const drafts = await tx
@@ -181,13 +182,13 @@ export async function promoteEligibleDraftsForUser(
     .where(and(eq(items.created_by, userId), eq(items.lifecycle_status, 'draft')))
     .orderBy(desc(items.created_at), desc(items.item_id));
   const promoted: PromotedItemKey[] = [];
-  let blockedByLiveLimit = false;
+  const blockedItemIds: string[] = [];
   // Sequential on purpose: drafts take free live slots newest first, and every
   // call shares the one transaction connection.
   for (const d of drafts) {
     if (await hasAcceptedProfileConsent(tx, d.item_id)) {
       const result = await promoteItemOnProfileConsent(tx, d.item_id); // NOSONAR typescript:S9382 — order matters (see above)
-      blockedByLiveLimit ||= result.blockedByLiveLimit;
+      if (result.blockedByLiveLimit) blockedItemIds.push(d.item_id);
       if (result.promoted) {
         promoted.push({
           item_network: d.item_network,
@@ -198,5 +199,5 @@ export async function promoteEligibleDraftsForUser(
       }
     }
   }
-  return { promoted, blockedByLiveLimit };
+  return { promoted, blockedItemIds };
 }

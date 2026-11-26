@@ -740,7 +740,7 @@ describe('createItemInternal — single-domain lock', () => {
 });
 
 describe('createItemInternal — profile cap', () => {
-  it('takes a transaction advisory lock on the (user, network, domain, type) scope before counting', async () => {
+  it('takes a transaction advisory lock on the profile owner before counting', async () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ n: 1 }]);
     queue.push([ROW]);
@@ -751,9 +751,8 @@ describe('createItemInternal — profile cap', () => {
     // design (see the ordering note at its call site); the cap's advisory lock
     // is executes[1].
     expect(rec.order.slice(0, 3)).toEqual(['execute', 'execute', 'select']);
-    expect(rec.executes[1]).toMatchObject({
-      values: ['u1:blue_dot:student:profile_1.0'],
-    });
+    // Per owner, not per scope: one lock per user leaves no order to deadlock on.
+    expect(rec.executes[1]).toMatchObject({ values: ['profile-limit:u1'] });
   });
 
   it('409 PROFILE_LIMIT_REACHED at the global cap', async () => {
@@ -838,7 +837,7 @@ describe('createItemInternal — profile cap', () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
     queue.push([{ n: 1 }]);
@@ -1063,6 +1062,7 @@ describe('promoteItemOnProfileConsent', () => {
     classify_item.mockReturnValue({ lifecycle_status: 'live' });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
+    queue.push([{ item_id: 'i1' }]); // the draft-only UPDATE flipped it
 
     await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: true, blockedByLiveLimit: false });
     expect(rec.updates[0].set).toMatchObject({ lifecycle_status: 'live' });
@@ -1129,15 +1129,46 @@ describe('promoteItemOnProfileConsent', () => {
 });
 
 describe('promoteItemOnProfileConsent — live limit', () => {
+  it('does nothing when the item went live while it waited for the lock (double submit)', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 2, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([{ n: 2 }]); // live count now full: the other request took the slot
+    queue.push([{ lifecycle_status: 'live' }]); // ...with this very item
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      blockedByLiveLimit: false,
+    });
+    expect(classify_item).not.toHaveBeenCalled();
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('never turns a profile retired meanwhile back into live (draft-only UPDATE)', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([]); // the UPDATE matched nothing: the row is no longer a draft
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      blockedByLiveLimit: false,
+    });
+    expect(JSON.stringify(rec.updates[0].where)).toContain('draft');
+  });
+
   it('fails closed (no free slot) when the limits cannot be re-read', async () => {
     const cfg = { domains: [{ id: 'student', profile_limits: { live: 5, total: 9 } }] };
     getNetworkConfigById
       .mockResolvedValueOnce(cfg) // resolveGoLiveGates
-      .mockResolvedValueOnce(cfg) // guardianGateBlocksGoLive
-      .mockRejectedValueOnce(new Error('config down')); // resolveLiveSlotFree
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
+      .mockRejectedValueOnce(new Error('config down')) // resolveLiveSlotFree
+      .mockResolvedValueOnce(cfg); // guardianGateBlocksGoLive
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
+    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
 
     await promoteItemOnProfileConsent(exec, 'i1');
 
@@ -1149,10 +1180,11 @@ describe('promoteItemOnProfileConsent — live limit', () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
     queue.push([{ n: 1 }]); // live count: limit reached
+    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
 
     await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
       promoted: false,
@@ -1173,6 +1205,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
     classify_item.mockReturnValue({ lifecycle_status: 'live' });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
+    queue.push([{ item_id: 'i1' }]); // the draft-only UPDATE flipped it
 
     const promoted = await upsertGuardianProfileConsentAndPromote(exec, {
       userId: 'u1',
@@ -1278,7 +1311,7 @@ describe('updateItemInternal — state edits', () => {
     getNetworkConfigById.mockResolvedValue({
       domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
     });
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', blocked_by_live_limit: true });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
     const { exec, queue } = makeExec();
     queue.push([existingItem]);
     queue.push([{ n: 1 }]); // live count: limit reached

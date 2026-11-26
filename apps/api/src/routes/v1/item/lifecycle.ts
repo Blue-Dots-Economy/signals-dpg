@@ -5,13 +5,15 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { acting_org_preHandler_optional } from '@/middleware/acting_org_optional';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import { getNetworkConfigById } from '@/network_configs';
 import { classify_item, DEFAULT_GO_LIVE_GATES } from '@/services/items/classifier';
 import {
   LIVE_LIMIT_UNPAUSE_MESSAGE,
+  isBlockedOnlyByLiveLimit,
+  readLifecycleStatus,
   resolveGoLiveGates,
   resolveLiveSlotFree,
 } from '@/services/item_service';
@@ -45,9 +47,17 @@ interface PausedItem {
  * profile that was live must not be stricter than leaving it alone. The one
  * exception is the live limit, which unpause must respect.
  *
- * @returns The status to write, or null when the live limit blocks going live.
+ * @returns The status to write, or why unpause is refused: the live limit is
+ *   full, or the item stopped being paused while this request waited.
  */
-async function classifyUnpause(tx: DbOrTx, existing: PausedItem): Promise<'draft' | 'live' | null> {
+async function classifyUnpause(
+  tx: DbOrTx,
+  existing: PausedItem,
+): Promise<
+  | { status: 'draft' | 'live' }
+  | { liveLimitReached: true }
+  | { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' }
+> {
   const { mergedState } = decryptItemPrivate({
     item_state: existing.item_state as Record<string, unknown>,
     item_private_state: existing.item_private_state ?? '',
@@ -63,16 +73,44 @@ async function classifyUnpause(tx: DbOrTx, existing: PausedItem): Promise<'draft
   const gates = domainGates.includes('live_limit')
     ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
     : DEFAULT_GO_LIVE_GATES;
+  // Takes the owner lock. Re-read under it: a concurrent unpause or retire of
+  // the same item may have committed while this one waited.
+  const liveSlotFree = await resolveLiveSlotFree(tx, gates, existing);
+  if (liveSlotFree !== undefined && (await readLifecycleStatus(tx, existing.item_id)) !== 'paused') {
+    return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' };
+  }
   const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedState,
     current_status: 'draft',
     consent_accepted,
     gates,
-    live_slot_free: await resolveLiveSlotFree(tx, gates, existing),
+    live_slot_free: liveSlotFree,
   });
-  if (classification.blocked_by_live_limit) return null;
-  return classification.lifecycle_status === 'live' ? 'live' : 'draft';
+  // Unpause exists only to go live: refuse rather than turn it into a draft.
+  if (isBlockedOnlyByLiveLimit(classification)) return { liveLimitReached: true };
+  return { status: classification.lifecycle_status === 'live' ? 'live' : 'draft' };
+}
+
+/**
+ * Write a pause/unpause transition only if the item is still in `from`, so a
+ * retire committed meanwhile is never overwritten.
+ *
+ * @returns The refusal code when the item moved on, else null.
+ */
+async function writePauseTransition(
+  tx: DbOrTx,
+  item_id: string,
+  from: 'live' | 'paused',
+  to: 'draft' | 'live' | 'paused',
+): Promise<'PAUSE_REQUIRES_LIVE' | 'UNPAUSE_REQUIRES_PAUSED' | null> {
+  const written = await tx
+    .update(items)
+    .set({ lifecycle_status: to, updated_at: sql`now()` })
+    .where(and(eq(items.item_id, item_id), eq(items.lifecycle_status, from)))
+    .returning({ item_id: items.item_id });
+  if (written.length > 0) return null;
+  return from === 'live' ? 'PAUSE_REQUIRES_LIVE' : 'UNPAUSE_REQUIRES_PAUSED';
 }
 
 export const item_lifecycle: FastifyPluginAsyncZod = async function (fastify) {
@@ -233,20 +271,15 @@ const item_lifecycle_handler = async (
         };
       }
 
-      const next = action === 'pause' ? 'paused' : await classifyUnpause(tx, existing);
-      // Unpause exists only to go live: refuse rather than turn it into a draft.
-      if (next === null) {
-        return { liveLimitReached: true } as const;
-      }
-      next_status = next;
+      const next =
+        action === 'pause' ? { status: 'paused' as const } : await classifyUnpause(tx, existing);
+      if (!('status' in next)) return next;
+      next_status = next.status;
 
-      await tx
-        .update(items)
-        .set({
-          lifecycle_status: next_status,
-          updated_at: sql`now()`,
-        })
-        .where(eq(items.item_id, item_id));
+      // Checked above: pause needs `live`, unpause needs `paused`.
+      const from = current as 'live' | 'paused';
+      const conflict = await writePauseTransition(tx, item_id, from, next_status);
+      if (conflict) return { invalidAction: conflict } as const;
 
       return {
         item_id,

@@ -31,7 +31,7 @@ describe('classify_item', () => {
         consent_accepted: false,
         gates: BOTH_GATES,
       }),
-    ).toEqual({ lifecycle_status: 'draft' });
+    ).toMatchObject({ lifecycle_status: 'draft' });
   });
 
   it('one of two required missing (consent accepted) → draft', () => {
@@ -42,7 +42,7 @@ describe('classify_item', () => {
         current_status: 'draft',
         consent_accepted: true,
       }),
-    ).toEqual({ lifecycle_status: 'draft' });
+    ).toMatchObject({ lifecycle_status: 'draft' });
   });
 
   it('vacuous required (empty) + consent accepted → live', () => {
@@ -65,7 +65,7 @@ describe('classify_item', () => {
         consent_accepted: false,
         gates: BOTH_GATES,
       }),
-    ).toEqual({ lifecycle_status: 'draft' });
+    ).toMatchObject({ lifecycle_status: 'draft' });
   });
 
   it('paused is sticky against the classifier (complete state + consent)', () => {
@@ -98,7 +98,7 @@ describe('classify_item', () => {
         current_status: 'draft',
         consent_accepted: true,
       }),
-    ).toEqual({ lifecycle_status: 'draft' });
+    ).toMatchObject({ lifecycle_status: 'draft' });
   });
 
   it('schema with no required key + consent accepted → vacuous live', () => {
@@ -169,7 +169,7 @@ describe('classify_item — config-driven gates (go_live_required)', () => {
         consent_accepted: false,
         gates: ['consent_required'],
       }),
-    ).toEqual({ lifecycle_status: 'draft' });
+    ).toMatchObject({ lifecycle_status: 'draft' });
   });
 
   it('both gates: needs complete AND consent', () => {
@@ -277,12 +277,15 @@ describe('classify_item — live_limit gate', () => {
   it('blocks a complete profile from going live when no slot is free', () => {
     expect(run('draft', complete, false)).toEqual({
       lifecycle_status: 'draft',
-      blocked_by_live_limit: true,
+      failed_gates: ['live_limit'],
     });
   });
 
-  it('does not flag an incomplete profile as held by the limit', () => {
-    expect(run('draft', { a: 'x' }, false)).toEqual({ lifecycle_status: 'draft' });
+  it('reports every failing gate, not only the limit, for an incomplete profile', () => {
+    expect(run('draft', { a: 'x' }, false)).toEqual({
+      lifecycle_status: 'draft',
+      failed_gates: ['schema_required', 'live_limit'],
+    });
   });
 
   it('keeps a live profile live when no slot is free', () => {
@@ -292,7 +295,7 @@ describe('classify_item — live_limit gate', () => {
   it('fails closed when the gate is configured but no slot context is passed', () => {
     expect(run('draft', complete, undefined)).toEqual({
       lifecycle_status: 'draft',
-      blocked_by_live_limit: true,
+      failed_gates: ['live_limit'],
     });
   });
 });

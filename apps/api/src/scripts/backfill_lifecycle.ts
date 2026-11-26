@@ -3,9 +3,11 @@
  * a network.json `required[]` change. Re-runs each item's stored state through
  * `classify_item` and updates only rows whose status changed.
  *
- * No `gates` are passed, so only the default `schema_required` gate applies:
- * `consent_accepted` is computed but has no effect, and the consent and
- * owner gates a domain may declare are not evaluated.
+ * Only the default `schema_required` gate applies: `consent_accepted` is
+ * computed but has no effect, and the consent and owner gates a domain may
+ * declare are not evaluated. The exception is `live_limit`: a draft is never
+ * promoted past a domain's live profile limit (counted as the run goes, so a
+ * `--dry-run` may report more promotions than a real run makes).
  *
  * No decryption is needed: the public `item_state` carries masks for provided
  * private fields, which count as populated, so completeness matches write time.
@@ -17,7 +19,12 @@
 import { and, eq, asc, sql, type SQL } from 'drizzle-orm';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
-import { classify_item, type LifecycleStatus } from '@/services/items/classifier';
+import {
+  classify_item,
+  DEFAULT_GO_LIVE_GATES,
+  type LifecycleStatus,
+} from '@/services/items/classifier';
+import { resolveGoLiveGates, resolveLiveSlotFree } from '@/services/item_service';
 import { get_item_schema, type JSONSchemaLike } from '@/services/metrics/schema_lookup';
 
 const BATCH_SIZE = 1000;
@@ -101,6 +108,7 @@ async function main() {
         item_id: items.item_id,
         item_state: items.item_state,
         lifecycle_status: items.lifecycle_status,
+        created_by: items.created_by,
       })
       .from(items)
       .where(whereScope)
@@ -118,13 +126,18 @@ async function main() {
         continue;
       }
       const current = row.lifecycle_status as LifecycleStatus;
-      // No `gates`: a backfill must not demote a population for want of an
-      // owning aggregator (`owner_required`).
+      // Default gates only: a backfill must not demote a population for want of
+      // an owning aggregator (`owner_required`). The live limit is the exception.
+      const limited = (await resolveGoLiveGates(row.item_network, row.item_domain)).includes('live_limit');
+      const gates = limited ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const] : undefined;
       const next = classify_item({
         schema,
         merged_state: (row.item_state ?? {}) as Record<string, unknown>,
         current_status: current,
         consent_accepted: consented.has(row.item_id),
+        gates,
+        live_slot_free:
+          gates && current === 'draft' ? await resolveLiveSlotFree(db, gates, row) : undefined,
       }).lifecycle_status;
 
       if (next !== current) {

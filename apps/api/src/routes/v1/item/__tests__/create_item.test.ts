@@ -233,6 +233,7 @@ function baseBody(over: Record<string, unknown> = {}) {
 async function call(req: {
   user?: { id: string; role?: string };
   headers?: Record<string, string>;
+  acting_org?: { org_id: string; org_type: string };
   body: Record<string, unknown>;
 }) {
   const reply = makeReply();
@@ -645,6 +646,29 @@ describe('create_item_handler — lifecycle notification seam', () => {
     });
     await new Promise((r) => setTimeout(r, 0));
     expect(dispatchItemLifecycleNotification).not.toHaveBeenCalled();
+  });
+
+  it('an aggregator create blocked by the live limit still sends the onboarding email', async () => {
+    createItemInternal.mockResolvedValue({
+      itemId: 'item-1',
+      itemType: 'profile_1.0',
+      lifecycleStatus: 'draft',
+      blockedByLiveLimit: true,
+    });
+
+    const reply = await call({
+      user: { id: 'admin1', role: 'admin' },
+      headers: { 'x-api-key': 'k' },
+      acting_org: { org_id: 'org_agg_1', org_type: 'aggregator' },
+      body: baseBody({ created_by: 'u2' }),
+    });
+
+    expect(reply.statusCode).toBe(201);
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalledTimes(1));
+    expect(dispatchItemLifecycleNotification.mock.calls[0]![0]).toMatchObject({
+      op: 'create',
+      actingOrgType: 'aggregator',
+    });
   });
 
   it('still returns 201 when the create notification rejects (best-effort)', async () => {

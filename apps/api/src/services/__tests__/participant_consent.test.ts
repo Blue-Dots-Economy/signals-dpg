@@ -288,7 +288,7 @@ describe('recordParticipantConsent', () => {
     ]);
   });
 
-  it('promoteEligibleDraftsForUser sweeps newest first and reports a draft blocked by the live limit', async () => {
+  it('promoteEligibleDraftsForUser sweeps newest first and reports the drafts the live limit blocked', async () => {
     hasAcceptedProfileConsent.mockResolvedValue(true);
     promoteItemOnProfileConsent.mockImplementation(async (_tx: unknown, itemId: string) => ({
       promoted: itemId === 'newest',
@@ -305,6 +305,6 @@ describe('recordParticipantConsent', () => {
     expect(tx.orderBy).toHaveBeenCalledTimes(1);
     expect(tx.orderBy.mock.calls[0]).toHaveLength(2); // created_at DESC, item_id DESC
     expect(res.promoted.map((k) => k.item_id)).toEqual(['newest']);
-    expect(res.blockedByLiveLimit).toBe(true);
+    expect(res.blockedItemIds).toEqual(['older']);
   });
 });

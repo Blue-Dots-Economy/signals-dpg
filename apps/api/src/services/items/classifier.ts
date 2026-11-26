@@ -1,6 +1,6 @@
 import type { JSONSchemaLike } from '../metrics/profile_completion.js';
 import type { GoLiveGate } from '@dpg/schemas';
-import { passesGoLiveGates, type GoLiveContext } from './go_live_gates.js';
+import { failedGoLiveGates, type GoLiveContext } from './go_live_gates.js';
 
 export type LifecycleStatus = 'draft' | 'live' | 'paused' | 'retired';
 export type { GoLiveGate };
@@ -49,8 +49,8 @@ export interface ClassifierInput {
 
 export interface ClassifierResult {
   lifecycle_status: LifecycleStatus;
-  /** Set when `live_limit` is the only gate that kept the profile in `draft`. */
-  blocked_by_live_limit?: true;
+  /** The gates that kept the profile in `draft`; set only on a `draft` result. */
+  failed_gates?: GoLiveGate[];
 }
 
 /**
@@ -83,13 +83,8 @@ export const classify_item = (input: ClassifierInput): ClassifierResult => {
     currentStatus: input.current_status,
     liveSlotFree: input.live_slot_free ?? false,
   };
-  if (passesGoLiveGates(gates, ctx)) {
-    return { lifecycle_status: 'live' };
-  }
-  const blockedByLiveLimit =
-    gates.includes('live_limit') &&
-    passesGoLiveGates(gates.filter((g) => g !== 'live_limit'), ctx);
-  return blockedByLiveLimit
-    ? { lifecycle_status: 'draft', blocked_by_live_limit: true }
-    : { lifecycle_status: 'draft' };
+  const failed_gates = failedGoLiveGates(gates, ctx);
+  return failed_gates.length === 0
+    ? { lifecycle_status: 'live' }
+    : { lifecycle_status: 'draft', failed_gates };
 };

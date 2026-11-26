@@ -331,8 +331,10 @@ export const create_item_handler = async (
     // keep the notification chain off this route's static graph. `userId` is
     // the resolved owner on both paths. `lifecycleStatus` picks "you're live"
     // vs "complete your profile", since a 201 can commit a draft. A profile the
-    // live limit kept in draft is complete, so neither copy fits: no email.
-    if (!created.blockedByLiveLimit) {
+    // live limit kept in draft is complete, so neither of those fits: skip it.
+    // An aggregator's create sends the onboarding email instead, which still applies.
+    const actingOrgType = request.acting_org?.org_type ?? null;
+    if (!created.blockedByLiveLimit || actingOrgType === 'aggregator') {
       void import('@/notifications/notify_item_lifecycle')
         .then(({ dispatchItemLifecycleNotification }) =>
           dispatchItemLifecycleNotification(
@@ -342,7 +344,7 @@ export const create_item_handler = async (
               itemId: created.itemId,
               domain: body.item_domain,
               network: body.item_network,
-              actingOrgType: request.acting_org?.org_type ?? null,
+              actingOrgType,
               lifecycleStatus: created.lifecycleStatus,
             },
             request.log,

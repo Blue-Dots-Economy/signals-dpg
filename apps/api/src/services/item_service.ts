@@ -297,6 +297,15 @@ const LIVE_LIMIT_DRAFT_MESSAGE =
   'Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it.';
 export const LIVE_LIMIT_UNPAUSE_MESSAGE =
   'Live profile limit reached. Pause or retire any live profile to unpause this one.';
+/**
+ * True when the live limit is the only gate that kept a profile in draft, i.e.
+ * it would be live with a free slot. The classifier stays gate-agnostic; the
+ * limit's meaning lives here.
+ */
+export function isBlockedOnlyByLiveLimit(c: { failed_gates?: readonly GoLiveGate[] }): boolean {
+  return c.failed_gates?.length === 1 && c.failed_gates[0] === 'live_limit';
+}
+
 /** Response extra for a write the live limit kept in draft; empty otherwise. */
 export function liveLimitMessage(r: { blockedByLiveLimit: boolean }): { message?: string } {
   return r.blockedByLiveLimit ? { message: LIVE_LIMIT_DRAFT_MESSAGE } : {};
@@ -332,13 +341,14 @@ type ProfileScope = Pick<
 >;
 
 /**
- * Transaction-scoped advisory lock on (user, network, domain, item_type), so
- * concurrent writes can't both pass a limit count. Re-entrant within one
- * transaction; under autocommit it releases at once, so callers must be in one.
+ * Transaction-scoped advisory lock on the profile owner, so concurrent writes
+ * can't both pass a limit count. Per user, not per scope: the age sweep promotes
+ * drafts across scopes, and one lock per user leaves no order to deadlock on.
+ * Re-entrant within one transaction; under autocommit it releases at once, so
+ * callers must be in one.
  */
-async function lockProfileScope(exec: DbOrTx, scope: ProfileScope): Promise<void> {
-  const key = `${scope.created_by}:${scope.item_network}:${scope.item_domain}:${scope.item_type}`;
-  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+async function lockProfileOwner(exec: DbOrTx, ownerId: string): Promise<void> {
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`profile-limit:${ownerId}`}))`);
 }
 
 /** Count the owner's profiles in this scope matching `status`. */
@@ -374,7 +384,7 @@ async function countProfiles(exec: DbOrTx, scope: ProfileScope, status: SQL): Pr
 async function assertProfileLimit(exec: DbOrTx, params: ProfileScope): Promise<void> {
   const { total } = await resolveProfileLimits(params.item_network, params.item_domain);
   if (!Number.isFinite(total)) return;
-  await lockProfileScope(exec, params);
+  await lockProfileOwner(exec, params.created_by);
 
   if ((await countProfiles(exec, params, ne(items.lifecycle_status, 'retired'))) >= total) {
     throw new ItemServiceError(409, 'PROFILE_LIMIT_REACHED', TOTAL_LIMIT_MESSAGE, {
@@ -398,7 +408,7 @@ export async function resolveLiveSlotFree(
   // The gate comes from `profile_limits`, so a missing limit here means the
   // config could not be read: fail closed (stay draft) rather than publish.
   if (live === null) return false;
-  await lockProfileScope(exec, scope);
+  await lockProfileOwner(exec, scope.created_by);
   return (await countProfiles(exec, scope, eq(items.lifecycle_status, 'live'))) < live;
 }
 
@@ -532,7 +542,7 @@ export async function createItemInternal(
       'An item with the same type and id already exists'
     );
   }
-  return { ...result[0], blockedByLiveLimit: classification.blocked_by_live_limit === true };
+  return { ...result[0], blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification) };
 }
 
 export interface UpdateItemInternalResult {
@@ -709,6 +719,12 @@ export async function promoteItemOnProfileConsent(
   );
 
   const goLiveGates = await resolveGoLiveGates(item.item_network, item.item_domain);
+  // Takes the owner lock. Re-read the status under it: a concurrent promote of
+  // the same item may have made it live while this one waited.
+  const liveSlotFree = await resolveLiveSlotFree(exec, goLiveGates, item);
+  if (liveSlotFree !== undefined && (await readLifecycleStatus(exec, itemId)) !== 'draft') {
+    return NOT_PROMOTED;
+  }
   // The caller recorded the consent row, so `consent_required` reduces to the
   // U18 guardian check (fail-closed for a gated minor or null age).
   const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
@@ -725,18 +741,30 @@ export async function promoteItemOnProfileConsent(
       item.item_network,
       item.item_domain,
     ),
-    live_slot_free: await resolveLiveSlotFree(exec, goLiveGates, item),
+    live_slot_free: liveSlotFree,
   });
 
   if (classification.lifecycle_status !== 'live') {
-    return { promoted: false, blockedByLiveLimit: classification.blocked_by_live_limit === true };
+    return { promoted: false, blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification) };
   }
 
-  await exec
+  // Only from draft: retire takes no owner lock, and must not be undone here.
+  const flipped = await exec
     .update(items)
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
-    .where(eq(items.item_id, itemId));
-  return { promoted: true, blockedByLiveLimit: false };
+    .where(and(eq(items.item_id, itemId), eq(items.lifecycle_status, 'draft')))
+    .returning({ item_id: items.item_id });
+  return flipped.length > 0 ? { promoted: true, blockedByLiveLimit: false } : NOT_PROMOTED;
+}
+
+/** The item's current lifecycle status, or null when it no longer exists. */
+export async function readLifecycleStatus(exec: DbOrTx, itemId: string): Promise<string | null> {
+  const [row] = await exec
+    .select({ lifecycle_status: items.lifecycle_status })
+    .from(items)
+    .where(eq(items.item_id, itemId))
+    .limit(1);
+  return row?.lifecycle_status ?? null;
 }
 
 /**
@@ -797,9 +825,8 @@ async function computeItemStateUpdate(
 ): Promise<{
   mergedFullState: Record<string, unknown>;
   addressChanged: boolean;
-  writes: { item_state: unknown; item_private_state: string; lifecycle_status: string };
-  blockedByLiveLimit: boolean;
-  changed: boolean;
+  writes: { item_state: unknown; item_private_state: string };
+  stateChanged: boolean;
 }> {
   const priorPrivate =
     existingItem.item_private_state === ''
@@ -851,6 +878,24 @@ async function computeItemStateUpdate(
       ? ''
       : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
 
+  return {
+    mergedFullState,
+    addressChanged,
+    writes: { item_state, item_private_state },
+    stateChanged: !isDeepStrictEqual(priorFullState, mergedFullState),
+  };
+}
+
+/**
+ * Re-classify go-live for an edit, over the merged post-write state. Runs after
+ * any geocoding, so the owner lock `live_limit` takes is held only for the write.
+ */
+async function classifyStateUpdate(
+  exec: DbOrTx,
+  existingItem: ExistingItemForUpdate,
+  itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
+  mergedFullState: Record<string, unknown>,
+): Promise<{ lifecycle_status: string; blockedByLiveLimit: boolean }> {
   // `consent_required` folds in the U18 guardian check so a minor's self-consent
   // row can't flip the item live (the classifier just evaluates configured gates).
   const goLiveGates = await resolveGoLiveGates(existingItem.item_network, existingItem.item_domain);
@@ -883,13 +928,8 @@ async function computeItemStateUpdate(
   });
 
   return {
-    mergedFullState,
-    addressChanged,
-    writes: { item_state, item_private_state, lifecycle_status: classification.lifecycle_status },
-    blockedByLiveLimit: classification.blocked_by_live_limit === true,
-    changed:
-      !isDeepStrictEqual(priorFullState, mergedFullState) ||
-      classification.lifecycle_status !== existingItem.lifecycle_status,
+    lifecycle_status: classification.lifecycle_status,
+    blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification),
   };
 }
 
@@ -1008,8 +1048,7 @@ export async function updateItemInternal(
       );
       mergedFullState = stateUpdate.mergedFullState;
       addressChanged = stateUpdate.addressChanged;
-      blockedByLiveLimit = stateUpdate.blockedByLiveLimit;
-      changed = stateUpdate.changed;
+      changed = stateUpdate.stateChanged;
       Object.assign(updateValues, stateUpdate.writes);
     }
 
@@ -1027,6 +1066,13 @@ export async function updateItemInternal(
         (existingItem.item_locations as ItemLocation[] | null) ?? [],
         locationUpdate,
       );
+    }
+
+    if (body.item_state) {
+      const lifecycle = await classifyStateUpdate(exec, existingItem, itemSchema, mergedFullState);
+      updateValues.lifecycle_status = lifecycle.lifecycle_status;
+      blockedByLiveLimit = lifecycle.blockedByLiveLimit;
+      changed ||= lifecycle.lifecycle_status !== existingItem.lifecycle_status;
     }
   }
 
