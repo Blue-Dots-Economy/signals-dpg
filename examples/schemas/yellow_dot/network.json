@@ -40,7 +40,7 @@
             },
             "Phone Number": {
               "type": "string",
-              "pattern": "^[0-9]{10}$",
+              "pattern": "^\\+[1-9][0-9]{9,14}$",
               "private": true
             },
             "Email Address": {
@@ -144,7 +144,7 @@
             },
             "Phone Number": {
               "type": "string",
-              "pattern": "^[0-9]{10}$",
+              "pattern": "^\\+[1-9][0-9]{9,14}$",
               "private": true
             },
             "Email Address": {

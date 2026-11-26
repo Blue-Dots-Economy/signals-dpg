@@ -97,7 +97,7 @@
             "phone": {
               "type": "string",
               "title": "Mobile Number",
-              "pattern": "^(\\+[1-9][0-9]{9,14}|[6-9][0-9]{9})$",
+              "pattern": "^\\+[1-9][0-9]{9,14}$",
               "private": true
             },
             "age": {
@@ -885,7 +885,7 @@
             "hiringManagerPhoneNumber": {
               "type": "string",
               "title": "Hiring Manager Phone Number",
-              "pattern": "^(\\+[1-9][0-9]{9,14}|0?[1-9][0-9]{9})$",
+              "pattern": "^\\+[1-9][0-9]{9,14}$",
               "private": true
             },
             "hiringManagerEmail": {
