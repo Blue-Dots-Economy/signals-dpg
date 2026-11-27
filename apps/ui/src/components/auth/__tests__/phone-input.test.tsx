@@ -99,7 +99,7 @@ describe('PhoneInput', () => {
     expect(phoneValueMode('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$')).toBe('international');
   });
 
-  it('blue_dot phone rules: a seeker phone is a mobile, a hiring-manager phone may be a landline', () => {
+  it('blue_dot phone rules: every phone field takes the + form only', () => {
     const network = JSON.parse(
       readFileSync(resolve(__dirname, '../../../../../../examples/schemas/blue_dot/network.json'), 'utf8'),
     );
@@ -113,16 +113,16 @@ describe('PhoneInput', () => {
       return new RegExp(found!);
     };
     const mobile = patternOf('phone');
-    for (const ok of ['+919353500020', '9353500020', '+447911123456', '+12025550123', '+971501234567']) {
+    for (const ok of ['+919353500020', '+447911123456', '+12025550123', '+971501234567']) {
       expect(mobile.test(ok)).toBe(true);
     }
     // The schema checks the shape only; the country rules are applied by parsePhone.
-    for (const bad of ['935350002', '12345', '+0919353500020', '+9193535000201234']) {
+    for (const bad of ['9353500020', '935350002', '12345', '+0919353500020', '+9193535000201234']) {
       expect(mobile.test(bad)).toBe(false);
     }
     const contact = patternOf('hiringManagerPhoneNumber');
-    for (const ok of ['+911123456789', '01123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
-    for (const bad of ['12345', '0000000000', '0123456789', '+0911123456789']) {
+    for (const ok of ['+911123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
+    for (const bad of ['01123456789', '1123456789', '12345', '0000000000', '+0911123456789']) {
       expect(contact.test(bad)).toBe(false);
     }
   });
