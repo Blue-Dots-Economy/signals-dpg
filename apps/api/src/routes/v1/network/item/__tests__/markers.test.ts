@@ -76,6 +76,15 @@ vi.mock('@/utils/inter_instance_fetch', () => ({
   fetchMarkersAcrossInstances: fetchMarkersAcrossInstancesMock,
 }));
 
+const { fetchLocalMarkersMock } = vi.hoisted(() => ({ fetchLocalMarkersMock: vi.fn() }));
+
+vi.mock('@/utils/item_fetch_runtime', () => ({ fetchLocalMarkers: fetchLocalMarkersMock }));
+
+vi.mock('@/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/config')>();
+  return { ...actual, apiConfig: { ...actual.apiConfig, markers_max_limit: 25000 } };
+});
+
 // Imported after mocks.
 import { markers } from '../markers.js';
 
@@ -196,5 +205,42 @@ describe('POST /api/v1/network/item/markers_local — never throws (review fix)'
       error: 'INTERNAL_SERVER_ERROR',
       message: 'Failed to fetch local markers',
     });
+  });
+});
+
+describe('markers limit above MARKERS_MAX_LIMIT', () => {
+  let app: FastifyInstance;
+
+  beforeEach(() => {
+    fetchMarkersAcrossInstancesMock.mockReset();
+    fetchMarkersAcrossInstancesMock.mockResolvedValue(EMPTY_RESULT);
+    fetchLocalMarkersMock.mockReset();
+    fetchLocalMarkersMock.mockResolvedValue({ meta: { total: 0, limit: 25000, offset: 0 }, markers: [] });
+    app = buildApp();
+  });
+
+  it('caps a larger GET limit at MARKERS_MAX_LIMIT instead of rejecting the request', async () => {
+    const res = await app.inject({ method: 'GET', url: query({ limit: '50000' }) });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchMarkersAcrossInstancesMock.mock.calls[0][0].filters.limit).toBe(25000);
+  });
+
+  it('passes a GET limit within MARKERS_MAX_LIMIT through unchanged', async () => {
+    const res = await app.inject({ method: 'GET', url: query({ limit: '1000' }) });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchMarkersAcrossInstancesMock.mock.calls[0][0].filters.limit).toBe(1000);
+  });
+
+  it('caps a larger peer limit at MARKERS_MAX_LIMIT instead of rejecting the request', async () => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/v1/network/item/markers_local',
+      payload: { item_network: NET, item_domain: DOMAIN, limit: 50000, offset: 0 },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(fetchLocalMarkersMock.mock.calls[0][0].limit).toBe(25000);
   });
 });

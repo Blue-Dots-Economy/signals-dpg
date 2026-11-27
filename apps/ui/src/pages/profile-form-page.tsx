@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from 'react-rout
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { Wallet, OctagonX } from 'lucide-react';
+import { OctagonX } from 'lucide-react';
 import type { RJSFSchema } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -27,11 +27,7 @@ import { RoleCard } from '@/components/cards/role-card';
 import { useNetworkTheme } from '@/theme/theme-provider';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { ConsentCheckbox } from '@/components/actions/consent-checkbox';
-import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
-import { getConfiguredWalletProviders } from '@/engine/wallet/wallet-registry';
-import type { WalletImportResult } from '@/engine/wallet/types';
 import { useAuth } from '@/contexts/auth-context';
-import { mergeImportedDataIntoSchema } from '@/lib/import-mapping';
 import { getServedScope } from '@/lib/served-binding';
 import { useNetworkConfigs, useResolvedNetwork } from '@/hooks/use-network-config';
 import { useEditItem } from '@/hooks/use-edit-item';
@@ -49,6 +45,8 @@ import {
   finalizeProfileConsent,
 } from '@/lib/consent-api';
 import axios from 'axios';
+import { apiErrorMessage, isReadableServerMessage, readApiError } from '@/lib/api-error';
+import { schemaNodeAt, splitServerFieldErrors } from '@/components/forms/field-error-message';
 
 import {
   createItem,
@@ -68,6 +66,16 @@ function parseNetworkIds(networkEnv: string | undefined): string[] {
 
 import { getDomainIcon, formatDomainLabel } from '@/lib/domain-icons';
 
+/** A field's title for the user, else its top-level name in plain words. */
+function readableFieldName(schema: unknown, segments: string[]): string {
+  const title = schemaNodeAt(schema, segments.slice(0, 1))?.title;
+  if (typeof title === 'string' && title.trim()) return title;
+  return (segments[0] ?? '')
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .trim();
+}
+
 export function ProfileFormPage() {
   const { t } = useTranslation();
   const location = useLocation();
@@ -78,9 +86,9 @@ export function ProfileFormPage() {
   const queryClient = useQueryClient();
   const { theme, brand } = useNetworkTheme();
   const { config: consentConfig, isLoading: consentLoading } = useConsentConfig();
-  // Shared profile_creation-consent accept flow (adult self-accept OR minor
-  // guardian-OTP). Used by the EDIT-of-draft submit path below; `dialogs` is
-  // rendered once in the tree. Create keeps its own pre-create guardian flow.
+  // Shared profile_creation consent accept flow (adult self-accept or minor
+  // guardian OTP), used by the edit-of-draft submit path. Create has its own
+  // pre-create guardian flow.
   const { accept: acceptProfileConsentFlow, dialogs: consentAcceptDialogs } =
     useProfileConsentAccept();
   const isEdit = !!id;
@@ -90,63 +98,60 @@ export function ProfileFormPage() {
   const singleServedDomain =
     servedScope && servedScope.domains.length === 1 ? servedScope.domains[0] : null;
 
-  // With a single served domain, initialise the selected domain to it (create
-  // mode) so the role-picker step is skipped entirely — the form renders
-  // directly, no intermediate page or flash. With multiple served domains the
-  // picker (restricted to the served set) is shown.
+  // A single served domain pre-selects the domain (create mode) so the picker
+  // step is skipped; with several, the picker is restricted to the served set.
   const [selectedDomain, setSelectedDomain] = React.useState<string | null>(
     () => (!isEdit && singleServedDomain ? singleServedDomain : null),
   );
   const [existingItem, setExistingItem] = React.useState<Item | null>(null);
   const [initialData, setInitialData] = React.useState<Record<string, unknown> | null>(null);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  // Lifecycle controls (pause/resume/retire, #346/#347) live on the "My
-  // Profiles" sidebar rows now — NOT in this editor — so no pause UI state here.
-  // `isLoading`/`availableNetworkIds` come from React Query (#295) below.
-  const [isWalletModalOpen, setIsWalletModalOpen] = React.useState(false);
+  // Lifecycle controls (pause/resume/retire) live on the sidebar's "My
+  // Profiles" rows, not in this editor.
   const [formError, setFormError] = React.useState<{ title: string; description?: string } | null>(null);
+  const [serverFieldErrors, setServerFieldErrors] = React.useState<Record<string, string> | undefined>();
+  // A valid form was submitted while consent/guardian was still pending.
+  const [gateAttempted, setGateAttempted] = React.useState(false);
   const [resolvedLocations, setResolvedLocations] = React.useState<
     Array<{ lat: number; lng: number; label?: string; components?: GeoComponents }>
   >([]);
   const [formValid, setFormValid] = React.useState(false);
-  // Why the form is invalid, so the hint can distinguish "you have not filled in
-  // the required fields" from "something you typed is not valid" — the latter used
-  // to show the former's copy, sending people to look at the wrong fields.
+  // Why the form is invalid, so the hint can tell "required fields missing"
+  // from "a value is not valid".
   const [invalidValueCount, setInvalidValueCount] = React.useState(0);
   const [consentChecked, setConsentChecked] = React.useState(false);
 
-  // U18 guardian gate, run at the consent tick (BEFORE the profile is created,
-  // like the self-signup materialize-after-verify flow). Null until the stored
-  // status loads; a minor must have their guardian OTP-verify a pre-create
-  // token before "Create profile" is allowed.
+  // U18 guardian gate at the consent tick, before the profile is created. Null
+  // until the stored status loads; a minor's guardian must OTP-verify a
+  // pre-create token before "Create profile" is allowed.
   const [u18IsMinor, setU18IsMinor] = React.useState<boolean | null>(null);
-  // Interstitial shown at the consent tick BEFORE any OTP is sent, so a minor
-  // is told what's about to happen (a code goes to their guardian).
+  // Interstitial at the consent tick, before any OTP is sent, telling a minor
+  // that a code goes to their guardian.
   const [guardianConfirmOpen, setGuardianConfirmOpen] = React.useState(false);
   const [guardianOtpOpen, setGuardianOtpOpen] = React.useState(false);
   const [guardianSentTo, setGuardianSentTo] = React.useState<string | undefined>(undefined);
   const [guardianSetupOpen, setGuardianSetupOpen] = React.useState(false);
   const [guardianVerifiedForCreate, setGuardianVerifiedForCreate] = React.useState(false);
 
-  // Reset consent checkbox when form becomes invalid
+  // Reset the consent checkbox when the form becomes invalid.
   React.useEffect(() => {
     if (!formValid) setConsentChecked(false);
   }, [formValid]);
 
-  // Clear stale locations whenever the user switches domain so a prior domain's
-  // address suggestion is never submitted for a different domain.
+  // Clear locations on a domain switch so a prior domain's address is never
+  // submitted for a different domain.
   React.useEffect(() => {
     setResolvedLocations([]);
   }, [selectedDomain]);
 
-  // Get network from URL query param, fallback to env config
+  // Network from the URL query param, else env config.
   const configuredNetworkIds = React.useMemo(
     () => parseNetworkIds(import.meta.env.VITE_NETWORK_ID),
     []
   );
   const networkFromUrl = searchParams.get('network');
 
-  // Networks list (config tier) — discover which network ids are available.
+  // Networks list: which network ids are available.
   const {
     data: networksData,
     isError: networksError,
@@ -171,7 +176,7 @@ export function ProfileFormPage() {
     return availableNetworkIds[0] ?? null;
   }, [servedScope?.network, availableNetworkIds, networkFromUrl]);
 
-  // Resolved network config (config tier) — fetch + $ref resolution, cached.
+  // Resolved network config ($ref-resolved, cached).
   const { data: resolvedNetwork, isError: resolvedNetworkError } = useResolvedNetwork(targetNetworkId);
   const network = resolvedNetwork;
   const domains = network?.domains ?? [];
@@ -179,12 +184,9 @@ export function ProfileFormPage() {
   // Existing profile for edit mode.
   const editItem = useEditItem(network, isEdit ? (id ?? null) : null);
 
-  // Edit-mode loading screen: shown from mount through the networks-list and
-  // network-config-resolve phases and while the item itself loads (old
-  // `isLoading` was seeded to `isEdit` and cleared only once the item load
-  // settled). Goes false when the networks-list fetch or the network resolve
-  // errors, so a failure falls through to the terminal "no networks" /
-  // "loading schemas" guards exactly as before.
+  // Edit-mode loading screen through the networks-list and network-resolve
+  // phases and while the item loads. False on a list or resolve error, so the
+  // terminal "no networks" / "loading schemas" guards still apply.
   const editLoading =
     isEdit &&
     !networksError &&
@@ -197,8 +199,8 @@ export function ProfileFormPage() {
     if (!isEdit) return;
     const item = editItem.data;
     if (item) {
-      // Seed once per item — a background refetch of the same item must not
-      // clobber the user's in-progress form edits.
+      // Seed once per item: a background refetch must not clobber in-progress
+      // edits.
       if (existingItem?.item_id === item.item_id) return;
       setExistingItem(item);
       setSelectedDomain(item.item_domain);
@@ -207,7 +209,7 @@ export function ProfileFormPage() {
       toast.error(t('home.toast_profile_not_found'), {
         description: t('profile.toast_not_found_desc'),
       });
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } else if (editItem.isError && !existingItem) {
       console.error('Failed to load profile:', editItem.error);
       toast.error(t('profile.toast_load_error'), {
@@ -226,12 +228,9 @@ export function ProfileFormPage() {
     t,
   ]);
 
-  // The user's role(s), persisted on `user.domains` — the single source of
-  // truth for which domain they may create profiles in (set at signup /
-  // bootstrapped on first create; backfilled for existing users). One entry
-  // today = single role; the server enforces the same set (create_item's
-  // DOMAIN_LOCKED guard reads user.domains too), so the picker and the server
-  // can't disagree. Empty → fall back to the served set.
+  // The user's role(s) from `user.domains`: the domains they may create
+  // profiles in. The server enforces the same set (create_item's DOMAIN_LOCKED
+  // guard). Empty falls back to the served set.
   const [userDomains, setUserDomainsState] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (isEdit || !user) return;
@@ -242,8 +241,7 @@ export function ProfileFormPage() {
     return () => { cancelled = true; };
   }, [isEdit, user]);
 
-  // Domains offered in the picker: the served set (when a scope is configured),
-  // then narrowed to the user's persisted role(s).
+  // Picker domains: the served set (when scoped), narrowed to the user's roles.
   const selectableDomains = React.useMemo(() => {
     let list = servedScope
       ? domains.filter((d) => servedScope.domains.includes(d.id))
@@ -252,24 +250,19 @@ export function ProfileFormPage() {
     return list;
   }, [domains, servedScope, userDomains]);
 
-  // Single-role users skip the picker — the one selectable domain is chosen for
-  // them (covers both the stored-role case and a single served domain).
+  // Single-role users skip the picker (stored role or single served domain).
   const roleLocked = selectableDomains.length <= 1;
   React.useEffect(() => {
     if (isEdit || selectedDomain || selectableDomains.length !== 1) return;
     setSelectedDomain(selectableDomains[0].id);
   }, [isEdit, selectedDomain, selectableDomains]);
 
-  // Domain confirmed at Signals self-signup (see pages/auth/login-page.tsx +
-  // otp-page.tsx): a brand-new user who hasn't created any profile yet, so
-  // without this they'd be asked to pick a domain a second time. One-shot:
-  // cleared once consumed so it never leaks into a later, unrelated
-  // profile-creation flow.
+  // Domain confirmed at self-signup, so a new user with no profile is not
+  // asked again. One-shot: cleared once consumed so it never leaks into a
+  // later profile-creation flow.
   React.useEffect(() => {
-    // Wait for the network's domain list to actually load before consuming —
-    // otherwise an empty `domains` on the first render (network still
-    // fetching) would fail the validity check below and clear the stored
-    // value before it ever got a chance to apply.
+    // Wait for the domain list: an empty list on the first render would fail
+    // the validity check below and clear the stored value too early.
     if (isEdit || selectedDomain || !targetNetworkId || domains.length === 0) return;
     const stored = getStoredSignupDomain(targetNetworkId);
     if (!stored) return;
@@ -279,14 +272,14 @@ export function ProfileFormPage() {
     }
   }, [isEdit, selectedDomain, targetNetworkId, domains]);
 
-  // Find the profile schema for the selected domain
+  // The profile schema for the selected domain.
   const profileSchema = React.useMemo<RJSFSchema | null>(() => {
     if (!selectedDomain || !domains.length) return null;
     const domain = domains.find((d) => d.id === selectedDomain);
     return domain?.item_schemas ? Object.values(domain.item_schemas)[0] : null;
   }, [selectedDomain, domains]);
 
-  // Get the default item type name from domain config (e.g., "profile_1.0")
+  // The default item type from the domain config (e.g. "profile_1.0").
   const defaultItemType = React.useMemo<string | null>(() => {
     if (!selectedDomain || !domains.length) return null;
     const domain = domains.find((d) => d.id === selectedDomain);
@@ -294,16 +287,13 @@ export function ProfileFormPage() {
     return itemTypeKeys.length > 0 ? itemTypeKeys[0] : null;
   }, [selectedDomain, domains]);
 
-  // Consent config derivations. `profile_creation` consent is captured on CREATE
-  // and now also when EDITing a still-draft profile (which promotes it to live).
+  // Consent config. `profile_creation` consent is captured on create and on
+  // editing a still-draft profile (which promotes it to live).
   const profileDoc = consentConfig?.documents.profile_creation;
   const profileVersion = profileDoc?.versions.find((v) => v.version === profileDoc.current_version);
   const statement = profileVersion?.statement ?? '';
-  // The profile_creation consent tick only applies when the selected domain
-  // gates go-live on `consent_required` (mirrors `go_live_required` in
-  // network.json). A domain that goes live on completeness alone (e.g. a
-  // provider configured `["schema_required"]`) shows no consent step. Absent
-  // config ⇒ require (safe default, matches the login/create-enforcement gates).
+  // The consent tick applies only when the selected domain gates go-live on
+  // `consent_required`. Absent config requires it.
   const selectedDomainGates = network?.domains.find(
     (d) => d.id === selectedDomain,
   )?.go_live_required;
@@ -312,45 +302,42 @@ export function ProfileFormPage() {
     : true;
   const consentRequired = !isEdit && !!statement && domainNeedsConsent;
 
-  // Has THIS draft already recorded profile_creation consent? The home-page
-  // consent gate populates this set; read it (a plain cache read, no
-  // subscription) so re-opening an already-consented draft doesn't re-prompt.
+  // Whether this draft already recorded profile_creation consent (a plain
+  // cache read of the set home-page's gate populates), so re-opening it does
+  // not re-prompt.
   const alreadyConsented = network
     ? queryClient.getQueryData<Set<string>>(queryKeys.profileConsent(network.id))
     : undefined;
 
-  // Create, or editing a not-yet-live (draft) profile. A live profile edit never
-  // re-captures consent.
+  // Create, or editing a draft. A live profile edit never re-captures consent.
   const isDraft = !isEdit || editItem.data?.lifecycle_status === 'draft';
-  // Consent is needed when a statement is configured, we're on the draft path,
-  // and this specific item hasn't already consented. For create (existingItem
-  // null) this reduces to `!!statement`, matching the old `consentRequired`.
+  // Consent is needed when a statement is configured, on the draft path, and
+  // this item has not consented yet.
   const needsConsent =
     !!statement && isDraft && !(existingItem && alreadyConsented?.has(existingItem.item_id));
 
-  // Stored U18 status: whether THIS ward is a minor. Fetched whenever consent
-  // may be captured — create, OR editing a still-draft profile — so the accept
-  // flow routes a minor through guardian verification. A live edit (no consent)
-  // leaves it null.
+  // Stored U18 status, fetched whenever consent may be captured, so the
+  // accept flow routes a minor through guardian verification. Null on a live
+  // edit.
   React.useEffect(() => {
     if (!isDraft || !user || !network) { setU18IsMinor(null); return; }
     let cancelled = false;
     getU18Status(network.id)
       .then((s) => { if (!cancelled) setU18IsMinor(s.isMinor); })
-      // On failure leave it null — the server re-checks on finalize, so a
-      // transient error can't let a minor create a live profile ungated.
+      // Leave it null on failure; the server re-checks on finalize, so a
+      // transient error cannot let a minor go live ungated.
       .catch(() => { if (!cancelled) setU18IsMinor(null); });
     return () => { cancelled = true; };
   }, [isDraft, user, network]);
 
-  // A minor creating a profile on a guardian-gated domain: the consent tick
-  // triggers guardian OTP; "Create profile" stays blocked until it's verified.
+  // A minor on a guardian-gated domain: the consent tick triggers the guardian
+  // OTP and "Create profile" stays blocked until it is verified.
   const minorGatedCreate = Boolean(
     !isEdit && u18IsMinor === true && network && selectedDomain &&
     isGuardianConsentRequiredDomain(network, selectedDomain),
   );
 
-  // Re-arm the guardian gate whenever the target domain changes.
+  // Re-arm the guardian gate when the target domain changes.
   React.useEffect(() => {
     setGuardianVerifiedForCreate(false);
     setGuardianOtpOpen(false);
@@ -366,8 +353,8 @@ export function ProfileFormPage() {
     [network?.id, brand, selectedDomain],
   );
 
-  // Issue the pre-create guardian OTP and open the OTP dialog. If no guardian is
-  // on file yet (409 GUARDIAN_REQUIRED), run the capture flow first, then retry.
+  // Issue the pre-create guardian OTP and open its dialog. With no guardian on
+  // file (409 GUARDIAN_REQUIRED), run the capture flow first, then retry.
   const beginGuardianPrecreate = React.useCallback(async () => {
     try {
       const { otpSent, sent_to } = await issueProfilePrecreateOtp(precreateRef());
@@ -387,7 +374,7 @@ export function ProfileFormPage() {
       } else if (status === 503) {
         toast.error(t('u18.guardian_error_otp_unavailable', "Guardian confirmation isn't available on this instance right now."));
       } else {
-        toast.error(t('profile.error_generic_desc'));
+        toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
       }
     }
   }, [precreateRef, t]);
@@ -395,16 +382,13 @@ export function ProfileFormPage() {
   const selectedDomainInfo = domains.find((d) => d.id === selectedDomain);
   const DomainIcon = getDomainIcon(selectedDomain, network?.id);
   const roleLabel = formatDomainLabel(selectedDomain, domains);
-  // #376: the "why complete your profile" prompt — shown when creating, or when
-  // completing a still-draft profile (not when editing an already-live one).
+  // The "why complete your profile" prompt, shown on create or when completing
+  // a draft.
   const showCompletionPrompt = !isEdit || editItem.data?.lifecycle_status === 'draft';
   const completionPrompt = selectedDomainInfo?.profile_completion_prompt;
 
-  // ── App-shell sidebar props ──────────────────────────────────────────────
-  // The form now renders inside the main app shell (PageShell), so it feeds the
-  // same sidebar (networks / domains / "My Profiles") home-page does. Selecting
-  // anything in the sidebar navigates back to home — this page only edits the
-  // one profile it's opened for.
+  // App-shell sidebar props: the form renders inside PageShell with the same
+  // sidebar as home-page. Any sidebar selection navigates back to home.
   const allNetworks = React.useMemo<DotNetworkSchema[]>(() => {
     if (!networksData) return [];
     return configuredNetworkIds.length > 0
@@ -425,12 +409,12 @@ export function ProfileFormPage() {
   }, [network]);
 
   // Back / Cancel: in a multi-role create flow, step back to the role picker;
-  // otherwise leave the form for home (mirrors the pre-shell back nav).
+  // otherwise return home.
   const handleBack = React.useCallback(() => {
     if (selectedDomain && !isEdit && !roleLocked && !singleServedDomain) {
       setSelectedDomain(null);
     } else {
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     }
   }, [selectedDomain, isEdit, roleLocked, singleServedDomain, navigate, resolvedNetwork?.id]);
 
@@ -450,84 +434,30 @@ export function ProfileFormPage() {
   const handleSidebarProfileChange = React.useCallback(
     (profileId: string) => {
       if (network?.id) setStoredActiveProfileId(network.id, profileId);
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     },
     [network?.id, navigate, resolvedNetwork?.id],
   );
   const handleProfilesChanged = React.useCallback(() => {
-    if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+    if (network) void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
   }, [network, queryClient]);
 
-  const canImportCredentials = React.useMemo(
-    () => Boolean(profileSchema) && getConfiguredWalletProviders().length > 0,
-    [profileSchema]
-  );
-
-  // Get network-level instance URL and schema URL for the selected domain
+  // Network-level instance URL and schema URL for the selected domain.
   const domainInstance = React.useMemo(() => {
     if (!selectedDomain || !network) return null;
     return network.instances?.find((i) => i.domain_id === selectedDomain) ?? null;
   }, [selectedDomain, network]);
 
-  const walletImportContext = React.useMemo(
-    () => ({
-      user: {
-        email: user?.email ?? null,
-        phoneNumber: user?.phoneNumber ?? null,
-        name: user?.name ?? 'User',
-      },
-      networkId: network?.id ?? null,
-      domainId: selectedDomain,
-      schema: profileSchema,
-      formData: initialData,
-    }),
-    [initialData, network?.id, profileSchema, selectedDomain, user?.email, user?.name, user?.phoneNumber]
-  );
-
-  const handleImportedCredentials = React.useCallback(
-    (result: WalletImportResult) => {
-      if (!profileSchema) {
-        toast.error(t('profile.toast_no_schema'), {
-          description: t('profile.toast_no_schema_desc'),
-        });
-        return;
-      }
-
-      const { mergedData, mappedCount, skippedKeys } = mergeImportedDataIntoSchema(
-        profileSchema,
-        initialData,
-        result
-      );
-
-      if (mappedCount === 0) {
-        toast.error(t('profile.toast_import_no_match', { provider: result.providerLabel }));
-        return;
-      }
-
-      setInitialData(mergedData);
-
-      if (skippedKeys.length > 0) {
-        toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-          description: t('profile.toast_import_skipped', { count: skippedKeys.length }),
-        });
-        return;
-      }
-
-      toast.success(t('profile.toast_import_success', { count: mappedCount, provider: result.providerLabel }), {
-        description: result.summary,
-      });
-    },
-    [initialData, profileSchema]
-  );
-
   const handleSubmit = async (data: Record<string, unknown>) => {
     if (!selectedDomain || !network) return;
 
-    // A no-change save would still send the owner a "profile updated" email/SMS.
-    // Publishing a draft (needsConsent) goes through: the consent is the change.
+    // Nothing to save on a live/paused profile. A draft always goes through: the
+    // save re-runs the go-live check, which is how a draft parked by the live
+    // profile limit is published once a slot frees (the API sends no "updated"
+    // email/SMS when nothing changed).
     if (
       isEdit &&
-      !needsConsent &&
+      !isDraft &&
       resolvedLocations.length === 0 &&
       !hasProfileChanges(data, initialData)
     ) {
@@ -539,13 +469,13 @@ export function ProfileFormPage() {
 
     setIsSubmitting(true);
     setFormError(null);
+    setServerFieldErrors(undefined);
 
     try {
-      // Resolve the coordinates to submit, client-side, using the same (Google)
-      // geocoder the autocomplete uses. We send the EXACT point for every field —
-      // for a PRIVATE field the server jitters it (100–250 m) before storing, so
-      // the exact coordinate is never persisted (see PII location jitter, #243).
-      // Resolve from the picked suggestion(s) when available, else the typed text.
+      // Resolve coordinates client-side with the same geocoder as the
+      // autocomplete: from the picked suggestion(s), else the typed text. The
+      // exact point is sent; for a private field the server jitters it
+      // (100–250 m) before storing.
       const toPoint = (
         lat: number,
         lng: number,
@@ -572,52 +502,51 @@ export function ProfileFormPage() {
       }
 
       if (isEdit && existingItem) {
-        // Update existing profile
         const updatePayload: UpdateItemPayload = {
           item_state: data,
         };
 
-        // Only include item_locations when we have computed a non-empty array.
-        // When item_locations is empty on edit (e.g. the user never re-selected
-        // a suggestion for a private field whose value appears as "***"), omit
-        // the field entirely so updateItemInternal preserves the stored coarse
-        // coordinate rather than overwriting it with [].
+        // Omit item_locations when empty (e.g. a private field shown as "***"
+        // with no new suggestion), so the server keeps the stored coordinate
+        // instead of overwriting it with [].
         if (item_locations.length > 0) {
           updatePayload.item_locations = item_locations;
         }
 
-        await updateItem(existingItem.item_id, updatePayload);
-        // Bust the by-id caches for THIS item, else re-opening the editor within
-        // the 60s own-data window seeds the form from the pre-edit copy — and the
-        // seed-once guard then pins that stale value so the background refetch
-        // can't correct it. removeQueries (not invalidate) for editItem so the
-        // next open has no stale copy to seed from and refetches fresh via the
-        // same masked read path; itemDetail (marker click-through / detail popup)
-        // can just be invalidated.
+        const updated = await updateItem(existingItem.item_id, updatePayload);
+        // Bust the by-id caches for this item, or re-opening the editor within
+        // the own-data stale window seeds the form from the pre-edit copy and
+        // the seed-once guard pins it. removeQueries for editItem (nothing
+        // stale to seed from); itemDetail can just be invalidated.
         queryClient.removeQueries({
           queryKey: queryKeys.editItem(network.id, existingItem.item_id),
         });
-        queryClient.invalidateQueries({
+        void queryClient.invalidateQueries({
           queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
         });
 
-        // Refresh the browse / my-items lists (§C5). IMPORTANT: when a draft is
-        // about to be promoted to live via consent below, do NOT invalidate
-        // my-items here — that kicks off a refetch of the still-`draft` status
-        // that wins the race and leaves the sidebar showing "Draft" even though
-        // the profile is live server-side. Invalidate only AFTER the promotion
-        // (in the accept flow's onDone). This mirrors the create path.
+        // Refresh the browse / my-items lists. When a draft is about to be
+        // promoted via consent below, do not invalidate my-items here: the
+        // refetch of the still-draft status would win the race and the sidebar
+        // would show "Draft". The accept flow's onDone invalidates instead.
         const refreshLists = () => {
-          queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-          queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+          void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         };
 
-        // Editing a still-draft profile with a configured statement: record
-        // profile_creation consent, which promotes the draft to live. For an
-        // adult this resolves synchronously → `onDone`; for a minor on a gated
-        // domain the hook opens the guardian-OTP flow and `onDone` runs only
-        // after OTP success. Either way the list refresh + navigation are
-        // deferred to `onDone`, so we return here rather than falling through.
+        // The live limit kept it in draft. The API only reports that once every
+        // other gate passed, consent included, so there is nothing to accept.
+        if (needsConsent && profileDoc && updated.message) {
+          refreshLists();
+          toast.warning(t('profile.toast_saved_as_draft'), { description: updated.message });
+          void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+          return;
+        }
+
+        // Editing a draft with a configured statement: record profile_creation
+        // consent, which promotes it to live. `onDone` runs immediately for an
+        // adult, or after guardian OTP success for a minor on a gated domain;
+        // list refresh and navigation are deferred to it.
         if (needsConsent && profileDoc) {
           await acceptProfileConsentFlow({
             network: network.id,
@@ -629,9 +558,8 @@ export function ProfileFormPage() {
             },
             version: profileDoc.current_version,
             isMinor: u18IsMinor === true,
-            // The guardian flow may reclassify the ward as an adult (or capture a
-            // guardian); re-sync U18 status so a not-minor outcome doesn't
-            // dead-end and a retry runs with the corrected status.
+            // The guardian flow may reclassify the ward; re-sync U18 status so
+            // a not-minor outcome does not dead-end and a retry is correct.
             onGuardianStatusChanged: () => {
               getU18Status(network.id)
                 .then((s) => setU18IsMinor(s.isMinor))
@@ -639,20 +567,22 @@ export function ProfileFormPage() {
             },
             onDone: () => {
               refreshLists();
-              navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+              void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
             },
           });
           return;
         }
 
-        // Plain edit (already live / no statement configured): reflect the field
-        // edits in the lists now.
+        // Plain edit (live, or no statement configured): refresh the lists now.
         refreshLists();
-        toast.success(t('profile.toast_updated'), {
-          description: t('profile.toast_updated_desc'),
-        });
+        if (updated.message) {
+          toast.warning(t('profile.toast_saved_as_draft'), { description: updated.message });
+        } else {
+          toast.success(t('profile.toast_updated'), {
+            description: t('profile.toast_updated_desc'),
+          });
+        }
       } else {
-        // Create new profile
         const createPayload: CreateItemPayload = {
           item_network: network.id,
           item_domain: selectedDomain,
@@ -680,85 +610,102 @@ export function ProfileFormPage() {
         }
 
         const created = await createItem(createPayload);
-        // Make the freshly-created profile the active one so the home sidebar
-        // selects it (and the discover list anchors to it) instead of keeping
-        // the previously-stored profile. Home reads this on load.
+        // Make the new profile the active one so home selects it and the
+        // discover list anchors to it.
         setStoredActiveProfileId(network.id, created.item_id);
-        // NOTE: my-items / browse-items invalidation runs AFTER
-        // finalizeProfileConsent below — NOT here. A minor's item is created
-        // `draft` and only flips to `live` in finalize; invalidating here would
-        // refetch the still-draft status and leave the sidebar showing "Draft".
+        // my-items / browse-items invalidation runs after
+        // finalizeProfileConsent below: a minor's item is created `draft` and
+        // only flips to `live` there.
         if (consentRequired && profileDoc) {
-          // This create recorded profile_creation consent. Optimistically add
-          // the new item to the profileConsent cache so returning to home sees
-          // it as consented IMMEDIATELY. A plain invalidate is not enough: the
-          // profileConsent query is stale-while-revalidate, so the home gate
-          // would read the old set (without this profile) during the refetch
-          // window and spuriously re-prompt. Mirrors the accept handler's
-          // setQueryData approach.
+          // Optimistically add the item to the profileConsent cache: the query
+          // is stale-while-revalidate, so a plain invalidate would let the home
+          // gate read the old set and re-prompt.
           queryClient.setQueryData<Set<string>>(
             queryKeys.profileConsent(network.id),
             (prev) => new Set([...(prev ?? []), created.item_id]),
           );
         }
-        // Minor on a gated domain: the guardian already OTP-verified a
-        // pre-create token at the consent tick. Consume it now to record the
-        // GUARDIAN profile_creation consent and promote the fresh item to live
-        // (the create above wrote a draft with source='profile').
+        // Minor on a gated domain: consume the pre-create token the guardian
+        // verified to record guardian profile_creation consent and promote the
+        // fresh draft to live.
+        let liveLimitMessage = created.message;
         if (minorGatedCreate) {
-          await finalizeProfileConsent({
+          const finalized = await finalizeProfileConsent({
             network: network.id,
             brand: brand === 'standard' ? null : brand,
             item_domain: selectedDomain,
             item_type: defaultItemType ?? 'profile',
             item_id: created.item_id,
           });
+          // The guardian promotion is where a minor's profile meets the live limit.
+          liveLimitMessage ??= finalized.message;
         }
-        // Reflect the write in cached lists (§C5) — invalidate AFTER the minor
-        // promotion above, not right after createItem. A minor's item is created
-        // `draft` and only flips to `live` in finalizeProfileConsent; invalidating
-        // before that made my-items refetch the still-`draft` status, so the
-        // sidebar showed "Draft" until the next interaction even though the
-        // profile was live server-side.
-        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-        // Network-level prefix of the browse-items key (React Query matches
-        // prefixes) — invalidates every domain's browse cache for this network.
-        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
-        toast.success(t('profile.toast_created'), {
-          description: t('profile.toast_created_desc'),
-        });
+        // Invalidate after the minor promotion above, so my-items does not
+        // refetch the still-draft status.
+        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        // Network-level prefix of the browse-items key: invalidates every
+        // domain's browse cache for this network.
+        void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        // The live profile limit kept it in draft: say so instead of "you're visible".
+        if (liveLimitMessage) {
+          toast.warning(t('profile.toast_saved_as_draft'), { description: liveLimitMessage });
+        } else {
+          toast.success(t('profile.toast_created'), {
+            description: t('profile.toast_created_desc'),
+          });
+        }
       }
 
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } catch (err: unknown) {
       console.error('Failed to save profile:', err);
 
-      const axiosError = err as { response?: { status?: number; data?: { error?: string; message?: string } } };
-      const status = axiosError?.response?.status;
-      const error = axiosError?.response?.data;
+      const info = readApiError(err);
+      const status = info.status;
 
-      if (status === 403 && error?.error === 'UNSERVED_DOMAIN_BINDING') {
+      const split = splitServerFieldErrors(info.fields ?? {}, profileSchema, data);
+      const onForm = split.onForm;
+      const offForm = split.offForm.map((path) => readableFieldName(profileSchema, path.split('.').filter(Boolean)));
+
+      if (offForm.length > 0) {
+        const names = [...new Set(offForm)];
+        // The form has no field to show these on, so they go in the banner.
+        if (Object.keys(onForm).length > 0) setServerFieldErrors(onForm);
+        setFormError({
+          title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
+          description: t(
+            'profile.error_fields_not_in_form',
+            'Some saved details cannot be changed in this form ({{fields}}). Please contact support.',
+            { fields: names.join(', ') },
+          ),
+        });
+      } else if (Object.keys(onForm).length > 0) {
+        // Field messages go under their fields; no banner.
+        setServerFieldErrors(onForm);
+      } else if (status === 403 && info.code === 'UNSERVED_DOMAIN_BINDING') {
         setFormError({
           title: t('profile.error_role_unavailable'),
-          description: error?.message ?? t('profile.error_role_unavailable_fallback_desc'),
+          description: isReadableServerMessage(info.message)
+            ? info.message
+            : t('profile.error_role_unavailable_fallback_desc'),
         });
       } else if (status === 401) {
         const redirectTo = `${location.pathname}${location.search}`;
         toast.error(t('profile.toast_sign_in'), {
           description: t('profile.toast_sign_in_desc'),
         });
-        navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
-      } else if (status === 409 && error?.error === 'ITEM_ALREADY_EXISTS') {
-        // Match on the CODE, not the bare 409 (#737). Four different codes come
-        // back as 409 from this one call — PROFILE_LIMIT_REACHED,
-        // REQUIRED_FIELD_LOCKED_WHILE_LIVE, ITEM_RETIRED and this one — and
-        // only a genuine duplicate is "already exists". Branching on the status
-        // alone told a participant at the per-domain cap that they "already
-        // have a profile for this role", which is both untrue (a user may hold
-        // several) and hid the cap message naming the one action that frees a
-        // slot. Every other 409 falls through to the branch below, which
-        // surfaces the server's own sentence — the same shape the 403 above
-        // uses.
+        void navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
+      } else if (status === 409 && info.code === 'PROFILE_LIMIT_REACHED') {
+        // A toast, not the banner: the banner sits at the top of a long form,
+        // out of sight of the Save button that triggered it.
+        toast.error(isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'), {
+          description: apiErrorMessage(err, t, t('profile.error_generic_desc')),
+        });
+      } else if (status === 409 && info.code === 'ITEM_ALREADY_EXISTS') {
+        // Match on the code, not the bare 409: PROFILE_LIMIT_REACHED,
+        // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are 409s too, and
+        // only a genuine duplicate is "already exists". Other 409s fall through
+        // to the server's own message below.
         setFormError({
           title: t('profile.error_already_exists'),
           description: t('profile.error_already_exists_desc'),
@@ -766,7 +713,7 @@ export function ProfileFormPage() {
       } else {
         setFormError({
           title: isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'),
-          description: error?.message ?? t('profile.error_generic_desc'),
+          description: apiErrorMessage(err, t, t('profile.error_generic_desc')),
         });
       }
     } finally {
@@ -800,9 +747,8 @@ export function ProfileFormPage() {
     );
   }
 
-  // Shared sidebar wiring for both the role-picker and the form itself — the
-  // page lives inside the main app shell now (Task 3), so the sidebar mirrors
-  // home-page's; every selection navigates back to home.
+  // Shared sidebar wiring for the role picker and the form; every selection
+  // navigates back to home.
   const shellSidebarProps = {
     networks: showNetworkSelector ? allNetworks : [],
     selectedNetwork: targetNetworkId,
@@ -815,14 +761,13 @@ export function ProfileFormPage() {
     onActiveProfileChange: handleSidebarProfileChange,
     onProfilesChanged: handleProfilesChanged,
     userSchemas,
-    // On a create/edit form there is nothing to browse — hide the Browse
-    // (domain selector) group, and label the return control "Browse" (it goes
-    // to the browse view, not the prior route).
+    // Nothing to browse on a form: hide the domain selector group and label
+    // the return control "Browse".
     hideBrowse: true,
     backLabel: t('nav.browse_group'),
   };
 
-  // Domain selection step
+  // Domain selection step.
   if (!selectedDomain && !isEdit) {
     return (
       <PageShell
@@ -860,39 +805,40 @@ export function ProfileFormPage() {
     );
   }
 
-  // When consent is being captured (create, or promoting a draft) the primary
-  // action publishes; otherwise it's a plain create/update.
+  // When consent is captured (create, or promoting a draft) the primary action
+  // publishes; otherwise it is a plain create/update.
   const editPrimaryLabel = isEdit ? t('profile.btn_update') : t('profile.btn_create');
   const primaryLabel = needsConsent
     ? t('profile.btn_save_publish')
     : editPrimaryLabel;
-  const submitDisabled = isEdit
-    ? // Live edit: unchanged (formValid only). Draft-with-consent: wait for the
-      // consent config to load, then require the acknowledgement tick.
-      !formValid || (isDraft && consentLoading) || (needsConsent && !consentChecked)
-    : !formValid ||
-      consentLoading ||
-      (needsConsent && !consentChecked) ||
-      (minorGatedCreate && !guardianVerifiedForCreate);
+  // Consent and guardian steps that must finish before a valid form is sent.
+  const consentPending = isEdit ? isDraft && consentLoading : consentLoading;
+  const gateBlocked =
+    consentPending ||
+    (needsConsent && !consentChecked) ||
+    (!isEdit && minorGatedCreate && !guardianVerifiedForCreate);
+  // Only a request in flight disables Submit; a click otherwise shows what is missing.
+  const submitDisabled = isSubmitting || consentPending;
+  const consentError =
+    gateAttempted && needsConsent && !consentChecked
+      ? t('profile.consent_required_error', 'Tick the box to agree before you continue.')
+      : undefined;
 
-  // Action bar rendered as PageShell's pinned footer (below the scroll area, via
-  // footerSlot) — NOT a sticky element inside the scroll, which floated
-  // mid-content when the form was short and produced a second scrollbar. The
-  // submit is `type=submit form=profile-form`, so it still drives the (hidden-
-  // submit) SchemaForm even though it now lives outside the form's DOM subtree.
+  // Action bar in PageShell's pinned footer, not sticky inside the scroll area
+  // (which floated mid-content and added a second scrollbar). The submit is
+  // `type=submit form=profile-form`, so it still drives SchemaForm from
+  // outside its DOM subtree.
   const actionBar = (
     <div data-testid="profile-action-bar" className="mx-auto max-w-[1040px] space-y-3 px-4 py-3 sm:px-6">
-      {/* Consent gets its OWN full-width row above the buttons — the
-          ConsentCheckbox is a bordered block, so cramming it into the horizontal
-          button cluster wrapped and broke the bar (esp. with the minor status
-          line). Shown for CREATE and EDIT-of-draft (the `needsConsent` path). The
-          minor pre-create interstitial is create-only; an edit-of-draft minor is
-          routed through the guardian flow by the accept hook. */}
+      {/* Consent gets its own full-width row above the buttons. Shown for
+          create and edit-of-draft; an edit-of-draft minor is routed through the
+          guardian flow by the accept hook. */}
       {formValid && needsConsent && (
         <div className="space-y-2">
           <ConsentCheckbox
             text={statement}
             checked={consentChecked}
+            error={consentError}
             onCheckedChange={(v) => {
               setConsentChecked(v);
               if (v && minorGatedCreate && !guardianVerifiedForCreate) {
@@ -901,7 +847,10 @@ export function ProfileFormPage() {
             }}
           />
           {!isEdit && minorGatedCreate && consentChecked && (
-            <p className="text-sm text-muted-foreground">
+            <p
+              className={gateAttempted && !guardianVerifiedForCreate ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
+              role={gateAttempted && !guardianVerifiedForCreate ? 'alert' : undefined}
+            >
               {guardianVerifiedForCreate
                 ? t('u18.guardian_verified_for_create', 'Guardian verified. You can now create your profile.')
                 : t('u18.guardian_pending_for_create', "You're under 18 — your guardian must verify with a one-time code before you can create this profile.")}
@@ -941,17 +890,14 @@ export function ProfileFormPage() {
   return (
     <PageShell
       variant="form"
-      // No app-bar title here: the branded hero strip below already shows the
-      // role heading, so a title in the bar would duplicate it. (The role-picker
-      // step above keeps its bar title — it has no hero.)
+      // No app-bar title: the hero strip below shows the role heading.
       onBack={handleBack}
       footerSlot={actionBar}
       {...shellSidebarProps}
     >
       <div className="mx-auto max-w-[1040px]">
-        {/* Branded hero strip — sits flush above the form Card. This hero heading
-            is the page's <h1> now (the app-bar title was dropped to avoid
-            duplicating it). Uses the network's primary brand color. */}
+        {/* Branded hero strip, flush above the form card; its heading is the
+            page's <h1>. */}
         <div data-tour="profile-hero" className="relative overflow-hidden rounded-t-xl bg-primary">
           <div className="pointer-events-none absolute inset-0 opacity-15">
             <NetworkConstellation className="h-full w-full" />
@@ -975,11 +921,11 @@ export function ProfileFormPage() {
           </div>
         </div>
 
-        {/* Form card — connects flush to the hero strip. */}
+        {/* Form card, flush to the hero strip. */}
         <Card className="rounded-t-none border-t-0 shadow-lg">
           <CardContent className="pt-6">
-            {/* #376: motivating "why complete your profile" prompt — per-domain
-                from network.json (role-specific), with a generic i18n fallback. */}
+            {/* "Why complete your profile" prompt: per-domain from network.json,
+                with a generic i18n fallback. */}
             {showCompletionPrompt && selectedDomain && (
               <div className="mb-5 rounded-lg border border-brand-cta/30 bg-brand-cta/[0.06] p-4">
                 <p className="text-sm font-semibold text-foreground">
@@ -988,15 +934,6 @@ export function ProfileFormPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {completionPrompt?.body ?? t('profile.completion_prompt_default_body')}
                 </p>
-              </div>
-            )}
-
-            {canImportCredentials && (
-              <div className="mb-4">
-                <Button data-tour="import-credentials" variant="outline" size="sm" onClick={() => setIsWalletModalOpen(true)}>
-                  <Wallet className="h-4 w-4" />
-                  {t('profile.import_credentials')}
-                </Button>
               </div>
             )}
 
@@ -1012,7 +949,14 @@ export function ProfileFormPage() {
               <SchemaForm
                 id="profile-form"
                 schema={profileSchema}
-                onSubmit={handleSubmit}
+                onSubmit={(data) => {
+                  if (gateBlocked) {
+                    setGateAttempted(true);
+                    return;
+                  }
+                  void handleSubmit(data);
+                }}
+                serverErrors={serverFieldErrors}
                 disabled={isSubmitting}
                 formData={initialData ?? undefined}
                 hideSubmit
@@ -1020,8 +964,7 @@ export function ProfileFormPage() {
                   setFormValid(valid);
                   setInvalidValueCount(detail?.invalidValues ?? 0);
                 }}
-                // The page heading is the hero <h1>; render section titles as
-                // <h2> so the heading chain (h1 → h2) has no skip.
+                // The hero is the <h1>, so section titles are <h2>.
                 sectionHeadingLevel={2}
                 domainId={selectedDomain ?? undefined}
                 networkId={network?.id}
@@ -1037,21 +980,14 @@ export function ProfileFormPage() {
           </CardContent>
         </Card>
 
-        <WalletImportModal
-          open={isWalletModalOpen}
-          onOpenChange={setIsWalletModalOpen}
-          context={walletImportContext}
-          onImported={handleImportedCredentials}
-        />
-
-        {/* Interstitial: tell the minor what's about to happen before any code
-            is sent. Confirming issues the guardian OTP. */}
+        {/* Interstitial: tells the minor what happens before any code is
+            sent. Confirming issues the guardian OTP. */}
         <Dialog
           open={guardianConfirmOpen}
           onOpenChange={(open) => {
             if (open) return;
             setGuardianConfirmOpen(false);
-            // Backed out → untick so re-ticking re-opens this notice.
+            // Backed out: untick so re-ticking re-opens this notice.
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
         >
@@ -1089,7 +1025,7 @@ export function ProfileFormPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Pre-create guardian OTP: verified BEFORE the profile row is written. */}
+        {/* Pre-create guardian OTP, verified before the profile row is written. */}
         <GuardianOtpDialog
           open={guardianOtpOpen}
           purpose={{ kind: 'profile' }}
@@ -1097,21 +1033,21 @@ export function ProfileFormPage() {
           onOpenChange={(open) => {
             if (open) return;
             setGuardianOtpOpen(false);
-            // Closed without verifying → untick consent so re-ticking re-issues
-            // the OTP (otherwise the create button stays stuck-disabled).
+            // Closed without verifying: untick consent so re-ticking re-issues
+            // the OTP (otherwise create stays disabled).
             if (!guardianVerifiedForCreate) setConsentChecked(false);
           }}
           onLogout={() => { void signOut(); }}
           onSubmitOtp={async (otp) => {
-            // Throws on an invalid/expired code → the dialog shows the inline
-            // error and stays open for a retry.
+            // Throws on an invalid/expired code; the dialog shows the error
+            // inline and stays open.
             await verifyProfilePrecreateOtp({ ...precreateRef(), otp });
             setGuardianVerifiedForCreate(true);
             setGuardianOtpOpen(false);
           }}
         />
 
-        {/* No guardian on file yet → capture (details + setup OTP), then retry. */}
+        {/* No guardian on file: capture (details + setup OTP), then retry. */}
         {guardianSetupOpen && network && selectedDomain && (
           <U18GuardianFlow
             network={network.id}
@@ -1127,8 +1063,7 @@ export function ProfileFormPage() {
           />
         )}
 
-        {/* Guardian-OTP + capture dialogs for the EDIT-of-draft consent path
-            (driven by separate state from the create pre-create flow above). */}
+        {/* Guardian OTP and capture dialogs for the edit-of-draft consent path. */}
         {consentAcceptDialogs}
       </div>
     </PageShell>

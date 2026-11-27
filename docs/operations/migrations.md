@@ -141,7 +141,7 @@ Never edit the bundle by hand.
 
 This is historical, not designed-in. The `items` / `item_actions` /
 `action_events` tables predate the better-auth adoption — they came in as
-raw SQL from the vendor (Dhiway) and are partitioned in ways Drizzle Kit
+raw SQL and are partitioned in ways Drizzle Kit
 doesn't model cleanly. Drizzle was introduced later for the better-auth
 tables only; nobody migrated the existing items DDL across.
 

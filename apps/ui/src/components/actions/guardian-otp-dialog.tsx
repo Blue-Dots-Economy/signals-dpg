@@ -5,36 +5,26 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { OtpInput } from '@/components/auth/otp-input';
 import { guardianOtpErrorFromThrown, type GuardianOtpErrorCode } from '@/lib/action-api';
+import { apiErrorMessage } from '@/lib/api-error';
 import { GuardianOtpPurpose, type GuardianPurpose } from '@/components/consent/u18/guardian-otp-purpose';
 
-// Desktop: Dialog
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
-// Mobile: Drawer
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 
 export interface GuardianOtpDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
-   * Called with the 6-digit code the ward entered. Should resubmit the SAME
-   * action (perform/update-status) with `guardianOtp` set, and resolve on
-   * success. The caller owns closing the dialog + toasting/refreshing on
-   * success (typically by calling `onOpenChange(false)` at the end of this
-   * function) — `GuardianOtpDialog` only renders the challenge UI and maps a
-   * rejection into an inline error, it never closes itself.
-   *
-   * On failure, throw the original error (a `BulkSingleError` with `.code`,
-   * or an axios error) — this component classifies it via
-   * `guardianOtpErrorFromThrown` to pick the right inline message and resets
-   * the OTP input so the ward can retry.
+   * Called with the ward's 6-digit code; should resubmit the same action with
+   * `guardianOtp` and resolve on success. The caller closes the dialog; this
+   * component never closes itself. On failure throw the original error,
+   * which `guardianOtpErrorFromThrown` maps to an inline message.
    */
   onSubmitOtp: (otp: string) => Promise<void>;
-  /** Optional escape hatch — a stuck ward can sign out (wrong account / can't
-   * reach the guardian). When provided, a "Not you? Log out" link is shown. */
+  /** Shows a "Not you? Log out" link so a stuck ward can sign out. */
   onLogout?: () => void;
-  /** What this OTP authorises — renders the highlighted "Guardian approval for"
-   * panel so the ward + guardian see the exact purpose (apply, profile, …). */
+  /** What this OTP authorises, shown in the "Guardian approval for" panel. */
   purpose?: GuardianPurpose;
   /** Masked guardian contact the code went to (`******7347`), from the API's `sent_to`. */
   sentTo?: string;
@@ -109,8 +99,8 @@ export function GuardianOtpDialog({ open, onOpenChange, onSubmitOtp, onLogout, p
     } catch (err) {
       const code = guardianOtpErrorFromThrown(err);
       const { title, description } = messageForCode(code, t);
-      setInlineError({ code, title, description });
-      // Reset the input so the ward can retry cleanly.
+      // An unclassified failure (network, server, other 4xx) says what actually happened.
+      setInlineError({ code, title, description: code ? description : apiErrorMessage(err, t, description) });
       setOtpKey((k) => k + 1);
     } finally {
       setIsSubmitting(false);

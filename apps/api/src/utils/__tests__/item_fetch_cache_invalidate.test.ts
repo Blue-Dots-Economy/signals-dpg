@@ -35,7 +35,7 @@ describe('invalidateItemFetchCache', () => {
     del.mockResolvedValue(1);
   });
 
-  it('sweeps all three cache families for the given network/domain', async () => {
+  it('sweeps all four cache families for the given network/domain, map markers included', async () => {
     scanStream.mockImplementation(() => fakeStream([]));
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
@@ -47,6 +47,7 @@ describe('invalidateItemFetchCache', () => {
       'local-item-fetch:*blue_dot*seeker*',
       'item-count:blue_dot:seeker:*',
       'item-page:blue_dot:seeker:*',
+      'marker-page:blue_dot:seeker:*',
     ]);
   });
 
@@ -55,7 +56,7 @@ describe('invalidateItemFetchCache', () => {
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
 
-    expect(scanStream).toHaveBeenCalledTimes(3);
+    expect(scanStream).toHaveBeenCalledTimes(4);
     for (const call of scanStream.mock.calls) {
       expect((call[0] as { count: number }).count).toBe(200);
     }
@@ -66,7 +67,7 @@ describe('invalidateItemFetchCache', () => {
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
 
-    expect(unlink).toHaveBeenCalledTimes(3);
+    expect(unlink).toHaveBeenCalledTimes(4);
     expect(unlink).toHaveBeenCalledWith('k1', 'k2');
     expect(del).not.toHaveBeenCalled();
   });
@@ -76,8 +77,8 @@ describe('invalidateItemFetchCache', () => {
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
 
-    // 2 batches x 3 patterns.
-    expect(unlink).toHaveBeenCalledTimes(6);
+    // 2 batches x 4 patterns.
+    expect(unlink).toHaveBeenCalledTimes(8);
   });
 
   it('skips empty key batches rather than issuing a no-arg unlink', async () => {
@@ -85,7 +86,7 @@ describe('invalidateItemFetchCache', () => {
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
 
-    expect(unlink).toHaveBeenCalledTimes(3);
+    expect(unlink).toHaveBeenCalledTimes(4);
     expect(unlink).toHaveBeenCalledWith('only');
   });
 
@@ -95,7 +96,7 @@ describe('invalidateItemFetchCache', () => {
 
     await invalidateItemFetchCache('blue_dot', 'seeker');
 
-    expect(del).toHaveBeenCalledTimes(3);
+    expect(del).toHaveBeenCalledTimes(4);
     expect(del).toHaveBeenCalledWith('k1');
   });
 

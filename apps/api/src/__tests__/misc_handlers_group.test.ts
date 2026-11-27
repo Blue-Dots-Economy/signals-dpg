@@ -135,11 +135,15 @@ vi.mock('@api/plugins/auth/auth_middleware', () => ({
   auth_middleware_if_enabled: async () => {},
 }));
 
+vi.mock('@/config', () => ({ authConfig: { phone_countries: ['IN'] } }));
 vi.mock('@dpg/schemas', () => {
   const leaf: Record<string, () => unknown> = {
     min: () => leaf,
     email: () => leaf,
+    regex: () => leaf,
     optional: () => leaf,
+    max: () => leaf,
+    transform: () => leaf,
   };
   return {
     default: {
@@ -147,6 +151,8 @@ vi.mock('@dpg/schemas', () => {
       string: () => leaf,
       boolean: () => leaf,
     },
+    PHONE_INPUT_SHAPE: /./,
+    parsePhone: () => ({ ok: true, value: '' }),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getDomainItemSchema: (...a: any[]) => getDomainItemSchema(a[0], a[1], a[2]),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

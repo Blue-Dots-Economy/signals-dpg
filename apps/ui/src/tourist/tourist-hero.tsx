@@ -1,13 +1,10 @@
 import { NetworkConstellation } from '@/components/layout/network-constellation';
 
 /**
- * Tourist banner — the same visual treatment as the signals GuestHero
- * (brand-hero gradient + faint constellation + legibility vignette, highlight in
- * the brand-hero-highlight colour) but WITHOUT the sign-in CTA, since the
- * tourist app is login-free. The copy is hardcoded (rather than read from the
- * network theme, which defaults to blue_dot's "Seeker & Provider Portal…" in the
- * tourist context); the colours come from the orange_dot brand CSS vars, so the
- * gradient and highlight match the orange_dot banner used in signals.
+ * Tourist banner: the GuestHero treatment (brand-hero gradient, constellation,
+ * vignette) without the sign-in CTA, since the tourist app is login-free. The
+ * copy is hardcoded because the network theme defaults to blue_dot's copy in
+ * this context; the colours come from the orange_dot brand CSS vars.
  */
 export function TouristHero() {
   return (

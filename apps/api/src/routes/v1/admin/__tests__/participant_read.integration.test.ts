@@ -519,16 +519,15 @@ describeIf(`GET /api/v1/admin/participant (integration)${
     // into a length-capped surface — the voice bot consumes only the first N
     // characters — so the newest profile has to come first or it is the one that
     // gets dropped.
-    // The per-user profile cap is per-domain-overridable (`resolveProfileLimit`
-    // prefers the domain's `max_profiles_per_user` over the global default), so
+    // The per-user profile cap is per-domain-overridable (`resolveProfileLimits`
+    // prefers the domain's `profile_limits.total` over the global default), so
     // a hard-coded 3 would 409 with PROFILE_LIMIT_REACHED on a tightly-capped
     // domain and never reach the assertion. Resolve it the way the server does.
     const { apiConfig } = await import('@/config');
     const { getNetworkConfigById } = await import('@/network_configs');
     const networkCfg = await getNetworkConfigById(primary.network);
-    const domainCap = networkCfg.domains?.find(
-      (d: { id: string; max_profiles_per_user?: number }) => d.id === primary.domain,
-    )?.max_profiles_per_user;
+    const domainCap = networkCfg.domains?.find((d) => d.id === primary.domain)?.profile_limits
+      ?.total;
     const cap = domainCap ?? apiConfig.max_profiles_per_user;
     // Two profiles are enough to pin an ordering; one is not.
     const profileCount = Math.min(3, cap);

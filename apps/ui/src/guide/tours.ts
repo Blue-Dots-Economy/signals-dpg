@@ -205,7 +205,6 @@ const CREATE_PROFILE_TOUR: GuideTour = {
       description: `
         <ul>
           <li>Work through each section. Fields marked <b>*</b> are required; the rest help others find you.</li>
-          <li>Hold digital credentials in a wallet? <b>Import credentials</b> above the form fills parts of it for you.</li>
         </ul>`,
     },
     {
@@ -378,7 +377,7 @@ const MAP_TOUR: GuideTour = {
       title: 'Search an area, full screen',
       description: `
         <ul>
-          <li>Zoom in on a region and <b>Search this area</b> appears at the bottom; it lists only the listings there.</li>
+          <li>Zoom in on a region and <b>List what's in this view</b> appears at the bottom; it lists only the listings there.</li>
           <li>This button makes the map full screen; filters and location stay in the corner.</li>
         </ul>`,
     },

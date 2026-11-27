@@ -21,6 +21,7 @@ interface ConsentAcceptResponse {
 
 interface RawSchemaEntry {
   kind: string;
+  network?: string;
   brand?: string;
   schema: unknown;
 }
@@ -35,8 +36,15 @@ export async function fetchConsentConfigs(networkId: string): Promise<ConsentCon
   const response = await apiClient.get<RawSchemaEntry[]>('/api/v1/network/schemas', {
     params: { network: networkId },
   });
-  return response.data
-    .filter((e) => e.kind === 'consent_config')
+  return consentConfigsIn(response.data, networkId);
+}
+
+export function consentConfigsIn(
+  entries: RawSchemaEntry[],
+  networkId: string,
+): ConsentConfigEntry[] {
+  return entries
+    .filter((e) => e.kind === 'consent_config' && e.network === networkId)
     .map((e) => ({ brand: e.brand ?? null, schema: e.schema as ConsentConfigDocument }));
 }
 
@@ -74,19 +82,18 @@ export async function getProfileConsentStatus(
 
 export async function acceptProfileConsent(
   body: ProfileConsentAcceptBody,
-): Promise<{ recorded: number }> {
-  const response = await apiClient.post<{ recorded: number }>(
+): Promise<{ recorded: number; message?: string }> {
+  // `message` is set when the live profile limit kept the profile in draft.
+  const response = await apiClient.post<{ recorded: number; message?: string }>(
     '/api/v1/consent/profile-accept',
     body,
   );
   return response.data;
 }
 
-// ─── U18 guardian consent flow ──────────────────────────────────────
-
 export interface SubmitU18DobBody {
   network: string;
-  /** Age in years (derived from birth year on the client) — stored on user.age. */
+  /** Age in years, derived from the birth year on the client; stored on user.age. */
   age: number;
 }
 
@@ -100,8 +107,8 @@ export interface SubmitGuardianBody {
   network: string;
   brand?: string | null;
   guardianName: string;
-  /** Both contacts (at least one). Server resolves the OTP channel (phone
-   * preferred) and stores whatever is provided. */
+  /** At least one contact. The server picks the OTP channel (phone preferred)
+   * and stores whatever is provided. */
   guardianEmail?: string;
   guardianPhone?: string;
   guardianDeclarationAccepted: true;
@@ -143,6 +150,8 @@ export interface VerifyProfileConsentOtpBody extends ProfileConsentOtpItemRef {
 export interface VerifyProfileConsentOtpResponse {
   verified: boolean;
   promoted: boolean;
+  /** Set when the live profile limit kept the profile in draft. */
+  message?: string;
 }
 
 export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18DobResponse> {
@@ -151,9 +160,9 @@ export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18Dob
 }
 
 export interface U18StatusResponse {
-  /** A birth month/year is already stored — never ask DOB again. */
+  /** An age is already stored, so DOB is never asked again. */
   hasBirthData: boolean;
-  /** Derived server-side from the stored birth month/year. */
+  /** Derived server-side from the stored age. */
   isMinor: boolean;
   /** A guardian has already been OTP-verified for this user. */
   guardianVerified: boolean;
@@ -162,9 +171,8 @@ export interface U18StatusResponse {
 }
 
 /**
- * Read the authenticated ward's U18 status from stored data (no DOB prompt).
- * Used to decide whether to run the guardian flow — and whether the DOB step
- * is even needed — at profile-creation / first-login time.
+ * The authenticated ward's U18 status from stored data. Decides whether the
+ * guardian flow, and the DOB step, are needed.
  */
 export async function getU18Status(network: string): Promise<U18StatusResponse> {
   const response = await apiClient.get<U18StatusResponse>('/api/v1/consent/u18/status', {
@@ -189,13 +197,10 @@ export async function verifyGuardian(body: VerifyGuardianBody): Promise<VerifyGu
   return response.data;
 }
 
-// --- Pre-auth, signup-scoped guardian consent (no session yet) ---
-//
-// Mirrors the authenticated submit/verify pair, but the account doesn't exist
-// yet: the body carries the ward's own signup identifier (email OR phone) plus
-// the network/domain and birth month/year the server needs to (re-)confirm the
-// ward is a gated minor. Backed by public routes POST /u18/signup/guardian
-// and /u18/signup/guardian/verify (services/signup_guardian.ts).
+// Pre-auth guardian consent at signup (no account yet): the body carries the
+// ward's signup identifier (email or phone), network/domain and age so the
+// server can confirm a gated minor. Public routes POST /u18/signup/guardian
+// and /u18/signup/guardian/verify.
 
 export interface StartSignupGuardianBody {
   network: string;
@@ -257,8 +262,8 @@ export async function verifyProfileConsentOtp(
   return response.data;
 }
 
-// Pre-create guardian consent: verified BEFORE the item exists, so a minor's
-// profile row isn't written until the guardian approves (mirrors self-signup).
+// Pre-create guardian consent: verified before the item exists, so a minor's
+// profile row is not written until the guardian approves.
 export interface ProfilePrecreateRef {
   network: string;
   brand?: string | null;
@@ -287,8 +292,9 @@ export async function verifyProfilePrecreateOtp(
 
 export async function finalizeProfileConsent(
   body: ProfileConsentOtpItemRef,
-): Promise<{ promoted: boolean }> {
-  const response = await apiClient.post<{ promoted: boolean }>(
+): Promise<{ promoted: boolean; message?: string }> {
+  // `message` is set when the live profile limit kept the profile in draft.
+  const response = await apiClient.post<{ promoted: boolean; message?: string }>(
     '/api/v1/consent/u18/profile-consent/finalize',
     body,
   );

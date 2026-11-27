@@ -1,5 +1,10 @@
-import { useQuery } from '@tanstack/react-query';
-import { fetchNetworkConfig, fetchNetworkConfigs } from '@/lib/network-api';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import {
+  fetchSchemaEntries,
+  networkConfigIn,
+  networkConfigsIn,
+  type CachedSchemaEntry,
+} from '@/lib/network-api';
 import { resolveNetworkRefs } from '@/engine/schema/resolve-schema';
 import { apiConfig } from '@/lib/api-config';
 import type { DotNetworkSchema } from '@/engine/types';
@@ -10,24 +15,32 @@ interface UseNetworkConfigResult {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
-  /** Re-run the query. For offering a user-initiated retry after a failure. */
+  /** Re-runs the query, for a user-initiated retry. */
   refetch: () => void;
 }
 
-/**
- * Hook to fetch and cache a specific network configuration
- * @param networkId - The id of the network to fetch
- * @returns Network config data and query state
- */
+const CONFIG_STALE_TIME = 5 * 60 * 1000;
+
+/** The deployment's schema entries, fetched once and shared by every config hook. */
+export function fetchSharedSchemaEntries(queryClient: QueryClient): Promise<CachedSchemaEntry[]> {
+  return queryClient.fetchQuery({
+    queryKey: queryKeys.networkSchemas(),
+    queryFn: fetchSchemaEntries,
+    staleTime: CONFIG_STALE_TIME,
+  });
+}
+
+/** One network's config (config tier, 5 minutes), read from the shared schema entries. */
 export function useNetworkConfig(networkId: string | null): UseNetworkConfigResult {
+  const queryClient = useQueryClient();
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: networkId ? queryKeys.networkConfig(networkId) : ['network-config', null],
     queryFn: async () => {
       if (!networkId) return null;
-      return fetchNetworkConfig(networkId);
+      return networkConfigIn(await fetchSharedSchemaEntries(queryClient), networkId);
     },
     enabled: !!networkId,
-    staleTime: 5 * 60 * 1000, // 5 minutes cache
+    staleTime: CONFIG_STALE_TIME,
   });
 
   return {
@@ -47,15 +60,13 @@ interface UseNetworkConfigsResult {
   isError: boolean;
 }
 
-/**
- * Hook to fetch and cache the full list of network configs (used to discover
- * which networks a deployment serves). Config tier: 5-minute staleTime.
- */
+/** Fetches the list of network configs this deployment serves (config tier). */
 export function useNetworkConfigs(): UseNetworkConfigsResult {
   const { data, isLoading, isError } = useQuery({
-    queryKey: queryKeys.networkConfigs(),
-    queryFn: fetchNetworkConfigs,
-    staleTime: 5 * 60 * 1000,
+    queryKey: queryKeys.networkSchemas(),
+    queryFn: fetchSchemaEntries,
+    staleTime: CONFIG_STALE_TIME,
+    select: networkConfigsIn,
   });
   return { data: data ?? null, isLoading, isError };
 }
@@ -67,10 +78,8 @@ interface UseResolvedNetworkResult {
 }
 
 /**
- * Hook to fetch a network config and resolve its `$ref`s. Composes
- * `useNetworkConfig` (so the raw config shares the cache with other consumers,
- * e.g. action components) and caches the resolved result under a key that
- * includes the API base URL (so an instance switch re-resolves). Config tier.
+ * Fetches a network config and resolves its `$ref`s. The raw config shares
+ * `useNetworkConfig`'s cache; the resolved one is keyed by API base URL too.
  */
 export function useResolvedNetwork(networkId: string | null): UseResolvedNetworkResult {
   const {

@@ -43,6 +43,7 @@ const emptyEnvelope: BulkEnvelope<UpdateActionStatusResponse> = {
 const mocks = vi.hoisted(() => ({
   isMobile: { value: false },
   networkConfig: { value: null as DotNetworkSchema | null },
+  networkConfigFailed: { value: false },
   consentConfig: { value: null as ConsentConfigDocument | null },
   statusPending: { value: false },
   bulkPending: { value: false },
@@ -93,7 +94,7 @@ vi.mock('@/hooks/use-network-config', () => ({
   useNetworkConfig: () => ({
     data: mocks.networkConfig.value,
     isLoading: false,
-    isError: false,
+    isError: mocks.networkConfigFailed.value,
     error: null,
   }),
 }));
@@ -287,6 +288,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.isMobile.value = false;
   mocks.networkConfig.value = makeNetworkConfig();
+  mocks.networkConfigFailed.value = false;
   mocks.consentConfig.value = consentConfig;
   mocks.statusPending.value = false;
   mocks.bulkPending.value = false;
@@ -955,11 +957,16 @@ describe('ActionStatusUpdater', () => {
     // The consent variant replaces the remarks box.
     expect(screen.queryByLabelText(/reason \(optional\)/i)).not.toBeInTheDocument();
 
+    // Submit stays enabled; an unticked click says what to do and sends nothing.
     const submit = screen.getByRole('button', { name: 'Submit' });
-    expect(submit).toBeDisabled();
+    expect(submit).not.toBeDisabled();
+    await user.click(submit);
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(screen.getByText('Tick the box to agree before you confirm.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-invalid', 'true');
 
     await user.click(screen.getByRole('checkbox'));
-    expect(submit).not.toBeDisabled();
+    expect(screen.queryByText('Tick the box to agree before you confirm.')).toBeNull();
 
     await user.click(submit);
     expect(statusMutateCall()[0]).toEqual({
@@ -970,10 +977,15 @@ describe('ActionStatusUpdater', () => {
     expect(mocks.toast.success).toHaveBeenCalledWith('Request accepted', expect.anything());
   });
 
-  it('keeps Submit disabled until the network config has loaded (consent requirement unknown)', () => {
+  it('sends nothing and says why while the network config has not loaded (consent requirement unknown)', async () => {
+    const user = userEvent.setup();
     mocks.networkConfig.value = null;
     renderWithClient(<UpdaterHarness action={makeAction()} suggestedStatus="accepted" />);
-    expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
+    const submit = screen.getByRole('button', { name: 'Submit' });
+    expect(submit).not.toBeDisabled();
+    await user.click(submit);
+    expect(mocks.mutate).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('Still loading. Please try again in a moment.');
   });
 
   it('shows the updating label and disables both buttons while the mutation is pending', () => {
@@ -999,14 +1011,19 @@ describe('ActionStatusUpdater', () => {
   it('surfaces a non-guardian failure as a toast and keeps the dialog open', async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn((_open: boolean) => {});
-    mocks.mutate.mockImplementation((_payload, opts) => opts.onError(new Error('server on fire')));
+    const forbidden = Object.assign(new Error('Request failed with status code 403'), {
+      response: { status: 403, data: { error: 'FORBIDDEN', message: 'Request failed with status code 403' } },
+    });
+    mocks.mutate.mockImplementation((_payload, opts) => opts.onError(forbidden));
 
     renderWithClient(
       <UpdaterHarness action={makeAction()} suggestedStatus="rejected" onOpenChange={onOpenChange} />,
     );
     await user.click(screen.getByRole('button', { name: 'Submit' }));
 
-    expect(mocks.toast.error).toHaveBeenCalledWith('Failed to update status: server on fire');
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "Failed to update status: You don't have permission to do this.",
+    );
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     expect(screen.getByRole('button', { name: 'Submit' })).toBeInTheDocument();
   });
@@ -1095,6 +1112,46 @@ describe('BulkStatusDialog', () => {
     makeAction({ action_id: 'act-2', source_item_domain: 'provider' }),
   ];
 
+  it('still rejects when the network config failed to load, since only accepting needs it', async () => {
+    const user = userEvent.setup();
+    mocks.networkConfig.value = null;
+    mocks.networkConfigFailed.value = true;
+    mocks.bulkMutateAsync.mockResolvedValue(successEnvelope(2));
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="rejected" onSettled={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() => expect(mocks.bulkMutateAsync).toHaveBeenCalled());
+  });
+
+  it('keeps Confirm enabled and says why when accepting needs the config that failed to load', async () => {
+    const user = userEvent.setup();
+    mocks.networkConfig.value = null;
+    mocks.networkConfigFailed.value = true;
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="accepted" onSettled={vi.fn()} />);
+    const confirm = screen.getByRole('button', { name: 'Confirm' });
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+    expect(await screen.findByText(/Couldn't load the details for this request/)).toBeInTheDocument();
+    expect(mocks.bulkMutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('lists each distinct reason when several requests fail', async () => {
+    const user = userEvent.setup();
+    mocks.bulkMutateAsync.mockResolvedValue({
+      results: [
+        { index: 0, status: 'error', error: 'INVALID_STATUS_TRANSITION', message: 'already final' },
+        { index: 1, status: 'error', error: 'NOT_FOUND', message: 'request was withdrawn' },
+      ],
+      summary: { total: 2, succeeded: 0, failed: 2 },
+    });
+    renderWithClient(<BulkHarness actions={twoActions} targetStatus="rejected" onSettled={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith(expect.any(String), {
+        description: 'Why some failed: already final; request was withdrawn',
+      }),
+    );
+  });
+
   it('rejects a batch with one shared reason, toasts the total and closes', async () => {
     const user = userEvent.setup();
     const onSettled = vi.fn((_s: number, _t: number, _f: string[]) => {});
@@ -1155,7 +1212,11 @@ describe('BulkStatusDialog', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    await waitFor(() => expect(mocks.toast.warning).toHaveBeenCalledWith('Updated 1 of 2'));
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith('Updated 1 of 2', {
+        description: 'Why some failed: already final',
+      }),
+    );
     expect(onSettled).toHaveBeenCalledWith(1, 2, ['act-2']);
     expect(mocks.toast.success).not.toHaveBeenCalled();
   });
@@ -1164,7 +1225,11 @@ describe('BulkStatusDialog', () => {
     const user = userEvent.setup();
     const onSettled = vi.fn((_s: number, _t: number, _f: string[]) => {});
     const onOpenChange = vi.fn((_open: boolean) => {});
-    mocks.bulkMutateAsync.mockRejectedValue(new Error('gateway timeout'));
+    mocks.bulkMutateAsync.mockRejectedValue(
+      Object.assign(new Error('Request failed with status code 504'), {
+        response: { status: 504, data: 'gateway timeout' },
+      }),
+    );
 
     renderWithClient(
       <BulkHarness
@@ -1178,7 +1243,7 @@ describe('BulkStatusDialog', () => {
 
     await waitFor(() =>
       expect(mocks.toast.error).toHaveBeenCalledWith('Could not update requests', {
-        description: 'gateway timeout',
+        description: 'Something went wrong on our side. Please try again in a moment.',
       }),
     );
     expect(onSettled).not.toHaveBeenCalled();
@@ -1200,9 +1265,10 @@ describe('BulkStatusDialog', () => {
     expect(screen.queryByLabelText(/reason \(optional, applied to all\)/i)).not.toBeInTheDocument();
 
     const confirm = screen.getByRole('button', { name: 'Confirm' });
-    expect(confirm).toBeDisabled();
+    await user.click(confirm);
+    expect(mocks.bulkMutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByText('Tick the box to agree before you confirm.')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox'));
-    expect(confirm).not.toBeDisabled();
 
     await user.click(confirm);
     await waitFor(() =>
@@ -1346,7 +1412,11 @@ describe('BulkStatusDialog', () => {
       }),
     );
     // …and the other failure is reported back as still-needing-a-retry.
-    await waitFor(() => expect(mocks.toast.warning).toHaveBeenCalledWith('Updated 1 of 2'));
+    await waitFor(() =>
+      expect(mocks.toast.warning).toHaveBeenCalledWith('Updated 1 of 2', {
+        description: 'The ones that failed are still selected so you can try again.',
+      }),
+    );
     expect(onSettled).toHaveBeenCalledWith(1, 2, ['act-2']);
   });
 
@@ -1627,11 +1697,14 @@ describe('ActionModal', () => {
       screen.queryByText('Share details so the other party can review your request.'),
     ).not.toBeInTheDocument();
 
+    // Confirm stays enabled; an unticked click shows the message and sends nothing.
     const confirm = screen.getByRole('button', { name: 'Confirm' });
-    expect(confirm).toBeDisabled();
+    expect(confirm).not.toBeDisabled();
+    await user.click(confirm);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText('Tick the box to agree before you confirm.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('checkbox'));
-    expect(confirm).not.toBeDisabled();
     // Ticking alone must not submit for an adult.
     expect(onSubmit).not.toHaveBeenCalled();
 

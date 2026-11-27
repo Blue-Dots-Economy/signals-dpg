@@ -36,7 +36,7 @@ const schema = {
   required: ['name'],
   properties: {
     name: { type: 'string', title: 'Name' },
-    phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+    phone: { type: 'string', title: 'Phone', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$' },
   },
 } as RJSFSchema;
 
@@ -100,12 +100,12 @@ describe('SchemaForm inline errors are gated on blur', () => {
     );
     const phone = screen.getByLabelText(/Phone/);
     await user.click(phone);
-    await user.type(phone, '123');
+    await user.type(phone, '981');
     await user.tab();
     expect(await screen.findByText(/Please enter a valid Phone/i)).toBeInTheDocument();
 
     await user.click(phone);
-    await user.type(phone, '4567890');
+    await user.type(phone, '2345670');
     expect(screen.queryByText(/Please enter a valid Phone/i)).toBeNull();
   });
 
@@ -133,7 +133,7 @@ describe('SchemaForm inline errors are gated on blur', () => {
       properties: {
         name: { type: 'string', title: 'Name' },
         age: { type: 'integer', title: 'Age' },
-        phone: { type: 'string', title: 'Phone', pattern: '^[0-9]{10}$' },
+        phone: { type: 'string', title: 'Phone', pattern: '^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$' },
       },
     } as RJSFSchema;
     const { container } = render(
@@ -147,7 +147,8 @@ describe('SchemaForm inline errors are gated on blur', () => {
     const user = userEvent.setup();
     render(<SchemaForm schema={schema} formData={{}} onSubmit={vi.fn()} submitButtonText="Save" />);
     await user.click(screen.getByRole('button', { name: 'Save' }));
-    expect(await screen.findByText(/must have required property/i)).toBeInTheDocument();
+    expect(await screen.findByText('Name is required.')).toBeInTheDocument();
+    expect(screen.queryByText(/must have required property/i)).toBeNull();
   });
 
   it('still blocks submit while a value is invalid', async () => {
@@ -233,8 +234,8 @@ describe('conditionally required fields (if/then), e.g. licensed → Licence Num
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(submit).not.toHaveBeenCalled();
-    expect(await screen.findByText(/must have required property 'Licence Number'/)).toBeInTheDocument();
-    expect(screen.getByText(/must have required property 'Licence Type'/)).toBeInTheDocument();
+    expect(await screen.findByText('Licence Number is required.')).toBeInTheDocument();
+    expect(screen.getByText('Licence Type is required.')).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/"then"/);
   });
 });

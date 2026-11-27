@@ -2,18 +2,16 @@ import { resolve_display_name } from '@/services/metrics/resolve_display_name';
 
 /**
  * Conventional name properties to surface when an item schema declares no
- * public `display_name_field`. The schema-aware mask in
- * packages/schemas/item_state_masking applies to these at item-create time,
- * so item_state already carries the masked value (e.g. "M***").
+ * public `display_name_field`. Private values are masked on every item write
+ * (packages/schemas item_state_masking), so item_state carries e.g. "M***".
  */
 export const PRIVATE_NAME_FIELDS = ['beneficiary_name', 'full_name', 'name', 'contact_name'];
 
 /**
- * Whether a PRIVATE name is shown on an action row: the row's status is one
- * the interaction reveals contact details on, AND that profile is live (a
- * paused/draft profile keeps its name masked even on an accepted action —
- * the contact-details gate, #273). The one rule the list, its search and the
- * export search all use.
+ * Whether a private name is shown on an action row: the row's status reveals
+ * contact details and that profile is live (a paused/draft profile stays
+ * masked, matching the contact-details gate). The one rule the list, its search
+ * and the export search all use.
  */
 export function privateNameShown(
   revealStatuses: readonly string[],
@@ -24,14 +22,10 @@ export function privateNameShown(
 }
 
 /**
- * The item's name as a caller may see it, or null when it stays masked.
- *
- * - a public `display_name_field` value → returned as-is;
- * - otherwise a private name → only when `revealed`, read from the decrypted
- *   state (`decrypt` may throw; a failure means "not visible").
- *
- * Used where only UNMASKED names may be matched (owned-action search), so a
- * masked value is never returned.
+ * The item's name as a caller may see it, or null when it stays masked: a
+ * public display name as-is, else a private name only when `revealed` (a
+ * failed decrypt means not visible). Never returns a masked value, so search
+ * cannot probe hidden names.
  */
 export function visibleItemName(input: {
   itemId: string;

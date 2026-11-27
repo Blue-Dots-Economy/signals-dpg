@@ -3,14 +3,12 @@ import z from 'zod';
 /**
  * Body for POST /api/v1/admin/aggregator/upsert.
  *
- * Called by aggregator-dpg (or any integrating DPG) to mirror its own
- * aggregator record into Signals' organization table. Idempotent —
- * a second call with the same `slug` updates the existing row.
+ * Called by an integrating DPG to mirror its aggregator record into Signals'
+ * organization table. Idempotent: a repeat call with the same `slug` updates
+ * the existing row.
  *
- * external_id is opaque to Signals — it's the upstream system's primary key
- * for the aggregator; stored in organization.metadata for cross-system
- * traceability. Lookups are by slug, not external_id, to avoid a schema
- * change on organization.
+ * external_id is the upstream system's opaque key, stored in
+ * organization.metadata for traceability. Lookups are by slug.
  */
 export const AggregatorUpsertRequest = z.object({
   external_id: z.string().min(1).describe('aggregator-dpg primary key for this aggregator'),

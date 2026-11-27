@@ -1,8 +1,7 @@
 /**
- * Bulk-export eligibility (#769), dependency-free so the browser bundle can
- * import it (`@dpg/schemas/export_eligibility`) without the DB-bound barrel.
- * The api and the UI share this one function, so "which download controls
- * show" and "what the server will export" cannot drift.
+ * Bulk-export eligibility, dependency-free so the browser can import it
+ * (`@dpg/schemas/export_eligibility`) without the DB-bound barrel. Shared by
+ * the API and the UI so the download controls match what the server exports.
  */
 
 /** Structural subset of a network config this module reads. */
@@ -69,9 +68,7 @@ export function getExportableCounterparties(
  * that domain. Sorted, deduplicated.
  *
  * Exporting is only useful where the counterparty's details are revealed, so
- * the reveal statuses are the export statuses — adding a status to a
- * network's `reveals_pii_on_status` (e.g. `completed`) makes it exportable
- * with no code change.
+ * the reveal statuses are the export statuses.
  */
 export function getExportableStatuses(
   networkConfig: ExportEligibilityConfig,

@@ -2,16 +2,9 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain } from '@/engine/types';
 
 /**
- * enum-filters.ts
- *
- * Generic helpers for deriving filter groups from JSON Schema enum fields.
- * Completely schema-driven — nothing is hardcoded to a specific network or
- * domain name. Works with any network that uses JSON Schema `enum` /
- * `type:"array" + items.enum` conventions.
+ * Derives filter groups from JSON Schema `enum` and `type: "array"` +
+ * `items.enum` fields. Schema-driven; nothing is network-specific.
  */
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export interface EnumFilterField {
   /** Property name from the JSON Schema, e.g. "looking_for". */
   key: string;
@@ -29,30 +22,18 @@ export interface EnumFilterField {
   isArray: boolean;
 }
 
-// ─── Humanization ─────────────────────────────────────────────────────────────
-
-/**
- * Convert a snake_case or camelCase key to Title Case.
- * Examples: "looking_for" → "Looking For", "providerCategory" → "Provider Category"
- */
+/** Converts a snake_case or camelCase key to Title Case ("looking_for" → "Looking For"). */
 export function humanizeKey(key: string): string {
-  // Split on underscores and camelCase boundaries
   return key
     .replaceAll('_', ' ')
     .replaceAll(/([a-z])([A-Z])/g, '$1 $2')
     .replaceAll(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// ─── Detection ────────────────────────────────────────────────────────────────
-
 /**
- * Scan a single JSON Schema's `properties` for enum and array-of-enum fields.
- * Returns one `EnumFilterField` per matching property.
- *
- * Detection rules (generic — inspects JSON Schema `properties`):
- *   - `{ type: "string"|"number", enum: [...] }` → single-value enum (`isArray: false`)
- *   - `{ type: "array", items: { enum: [...] } }` → array-of-enum (`isArray: true`)
- *   - Any other shape is ignored.
+ * One `EnumFilterField` per property with a non-empty top-level `enum`
+ * (`isArray: false`) or `type: "array"` with `items.enum` (`isArray: true`).
+ * Other shapes are ignored.
  */
 function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   if (!schema.properties || typeof schema.properties !== 'object') return [];
@@ -60,26 +41,14 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   const fields: EnumFilterField[] = [];
 
   for (const [key, rawProp] of Object.entries(schema.properties)) {
-    // JSON Schema properties can be boolean (true/false) when using additionalProperties
     if (typeof rawProp !== 'object' || rawProp === null) continue;
     const prop = rawProp as RJSFSchema & { private?: boolean };
 
-    // Defense-in-depth (#203 Task 7, restated #394): never offer a
-    // `private: true` field as a filter option, even though the server's
-    // facet guard (`resolveAllowedFacetFields`) would silently drop any
-    // filter request on one anyway. No currently-configured network schema
-    // declares both `private: true` and `enum` on the same property
-    // (verified across every `examples/schemas/*/network.json`), so this
-    // doesn't change any network's filter options today — it just stops a
-    // future schema edit from silently surfacing an inert-but-visible filter
-    // for a private field. This is the ONLY gate now — #394 removed the
-    // separate `filterable: true` marker that used to additionally restrict
-    // the map's offered/sent facets; every declared, non-private enum field
-    // is a filter again in both views. Proper schema-driven search/filter
-    // declaration is tracked in #360.
+    // A private field is never offered as a filter; the server's facet guard
+    // (`resolveAllowedFacetFields`) would drop it anyway. Every declared,
+    // non-private enum field is a filter in both the map and list views.
     if (prop.private === true) continue;
 
-    // Single-value enum: string or number property with a top-level `enum` array
     if (Array.isArray(prop.enum) && prop.enum.length > 0) {
       const options = prop.enum
         .filter((v): v is string | number => typeof v === 'string' || typeof v === 'number')
@@ -95,7 +64,6 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
       continue;
     }
 
-    // Array-of-enum: `type: "array"` with `items.enum`
     if (
       prop.type === 'array' &&
       prop.items !== null &&
@@ -122,21 +90,12 @@ function extractEnumFields(schema: RJSFSchema): EnumFilterField[] {
   return fields;
 }
 
-// ─── Multi-schema union ────────────────────────────────────────────────────────
-
 /**
- * Derive enum filter fields from an array of JSON Schemas (e.g. all item_type
- * schemas from all visible domains).
- *
- * When the same `key` appears in multiple schemas:
- *   - The `label` from the first occurrence is used.
- *   - `options` are unioned (preserving first-seen order, deduped by value).
- *   - `isArray` from the first occurrence wins.
- *
- * Fields are returned in declaration order across schemas (first schema first).
+ * Derives enum filter fields from several schemas. For a key in more than one
+ * schema, the first `label` and `isArray` win and `options` are unioned in
+ * first-seen order. Fields keep declaration order across schemas.
  */
 export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
-  // Map from key → accumulated field (mutable during the loop)
   const byKey = new Map<
     string,
     { label: string; optionsSet: Set<string>; options: string[]; isArray: boolean }
@@ -153,7 +112,6 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
           isArray: field.isArray,
         });
       } else {
-        // Union options, preserving insertion order, deduping by value
         for (const opt of field.options) {
           if (!existing.optionsSet.has(opt)) {
             existing.optionsSet.add(opt);
@@ -173,12 +131,8 @@ export function getEnumFilterFields(schemas: RJSFSchema[]): EnumFilterField[] {
 }
 
 /**
- * Convenience helper: extract all item_schemas from the given visible domains,
- * then derive enum filter fields. Both the map and list views use this same
- * full set — every declared, non-private enum field is a filter in both
- * (#394 dropped the `filterable: true` gate that used to additionally
- * restrict what the map offered/sent; proper schema-driven search/filter
- * declaration is tracked in #360).
+ * Enum filter fields for every item schema (and `default_item_schemas.profile`)
+ * of the given domains. The map and list views use the same set.
  */
 export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): EnumFilterField[] {
   const schemas: RJSFSchema[] = [];
@@ -188,7 +142,6 @@ export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): Enum
         schemas.push(schema);
       }
     }
-    // Also check default_item_schemas for backwards-compat
     if (domain.default_item_schemas?.profile) {
       schemas.push(domain.default_item_schemas.profile);
     }
@@ -196,31 +149,17 @@ export function getEnumFilterFieldsForDomains(domains: DotNetworkDomain[]): Enum
   return getEnumFilterFields(schemas);
 }
 
-// ─── Filter application ───────────────────────────────────────────────────────
-
 /**
- * Apply `selectedFields` (a map of fieldKey → selected values[]) to a single
- * item's data object.
- *
- * Semantics:
- *   - AND across different field keys (item must pass every active field filter).
- *   - OR within a single field's selected values (match ANY selected value).
- *   - If the item does NOT have the field in its data → the item PASSES this
- *     field check (domain-safe: a provider field won't kill seeker items).
- *   - If the field is present:
- *       • Single value: passes if the item's value is in the selected set.
- *       • Array value:  passes if the item's array intersects the selected set.
- *
- * @param data           - The item's data object (from `item.data`).
- * @param selectedFields - Map of fieldKey → non-empty selected value arrays.
- * @param enumFields     - The field metadata (used to know `isArray`).
+ * Applies `selectedFields` (fieldKey → selected values) to one item's data:
+ * AND across fields, OR within a field. An item without the field passes that
+ * check, so a provider field does not exclude seeker items. An array value
+ * passes if it intersects the selection.
  */
 export function itemPassesEnumFilters(
   data: Record<string, unknown>,
   selectedFields: Record<string, string[]>,
   enumFields: EnumFilterField[],
 ): boolean {
-  // Build a quick lookup from key → metadata
   const fieldMeta = new Map<string, EnumFilterField>();
   for (const f of enumFields) {
     fieldMeta.set(f.key, f);
@@ -229,7 +168,7 @@ export function itemPassesEnumFilters(
   for (const [key, selectedValues] of Object.entries(selectedFields)) {
     if (selectedValues.length === 0) continue; // no selection → don't filter
 
-    // Absent field → passes (domain-safe)
+    // Absent field passes.
     if (!(key in data)) continue;
 
     const itemValue = data[key];
@@ -237,9 +176,8 @@ export function itemPassesEnumFilters(
     const isArray = meta?.isArray ?? Array.isArray(itemValue);
 
     if (isArray) {
-      // Array field: passes if any of the item's values is in the selected set
       if (!Array.isArray(itemValue)) {
-        // Malformed data — treat the single value as a one-element array
+        // Malformed data: treat the single value as a one-element array.
         const strVal = String(itemValue);
         if (!selectedValues.includes(strVal)) return false;
       } else {
@@ -248,7 +186,6 @@ export function itemPassesEnumFilters(
         if (!intersects) return false;
       }
     } else {
-      // Single-value field: passes if the item's value is in the selected set
       const strVal = itemValue === null || itemValue === undefined ? '' : String(itemValue);
       if (!selectedValues.includes(strVal)) return false;
     }

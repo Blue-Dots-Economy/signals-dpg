@@ -1,13 +1,10 @@
 /**
- * One-time deploy-time backfill for the consent gate (aggregator-dpg#464).
+ * One-time deploy-time backfill for the consent gate.
  *
  * The consent gate makes a profile live only when `profile_creation` consent
- * exists. On-write classification only re-evaluates items that are created,
- * updated, or consent-accepted — so a profile that was already `live` before
- * this change and is never edited would stay live and discoverable WITHOUT
- * consent. This backfill closes that gap deterministically: it demotes every
- * `live` item that has no `profile_creation` consent row to `draft` in a single
- * pass. Those profiles return to live via `promoteItemOnProfileConsent` when the
+ * exists, but on-write classification only re-evaluates items that are
+ * created, updated or consent-accepted. This demotes every `live` item with no
+ * `profile_creation` consent row to `draft` in a single pass. Those profiles return to live via `promoteItemOnProfileConsent` when the
  * owner consents on login / profile-select / voice-connect.
  *
  * Run once per environment after deploying the consent gate.

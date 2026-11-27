@@ -28,6 +28,7 @@ const {
   newStateValue,
   refreshTokens,
   idTokenNonce,
+  idTokenSid,
   OidcExchangeError,
 } = await import('../oidc_exchange.js');
 
@@ -296,6 +297,14 @@ describe('token requests', () => {
     expect(idTokenNonce('h.%%%.sig')).toBeNull();
     const noNonce = Buffer.from(JSON.stringify({ sub: 'x' })).toString('base64url');
     expect(idTokenNonce(`h.${noNonce}.sig`)).toBeNull();
+  });
+
+  it('reads the Keycloak session id out of an id token', async () => {
+    const claims = Buffer.from(JSON.stringify({ sid: 'kc-1', sub: 'x' })).toString('base64url');
+    expect(idTokenSid(`h.${claims}.sig`)).toBe('kc-1');
+    const noSid = Buffer.from(JSON.stringify({ sub: 'x' })).toString('base64url');
+    expect(idTokenSid(`h.${noSid}.sig`)).toBeNull();
+    expect(idTokenSid(undefined)).toBeNull();
   });
 
   it('rejects a 200 that carries no usable tokens', async () => {

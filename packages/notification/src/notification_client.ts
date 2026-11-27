@@ -7,9 +7,6 @@ export interface NotificationClientConfig {
   secret: string;
 }
 
-/**
- * Client for communicating with the Notification Service.
- */
 export class NotificationClient {
   constructor(
     private readonly baseUrl: string,
@@ -25,10 +22,6 @@ export class NotificationClient {
    * - Selecting a valid `channel`
    * - Selecting a valid `template_id`
    * - Ensuring `variables` match the provider schema
-   *
-   * @typeParam TVariables - Variables schema for the selected channel
-   *
-   * @param payload - Notification request payload
    *
    * @example
    * ```ts
@@ -99,10 +92,6 @@ export class NotificationClient {
   }
 }
 
-/**
- * Create a notification client with the given config.
- * Use this in apps, e.g. from env: createNotificationClient({ baseUrl: process.env.NOTIFICATION_SERVICE_ENDPOINT!, keyId: process.env.NOTIFICATION_SERVICE_KEY_ID!, secret: process.env.NOTIFICATION_SERVICE_SECRET! })
- */
 export function createNotificationClient(config: NotificationClientConfig): NotificationClient {
   return new NotificationClient(
     config.baseUrl,

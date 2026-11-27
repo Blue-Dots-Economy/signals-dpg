@@ -194,6 +194,7 @@ import {
   guardianGateBlocksGoLive,
   isItemOwnedBy,
   jitterPrivateLocations,
+  liveLimitMessage,
   primaryLocation,
   promoteItemOnProfileConsent,
   sameLocations,
@@ -315,6 +316,8 @@ function makeExec() {
         },
       }),
     }),
+    // A nested transaction (savepoint) runs on the same fake executor.
+    transaction: (fn: (tx: unknown) => unknown) => fn(exec),
   };
 
   return { exec: exec as unknown as DbOrTx, rec, queue, state };
@@ -740,7 +743,7 @@ describe('createItemInternal — single-domain lock', () => {
 });
 
 describe('createItemInternal — profile cap', () => {
-  it('takes a transaction advisory lock on the (user, network, domain, type) scope before counting', async () => {
+  it('takes a transaction advisory lock on the profile owner before counting', async () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ n: 1 }]);
     queue.push([ROW]);
@@ -751,9 +754,8 @@ describe('createItemInternal — profile cap', () => {
     // design (see the ordering note at its call site); the cap's advisory lock
     // is executes[1].
     expect(rec.order.slice(0, 3)).toEqual(['execute', 'execute', 'select']);
-    expect(rec.executes[1]).toMatchObject({
-      values: ['u1:blue_dot:student:profile_1.0'],
-    });
+    // Per owner, not per scope: one lock per user leaves no order to deadlock on.
+    expect(rec.executes[1]).toMatchObject({ values: ['profile-limit:u1'] });
   });
 
   it('409 PROFILE_LIMIT_REACHED at the global cap', async () => {
@@ -784,30 +786,82 @@ describe('createItemInternal — profile cap', () => {
     expect(where).toContain('items.item_type');
   });
 
-  it('names retire, not delete, in the 409 message (#737)', async () => {
+  it('names retire, not delete, in the 409 message, with no numbers (#737, #927)', async () => {
     // Retire is the action that exists (per-row control in the UI, #347) and,
-    // with the count above, the one that actually frees the slot. Telling a
-    // capped participant to "delete" pointed at nothing they could do.
+    // with the count above, the one that actually frees the slot.
     apiConfig.max_profiles_per_user = 1;
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
 
     const err = await createItemInternal(exec, createParams()).catch((e: Error) => e);
 
-    expect((err as Error).message).toContain('Retire an existing profile to create a new one.');
-    expect((err as Error).message).not.toContain('Delete an existing profile');
+    expect((err as Error).message).toBe(
+      'This account has reached its profile limit. Retire any profile to add another.',
+    );
+    expect((err as Error).message).not.toMatch(/\d/);
+    expect(err).toMatchObject({ details: { limit_type: 'total' } });
   });
 
-  it("prefers the domain's max_profiles_per_user over the global default", async () => {
+  it("uses the domain's profile_limits.total over the global default", async () => {
     apiConfig.max_profiles_per_user = 50;
     getNetworkConfigById.mockResolvedValue({
-      domains: [{ id: 'student', max_profiles_per_user: 1 }],
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 1 } }],
     });
     const { exec, queue } = makeExec();
     queue.push([{ n: 1 }]);
 
-    await expect(createItemInternal(exec, createParams())).rejects.toThrow(
-      /maximum of 1 student profile\(s\)/,
+    await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
+      statusCode: 409,
+      errorCode: 'PROFILE_LIMIT_REACHED',
+    });
+  });
+
+  it('checks the live slot and passes it to the classifier when profile_limits is set', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 2, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ n: 2 }]); // total count: under 3
+    queue.push([{ n: 2 }]); // live count: at 2, no slot
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams());
+
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gates: ['schema_required', 'live_limit'],
+        live_slot_free: false,
+      }),
+    );
+    expect(JSON.stringify(rec.selectWheres[1])).toContain('live');
+  });
+
+  it('reports blockedByLiveLimit when the classifier holds the profile in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
+    const { exec, queue } = makeExec();
+    queue.push([{ n: 1 }]);
+    queue.push([{ n: 1 }]);
+    queue.push([ROW]);
+
+    await expect(createItemInternal(exec, createParams())).resolves.toMatchObject({
+      blockedByLiveLimit: true,
+    });
+  });
+
+  it('gives a free live slot without counting for skip_profile_limit callers', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 1 } }],
+    });
+    const { exec, queue } = makeExec();
+    queue.push([ROW]);
+
+    await createItemInternal(exec, createParams({ skip_profile_limit: true }));
+
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: true }),
     );
   });
 
@@ -837,18 +891,14 @@ describe('createItemInternal — profile cap', () => {
     expect(rec.order).toEqual(['execute', 'insert']);
   });
 
-  it('counts with no cap when the network config cannot be read', async () => {
-    // resolveProfileLimit swallows the config error and uses the global default.
-    apiConfig.max_profiles_per_user = 1;
+  it('fails the create, not with a limit error, when the limits cannot be read', async () => {
     getNetworkConfigById
       .mockResolvedValueOnce({ domains: [{ id: 'student' }] })
       .mockRejectedValueOnce(new Error('config down'));
-    const { exec, queue } = makeExec();
-    queue.push([{ n: 1 }]);
+    const { exec, rec } = makeExec();
 
-    await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
-      errorCode: 'PROFILE_LIMIT_REACHED',
-    });
+    await expect(createItemInternal(exec, createParams())).rejects.toThrow('config down');
+    expect(rec.order).not.toContain('insert');
   });
 });
 
@@ -879,7 +929,7 @@ describe('createItemInternal — storage shape', () => {
     expect(values.item_private_state).toBe('enc:{"phone":"9990001111"}');
     expect(values.item_locations).toEqual([{ lat: 12.901, lng: 77.6, label: 'home' }]);
     expect(values.lifecycle_status).toBe('live');
-    expect(out).toEqual(ROW);
+    expect(out).toEqual({ ...ROW, blockedByLiveLimit: false });
   });
 
   it('stores an empty private blob (no encryption) when nothing is private', async () => {
@@ -1011,8 +1061,9 @@ describe('promoteItemOnProfileConsent', () => {
     classify_item.mockReturnValue({ lifecycle_status: 'live' });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
+    queue.push([{ item_id: 'i1' }]); // the draft-only UPDATE flipped it
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(true);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: true, blockedByLiveLimit: false });
     expect(rec.updates[0].set).toMatchObject({ lifecycle_status: 'live' });
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ current_status: 'draft', consent_accepted: true }),
@@ -1021,7 +1072,7 @@ describe('promoteItemOnProfileConsent', () => {
 
   it('returns false when the item does not exist', async () => {
     const { exec, rec } = makeExec();
-    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'missing')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1029,7 +1080,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([{ ...draftItem, lifecycle_status: 'paused' }]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).not.toHaveBeenCalled();
   });
@@ -1039,7 +1090,7 @@ describe('promoteItemOnProfileConsent', () => {
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1068,10 +1119,78 @@ describe('promoteItemOnProfileConsent', () => {
     queue.push([{ age: 15 }]);
     queue.push([]); // no guardian consent row
 
-    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toBe(false);
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.updates).toHaveLength(0);
     expect(classify_item).toHaveBeenCalledWith(
       expect.objectContaining({ consent_accepted: false }),
+    );
+  });
+});
+
+describe('promoteItemOnProfileConsent — live limit', () => {
+  it('does nothing when the item went live while it waited for the lock (double submit)', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 2, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([{ n: 2 }]); // live count now full: the other request took the slot
+    queue.push([{ lifecycle_status: 'live' }]); // ...with this very item
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      blockedByLiveLimit: false,
+    });
+    expect(classify_item).not.toHaveBeenCalled();
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('never turns a profile retired meanwhile back into live (draft-only UPDATE)', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([]); // the UPDATE matched nothing: the row is no longer a draft
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      blockedByLiveLimit: false,
+    });
+    expect(JSON.stringify(rec.updates[0].where)).toContain('draft');
+  });
+
+  it('throws instead of reporting the limit when the limits cannot be re-read', async () => {
+    const cfg = { domains: [{ id: 'student', profile_limits: { live: 5, total: 9 } }] };
+    getNetworkConfigById
+      .mockResolvedValueOnce(cfg) // resolveGoLiveGates
+      .mockRejectedValueOnce(new Error('config down')); // resolveLiveSlotFree
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).rejects.toThrow('config down');
+    expect(classify_item).not.toHaveBeenCalled();
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('reports a complete draft the live limit kept in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
+    const { exec, queue, rec } = makeExec();
+    queue.push([draftItem]);
+    queue.push([{ n: 1 }]); // live count: limit reached
+    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
+
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).resolves.toEqual({
+      promoted: false,
+      blockedByLiveLimit: true,
+    });
+    expect(rec.updates).toHaveLength(0);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({
+        gates: ['schema_required', 'live_limit'],
+        live_slot_free: false,
+      }),
     );
   });
 });
@@ -1081,6 +1200,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
     classify_item.mockReturnValue({ lifecycle_status: 'live' });
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
+    queue.push([{ item_id: 'i1' }]); // the draft-only UPDATE flipped it
 
     const promoted = await upsertGuardianProfileConsentAndPromote(exec, {
       userId: 'u1',
@@ -1089,7 +1209,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
       documentVersion: 2,
     });
 
-    expect(promoted).toBe(true);
+    expect(promoted).toEqual({ promoted: true, blockedByLiveLimit: false });
     expect(rec.inserts[0].values).toEqual({ userId: 'u1', itemId: 'i1', source: 'guardian' });
     // Idempotent on a repeat guardian acceptance for the same item.
     expect(JSON.stringify(rec.conflicts[0])).toContain('cr.source');
@@ -1106,7 +1226,7 @@ describe('upsertGuardianProfileConsentAndPromote', () => {
         network: 'blue_dot',
         documentVersion: 1,
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ promoted: false, blockedByLiveLimit: false });
     expect(rec.inserts).toHaveLength(1);
   });
 });
@@ -1182,6 +1302,107 @@ describe('updateItemInternal — ownership scoping', () => {
 });
 
 describe('updateItemInternal — state edits', () => {
+  it('reports blockedByLiveLimit for a draft the live limit keeps in draft', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([{ n: 1 }]); // live count: limit reached
+    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
+
+    expect(res.blockedByLiveLimit).toBe(true);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: false }),
+    );
+  });
+
+  it('reports changed:false when the save leaves fields and status as they were', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, {
+      item_state: { ...existingItem.item_state },
+    });
+
+    expect(res.changed).toBe(false);
+  });
+
+  it('reports changed:true when an unchanged draft goes live', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, {
+      item_state: { ...existingItem.item_state },
+    });
+
+    expect(res.changed).toBe(true);
+  });
+
+  it('reports changed:true when a field changed', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'draft' });
+    const { exec, queue } = makeExec();
+    queue.push([existingItem]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'Zed' } });
+
+    expect(res.changed).toBe(true);
+  });
+
+  it('409 ITEM_CHANGED when the draft moved on while waiting for the lock (never overwrite)', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    const { exec, queue, rec } = makeExec();
+    queue.push([existingItem]);
+    queue.push([{ n: 0 }]);
+    queue.push([{ lifecycle_status: 'retired' }]); // retired by a concurrent request
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } }),
+    ).rejects.toMatchObject({ statusCode: 409, errorCode: 'ITEM_CHANGED' });
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it('409 ITEM_CHANGED when the write finds the item no longer in the status it read', async () => {
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ ...existingItem, lifecycle_status: 'live' }]);
+    queue.push([]); // the guarded UPDATE matched nothing: paused or retired meanwhile
+
+    await expect(
+      updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } }),
+    ).rejects.toMatchObject({ statusCode: 409, errorCode: 'ITEM_CHANGED' });
+    expect(JSON.stringify(rec.updates[0].where)).toContain('items.lifecycle_status');
+  });
+
+  it('does not count live slots when editing an already-live profile', async () => {
+    getNetworkConfigById.mockResolvedValue({
+      domains: [{ id: 'student', profile_limits: { live: 1, total: 3 } }],
+    });
+    classify_item.mockReturnValue({ lifecycle_status: 'live' });
+    const { exec, queue, rec } = makeExec();
+    queue.push([{ ...existingItem, lifecycle_status: 'live' }]);
+    queue.push([updatedRow]);
+
+    const res = await updateItemInternal(exec, 'i1', 'u1', false, { item_state: { name: 'B' } });
+
+    expect(res.blockedByLiveLimit).toBe(false);
+    expect(rec.executes).toHaveLength(0); // no advisory lock taken
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ live_slot_free: undefined }),
+    );
+  });
+
   it('409 ITEM_RETIRED — a retired item can never be re-edited (retire is terminal)', async () => {
     const { exec, queue } = makeExec();
     queue.push([{ ...existingItem, lifecycle_status: 'retired' }]);
@@ -1479,5 +1700,25 @@ describe('ItemServiceError', () => {
     expect(err.statusCode).toBe(409);
     expect(err.errorCode).toBe('ITEM_RETIRED');
     expect(err.message).toBe('nope');
+  });
+});
+
+describe('liveLimitMessage', () => {
+  it('adds nothing when the live limit did not hold the profile back', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: false })).toEqual({});
+  });
+
+  it('names the one profile for a write about a single profile', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: true })).toEqual({
+      message:
+        'Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it.',
+    });
+  });
+
+  it('speaks of several drafts for a write that names no profile', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: true }, false)).toEqual({
+      message:
+        'Live profile limit reached. Some profiles have stayed as drafts. Pause or retire any live profile to publish them.',
+    });
   });
 });

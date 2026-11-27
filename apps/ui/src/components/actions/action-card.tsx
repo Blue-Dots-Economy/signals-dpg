@@ -36,9 +36,8 @@ type StatusStyleShape = {
   icon: React.ReactNode;
 };
 
-// Status pill: dot + label on a soft tint. Semantic colours (not brand) so
-// state reads consistently across networks. Labels are i18n keys; the
-// component resolves them via t() so non-English locales render correctly.
+// Status pills use semantic colours, not brand, so state reads the same on
+// every network.
 const statusStyles: Record<string, StatusStyleShape> = {
   created: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
   pending: { labelKey: 'actions.status_pill_pending', cls: 'bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300', dot: 'bg-amber-500', icon: <Clock className="h-3 w-3" /> },
@@ -90,7 +89,6 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
 
   const status = getStatusStyle(action.action_status);
 
-  // Resolve the "other party" vs "me" from ownership.
   const otherParty =
     ownershipRole === 'initiated'
       ? {
@@ -122,9 +120,7 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
   // Avatar: first letter of a real name, else the role's initial.
   const initial = (hasRealName ? rawName : otherRole).charAt(0).toUpperCase() || '?';
 
-  // Both sides format as "<Subject> (<Role>)" so the brackets consistently
-  // contain the role on each end — avoids the mismatch where "You (Seeker)"
-  // had role-in-brackets while "Provider (Name)" had name-in-brackets.
+  // Both sides read "<Subject> (<Role>)".
   const meLabel = t('actions.you_label', { role: myRole });
   const otherLabel = `${rawName} (${otherRole})`;
   const fromLabel = ownershipRole === 'initiated' ? meLabel : otherLabel;
@@ -161,10 +157,8 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
               {status.labelKey ? t(status.labelKey) : action.action_status}
             </span>
             {action.match_score != null ? (
-              // #646: My Actions shows a connect-time relevance SNAPSHOT, not
-              // a browse-list metric — there is no sort here, so the basis is
-              // always the profile match. The column is 0-10 (see
-              // compute_match_score) while the pill renders 0-100.
+              // A connect-time snapshot of the profile match. The column is
+              // 0-10 (compute_match_score); the pill takes 0-100.
               <span data-tour="match-score" className="inline-flex">
                 <MatchScoreBadge
                   metric={{ kind: 'relevance', percent: action.match_score * 10 }}
@@ -266,9 +260,9 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
           </>
         )}
 
-        {/* Reason attached to a rejected/cancelled action — the actor's remark,
-            or a system remark (e.g. counterparty retired, #347). Rendered at the
-            card level so it shows even when the action has no requirements. */}
+        {/* The remark on a rejected or cancelled action (the actor's, or a
+            system one such as a retired counterparty), shown even without
+            requirements. */}
         {action.remarks && (
           <div className="mb-3 rounded-xl border border-border bg-muted/40 p-3.5">
             <p className="mb-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -297,9 +291,8 @@ export function ActionCard({ action, ownershipRole, onStatusUpdate, selectionMod
         {/* Actions */}
         {!selectionMode && (
         <div data-tour="action-respond" className="flex flex-wrap items-center gap-2 border-t pt-3">
-          {/* Always available (both roles, every status): the counterparty's
-              profile — masked while pending, unmasked once PII is revealed
-              (accepted/completed). Handled inside ProfileCardModal. */}
+          {/* Always available: the counterparty's profile, masked or revealed
+              as ProfileCardModal decides. */}
           <Button
             size="sm"
             variant="outline"

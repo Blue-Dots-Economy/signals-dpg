@@ -1,14 +1,10 @@
 /**
  * Keycloak Admin REST client, authenticated as the `signals-api` service
- * account (which holds the realm-management roles the realm export grants it).
+ * account (which holds realm-management roles). Used by self-signup, admin
+ * participant creation, and the migration / admin-bootstrap scripts.
  *
- * Used by the user migration (Build 4) and, later, by admin participant
- * creation in place of better-auth's `signUpEmail` (Build 5).
- *
- * Config is passed in rather than imported from `@/config` on purpose: the
- * migration runs as a standalone script, and importing the app config would
- * drag in `loadEnv()` and require every unrelated app env var to be present —
- * the same reason `scripts/seed_service_users.ts` builds its own db handle.
+ * Config is passed in rather than imported from `@/config` because the scripts
+ * run standalone, and the app config would require every app env var.
  */
 
 import type { KeycloakUserRepresentation } from './user_to_keycloak';
@@ -44,7 +40,7 @@ export interface KeycloakUserSummary {
 
 /** Result of trying to create one user. */
 export type CreateOutcome =
-  /** Created with the id we asked for — the happy path. */
+  /** Created with the id we asked for. */
   | { kind: 'created' }
   /**
    * Created, but Keycloak assigned its own id. Fatal for this strategy: the
@@ -75,10 +71,8 @@ export class KeycloakAdminClient {
   }
 
   /**
-   * Obtain (and cache) a service-account access token.
-   *
-   * Cached with a 30s safety margin so a long migration run does not fetch one
-   * per request, nor use a token that expires mid-flight.
+   * Obtain a service-account access token, cached until 30s before expiry so a
+   * token is not used as it expires mid-flight.
    */
   async accessToken(now: number = Date.now()): Promise<string> {
     if (this.token && now < this.tokenExpiresAt) return this.token;
@@ -119,18 +113,12 @@ export class KeycloakAdminClient {
   }
 
   /**
-   * One Admin-REST call, with a single retry on 401.
+   * One Admin-REST call, retried once on 401 with a fresh token. The cached
+   * token can go stale before `expires_in` (session revoked, secret rotated,
+   * Keycloak restarted with a new key). One retry only, so a genuinely
+   * unauthorised client still fails fast.
    *
-   * The cached token can go stale before its `expires_in` says so — the realm's
-   * SSO session is revoked, the client secret is rotated, or Keycloak restarts
-   * with a fresh signing key. Without this, the cached token is reused until it
-   * expires and every call in that window fails: on a long migration run that is
-   * the whole rest of the run. The retry is capped at one, and only ever on a
-   * 401, so a genuinely unauthorised client still fails fast rather than
-   * looping.
-   *
-   * Bodies here are always strings (`JSON.stringify`), never streams, so the
-   * request is safe to replay.
+   * Bodies are always strings, never streams, so the request is safe to replay.
    */
   private async request(
     path: string,
@@ -169,7 +157,7 @@ export class KeycloakAdminClient {
     return (await res.json()) as KeycloakUserSummary;
   }
 
-  /** Exact-match search. Used to detect the §6.3 spike-2 collision case. */
+  /** Exact-match search by email; used to detect identifier collisions. */
   async findByEmail(email: string): Promise<Array<{ id: string; username?: string }>> {
     const query = new URLSearchParams({ email, exact: 'true', max: '5' });
     const res = await this.request(`/users?${query.toString()}`, { method: 'GET' });
@@ -186,12 +174,9 @@ export class KeycloakAdminClient {
   /**
    * The realm roles actually assigned to a user.
    *
-   * Exists so callers can *verify* rather than assume: `partialImport` carries
-   * `realmRoles` in the user representation, but whether Keycloak honours them
-   * is a property of the import, not something the response body confirms. The
-   * admin-bootstrap script (`scripts/create_admin_user.ts`) checks this after
-   * writing, because a silently-unassigned `signals_admin` would make a real
-   * admin invisible to any realm-role → `user.role` sync.
+   * `partialImport` carries `realmRoles`, but its response does not confirm
+   * they were assigned, so `scripts/create_admin_user.ts` verifies with this
+   * after writing.
    */
   async realmRolesFor(id: string): Promise<string[]> {
     const res = await this.request(
@@ -227,13 +212,9 @@ export class KeycloakAdminClient {
   }
 
   /**
-   * Create one user via `POST /users`, then verify the id actually stuck.
-   *
-   * The verification is the point (§6.3 spike 1): Keycloak has historically
-   * ignored a client-supplied `id` on create and assigned its own. A silent
-   * substitution here would break the `sub == user.id` invariant for every
-   * migrated row, so this reads the created user back out of the Location
-   * header rather than assuming success means what we asked for.
+   * Create one user via `POST /users`, then verify the id stuck. Keycloak may
+   * ignore a client-supplied `id` and assign its own, which would break
+   * `sub == user.id`, so the Location header (or a read-back) is checked.
    */
   async createUser(user: KeycloakUserRepresentation): Promise<CreateOutcome> {
     const res = await this.request('/users', {
@@ -278,11 +259,10 @@ export class KeycloakAdminClient {
   /**
    * Create one user with its id preserved.
    *
-   * Goes through `partialImport` rather than `POST /users`, because on Keycloak
-   * 26.5.5 plain create **ignores a client-supplied `id`** and mints its own
-   * (verified — see `migrate_users_to_keycloak.ts --probe`). `sub` must equal
-   * the local `user.id` or every `created_by` / `*_owner` column stops matching
-   * its owner, so the only usable path is the one that honours the id.
+   * Uses `partialImport` rather than `POST /users`, because Keycloak 26.5.5
+   * plain create ignores a client-supplied `id` (see
+   * `migrate_users_to_keycloak.ts --probe`), and `sub` must equal the local
+   * `user.id` that `created_by` / `*_owner` columns point at.
    *
    * Verifies by reading the user back rather than trusting the import counters:
    * a `skipped` result can mean either "already there" or "something else owns
@@ -307,11 +287,8 @@ export class KeycloakAdminClient {
   }
 
   /**
-   * Create users via `partialImport`, the documented fallback when plain create
-   * will not honour a supplied `id` (§6.3 spike 1, and Build 4's stated
-   * dependency). Same field mapping — only the transport differs.
-   *
-   * `SKIP` on an existing id keeps the run idempotent.
+   * Create users via `partialImport`, which honours a supplied `id`.
+   * `SKIP` on an existing resource keeps re-runs idempotent.
    */
   async partialImportUsers(
     users: KeycloakUserRepresentation[]
@@ -344,9 +321,8 @@ export class KeycloakAdminClient {
   /**
    * The realm's user-profile config.
    *
-   * Needed because Keycloak 26 ignores `kc.user.profile.config` on realm
-   * import, and an undeclared attribute is **silently dropped** on write rather
-   * than rejected — see `attributesWillPersist`.
+   * Keycloak 26 ignores `kc.user.profile.config` on realm import, and silently
+   * drops an undeclared attribute on write; see `attributesWillPersist`.
    */
   async getUserProfile(): Promise<{
     unmanagedAttributePolicy?: string;
@@ -370,9 +346,8 @@ export class KeycloakAdminClient {
    * Will a write of `attribute` actually be retained by this realm?
    *
    * True when the attribute is declared in the user profile, or when unmanaged
-   * attributes are enabled. If neither holds, Keycloak accepts the write and
-   * throws the value away — so a migration would report success while leaving
-   * every phone-only user unable to receive an OTP.
+   * attributes are enabled. Otherwise Keycloak accepts the write and discards
+   * the value, leaving phone-only users unable to receive an OTP.
    */
   async attributesWillPersist(attribute: string): Promise<boolean> {
     const profile = await this.getUserProfile();

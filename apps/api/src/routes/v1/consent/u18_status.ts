@@ -15,7 +15,7 @@ type Req = FastifyRequest<{ Querystring: U18StatusQuery }>;
 /**
  * GET /u18/status — read-only U18 status for the authenticated ward.
  *
- * Derives everything from the stored `user.age` (captured ONCE) plus
+ * Derives everything from the stored `user.age` (captured once) plus
  * the `minor_guardian` guardian-verified flag. The UI reads this to decide
  * whether to run the guardian flow — and whether the age is already on file —
  * instead of re-asking at profile-creation / action time.

@@ -21,7 +21,7 @@ export function BrandHero() {
         </div>
       </div>
 
-      {/* Stat counters — hidden when stats array is empty (populated via API later) */}
+      {/* Stat counters, hidden when there are none */}
       {theme.stats.length > 0 && (
         <div className="relative z-10 grid grid-cols-2 gap-4 border-t border-white/10 pt-8 sm:grid-cols-4">
           {theme.stats.map((stat) => (

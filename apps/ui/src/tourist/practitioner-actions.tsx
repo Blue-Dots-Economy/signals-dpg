@@ -15,11 +15,8 @@ export function PractitionerActions({ phone, website, location }: PractitionerAc
   const { t } = useTranslation();
   if (!phone && !website && !location) return null;
 
-  // flex-wrap + a min width per button: on a wide card all three sit on one
-  // row (flex-1 shares the space); on a narrow card (small phones) they wrap to
-  // the next row instead of overflowing and getting clipped by the card edge.
-  // On mobile the buttons are shorter/smaller text so the card stays compact;
-  // sm+ restores the regular size (desktop unchanged).
+  // flex-wrap plus a min width per button: three on one row when wide, wrapping
+  // on small phones instead of being clipped. Smaller on mobile; sm+ is regular.
   const btn = 'h-8 min-w-[5rem] flex-1 text-xs sm:h-9 sm:min-w-[7rem] sm:text-sm';
   return (
     <div className="flex w-full flex-wrap gap-1.5 sm:gap-2">

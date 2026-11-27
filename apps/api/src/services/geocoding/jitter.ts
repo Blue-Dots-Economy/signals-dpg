@@ -1,17 +1,13 @@
 /**
- * Deterministic geo-jitter for PRIVATE (PII) locations: offsets a coordinate by
- * a pseudo-random distance in [minMeters, maxMeters] at a pseudo-random bearing,
- * so the stored point is near — but never exactly on — the true location.
+ * Deterministic geo-jitter for private (PII) locations: offsets a coordinate by
+ * a pseudo-random distance in [minMeters, maxMeters] at a pseudo-random bearing.
  *
- * Determinism (seed derived from the coordinate itself) is deliberate: the same
- * true location always maps to the same jittered point, so re-saving a profile
- * never drifts the pin and an observer cannot average repeated snapshots back to
- * the truth. See docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
- *
- * The seed is keyed with a server secret (see `jitterCoordinate`) — the jittered
- * point is served publicly (map/search) and the algorithm is open-source, so
- * without a secret key an attacker could brute-force the ~1 m grid within
- * `maxMeters` of the stored point and match it back to the true coordinate.
+ * The seed derives from the coordinate, so the same true location always maps
+ * to the same point: re-saving never drifts the pin, and repeated snapshots
+ * cannot be averaged back to the truth. The seed is keyed with a server secret
+ * because the jittered point is public and the algorithm is open source;
+ * without it the true coordinate could be brute-forced.
+ * Design: docs/superpowers/specs/2026-07-07-pii-location-jitter-design.md.
  */
 
 import { createHmac } from 'node:crypto';
@@ -26,16 +22,11 @@ export interface JitterableCoord {
 const METERS_PER_DEGREE = 111_320;
 
 /**
- * mulberry32 PRNG — deterministic uniform [0, 1) sequence from a 32-bit seed.
+ * mulberry32 PRNG: deterministic uniform [0, 1) sequence from a 32-bit seed.
  *
- * The `| 0` and `>>> 0` below are the algorithm, not a truncation shortcut: they
- * force 32-bit wraparound, which is what makes the sequence match every other
- * mulberry32 implementation. `Math.trunc` drops the fraction WITHOUT wrapping,
- * so swapping it in changes the output stream — and this PRNG seeds the PII
- * location jitter, where a stable mapping is the whole point (`jitterCoordinate`
- * must send the same true coordinate to the same pin every time, or re-saving a
- * profile visibly moves it on the map). A static analyser that flags `| 0` here
- * as "prefer Math.trunc" is pattern-matching the idiom without the semantics.
+ * `| 0` and `>>> 0` force 32-bit wraparound and are part of the algorithm; do
+ * not replace them with `Math.trunc`, which changes the output stream and so
+ * moves every stored jittered pin.
  */
 function mulberry32(seed: number): () => number {
   let s = seed >>> 0;
@@ -53,11 +44,8 @@ export function jitterCoordinate(
   maxMeters: number,
   secret: Buffer | string,
 ): JitterableCoord {
-  // Seed = HMAC(secret, "location-jitter:<lat5>,<lng5>") → first 4 bytes as uint32.
-  // The 'location-jitter:' prefix domain-separates this use of the key from
-  // PII-blob encryption. Determinism (same coord+secret → same point) is
-  // preserved; without the secret the offset is unpredictable, so a publicly
-  // served jittered point cannot be brute-forced back to the true coordinate.
+  // Seed = first 4 bytes of HMAC(secret, "location-jitter:<lat5>,<lng5>").
+  // The prefix domain-separates this use of the key from PII-blob encryption.
   const seed = createHmac('sha256', secret)
     .update(`location-jitter:${coord.lat.toFixed(5)},${coord.lng.toFixed(5)}`)
     .digest()
@@ -66,7 +54,7 @@ export function jitterCoordinate(
   const u = rng();
   const v = rng();
 
-  // Uniform over the annulus AREA (not biased toward the inner radius).
+  // Uniform over the annulus area, not biased toward the inner radius.
   const dist = Math.sqrt(u * (maxMeters ** 2 - minMeters ** 2) + minMeters ** 2);
   const theta = 2 * Math.PI * v;
 

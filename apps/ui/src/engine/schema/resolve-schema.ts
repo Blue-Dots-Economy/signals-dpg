@@ -43,9 +43,8 @@ export function resolveJsonPointer(doc: unknown, pointer: string): unknown {
 }
 
 /**
- * Detects whether a fetched result is a DotProfileSchema wrapper
- * (has `schema_type: "profile"` and a `schema` property) and extracts
- * the inner JSON Schema. Otherwise returns the result as-is.
+ * Unwraps a DotProfileSchema wrapper (`schema_type: "profile"` plus `schema`)
+ * to its inner JSON Schema; anything else is returned as-is.
  */
 export function extractSchema(result: unknown): RJSFSchema {
   if (
@@ -61,34 +60,27 @@ export function extractSchema(result: unknown): RJSFSchema {
 }
 
 /**
- * Resolves a single $ref string. Supports:
- *   - "#/definitions/key"     → local JSON Pointer (requires rootDocument)
- *   - "./file.json"           → relative path (looked up in refMap or fetched)
- *   - "https://..."           → absolute URL (fetched)
- *   - "http://..."            → absolute URL (fetched)
- * Results are cached via schema-loader.
+ * Resolves one $ref string: a local JSON Pointer ("#/…", needs rootDocument),
+ * a `refMap` entry, or a relative path / absolute URL (fetched). Results are
+ * cached via schema-loader.
  */
 export async function resolveRefString(
   ref: string,
   options?: { baseUrl?: string; rootDocument?: unknown; refMap?: Record<string, unknown> }
 ): Promise<unknown> {
-  // Check cache first
   const cached = getCachedSchema(ref);
   if (cached) return cached;
 
   let resolved: unknown;
 
   if (ref.startsWith('#/')) {
-    // Local JSON Pointer within root document
     if (!options?.rootDocument) {
       throw new Error(`Cannot resolve local ref "${ref}" without rootDocument`);
     }
     resolved = resolveJsonPointer(options.rootDocument, ref);
   } else if (options?.refMap && ref in options.refMap) {
-    // Look up in provided ref map (build-time imports)
     resolved = options.refMap[ref];
   } else {
-    // External URL or relative path → fetch
     let url: string;
     if (ref.startsWith('http://') || ref.startsWith('https://')) {
       url = ref;
@@ -110,13 +102,9 @@ export async function resolveRefString(
 }
 
 /**
- * Walks an entire object tree and resolves any `{ $ref: "..." }` nodes.
- * Detects DotProfileSchema wrappers and extracts the inner schema.
- * Returns a deep copy with all $ref resolved.
- *
- * @param network - The raw network object (may contain $ref nodes)
- * @param options.refMap - Map of $ref values to pre-loaded schemas (avoids fetch)
- * @param options.baseUrl - Base URL for resolving relative $ref paths via fetch
+ * Returns a deep copy of the network object with every external
+ * `{ $ref: "..." }` resolved and DotProfileSchema wrappers unwrapped. `refMap`
+ * supplies pre-loaded schemas; `baseUrl` resolves relative paths.
  */
 export async function resolveNetworkRefs(
   network: unknown,
@@ -134,9 +122,8 @@ export async function resolveNetworkRefs(
 
   const obj = network as Record<string, unknown>;
 
-  // If this node is a $ref, resolve it.
-  // Skip local JSON Pointers ("#/...") — RJSF resolves $defs/definitions
-  // natively at render time, and we don't have the schema's local root here.
+  // Local JSON Pointers ("#/...") are left for RJSF, which resolves
+  // $defs/definitions at render time.
   if (typeof obj.$ref === 'string') {
     if (obj.$ref.startsWith('#/') || obj.$ref === '#') {
       return obj;
@@ -150,7 +137,6 @@ export async function resolveNetworkRefs(
     return resolveNetworkRefs(schema, options);
   }
 
-  // Otherwise recurse into all properties
   const entries = await Promise.all(
     Object.entries(obj).map(async ([key, value]) => [
       key,

@@ -39,6 +39,11 @@ describe('MapCountPill', () => {
     expect(screen.queryByText(/Showing/)).not.toBeInTheDocument();
   });
 
+  it('keeps the zoom-in hint when the answer is capped but nothing is inside the view', () => {
+    render(<MapCountPill total={0} shown={0} truncated />);
+    expect(screen.getByText('0 in this area — zoom in')).toBeInTheDocument();
+  });
+
   it('prefers the over-dense variant over the plain count', () => {
     // Mutually exclusive: a truncated viewport must not also claim an exact
     // figure, because the marker set it would count is incomplete.

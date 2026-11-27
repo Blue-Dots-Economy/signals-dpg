@@ -121,10 +121,13 @@ vi.mock('@/lib/consent-api', () => ({
 }));
 
 vi.mock('@/components/consent/u18/u18-guardian-flow', () => ({
-  U18GuardianFlow: (props: { initialStep: string; onComplete: () => void }) => (
+  U18GuardianFlow: (props: { initialStep: string; onComplete: () => void; onLogout: () => void }) => (
     <div data-testid="u18-guardian-flow" data-initial-step={props.initialStep}>
       <button type="button" onClick={props.onComplete}>
         guardian done
+      </button>
+      <button type="button" onClick={props.onLogout}>
+        guardian logout
       </button>
     </div>
   ),
@@ -344,6 +347,20 @@ describe('G4 — authenticated U18 guardian gate', () => {
     // Birth data already stored → skip straight to the guardian step.
     expect(flow.getAttribute('data-initial-step')).toBe('guardian');
     expect(navigate).not.toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('logging out of the guardian flow signs out and returns to the login page', async () => {
+    getU18Status.mockResolvedValue({
+      hasBirthData: true,
+      isMinor: true,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'guardian logout' }));
+    expect(signOut).toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/auth/login', { replace: true });
   });
 
   it('starts at the DOB step when no birth data is stored', async () => {
@@ -662,6 +679,38 @@ describe('#558 — first-time-login profile redirect', () => {
       expect(screen.getByText(/already signed in with a different account/i)).toBeInTheDocument();
     });
 
+    it.each([
+      'SELF_SIGNUP_DISABLED',
+      'IDENTITY_CONFLICT',
+      'NO_IDENTIFIER',
+      'USER_BANNED',
+      'LOGIN_CHANNEL_DISABLED',
+    ])('ENDS the session for the account refusal %s (#713)', async (code) => {
+      // "Try again" would loop: Keycloak's sign-in is still live, so it hands
+      // back the same account. Someone who typed the wrong phone or email
+      // must be able to enter a different one.
+      rejectWith(code, 'Refused');
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /sign out and switch account/i }));
+
+      await waitFor(() => expect(endBffSession).toHaveBeenCalled());
+      expect(startBffLogin).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalledWith('/auth/login', { replace: true });
+    });
+
+    it.each(['IDENTITY_PROVIDER_UNAVAILABLE', 'PROVISIONING_FAILED'])(
+      'keeps the plain retry for the outage %s',
+      async (code) => {
+        // The same account can succeed once the outage passes.
+        rejectWith(code, 'Outage');
+        renderPage();
+
+        expect(await screen.findByText('Outage')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /sign out and switch account/i })).toBeNull();
+      },
+    );
+
     it('keeps the plain retry when signing out could not possibly help', async () => {
       // Switching account cannot fix a misconfigured instance, so offering it
       // would just walk the user round a loop with no exit.
@@ -670,6 +719,18 @@ describe('#558 — first-time-login profile redirect', () => {
 
       expect(await screen.findByText(/not configured/i)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /sign out and switch account/i })).toBeNull();
+    });
+
+    it('falls back to the login page when the server did not end the session', async () => {
+      // `false` means nothing is navigating to Keycloak, so the page must move.
+      rejectWith('TOKEN_AGGREGATOR_ACCOUNT', 'You are signed in as an aggregator account.');
+      endBffSession.mockResolvedValueOnce(false);
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /sign out and switch account/i }));
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/auth/login', { replace: true }),
+      );
     });
 
     it('falls back to the login page when the sign-out cannot start', async () => {

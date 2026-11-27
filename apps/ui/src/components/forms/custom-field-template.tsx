@@ -3,11 +3,8 @@ import { type FieldTemplateProps, getTemplate, getUiOptions } from '@rjsf/utils'
 import { cn } from '@/lib/utils';
 
 /**
- * FieldTemplate override of `@rjsf/shadcn`'s default. Identical layout, with one
- * change: the required indicator is a red asterisk shown for every required field
- * (the upstream template renders a plain `*` that only turns red on validation
- * error). This gives a consistent red required marker across all schema-driven
- * forms. See issue #200.
+ * `@rjsf/shadcn`'s FieldTemplate with one change: the required asterisk is
+ * always red, not only on a validation error.
  */
 export default function CustomFieldTemplate({
   id,

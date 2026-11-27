@@ -16,16 +16,10 @@ export type FaviconType = 'png' | 'svg';
 export type LogoShape = 'square' | 'wordmark' | 'lockup';
 
 /**
- * One labelled party in the sidebar footer's attribution block — "Owned by
- * Swavalambhan", "Managed by ALIMCO" (signals-dpg#720).
- *
- * Separate from `footerLogo`, which is a single unlabelled "seeded by" mark:
- * this is an ordered LIST, each entry carries its own caption, and the two
- * cannot be expressed by one image without baking the labels into artwork.
- *
- * `logo` is optional on purpose. The design ships letter tiles as placeholders
- * for parties whose artwork has not arrived, so a name alone is a valid entry
- * and renders the initial rather than a broken image.
+ * One labelled party in the sidebar footer's attribution block ("Owned by
+ * Swavalambhan", "Managed by ALIMCO"). Unlike the single unlabelled
+ * `footerLogo`, this is an ordered list with a caption per entry. `logo` is
+ * optional: a name alone renders a letter tile until artwork arrives.
  */
 export interface BrandAttribution {
   /** Caption above the party, e.g. `Owned by`. */
@@ -43,9 +37,9 @@ export interface BrandMeta {
   logoShape: LogoShape;
   copy: Record<string, string>;
   /**
-   * Optional "seeded by" mark rendered at the bottom of the sidebar. Absent
-   * (null) ⇒ no footer logo — it's opt-in per network/brand via brand.json's
-   * `footerLogo` / `footerLogoLight` (light = the dark-mode variant).
+   * Optional "seeded by" mark at the bottom of the sidebar; null means none.
+   * Opt-in via brand.json's `footerLogo` / `footerLogoLight` (light = the
+   * dark-mode variant).
    */
   footerLogo: string | null;
   footerLogoLight: string | null;
@@ -73,15 +67,11 @@ export function resolveBrandMeta(
 ): BrandMeta {
   const net = registry[networkId];
   const brand = net?.brands?.[brandSlug];
-  // footerLogo does NOT inherit network → brand (unlike favicon/logoShape/copy).
-  // The "seeded by" footer mark is a network-DEFAULT thing: a specific brand
-  // (e.g. up-gzb, ka-dhwd on blue_dot) shows it only if that brand sets its own
-  // footerLogo, otherwise it's hidden — even though the network sets one. Keyed
-  // on whether a brand entry exists (a real brand is active) vs the plain
-  // network default (no brand entry).
-  // `footerAttribution` follows the SAME no-inherit rule, and for a stronger
-  // reason: it names who owns and runs THIS deployment. Inheriting it would
-  // caption an unrelated brand's sidebar with another party's ownership.
+  // footerLogo and footerAttribution do not inherit network → brand (unlike
+  // favicon/logoShape/copy). An active brand shows them only if it sets its
+  // own; the network's values apply only with no brand entry. Attribution
+  // names who owns this deployment, so inheriting it would credit the wrong
+  // party.
   const footerFromBrand = brand
     ? {
         footerLogo: brand.footerLogo ?? null,

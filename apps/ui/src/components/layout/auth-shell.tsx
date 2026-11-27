@@ -11,9 +11,7 @@ interface AuthShellProps {
 
 export function AuthShell({ children }: AuthShellProps) {
   return (
-    // TooltipProvider wraps the shell because ThemeModeToggle renders a Radix
-    // Tooltip, which throws outside a provider. PageShell already mounts one
-    // for the app pages; the auth pages never needed it until now.
+    // ThemeModeToggle renders a Radix Tooltip, which throws without a provider.
     <TooltipProvider>
     <div className="min-h-svh lg:h-svh lg:overflow-hidden grid grid-cols-1 lg:grid-cols-[1.1fr_1fr]">
       {/* Left: branded hero panel (desktop only) — stays fixed while right scrolls */}
@@ -35,25 +33,19 @@ export function AuthShell({ children }: AuthShellProps) {
             <circle cx="23" cy="22" r="2.5" fill="var(--brand-cta)" opacity="0.6" />
           </svg>
           <div className="flex-1" />
-          {/* Same controls on the mobile band, where there is no desktop
-              header row to hang them off. */}
+          {/* Same controls on the mobile band. */}
           <div className="flex items-center gap-1">
             <LanguageSwitcher compact />
             <ThemeModeToggle />
           </div>
         </div>
 
-        {/* Portal header (desktop) — aligned with the form column so the logo
-            doesn't float off-axis from the inputs below. Larger size variant
-            so the brand is the visual anchor of the right panel. */}
+        {/* Portal header (desktop), aligned with the form column. */}
         <div className="hidden lg:block px-6 sm:px-10 lg:px-14 pt-10">
           <div className="mx-auto max-w-md w-full flex items-start justify-between gap-4">
             <PortalHeader size="lg" />
-            {/* Language + theme are reachable from the app's top bar, but the
-                auth pages have no top bar — so a visitor who needs another
-                language had to sign in first to change it, which is backwards.
-                (The Keycloak-hosted screens are a separate app and can't be
-                covered from here.) */}
+            {/* The auth pages have no top bar, so language and theme live
+                here. Keycloak-hosted screens are a separate app. */}
             <div className="flex items-center gap-1 shrink-0">
               <LanguageSwitcher compact />
               <ThemeModeToggle />

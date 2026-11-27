@@ -16,76 +16,28 @@ const get_header_value = (raw: string | string[] | undefined): string | undefine
 };
 
 /**
- * ACTING-ORG SCOPE MODEL — how `x-acting-org-id` is authorised, and where.
- *
- * An on-behalf-of request carries three things: a service credential (who the
- * caller is), `x-acting-org-id` (the org it is acting as), and the target user.
- * Authorisation of that combination is split across two layers, in two places.
- *
- *   1. caller -> acting org. This middleware. It validates that the org exists,
- *      that its type may be asserted as an acting org, and that the caller is a
- *      registered service principal. It does NOT bind the org to the caller:
- *      any service credential may name any org of an allowed type.
- *
- *   2. acting org -> target user. Enforced downstream, per route:
- *      `routes/v1/action/_resolve_acting_actor.ts` (step 5) and the admin read
- *      paths (e.g. `admin/participant_decrypt.ts`, scoping on
- *      `user.onboardedByOrgId`). An `aggregator` acting org reaches only users
- *      it onboarded. `network_service` is network-wide by design — see the
- *      rationale comment in `_resolve_acting_actor.ts`.
- *
- * So the reach of a request is determined by the TYPE of the org asserted, and
- * that reach is checked; the choice of which org to assert is not.
- *
- * What that means in practice depends entirely on the set of service principals
- * that exist. Every entry in `SERVICES` in `scripts/seed_service_users.ts` is
- * seeded with org `type: 'network_service'` — network-wide scope — as is every
- * org the deploy-time `provision_service_users.sql` creates, the Raya voice bot
- * included. (#518 retired a separate `voice` type that granted exactly this same
- * reach; the voice channel is now identified by the token's `azp`, not by a
- * distinct org type.) Every principal able to reach this middleware therefore
- * already carries the broadest scope the model defines.
- *
- * If a service principal is ever provisioned that should reach only PART of the
- * network — a regional aggregator, a partner integration — layer 1 has to carry
- * the restriction, because layer 2 cannot express it. The mechanism exists and
- * is deployed but inert: set `ACTING_ORG_SOURCE=claim_preferred` (see
- * `@/config`) and populate the `signals_acting_orgs` claim for that principal.
- * The grant check below already reads it; `["*"]` means "any org"; the Keycloak
- * mappers are live. Enable it in the same change that adds the principal.
- */
-
-/**
  * Fastify preHandler that resolves the acting org for a request.
  *
- * Reads the `x-acting-org-id` header and the apikey-bound user (set upstream
- * by the apikey auth path), validates that the org exists and is one of the
- * types allowed to be asserted as an acting org (`aggregator` |
- * `network_service`), and that the service user is a registered member of
- * some org in Signals. On success, attaches `request.acting_org` and resolves.
+ * Reads `x-acting-org-id` (or, under claim enforcement, a single-org grant) and
+ * the authenticated `request.user`. Checks the org is inside the token grant
+ * when `ACTING_ORG_SOURCE` enforces it, exists, has an assertable type
+ * (`aggregator` | `network_service`), and that the user is a member of some
+ * org. On success attaches `request.acting_org`; otherwise sends an error
+ * reply. It does not check which users the org may reach; routes do that.
+ * Design: docs/architecture/api-middleware-acting-org-scope.md.
  *
- * Each error branch responds via the reply and returns early; the request
- * lifecycle is terminated by Fastify when the reply is sent.
- *
- * The signature is declared as a plain async function (rather than typed via
- * Fastify's `preHandlerAsyncHookHandler`) so unit tests can invoke it without
- * binding a FastifyInstance `this`. The runtime shape still satisfies the
- * Fastify preHandler contract.
+ * A plain async function rather than `preHandlerAsyncHookHandler` so unit
+ * tests can call it without binding a FastifyInstance `this`.
  */
 export const acting_org_preHandler = async (
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> => {
   /**
-   * Acting-org authorisation (§5.1 of the Keycloak migration design).
-   *
-   * The header is unchanged in every mode and is still what SELECTS the org.
-   * What `ACTING_ORG_SOURCE` controls is whether the selection has to fall
-   * inside a grant the token carries (`signals_acting_orgs`), which is the
-   * difference between the caller authorising itself and the API verifying it.
-   *
-   * `undefined` grant means the token carried no claim at all — distinct from an
-   * empty grant, which authorises nothing.
+   * The header selects the org in every mode; `ACTING_ORG_SOURCE` controls
+   * whether it must fall inside the token's `signals_acting_orgs` grant.
+   * An `undefined` grant means the token carried no claim; an empty grant
+   * authorises nothing.
    */
   const grant = request.acting_org_grant;
   const grant_is_wildcard = grant?.includes(ACTING_ORG_WILDCARD) === true;
@@ -104,7 +56,6 @@ export const acting_org_preHandler = async (
   );
 
   // A grant naming exactly one org is unambiguous, so the header is optional.
-  // This is what lets human callers stop sending it entirely.
   if (!acting_org_id && authConfig.acting_org_claim_enforced && grant?.length === 1 && !grant_is_wildcard) {
     acting_org_id = grant[0];
   }
@@ -117,8 +68,7 @@ export const acting_org_preHandler = async (
     return;
   }
 
-  // The check this whole change exists for: an asserted org outside the grant is
-  // refused, where previously any existing org id was honoured.
+  // Under claim enforcement, an asserted org outside the grant is refused.
   if (
     authConfig.acting_org_claim_enforced &&
     grant !== undefined &&
@@ -173,11 +123,8 @@ export const acting_org_preHandler = async (
     return;
   }
 
-  // Org-agnostic by design: this gate separates privilege TIERS (service
-  // principal vs end user), not tenants. No production path writes `member`
-  // rows except `scripts/seed_service_users.ts`, so a participant session has
-  // none and is refused here before it can assert any acting org. Tenant reach
-  // is decided downstream by the acting org's type — see the scope model above.
+  // A participant without a `member` row is refused here. Which users the org
+  // may reach is checked downstream, per route.
   const member_rows = await db
     .select({ id: member.id })
     .from(member)

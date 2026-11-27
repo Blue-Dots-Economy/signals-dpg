@@ -96,7 +96,7 @@ export function writeFilter(prev: URLSearchParams, f: MyActionsFilter): URLSearc
   for (const facet of f.facets) {
     if (facet.values.length > 0) next.set(`f_${facet.domain}.${facet.field}`, joinList(facet.values));
   }
-  next.delete('profile'); // the pre-revamp single-profile param
+  next.delete('profile'); // legacy single-profile param
   return next;
 }
 
@@ -147,8 +147,6 @@ export function activeFilterCount(f: MyActionsFilter, statusOptions: readonly St
     f.facets.reduce((n, facet) => n + facet.values.length, 0)
   );
 }
-
-// ─── Network-derived vocabulary ────────────────────────────────────────────
 
 const interactions = (network: DotNetworkSchema | null | undefined) =>
   Object.values(network?.actions ?? {}).flatMap((a) => a.interactions ?? []);
@@ -216,8 +214,6 @@ export function actionTypes(network: DotNetworkSchema | null | undefined): strin
   return Object.keys(network?.actions ?? {});
 }
 
-// ─── Saved views ───────────────────────────────────────────────────────────
-
 export type SavedViewId = 'all' | 'needs_response' | 'ready_to_export' | 'sent';
 
 /** A saved view is a preset of status + direction; everything else is kept. */
@@ -257,8 +253,6 @@ export function currentSavedView(
   if (f.direction === 'sent' && f.statuses.length === 0) return 'sent';
   return null;
 }
-
-// ─── Row helpers ───────────────────────────────────────────────────────────
 
 export interface ActionSides {
   direction: 'received' | 'sent';

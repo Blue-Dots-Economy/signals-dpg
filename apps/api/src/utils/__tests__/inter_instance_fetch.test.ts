@@ -15,7 +15,7 @@ vi.mock('@api/db/secondary/redis', () => ({
 // instance_url below, so every count/page goes through global fetch.
 vi.mock('@/config', () => ({
   getCurrentApiBaseUrl: () => 'http://self.local',
-  apiConfig: { peer_fetch_timeout_ms: 3000 },
+  apiConfig: { peer_fetch_timeout_ms: 3000, markers_max_limit: 25000 },
   peerConfig: {
     shared_secret: 'a'.repeat(48),
     auth_mode: 'permissive',

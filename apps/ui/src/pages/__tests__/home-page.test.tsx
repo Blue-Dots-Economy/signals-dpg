@@ -10,9 +10,11 @@ import type {
   DotNetworkSchema,
   MapMarker,
   MapViewport,
+  OpenSpotGroup,
   ViewMode,
 } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
+import type { BrowseArea } from '@/lib/browse-discover';
 import type { DiscoverFacetFilter, Marker as NetworkMarker } from '@/lib/network-api';
 import { HomePage } from '../home-page';
 
@@ -152,6 +154,7 @@ interface BrowseOpts {
   filters?: DiscoverFacetFilter[];
   relevance?: boolean;
   anchorItemId?: string;
+  area?: BrowseArea;
 }
 
 interface BrowseCall {
@@ -205,6 +208,8 @@ const state = {
   browserSupported: false,
   browserStatus: 'idle' as 'idle' | 'loading' | 'error' | 'success',
   isMobile: false,
+  authLoading: false,
+  myItemsFetched: true,
 };
 
 const browseCalls: BrowseCall[] = [];
@@ -214,6 +219,7 @@ const browsedDomains = () =>
     browseCalls.filter((c) => c.enabled && c.domainId !== null).map((c) => c.domainId as string),
   );
 const markerCalls: MarkerCall[] = [];
+const totalsCalls: { domainIds: string[]; enabled: boolean; anchors: (string | undefined)[] }[] = [];
 const requestBrowserLocation = vi.fn();
 const fetchNextPage = vi.fn();
 const preferredSources: string[] = [];
@@ -232,7 +238,7 @@ vi.mock('@/hooks/use-network-config', () => ({
 }));
 
 vi.mock('@/hooks/use-my-items', () => ({
-  useMyItems: () => ({ data: state.myItems, isFetched: true, isLoading: false }),
+  useMyItems: () => ({ data: state.myItems, isFetched: state.myItemsFetched, isLoading: false }),
 }));
 
 vi.mock('@/hooks/use-profile-consent-status', () => ({
@@ -350,6 +356,24 @@ vi.mock('@/hooks/use-map-markers', () => ({
   },
 }));
 
+vi.mock('@/hooks/use-browse-totals', () => ({
+  useBrowseTotals: (
+    _network: DotNetworkSchema | null,
+    domains: DotNetworkDomain[],
+    _filters: Record<string, unknown>,
+    _search: string,
+    enabled: boolean,
+    anchorFor?: (domain: string) => string | undefined,
+  ) => {
+    totalsCalls.push({
+      domainIds: domains.map((d) => d.id),
+      enabled,
+      anchors: domains.map((d) => anchorFor?.(d.id)),
+    });
+    return { total: 0, mappable: 0, notMappable: 0, isLoading: false };
+  },
+}));
+
 vi.mock('@/hooks/use-item-detail', () => ({
   useItemDetail: () => ({ item: state.detail.item, isLoading: state.detail.isLoading }),
 }));
@@ -358,7 +382,7 @@ vi.mock('@/contexts/auth-context', () => ({
   useAuth: () => ({
     user: state.user,
     isAuthenticated: !!state.user,
-    isLoading: false,
+    isLoading: state.authLoading,
     checkUser: vi.fn(),
     requestOtp: vi.fn(),
     verifyOtp: vi.fn(),
@@ -389,7 +413,23 @@ interface MapViewStubProps {
   renderPopup?: (marker: MapMarker) => React.ReactNode;
   showPopup?: boolean;
   onMarkerSelect?: (marker: MapMarker) => void;
+  renderSpotGroup?: (group: OpenSpotGroup, close: () => void) => React.ReactNode;
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void;
+  focusPoint?: { lat: number; lng: number } | null;
+  focusZoom?: number;
+  heightClassName?: string;
 }
+
+let stubSpotGroup: OpenSpotGroup = {
+  key: 'c:1',
+  count: 3,
+  breakdown: [
+    { domain: 'provider', count: 2 },
+    { domain: 'mentor', count: 1 },
+  ],
+  exact: true,
+  bounds: { minLat: 12.9, minLng: 77.6, maxLat: 12.9, maxLng: 77.6 },
+};
 
 function MapViewStub({
   items,
@@ -399,8 +439,14 @@ function MapViewStub({
   renderPopup,
   showPopup = true,
   onMarkerSelect,
+  renderSpotGroup,
+  onSpotGroupSelect,
+  focusPoint,
+  focusZoom,
+  heightClassName,
 }: MapViewStubProps) {
   const [openId, setOpenId] = React.useState<string | null>(null);
+  const [spotOpen, setSpotOpen] = React.useState(false);
   const open = items.find((item) => item.id === openId);
   // The same marker the real MapView would build for an item's first location.
   const toMarker = (item: MapViewStubProps['items'][number]): MapMarker => ({
@@ -413,7 +459,8 @@ function MapViewStub({
     domain: item.domain,
   });
   return (
-    <div data-testid="map-view">
+    <div data-testid="map-view" className={heightClassName}>
+      <p>{`focus: ${focusPoint ? `${focusPoint.lat},${focusPoint.lng}` : 'none'} @ ${focusZoom ?? 'default'}`}</p>
       {filtersSlot}
       <button
         type="button"
@@ -446,6 +493,13 @@ function MapViewStub({
         </button>
       ))}
       {open && renderPopup?.(toMarker(open))}
+      <button
+        type="button"
+        onClick={() => (showPopup ? setSpotOpen(true) : onSpotGroupSelect?.(stubSpotGroup))}
+      >
+        click spot bubble
+      </button>
+      {spotOpen && renderSpotGroup?.(stubSpotGroup, () => setSpotOpen(false))}
     </div>
   );
 }
@@ -565,6 +619,7 @@ beforeEach(() => {
   localStorage.clear();
   browseCalls.length = 0;
   markerCalls.length = 0;
+  totalsCalls.length = 0;
   preferredSources.length = 0;
   state.networks = [networkFixture];
   state.network = networkFixture;
@@ -582,6 +637,8 @@ beforeEach(() => {
   state.browserSupported = false;
   state.browserStatus = 'idle';
   state.isMobile = false;
+  state.authLoading = false;
+  state.myItemsFetched = true;
 });
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -594,6 +651,80 @@ describe('HomePage — network config gate', () => {
 
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Browse All' })).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
+  });
+});
+
+describe('HomePage — no listing request before sign-in is known', () => {
+  const requested = () => ({
+    list: browseCalls.filter((c) => c.enabled && c.domainId !== null).length,
+    totals: totalsCalls.filter((c) => c.enabled && c.domainIds.length > 0).length,
+    markers: markerCalls.filter((c) => c.domainIds.length > 0).length,
+  });
+
+  it('waits while the session check is still running', () => {
+    state.authLoading = true;
+    state.user = null;
+    renderHome('/?view=map');
+    expect(requested()).toEqual({ list: 0, totals: 0, markers: 0 });
+  });
+
+  it("waits for a signed-in user's own profiles", () => {
+    signedInSeeker();
+    state.myItemsFetched = false;
+    renderHome('/?view=map');
+    expect(requested()).toEqual({ list: 0, totals: 0, markers: 0 });
+  });
+
+  it("asks only for the signed-in user's domains once their profiles are known", () => {
+    signedInSeeker();
+    renderHome('/?view=map');
+    const counts = requested();
+    expect(counts.totals).toBeGreaterThan(0);
+    expect(counts.markers).toBeGreaterThan(0);
+    const asked = new Set([
+      ...totalsCalls.filter((c) => c.enabled).flatMap((c) => c.domainIds),
+      ...markerCalls.flatMap((c) => c.domainIds),
+    ]);
+    expect(asked.has('seeker')).toBe(false);
+    expect(asked.size).toBeGreaterThan(0);
+  });
+
+  it('sends no listing request before the active profile is picked on a fresh sign-in', async () => {
+    signedInSeeker();
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
+    const providerTotals = totalsCalls
+      .filter((c) => c.enabled)
+      .flatMap((c) => c.domainIds.map((id, i) => ({ id, anchor: c.anchors[i] })))
+      .filter((c) => c.id === 'provider');
+    expect(providerTotals.length).toBeGreaterThan(0);
+    expect(providerTotals.every((c) => c.anchor === 'me-1')).toBe(true);
+    const providerList = browseCalls.filter((c) => c.enabled && c.domainId === 'provider');
+    expect(providerList.every((c) => c.opts?.anchorItemId === 'me-1')).toBe(true);
+  });
+
+  it('does not wait forever for a signed-in user with no profiles', async () => {
+    state.myItems = [];
+    renderHome('/?view=map');
+    await waitFor(() => expect(requested().totals).toBeGreaterThan(0));
+  });
+
+  it('starts at once for a visitor, without waiting on own profiles', () => {
+    state.user = null;
+    state.myItemsFetched = false;
+    renderHome('/?view=map');
+    const counts = requested();
+    expect(counts.totals).toBeGreaterThan(0);
+    expect(counts.markers).toBeGreaterThan(0);
+  });
+
+  it('shows the list as loading, not empty, while it waits', async () => {
+    state.user = null;
+    state.authLoading = true;
+    renderHome('/?view=list');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText('No listings in this network yet.')).not.toBeInTheDocument();
     expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
   });
 });
@@ -854,6 +985,17 @@ describe('HomePage — map→list domain collapse (spec D27)', () => {
 });
 
 describe('HomePage — map view', () => {
+  it('fills the height left below the sign-in banner instead of a fixed screen height', () => {
+    state.user = null;
+    renderHome('/?view=map');
+
+    const map = screen.getByTestId('map-view');
+    expect(map).toHaveClass('h-full');
+    const column = map.closest('.flex-col');
+    expect(column).not.toBeNull();
+    expect(column).toContainElement(screen.getByText('Sign in to connect'));
+  });
+
   it('fetches no markers until the map reports its first viewport', async () => {
     signedInSeeker();
     state.markers = [
@@ -879,6 +1021,106 @@ describe('HomePage — map view', () => {
   // that rule would pin the map to one domain and destroy its multi-domain
   // view. The map's own selection now decides which /markers requests are
   // ISSUED, rather than which fetched markers survive a post-filter.
+  describe('same-spot group', () => {
+    const lastArea = () => browseCalls.filter((c) => c.enabled).at(-1)?.opts?.area;
+
+    beforeEach(() => {
+      stubSpotGroup = { ...stubSpotGroup, breakdown: [{ domain: 'provider', count: 2 }, { domain: 'mentor', count: 1 }] };
+    });
+
+    it('opens the group in the list, scoped to its padded box, with a banner', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      expect(screen.getByText('3 listings at this exact spot')).toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(screen.getByText('Showing the listings at one spot on the map')).toBeInTheDocument();
+      const area = lastArea();
+      expect(area).toMatchObject({ mode: 'viewport', spot: { exact: true } });
+      if (area?.mode !== 'viewport') throw new Error('expected a viewport area');
+      expect(area.bounds.minLat).toBeCloseTo(12.9 - 5 / 111_320, 9);
+      expect(area.bounds.maxLat).toBeCloseTo(12.9 + 5 / 111_320, 9);
+    });
+
+    it('keeps the current tab when the group has listings of that type', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=mentor');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(url()).toContain('domain=mentor');
+    });
+
+    it('switches to the group’s largest type when the current tab has none of it', async () => {
+      signedInSeeker();
+      stubSpotGroup = { ...stubSpotGroup, breakdown: [{ domain: 'provider', count: 3 }] };
+      renderHome('/?view=map&domain=mentor');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('domain=provider'));
+    });
+
+    it('goes back to the map and drops the group area from the banner', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await waitFor(() => expect(url()).toContain('view=list'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Back to map' }));
+
+      await waitFor(() => expect(url()).toContain('view=map'));
+      expect(lastArea()).toEqual({ mode: 'anywhere' });
+    });
+
+    it('returns to the view the group was opened from', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'report viewport' }));
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await waitFor(() => expect(url()).toContain('view=list'));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Back to map' }));
+
+      expect(await screen.findByText('focus: 12.9,77.6 @ 12')).toBeInTheDocument();
+    });
+
+    it('drops the banner when Clear all resets the area', async () => {
+      signedInSeeker();
+      renderHome('/?view=map&domain=provider');
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      await userEvent.click(screen.getByRole('button', { name: 'View these 3 in the list' }));
+      await screen.findByText('Showing the listings at one spot on the map');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+
+      expect(screen.queryByText('Showing the listings at one spot on the map')).not.toBeInTheDocument();
+      expect(lastArea()).toEqual({ mode: 'anywhere' });
+    });
+
+    it('shows the group in the bottom sheet on a phone and opens the list from it', async () => {
+      signedInSeeker();
+      state.isMobile = true;
+      renderHome('/?view=map&domain=provider');
+
+      await userEvent.click(screen.getByRole('button', { name: 'click spot bubble' }));
+      const sheet = await screen.findByRole('dialog');
+      expect(within(sheet).getByText('3 listings at this exact spot', { selector: 'p' })).toBeInTheDocument();
+      await userEvent.click(within(sheet).getByRole('button', { name: 'View these 3 in the list' }));
+
+      await waitFor(() => expect(url()).toContain('view=list'));
+      expect(screen.getByText('Showing the listings at one spot on the map')).toBeInTheDocument();
+    });
+  });
+
   it('fetches every visible domain regardless of the list’s selected domain', async () => {
     signedInSeeker();
     renderHome('/?view=map&domain=provider');

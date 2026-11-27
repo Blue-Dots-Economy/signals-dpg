@@ -13,19 +13,15 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
   const { themeId, theme, brand } = useNetworkTheme();
   const { resolved } = useThemeMode();
   const { t } = useTranslation();
-  // Dark mode → light-text wordmark variant. Brand dot reads as a grey
-  // ring on dark grey, but the wordmark itself is fully readable and
-  // designer-shipped, which is the priority.
+  // Dark mode uses the light-text wordmark variant.
   const variant = resolved === 'dark' ? 'light' : 'default';
   const logoSrc = brandLogoUrl(themeId, variant, brand);
 
   const logoShape = resolveBrandMeta(themeId, brand).logoShape;
 
-  // Height-driven sizing: a wide wordmark reads fine at h-7, but the same
-  // height leaves a squarer mark tiny. A `lockup` (a wordmark stacked over a
-  // "Seeded by …" strapline, ~3:1) sits between the two — at wordmark height
-  // its strapline line is too small to read, which is exactly how the up-gzb
-  // mark landed in the sidebar.
+  // Height per logo shape: a wide wordmark reads at h-7, a squarer mark needs
+  // more, and a `lockup` (wordmark over a strapline, ~3:1) sits between, since
+  // at wordmark height its strapline is unreadable.
   const logoClass =
     size === 'lg'
       ? {
@@ -70,9 +66,8 @@ export function PortalHeader({ size = 'sm' }: PortalHeaderProps) {
         </svg>
       )}
 
-      {/* Drop text labels when the designer logo is present — the wordmark
-          and portal context live inside the PNG. Avoids "SERVICES P..."
-          truncation in the narrow sidebar column. */}
+      {/* No text labels with a designer logo, whose wordmark already names
+          the portal. */}
       {!logoSrc && (
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-foreground leading-tight">

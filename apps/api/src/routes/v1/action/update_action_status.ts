@@ -65,17 +65,13 @@ export const update_action_status: FastifyPluginAsyncZod = async function (fasti
 };
 
 /**
- * Pre-pass for the bulk update-status route (#393, accept side): resolve each
- * row far enough to know whether accepting it reveals the caller's PII (the
- * same `requiresReceiverConsent` condition the main loop applies), and gate the
- * gated subset with ONE guardian OTP + ONE email instead of one per row —
- * mirroring perform_action's initiator-side batch pre-pass. Only rows where the
- * caller is the accepting party (target item owner) and the transition reveals
- * PII are batched; everything else falls back to the per-item gate below (a
- * cheap `not_required`). The single OTP is read from the first row carrying
- * `guardian_otp` (the client puts one code on the resubmitted batch). The gate
- * scope mirrors the single call: the accepting minor's own item is the *source*
- * of the scope, the counterparty's item the *target*.
+ * Pre-pass for the bulk update-status route (accept side): gate every row whose
+ * accept reveals the caller's PII (the same `requiresReceiverConsent` condition
+ * as the main loop) with one guardian OTP + one email instead of one per row,
+ * mirroring perform_action's initiator-side pre-pass. Other rows fall back to
+ * the per-item gate. The OTP is read from the first row carrying
+ * `guardian_otp`. As in the single call, the accepting minor's own item is the
+ * gate scope's *source* and the counterparty's item its *target*.
  */
 async function buildBulkGuardianAcceptGate(
   items: unknown[],
@@ -135,14 +131,12 @@ async function buildBulkGuardianAcceptGate(
 }
 
 /**
- * Self-acted only. For receiver responses (accept/reject/…) the caller
- * (session cookie or apikey-as-self) must be the target item's owner. The one
- * exception is a cancellation (a status bucketed under metric_categories.cancel):
- * that is initiated by the source item owner to withdraw their own request, and
- * is only allowed while the receiver has not yet acted. On-behalf-of via
- * `acting_as_user_id` was removed by spec
- * 2026-05-23-action-on-behalf-of-network-service-tier-design.md — audit columns
- * on `item_actions` are populated only at create-time (by `/action/perform`).
+ * Self-acted only: there is no on-behalf-of here, and the `item_actions` audit
+ * columns are populated only at create time (by `/action/perform`). For
+ * receiver responses (accept/reject/…) the caller must own the target item.
+ * The exception is a cancellation (a status bucketed under
+ * metric_categories.cancel): the source item owner withdrawing their own
+ * request, allowed only while the receiver has not yet acted.
  */
 export const update_action_status_handler = async (
   request: FastifyRequest<{ Body: unknown[] }>,
@@ -151,10 +145,8 @@ export const update_action_status_handler = async (
   const callerId = request.user.id;
 
   // Only a genuine batch (>1 row) within the bulk limit uses the one-OTP-per-
-  // batch accept gate; a single update keeps the per-item gate untouched, and an
-  // over-limit batch is left for runBulk to reject before any gating work.
-  // Fail-safe: if the pre-pass errors, fall back to the per-item gate (still
-  // fail-closed) rather than failing the whole request.
+  // batch gate; an over-limit batch is left for runBulk to reject. If the
+  // pre-pass errors, the per-item gate (still fail-closed) takes over.
   let batchGate: Map<number, GateResult> | undefined;
   if (request.body.length > 1 && request.body.length <= apiConfig.bulk_max_items) {
     try {
@@ -209,10 +201,8 @@ export const update_action_status_handler = async (
         );
       }
 
-      // Cancellation is terminal: once the source owner has withdrawn a
-      // request, it is dead. No further transition (accept/reject or a repeat
-      // cancel) is allowed by either party — otherwise the receiver could
-      // "accept" an application the applicant already pulled.
+      // Cancellation is terminal for both parties, so the receiver cannot
+      // "accept" an application the applicant already withdrew.
       const cancelStatuses = interaction.metric_categories?.cancel ?? [];
       if (cancelStatuses.includes(existingAction.action_status)) {
         throw new BulkItemFailure(
@@ -221,13 +211,10 @@ export const update_action_status_handler = async (
         );
       }
 
-      // A "cancellation" is any status the network config buckets under
-      // metric_categories.cancel. Every other transition is a receiver
-      // response (self-acted by the target owner). A cancellation instead is
-      // driven by the source item owner — the initiator withdrawing their own
-      // request — and is only allowed while the receiver has not yet acted
-      // (update_count === 0). Withdrawal is de-escalation, so it is not gated
-      // on either side's liveness.
+      // A cancellation (any status under metric_categories.cancel) is driven
+      // by the source item owner and allowed only while update_count === 0.
+      // Withdrawal is de-escalation, so it is not gated on either side's
+      // liveness. Every other transition is a receiver response.
       const isCancellation = cancelStatuses.includes(body.action_status);
 
       if (isCancellation) {
@@ -290,31 +277,19 @@ export const update_action_status_handler = async (
         }
       }
 
-      // Consent is a receiver-response gate. A cancellation is the source
-      // owner withdrawing their own request — never a PII reveal — so it must
-      // not be gated even if a network lists a cancel status in
-      // reveals_pii_on_status.
+      // A cancellation is never a PII reveal, so it is not consent-gated even
+      // if a network lists a cancel status in reveals_pii_on_status.
       const requiresReceiverConsent =
         !isCancellation && interaction.reveals_pii_on_status.includes(body.action_status);
 
-      // U18 guardian gate (Phase 5b). Scoped to exactly the accept / PII-
-      // reveal stage — the same `requiresReceiverConsent` condition the
-      // adult consent-acknowledgment check below applies to — so every
-      // other transition (reject, custom statuses, etc.) is byte-for-byte
-      // unchanged. The party who must clear this gate is the ACCEPTING
-      // party: every non-cancellation transition reaching this point has
-      // already required `callerId === existingAction.target_item_owner`
-      // above, so the accepting minor's own item is the *target* item and
-      // the other party's item is the *source* item (mirrored from the DB
-      // row, not re-derived from the request body). A minor *initiator* was
-      // already gated at perform (Task 2, commit bc87fd0) — this gates the
-      // minor *acceptor*. Adults and ungated domains resolve `not_required`
-      // and the rest of this handler runs exactly as it does today.
+      // U18 guardian gate, scoped to the accept / PII-reveal stage only. The
+      // party gated is the accepting one (already checked to own the target
+      // item), so the minor's own item is the gate's *source* and the other
+      // party's the *target*, taken from the DB row. A minor initiator is gated
+      // at perform. Adults and ungated domains resolve `not_required`.
       let guardianGate: GateResult = { status: 'not_required' };
       if (requiresReceiverConsent) {
-        // In a bulk submit (#393) the accept pre-pass already produced this
-        // row's result (one OTP for the whole batch); fall back to the
-        // per-action gate for a single update or an unbatched row.
+        // In a bulk submit the pre-pass already produced this row's result.
         guardianGate =
           batchGate?.get(index) ??
           (await guardianActionGate({
@@ -325,25 +300,16 @@ export const update_action_status_handler = async (
             sourceItemId: existingAction.target_item_id,
             targetItemId: existingAction.source_item_id,
             stage: 'accept',
-            // Self-acted only (on-behalf was removed) — the external block must
-            // never fire here. Passing 'self' locks that invariant: if on-behalf
-            // is ever re-added, minors are blocked automatically (#395).
+            // Self-acted only, so the external-channel block does not apply.
+            // If on-behalf is ever added here, pass the real channel so minors
+            // are blocked.
             channel: 'self',
             otp: body.guardian_otp,
           }));
 
-        // Per-item BulkItemFailure (mirrors perform_action.ts, commit
-        // bc87fd0) — NOT a mid-loop reply.send. runBulk is sequential
-        // best-effort: a thrown BulkItemFailure is recorded for this item
-        // and the loop continues to the next one, so a real HTTP
-        // challenge/response status here would be wrong on two counts — it
-        // would apply to the whole batch, not just this item, and trailing
-        // items would still run and commit underneath it while the
-        // envelope that describes them never gets sent (the original bug:
-        // a batch [minorAccept-no-otp, adultAccept] could commit the
-        // adult's PII-revealing accept and then return a blanket 428 that
-        // hides it). Every item — gated or not — is reported in the normal
-        // per-item results array instead.
+        // A per-item BulkItemFailure, never a mid-loop reply.send: runBulk
+        // continues with later items, which would commit underneath a
+        // whole-batch status that hides them.
         const guardianGateFail = guardianGateFailure(guardianGate);
         if (guardianGateFail) throw guardianGateFail;
       }
@@ -415,15 +381,13 @@ export const update_action_status_handler = async (
         throw new BulkItemFailure('PARTITION_SETUP_FAILED', 'Failed to prepare storage for action event');
       }
 
-      // Optimistic-concurrency guard: only write if update_count still matches
-      // what we read. Cancellation adds a second legitimate writer (the source
-      // owner alongside the target owner), so a concurrent cancel + accept must
-      // not both land — the loser gets ACTION_CONFLICT instead of clobbering.
+      // Optimistic concurrency: write only if update_count still matches what
+      // was read. Source and target owners can both write (cancel vs accept),
+      // so the loser gets ACTION_CONFLICT.
       //
-      // The status update and the accept-consent row are written in one
-      // transaction so a consent-write failure rolls the accept back too
-      // (fail-closed — the PII-revealing accept is never applied without a
-      // consent record). The action event is emitted only after commit.
+      // Status update and accept-consent row share one transaction, so the
+      // PII-revealing accept is never applied without a consent record. The
+      // action event is emitted only after commit.
       const nextUpdateCount = existingAction.update_count + 1;
       const txOutcome = await db
         .transaction(async (tx) => {
@@ -497,14 +461,11 @@ export const update_action_status_handler = async (
             }
           }
 
-          // U18 guardian accept-consent (Phase 5b): only reached when the
-          // gate verified a fresh guardian OTP for this exact accept above.
-          // Mirrors the adult accept-consent write immediately above —
-          // same columns, same fail-closed behavior (a write/version
-          // failure rolls back the status update via ConsentWriteError) —
-          // with `source:'guardian'` and the u18 metadata tag. Action
-          // statements were not variant-split in Phase 2, so the version
-          // comes from the same (non-variant) accept resolver.
+          // Guardian accept-consent, only after a verified guardian OTP for
+          // this accept. Same shape and fail-closed behaviour as the adult row
+          // above, with `source:'guardian'` and the u18 metadata tag. Action
+          // statements have no u18 variant, so the version comes from the
+          // same resolver.
           if (guardianGate.status === 'verified') {
             const guardianVersion = await resolveConsentVersion({
               network: row.target_item_network,
@@ -607,9 +568,8 @@ export const update_action_status_handler = async (
       const createdEvent = await insertActionEvent(db, storedEvent);
       void mirrorActionEventToSourceInstance(storedEvent, request.log);
 
-      // Cancellation e-mails are deferred (separate issue): a source-initiated
-      // withdrawal must not reuse the receiver-response copy, so we send no
-      // notification for it here rather than send misleading mail.
+      // No email for a cancellation: it must not reuse the receiver-response
+      // copy, and no cancellation copy exists yet.
       if (createdEvent && !isCancellation) {
         void dispatchActionNotifications(
           {

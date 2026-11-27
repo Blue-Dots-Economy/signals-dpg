@@ -396,9 +396,15 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     expect(before.map((r) => r.item_id as string)).not.toContain(returnedId);
   });
 
-  it('per-user profile cap: creating past MAX_PROFILES_PER_USER returns 409 PROFILE_LIMIT_REACHED', async () => {
-    // Fresh user so the count starts clean. Default cap = MAX_PROFILES_PER_USER (5).
-    const limit = apiConfig.max_profiles_per_user;
+  // The total cap the server applies: the domain's `profile_limits.total`, else
+  // MAX_PROFILES_PER_USER.
+  const totalProfileLimit = async (): Promise<number> =>
+    (await getNetworkConfigById(primary.network)).domains.find((d) => d.id === primary.domain)
+      ?.profile_limits?.total ?? apiConfig.max_profiles_per_user;
+
+  it('per-user profile cap: creating past the total limit returns 409 PROFILE_LIMIT_REACHED', async () => {
+    // Fresh user so the count starts clean.
+    const limit = await totalProfileLimit();
     const capEmail = `cap-${randomUUID()}@test.local`;
     const capPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = (n: number) =>
@@ -447,7 +453,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
     // what the cap reads is `lifecycle_status`, and driving the real
     // POST /item/lifecycle would need the owner's session, which this
     // api-key-authenticated harness does not hold.
-    const limit = apiConfig.max_profiles_per_user;
+    const limit = await totalProfileLimit();
     const capEmail = `retirecap-${randomUUID()}@test.local`;
     const capPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = (n: number) =>
@@ -519,7 +525,7 @@ describeIf(`POST /api/v1/admin/participant (integration)${
   });
 
   it('per-user cap holds under CONCURRENCY on the insert_item path (no TOCTOU over-insert)', async () => {
-    const limit = apiConfig.max_profiles_per_user;
+    const limit = await totalProfileLimit();
     const ccEmail = `capcc-${randomUUID()}@test.local`;
     const ccPhone = `+9199${randomInt(1e8).toString().padStart(8, '0')}`;
     const mk = () =>

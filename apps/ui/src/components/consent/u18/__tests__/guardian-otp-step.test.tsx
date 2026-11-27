@@ -69,6 +69,43 @@ describe('GuardianOtpStep', () => {
     expect(onVerified).not.toHaveBeenCalled();
   });
 
+  it('a server or network failure is not reported as an incorrect code', async () => {
+    verifyGuardian.mockRejectedValue({ isAxiosError: true, response: { status: 500, data: { error: 'CONSENT_WRITE_FAILED' } } });
+    await renderOtpStep(vi.fn(), vi.fn());
+
+    typeOtp('123456');
+
+    await waitFor(() =>
+      expect(screen.getByText('Something went wrong on our side. Please try again in a moment.')).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/incorrect code/i)).toBeNull();
+  });
+
+  it('asks for a new code when the pending sign-up behind it has expired', async () => {
+    verifyGuardian.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 400, data: { error: 'NO_PENDING_SIGNUP' } },
+    });
+    await renderOtpStep(vi.fn(), vi.fn());
+
+    typeOtp('123456');
+
+    await waitFor(() => expect(screen.getByText(/code has expired/i)).toBeInTheDocument());
+    expect(screen.queryByText(/incorrect code/i)).toBeNull();
+  });
+
+  it('names the request for support on a server fault', async () => {
+    verifyGuardian.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 503, data: { error: 'X' }, headers: { 'x-request-id': 'req-5' } },
+    });
+    await renderOtpStep(vi.fn(), vi.fn());
+
+    typeOtp('123456');
+
+    await waitFor(() => expect(screen.getByText(/req-5/)).toBeInTheDocument());
+  });
+
   it('shows a friendly message on 429 throttling', async () => {
     verifyGuardian.mockRejectedValue({ isAxiosError: true, response: { status: 429 } });
     await renderOtpStep(vi.fn(), vi.fn());

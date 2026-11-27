@@ -21,10 +21,8 @@ interface PageShellProps {
   selectedNetwork?: string | null;
   onNetworkSelect?: (networkId: string) => void;
   /**
-   * Sidebar Browse group. Optional since #645 (spec D10): domain selection
-   * moved out of the sidebar into the browse toolbar, so the browse page
-   * passes `hideBrowse` and omits these. Form pages that still want the
-   * group keep supplying them.
+   * Sidebar Browse group. Optional: the browse page selects domains in its
+   * toolbar and passes `hideBrowse` instead.
    */
   domains?: DotNetworkDomain[];
   selectedDomain?: string | null;
@@ -40,26 +38,18 @@ interface PageShellProps {
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   /**
-   * Browse state bar (#644, spec §7.2) — domain, sort, area and the applied
-   * filter chips. Rendered BETWEEN the top bar and the scroll area, as a
-   * sibling of `<main>` rather than a `sticky` element inside it.
-   *
-   * That placement is the whole trick. `<main>` is the scroll container
-   * (`overflow-y-auto` in an `h-svh` flex column), so anything outside it is
-   * structurally pinned and needs no `sticky` and no `top-N` offset. A sticky
-   * child of `<main>` would have needed an offset equal to the top bar's
-   * height — and the top bar is `flex-wrap`, so its height changes with
-   * viewport width and any hardcoded offset would gap or overlap.
+   * Browse state bar, rendered between the top bar and `<main>` as a sibling.
+   * `<main>` is the scroll container, so this is pinned without `sticky`; a
+   * sticky child would need an offset equal to the wrapping top bar's
+   * variable height.
    */
   toolbarSlot?: React.ReactNode;
   /** Label for the form-variant Back control (defaults to "Back" in TopBar). */
   backLabel?: string;
-  /** Hide the sidebar's Browse (domain selector) group — form pages. */
+  /** Hide the sidebar's Browse (domain selector) group. */
   hideBrowse?: boolean;
-  /** A pinned footer rendered BELOW the scroll area (not inside it). Used by the
-   * form pages for the action bar so it stays fixed at the column bottom while
-   * the form scrolls above it — a `sticky` element inside `<main>` floats when
-   * the content is shorter than the viewport, which this avoids. */
+  /** A footer pinned below the scroll area, e.g. the form action bar. A
+   * `sticky` element inside `<main>` would float on short content. */
   footerSlot?: React.ReactNode;
 }
 
@@ -129,22 +119,16 @@ export function PageShell({
             onViewModeChange={onViewModeChange}
           />
           {toolbarSlot && (
-            // `flex-none` so it keeps its natural height instead of being
-            // squeezed by the flex column, matching `footerSlot` below.
+            // `flex-none` keeps its natural height in the flex column.
             <div className="flex-none border-b bg-background">{toolbarSlot}</div>
           )}
           <main
             id="main-content"
-            // `min-h-0` is load-bearing: without it a flex child defaults to
-            // min-height:auto and refuses to shrink below its content, so a tall
-            // form expands past the h-svh column and the whole page gets a second
-            // (body) scrollbar instead of scrolling inside <main>.
-            // `relative` is also load-bearing: it makes <main> the containing
-            // block for absolutely-positioned descendants (e.g. cmdk's
-            // visually-hidden `position:absolute` labels), so they anchor here and
-            // are clipped by this scroll container — otherwise they anchor to the
-            // initial containing block at their deep flow positions and stretch
-            // the document, producing a phantom second (body) scrollbar.
+            // `min-h-0` lets this flex child shrink, so a tall form scrolls
+            // inside <main> instead of growing the body. `relative` makes <main>
+            // the containing block for absolutely positioned descendants (e.g.
+            // cmdk's hidden labels); otherwise they stretch the document and
+            // add a second body scrollbar.
             className="relative min-h-0 flex-1 overflow-y-auto p-4 max-md:overflow-x-clip sm:p-6"
           >
             {children}

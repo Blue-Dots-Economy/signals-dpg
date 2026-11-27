@@ -1,26 +1,19 @@
 /**
- * One-shot handoff of the domain a NEW user picked on the Signals self-signup
- * form (see pages/auth/login-page.tsx) to the profile-creation form
- * (pages/profile-form-page.tsx), so the domain isn't asked twice.
- *
- * Domain is confirmed at signup time (before any profile exists, so
- * profile-form-page's own "locked domain" derivation — based on the user's
- * existing items — has nothing to key off yet). This stores it for exactly
- * one subsequent read; profile-form-page clears it once consumed so it never
- * leaks into a later, unrelated profile-creation flow (e.g. a second profile
- * in another network).
+ * One-shot handoff of the domain a new user picked on the self-signup form to
+ * the profile-creation form (pages/profile-form-page.tsx), so the domain is not
+ * asked twice. At signup no profile exists yet for the form to derive a locked
+ * domain from. Stored per network for one read; the form clears it once
+ * consumed so it cannot leak into a later profile-creation flow.
  */
-/** Signup-time domain + age captured for a brand-new account on the Signals
- * self-signup form. Threaded from login-page.tsx through the OTP step's router
- * state to otp-page.tsx, which uses it to call submitU18Dob post-verify and,
- * for a minor in a guardian-gated domain, to drive the U18GuardianFlow.
- * Undefined/null for returning users — they never see these fields and never
- * trigger this path. */
+/**
+ * Signup-time domain + age for a brand-new account. On the Keycloak path it is
+ * parked by `pending-signup-extras.ts` and written by the OIDC callback (domain
+ * and, when present, age via `submitU18Dob`). Absent for returning users.
+ */
 export interface SignupExtras {
   domain: string;
-  // Age (years, derived from the birth year) is captured in a SEPARATE step
-  // AFTER the signup form, and only when the chosen domain is guardian-gated
-  // (u18-enabled). Absent for an ungated domain (e.g. provider).
+  // Age in years, from a separate birth-year step shown only when the chosen
+  // domain is guardian-gated. Absent for an ungated domain.
   age?: number;
 }
 

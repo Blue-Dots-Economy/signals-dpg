@@ -1,29 +1,17 @@
 /**
- * Self-signup under Keycloak.
+ * Self-signup under Keycloak. The Keycloak OTP authenticator is login-only (it
+ * fails with `user_not_found` and cannot create users), and Keycloak's own
+ * registration form is password-based, so signals creates the identity and
+ * then hands the browser to Keycloak to authenticate it:
  *
- * The custom OTP authenticator is **login-only** — `IdentifierFormAuthenticator`
- * looks a user up and fails with `user_not_found` if absent, and nothing in the
- * SPI can create one. Keycloak's own registration form is no substitute: it is
- * password-based (breaking the passwordless model) and captures none of signals'
- * onboarding data. So signals creates the identity itself and then hands the
- * browser to Keycloak to actually authenticate it.
+ *   1. here: mint the UUID and create the unverified Keycloak identity
+ *   2. Keycloak: prove ownership of the identifier via the OTP flow
+ *   3. `provisionUserFromClaims`: create the local `user` mirror on first login
  *
- * The division of labour:
- *
- *   1. here — mint the UUID, create the Keycloak identity (unverified)
- *   2. Keycloak — prove the person owns the identifier, via the OTP flow
- *   3. `provisionUserFromClaims` — create the local `user` mirror on first
- *      successful login, which is also where guardian materialization and the
- *      org-join already happen
- *
- * **No local `user` row is written here**, deliberately. Until someone completes
- * an OTP login there is no proof they own the identifier, so an abandoned or
- * malicious signup leaves an unverified Keycloak shell and nothing else — no
- * signals user, no domain data, nothing joined to an org.
- *
- * `domains`, date-of-birth and consent are NOT collected here either: the UI
- * already submits those after login (`setUserDomains`, `submitU18Dob`), and the
- * U18 guardian capture has its own pre-auth flow keyed on the identifier.
+ * No local `user` row is written here: until an OTP login succeeds there is no
+ * proof of ownership, so an abandoned or malicious signup leaves only an
+ * unverified Keycloak identity. The optional `domain` and `age` are parked in
+ * Redis (signup_extras.ts) for provisioning to apply at first login.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -43,14 +31,14 @@ export interface SelfSignupInput {
   phoneNumber?: string | null;
   /** Network domain to join. Validated against this instance's served domains. */
   domain?: string | null;
-  /** Age in years (0..120), derived from the birth year on the client (#331). Parked for provisioning to apply at first login. */
+  /** Age in years (0..120), derived from the birth year on the client. Parked for provisioning to apply at first login. */
   age?: number | null;
   /** Caller IP, for rate limiting. */
   clientIp?: string;
 }
 
 export type SelfSignupErrorCode =
-  /** This instance isn't running Keycloak, so there is nothing to create in. */
+  /** No Keycloak admin client is configured, or the realm drops `phoneNumber` for a phone signup. */
   | 'SIGNUP_NOT_AVAILABLE'
   /** SELF_SIGNUP_MODE=gated — participants are admin-onboarded. */
   | 'SELF_SIGNUP_DISABLED'
@@ -67,8 +55,7 @@ export type SelfSignupResult =
       ok: true;
       /**
        * True when the identifier already belongs to someone. Reported as success
-       * so the UI can send them to sign in — the public `check-user` endpoint
-       * already exposed existence, so this leaks nothing new.
+       * so the UI can send them to sign in.
        */
       alreadyRegistered: boolean;
     }
@@ -108,14 +95,11 @@ async function overLimit(key: string, max: number, log: FastifyBaseLogger): Prom
 let adminClient: KeycloakAdminClient | null = null;
 
 /**
- * Whether the realm retains a written `phoneNumber` attribute, memoised.
- *
- * The realm's user profile is deploy-time configuration, not per-request state,
- * so one check per process is enough — and it must be memoised, because this
- * endpoint is public and would otherwise turn every signup into an extra
- * Admin-REST round trip. A failed check is not cached (stays null), so a
- * transient Keycloak blip does not disable phone signup for the process
- * lifetime.
+ * Whether the realm retains a written `phoneNumber` attribute, memoised per
+ * process: the realm user profile is deploy-time config, and this public
+ * endpoint should not add an Admin-REST round trip per signup. A check that
+ * throws leaves it null, so a transient Keycloak error does not disable phone
+ * signup for the process lifetime.
  */
 let phoneAttributePersists: boolean | null = null;
 
@@ -149,13 +133,11 @@ interface PreparedSignup {
 
 type SignupRejection = Extract<SelfSignupResult, { ok: false }>;
 
-/** Every up-front guard, in the order the endpoint has always applied them. */
+/** Every up-front guard, in order. */
 async function prepareSignup(
   input: SelfSignupInput,
   log: FastifyBaseLogger
 ): Promise<PreparedSignup | SignupRejection> {
-  // Only meaningful when Keycloak is the identity provider. Under `betterauth`
-  // the old OTP flow still owns signup.
   if (!authConfig.keycloak_enabled) {
     return {
       ok: false,
@@ -164,9 +146,8 @@ async function prepareSignup(
     };
   }
 
-  // The same gate provisioning enforces (R2). Checked here too so a gated
-  // instance rejects at the door rather than creating a Keycloak shell that
-  // could never become a signals user.
+  // Provisioning enforces the same gate; checking here too stops a gated
+  // instance creating a Keycloak identity that could never become a signals user.
   if (!authConfig.allow_self_signup) {
     return {
       ok: false,
@@ -207,9 +188,8 @@ async function prepareSignup(
     };
   }
 
-  // A client must not be able to join a domain this instance doesn't serve —
-  // `domains` gates profile creation (user_domains.ts), so this is a real check,
-  // not input hygiene.
+  // `domains` gates profile creation, so a client must not join a domain this
+  // instance doesn't serve.
   const domain = input.domain?.trim() || null;
   if (domain && !apiConfig.served_domains.some((binding) => binding.domain === domain)) {
     return {
@@ -281,11 +261,9 @@ async function identifierAlreadyKnown(
 }
 
 /**
- * A phone-only user whose `phoneNumber` attribute is silently dropped by the
- * realm is created and then permanently unable to receive an OTP — the same
- * false green the migration script guards against (`attributesWillPersist`),
- * which live signup was missing. Refuse before creating rather than mint an
- * account nobody can log into.
+ * If the realm silently drops `phoneNumber`, a phone user would be created but
+ * never receive an OTP. Refuse before creating rather than mint an account
+ * nobody can log into.
  */
 async function phoneAttributeWillPersist(
   client: KeycloakAdminClient,
@@ -310,8 +288,8 @@ async function createRealmIdentity(
 ): Promise<SelfSignupResult> {
   const { client, email, phoneNumber, domain, age } = prepared;
 
-  // The id minted here becomes the Keycloak `sub` AND, at first login, the
-  // local `user.id` — the same invariant the migration preserves.
+  // The id minted here becomes the Keycloak `sub` and, at first login, the
+  // local `user.id`.
   const id = randomUUID();
   const mapped = mapUserToKeycloak({
     id,
@@ -354,13 +332,9 @@ async function createRealmIdentity(
     case 'already_exists':
       return { ok: true, alreadyRegistered: true };
     default: {
-      // Creation failed and the pre-checks above found nothing, so this is
-      // either a race (someone claimed the identifier in between) or a real
-      // failure. Look again before answering: reporting `alreadyRegistered`
-      // unconditionally is the exact "sign-up says registered / sign-in says
-      // no such user" dead-end this migration exists to remove, and the user
-      // has no way out of it. Only a re-check that actually finds the
-      // identifier justifies that answer.
+      // Creation failed and the pre-checks found nothing: either a race or a
+      // real failure. Re-check before answering `alreadyRegistered`, otherwise
+      // the user is told "registered" at sign-up and "no such user" at sign-in.
       log.warn(
         { detail: 'detail' in outcome ? outcome.detail : outcome.kind },
         'self-signup: Keycloak refused to create the identity'

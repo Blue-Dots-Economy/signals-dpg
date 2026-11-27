@@ -591,8 +591,8 @@ describe('SchemaForm submit and validation', () => {
     expect(errors.length).toBeGreaterThan(0);
     // Messages are shown inline per field (showErrorList is false, so there is
     // no summary block — each field must carry its own message).
-    expect(await screen.findByText("must have required property 'Full Name'")).toBeInTheDocument();
-    expect(screen.getByText("must have required property 'Email Address'")).toBeInTheDocument();
+    expect(await screen.findByText(/^Full Name is required\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Email Address is required\./)).toBeInTheDocument();
   });
 
   it('focuses the first offending field so the user is taken to the problem', async () => {
@@ -707,7 +707,7 @@ describe('SchemaForm submit and validation', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(await screen.findByText("must have required property 'Full Name'")).toBeInTheDocument();
+    expect(await screen.findByText(/^Full Name is required\./)).toBeInTheDocument();
   });
 
   it('re-seeds the form when the formData prop identity changes (async edit load)', async () => {

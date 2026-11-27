@@ -31,10 +31,8 @@ export function TouristApp() {
 
   const browser = useBrowserLocation();
 
-  // No login/profile in the tourist UI — the visitor's location is purely the
-  // browser geolocation. Auto-request once on mount (same trigger condition
-  // useUserLocation used internally). request() is safe to call outside a user
-  // gesture; the browser shows its native permission prompt.
+  // No login or profile: the visitor's location is browser geolocation only,
+  // requested once on mount. The browser shows its own permission prompt.
   React.useEffect(() => {
     if (browser.isSupported && browser.status === 'idle') {
       void browser.request();

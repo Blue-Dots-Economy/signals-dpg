@@ -1,11 +1,13 @@
 /**
- * Per-item error thrown by a processOne callback. The runner converts it into
- * an error entry in the results array (does NOT abort the batch).
+ * Per-item error thrown by a processOne callback; recorded as that item's
+ * error result without aborting the batch.
  */
 export class BulkItemFailure extends Error {
   constructor(
     public readonly errorCode: string,
     message: string,
+    /** Per-field messages, keyed by dotted path, for a failed schema check. */
+    public readonly fields?: Record<string, string>,
     /** Extra fields merged into the item's error result. */
     public readonly details?: Record<string, string>,
   ) {
@@ -20,6 +22,7 @@ interface ErrorResult {
   status: 'error';
   error: string;
   message: string;
+  fields?: Record<string, string>;
 }
 export type BulkItemResult<T> = SuccessResult<T> | ErrorResult;
 
@@ -33,8 +36,8 @@ export interface BulkOutcome<T> {
 }
 
 /**
- * Run `processOne` over each element best-effort. Sequential by design (v1):
- * keeps DB partition creation and cross-instance fan-out predictable.
+ * Runs `processOne` over each element, best-effort and sequentially, which
+ * keeps partition creation and cross-instance fan-out predictable.
  */
 export async function runBulk<T extends object>(
   elements: unknown[],
@@ -68,7 +71,14 @@ export async function runBulk<T extends object>(
       succeeded += 1;
     } catch (err) {
       if (err instanceof BulkItemFailure) {
-        results.push({ ...err.details, index, status: 'error', error: err.errorCode, message: err.message });
+        results.push({
+          ...err.details,
+          index,
+          status: 'error',
+          error: err.errorCode,
+          message: err.message,
+          ...(err.fields && Object.keys(err.fields).length > 0 ? { fields: err.fields } : {}),
+        });
       } else {
         opts.onUnexpectedError?.(err, index);
         results.push({

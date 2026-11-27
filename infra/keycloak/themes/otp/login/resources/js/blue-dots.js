@@ -1,16 +1,12 @@
-/* Blue Dots — animated particle network for the Keycloak login hero panel.
- * Mirrors the canvas implementation in apps/web/src/app/(public)/login/LoginView.tsx
- * so the Next.js portal and Keycloak login share an identical visual.
+/* Blue Dots: animated particle network for the Keycloak login hero panel.
+ * Mirrors aggregator-dpg's apps/web login canvas so both share one visual.
  */
 (function () {
   'use strict';
 
-  // Palette pulled from CSS vars at boot so the canvas matches whatever
-  // brand the active deployment ships. Particle/link colors are mixed
-  // toward white before use — mirrors the aggregator web BrandPanel
-  // (`mix(primary, '#FFFFFF', 0.5)` for soft, `mix(accent, '#FFFFFF',
-  // 0.4)` for bright) so a deep brand primary (e.g. sienna #9c5b1f)
-  // still produces vivid dots against the dark hero gradient.
+  // Palette comes from the brand's CSS vars. Colors are mixed toward white
+  // (as the aggregator web BrandPanel does) so a deep brand primary still
+  // shows against the dark hero gradient.
   function parseHex(hex) {
     var m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
     if (m) {
@@ -47,8 +43,6 @@
     if (!ctx) return;
 
     var palette = readPalette();
-    // Mix toward white to brighten the particles against the dark
-    // hero gradient — matches the aggregator web BrandPanel exactly.
     var primaryRgb = mixToward(palette.primary, '#FFFFFF', 0.5);
     var brightRgb = mixToward(palette.accent, '#FFFFFF', 0.4);
     var lineRgb = mixToward(palette.accent, '#FFFFFF', 0.6);

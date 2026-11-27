@@ -95,3 +95,17 @@ describe('GeocodingSecretsSchema transient-retry (#405)', () => {
     expect(() => GeocodingSecretsSchema.parse({ GEO_RETRY_BACKOFF_MS: '-1' })).toThrow();
   });
 });
+
+describe('GeocodingSecretsSchema resolve endpoint', () => {
+  it('defaults to 1500ms / 5000 per day / signals-search-client', () => {
+    const parsed = GeocodingSecretsSchema.parse({});
+    expect(parsed.GEO_RESOLVE_TIMEOUT_MS).toBe(1500);
+    expect(parsed.GEO_RESOLVE_DAILY_CAP).toBe(5000);
+    expect(parsed.GEO_RESOLVE_CLIENT_IDS).toBe('signals-search-client');
+  });
+
+  it('rejects a non-positive timeout or cap', () => {
+    expect(() => GeocodingSecretsSchema.parse({ GEO_RESOLVE_TIMEOUT_MS: '0' })).toThrow();
+    expect(() => GeocodingSecretsSchema.parse({ GEO_RESOLVE_DAILY_CAP: '0' })).toThrow();
+  });
+});

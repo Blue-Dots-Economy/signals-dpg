@@ -24,11 +24,8 @@ import {
 import { fetchItemsAcrossInstances } from '@/utils/inter_instance_fetch';
 import { signalsSearchConfig } from '@/config';
 
-// Mirrors signals-search's own default `s_dwithin` radius (#394). Used ONLY
-// to REPORT the effective radius in `meta.distance_meters` when
-// SIGNALS_SEARCH_DISTANCE_METERS is unset and the request didn't override it
-// — we never send this value to signals-search ourselves in that case;
-// signals-search applies its own default when `distance_meters` is omitted.
+// Mirrors signals-search's default `s_dwithin` radius. Used only to report
+// `meta.distance_meters`; never sent, so signals-search applies its own default.
 const DEFAULT_SEARCH_DISTANCE_METERS = 30000;
 
 type DiscoverItemsRequest = FastifyRequest<{
@@ -36,70 +33,18 @@ type DiscoverItemsRequest = FastifyRequest<{
 }>;
 
 /**
- * Public `/network/item/discover` BFF (#203 List PR, P-follow-3 Task 2).
- * Mirrors `/network/item/fetch` in being unauthenticated (no `preHandler`) —
- * discovery of the masked public `item_state` needs no auth either way.
+ * Public `/network/item/discover` BFF: signals-search first, native fetch as
+ * fallback. Unauthenticated like `/network/item/fetch`; it returns only the
+ * masked public `item_state`.
  *
- * DIRECT MAP (revised — signals-search PR #87): signals-search's `/v1/search`
- * now returns the full item row per result, so each ranked result is mapped
- * straight to the DPG item response shape below — no local-DB hydrate/
- * re-read by id. signals-search's order is already the ranked order and is
- * preserved as-is. Live-only, single-instance is now signals-search's own
- * indexing invariant rather than something this BFF enforces via a lifecycle
- * filter.
- *
- * NATIVE FALLBACK (#394, revising #203 List PR Task 3): `searchSignals` throws
- * when signals-search is unconfigured (`SIGNALS_SEARCH_URL`/
- * `SIGNALS_SEARCH_API_KEY` unset), when the call times out (`AbortSignal.
- * timeout` in the client), or on any non-2xx/invalid response — all three
- * collapse to the same catch below. On catch, this BFF falls back to the
- * native `fetchItemsAcrossInstances` path (the same distance/recency-ordered,
- * live-only, paged fetch `/network/item/fetch` uses) so a search-service
- * outage degrades the list rather than 5xx-ing it. `q`/`filters` ARE now
- * applied on this native path too (#394) — the same value-match-on-public-
- * `item_state` (`text_search`) and facet (`item_state`) mechanisms the map's
- * `/markers` uses (see `resolveTextSearchFields`/`resolveAllowedFacetFilters`
- * in `facet_guard.ts`, applied by `buildWhereClause`) — so only relevance
- * RANKING is unavailable without signals-search. `meta.source:
- * 'native_fallback'`/`degraded: true` let the UI (Task 6) show the "basic
- * matches" note.
- *
- * PROFILE ANCHOR RELEVANCE (#394): `body.anchor_item_id` (the viewer's own
- * profile item) is forwarded to signals-search as `intent.item`. signals-
- * search returns an anchor error (`404 ANCHOR_NOT_FOUND` when the anchor isn't
- * indexed yet, or `403 INTERACTION_NOT_ALLOWED` when the anchor's domain has
- * no interaction with the browsed domain per the network's interaction matrix
- * — e.g. seeker→seeker) — neither is a search-service outage, so instead of
- * degrading to the native fallback, this retries `searchSignals` exactly once
- * with the anchor removed, still resolving as `source: 'signals_search'`,
- * `degraded: false`. The UI also avoids sending an anchor for non-interacting
- * domain pairs in the first place (schema-driven, see `home-page`); this
- * retry is the server-side safety net. Only a failure of THAT retry (or any
- * other non-anchor error) falls through to the native fallback.
- *
- * CONFIGURABLE SPATIAL RADIUS (#394): `SIGNALS_SEARCH_DISTANCE_METERS`
- * (optional env, `signalsSearchConfig.distanceMeters`) is forwarded to
- * signals-search as `distance_meters` whenever the request doesn't already
- * override it — omitted entirely (not sent) when unset, so signals-search's
- * own ~30km `s_dwithin` default applies. `meta.distance_meters` on every
- * return path reports the EFFECTIVE radius (request override > env >
- * `DEFAULT_SEARCH_DISTANCE_METERS`) so the UI's "within X km" note stays
- * accurate even when nothing was actually sent over the wire. Only present
- * when the request carried a location — a non-geo search has no radius to
- * report.
+ * Design: docs/architecture/http-discover.md
  */
 /**
- * Default and validate the requested order (#644, wire contract §5.2).
+ * Default and validate the requested order. Mirrors `resolveSort` in
+ * signals-search; the two services deploy independently, so it is not shared.
  *
- * Exported and pure so the decision table is testable without a route. Mirrors
- * `resolveSort` in signals-search rather than sharing a package with it: the
- * two services deploy independently, and the two layers legitimately know
- * different things (this one knows about `anchor_item_id`, the other about a
- * resolved query vector).
- *
- * Never errors. An order the request cannot have degrades to `newest`, and the
- * response reports what was actually applied — so the UI can label from what
- * happened rather than from what it asked for.
+ * Never errors: an order the request cannot have degrades to `newest`, and the
+ * response reports what was actually applied.
  */
 export function resolveDiscoverSort(input: {
   requested?: DiscoverSort;
@@ -116,27 +61,16 @@ export function resolveDiscoverSort(input: {
   }
   if (input.requested === 'newest') return 'newest';
 
-  // Unspecified: relevance whenever there is a QUERY VECTOR to rank against —
-  // an anchor or the text, exactly as the explicit branch above decides it.
-  //
-  // `hasQ` was missing here, and because `buildSearchInput` now always sends
-  // `sort`, this default OVERRODE signals-search's own inference: a
-  // pre-existing caller POSTing just `{ item_network, item_domain, item_type,
-  // q }` got date-ordered rows where it used to get cosine, and still paid for
-  // the embed. `sort` is a new field, so no existing non-UI caller sets it —
-  // they are all in this path.
+  // Unspecified: relevance whenever there is a query vector (anchor or text).
+  // `buildSearchInput` always sends `sort`, so this default overrides
+  // signals-search's own inference and must match it.
   return input.hasAnchor || input.hasQ ? 'relevance' : 'newest';
 }
 
 /**
- * The geo params the NATIVE fallback should receive (#644, contract §7).
- *
- * `buildDistanceOrderBy` keys off lat/lng ONLY, while `buildWhereClause` adds
- * a radius clause only when lat, lng AND radius_meters are all present. So
- * `nearest` sends coordinates with NO radius — distance-ordered and unbounded
- * — while every other sort sends them only when an area filter was actually
- * requested. Pure and separate from the handler so those three cases are
- * readable on their own.
+ * The geo params the native fallback should receive. `buildDistanceOrderBy`
+ * keys off lat/lng only, while `buildWhereClause` adds a radius clause only
+ * when lat, lng and radius_meters are all present.
  */
 function resolveNativeGeoFilters(input: {
   sortApplied: DiscoverSort;
@@ -165,11 +99,8 @@ function resolveNativeGeoFilters(input: {
 } {
   const { sortApplied, hasAreaFilter, effectiveDistanceMeters, body } = input;
 
-  // VIEWPORT: the native path has supported a bbox all along
-  // (`buildWhereClause`'s min_lat/min_lng/max_lat/max_lng), so this mode works
-  // even with signals-search down — which is every local run. The bbox
-  // filters; the order still comes from `sort`, and `nearest` inside a
-  // viewport uses the ordering centre the UI sends alongside it.
+  // Viewport: the bbox filters; `nearest` inside a viewport orders by the
+  // ordering centre the UI sends alongside it.
   if (body.min_lat !== undefined) {
     const nearestCentreGiven =
       sortApplied === 'nearest' &&
@@ -191,23 +122,10 @@ function resolveNativeGeoFilters(input: {
   }
 
   if (sortApplied === 'nearest') {
-    // Natively, `item_latitude`/`item_longitude` is BOTH the filter centre and
-    // the distance origin — `buildWhereClause` and `buildDistanceOrderBy` read
-    // the same pair. signals-search can separate them; the native path cannot.
-    //
-    // So when a RADIUS area was requested, the area's centre wins for both.
-    // Preferring the ordering centre here (the old `ordering_latitude ??`)
-    // moved the radius onto a different point, which quietly filtered a
-    // DIFFERENT CIRCLE than the signals-search path would for the same
-    // request — two result sets for one query, depending on whether the search
-    // service happened to be up. The user's explicit area filter is the thing
-    // that must not move; losing the separate distance origin is a documented
-    // native limitation, and the order stays truthful because the response
-    // still reports `nearest`.
-    //
-    // With no radius area there is nothing to filter, so the ordering centre
-    // is used for ordering alone and the set stays unbounded — which is the
-    // whole point of an ordering centre (#644).
+    // Natively one lat/lng pair is both the filter centre and the distance
+    // origin. With a radius area, the area's centre wins for both, so the
+    // native path filters the same circle signals-search would. With no
+    // radius, the ordering centre orders an unbounded set.
     const hasRadius = effectiveDistanceMeters !== undefined;
     return hasRadius
       ? {
@@ -227,23 +145,15 @@ function resolveNativeGeoFilters(input: {
       item_latitude: body.item_latitude,
       item_longitude: body.item_longitude,
       radius_meters: effectiveDistanceMeters,
-      // The area narrows the SET; it must not also choose the order. Leaving
-      // this to inference made `sort: 'newest'` + an area return
-      // distance-ordered rows, because the native ORDER BY keyed off the mere
-      // presence of coordinates (#644 P3, on the native path).
+      // The area narrows the set but must not choose the order: the native
+      // ORDER BY otherwise keys off the mere presence of coordinates.
       order_by: 'created_at',
     };
   }
   return { order_by: 'created_at' };
 }
 
-/**
- * The search-envelope input for one discover request (contract §5.1).
- *
- * Pure and separate from the handler so the three mutually-exclusive spatial
- * shapes — bbox, radius, neither — are readable side by side, and so the
- * handler is not carrying their branches.
- */
+/** The signals-search input for one discover request. */
 function buildSearchInput(input: {
   body: z.infer<typeof DiscoverItemsBodySchema>;
   filters: SignalsSearchFacetInput[];
@@ -267,12 +177,9 @@ function buildSearchInput(input: {
     ? {
         lat: body.item_latitude,
         lng: body.item_longitude,
-        // Sent radius, NOT `effectiveDistanceMeters`: when neither the request
-        // nor the env sets one we send nothing and let signals-search apply
-        // its own default, exactly as before. `effectiveDistanceMeters` folds
-        // in DEFAULT_SEARCH_DISTANCE_METERS for *reporting* only — sending it
-        // would hardcode our mirror of their default onto the wire and
-        // silently pin it if theirs moved.
+        // Not `effectiveDistanceMeters`: when neither request nor env sets a
+        // radius, nothing is sent and signals-search applies its own default.
+        // Sending our mirrored default would pin it if theirs changed.
         distanceMeters: body.distance_meters ?? signalsSearchConfig.distanceMeters,
       }
     : undefined;
@@ -319,11 +226,7 @@ function mapSignalsSearchItemToDiscoverItem(item: SignalsSearchItem) {
 type NativeFetchResult = Awaited<ReturnType<typeof fetchItemsAcrossInstances>>;
 type NativeItem = NativeFetchResult['items'][number];
 
-// Native fallback (Task 3): `fetchItemsAcrossInstances` already returns the
-// same DPG item response shape (`ItemResponseSchema`) the discover response
-// item extends, so this mapper is a narrow pass-through — no `score`/
-// `distanceMeters` since the native path does no ranking (nearest-first is
-// ordering only, not a comparable score).
+// No `score`/`distanceMeters`: the native path does no ranking.
 function mapNativeItemToDiscoverItem(item: NativeItem) {
   return {
     item_id: item.item_id,
@@ -369,12 +272,9 @@ const discover_items_handler = async (
   try {
     const networkConfig = await getNetworkConfigById(body.item_network);
 
-    // Validate item_type up-front (should-fix, PR #419 review): an unknown
-    // item_type otherwise throws inside resolveAllowedFacetFilters →
-    // getDomainItemSchema → the outer catch → a 500 that logs the client's
-    // request body at error level. Treat a bogus item_type as a 400 bad
-    // request, mirroring the served-domain guard's early return, and don't
-    // log client input at error for it.
+    // Validate item_type up front: an unknown one otherwise throws inside
+    // resolveAllowedFacetFilters and becomes a 500 that logs the client's body
+    // at error level.
     const domainConfig = networkConfig.domains.find(
       (entry) => entry.id === body.item_domain
     );
@@ -394,55 +294,33 @@ const discover_items_handler = async (
       body.filters ?? []
     );
 
-    // AREA FILTER, opt-in (#644). Present only when the client explicitly
-    // asked for `radius` mode. In the default `anywhere` mode all three area
-    // fields are absent, so no spatial clause is built and — critically — the
-    // SIGNALS_SEARCH_DISTANCE_METERS env fallback does NOT apply.
-    //
-    // This gate IS the #644 fix. Previously the UI forwarded the resolved
-    // viewer location on every list request and signals-search treats a
-    // spatial clause as a hard `s_dwithin` predicate, so every signed-in
-    // viewer silently saw only items within ~30 km with no way to widen it.
-    // Either area mode counts as "the caller asked to be bounded". `radius`
-    // sends a centre + distance; `viewport` sends a rectangle (contract §1.5).
+    // Area filter, opt-in: `radius` sends a centre (+ distance), `viewport` a
+    // rectangle. In the default `anywhere` mode no spatial clause is built and
+    // the SIGNALS_SEARCH_DISTANCE_METERS fallback does not apply, because
+    // signals-search treats any spatial clause as a hard `s_dwithin` predicate.
     const hasBbox = body.min_lat !== undefined;
-    // A radius centre. Declared before `hasAreaFilter` because the reported
-    // radius keys off THIS, not off "some area filter exists".
+    // The reported radius keys off this, not off "some area filter exists".
     const hasRadiusCenter =
       body.item_latitude !== undefined && body.item_longitude !== undefined;
     const hasAreaFilter = hasRadiusCenter || hasBbox;
 
-    // Effective reported radius (#394): only meaningful for a RADIUS filter.
-    // Precedence: the request's own override, then the configured env, then the
-    // documented constant that mirrors signals-search's own default — so the
-    // UI's "within X km" note is accurate whether or not
-    // SIGNALS_SEARCH_DISTANCE_METERS is set.
-    //
-    // Deliberately NOT `hasAreaFilter`: a VIEWPORT applies no radius, so
-    // reporting one is the same lie the ordering centre was split out to
-    // prevent. It was believed, too — `resolveListNote` shows its km note on
-    // `hasLocation && distanceMeters !== undefined` without consulting the area
-    // mode, so a viewer who zoomed to one street and hit "Search this area" was
-    // told "within 30 km of your profile location", and still 30 km after
-    // zooming out to a whole state.
+    // Effective reported radius, for a radius filter only: request override,
+    // then env, then the mirrored signals-search default. A viewport applies
+    // no radius, and the UI shows a "within X km" note whenever this is set.
     const effectiveDistanceMeters = hasRadiusCenter
       ? (body.distance_meters ??
         signalsSearchConfig.distanceMeters ??
         DEFAULT_SEARCH_DISTANCE_METERS)
       : undefined;
 
-    // ORDERING centre (#644): orders without filtering. Never contributes a
-    // spatial clause and never sets `meta.distance_meters`.
+    // Ordering centre: orders without filtering. Never contributes a spatial
+    // clause and never sets `meta.distance_meters`.
     const hasOrderingCenter =
       body.ordering_latitude !== undefined && body.ordering_longitude !== undefined;
 
-    // `nearest` needs a centre from somewhere. A RADIUS area's centre serves
-    // as one (`hasRadiusCenter` above; signals-search reuses it, contract §1.3
-    // rule 2) — a VIEWPORT does NOT: a bbox has no centre on the wire, and
-    // deriving one from the rectangle's midpoint would let "search this area"
-    // silently change the sort the user chose. So nearest-within-a-viewport
-    // requires the UI to send `ordering_latitude`/`ordering_longitude`
-    // alongside the bbox.
+    // `nearest` needs a centre. A radius area's centre serves as one; a
+    // viewport's midpoint does not, or "search this area" would change the
+    // chosen sort.
     const sortApplied = resolveDiscoverSort({
       requested: body.sort,
       hasAnchor: body.anchor_item_id !== undefined,
@@ -459,31 +337,11 @@ const discover_items_handler = async (
       hasOrderingCenter,
     });
 
-    // Native fallback (#394, revising Task 3): thrown for a request timeout, a
-    // non-2xx/invalid response, OR signals-search being unconfigured (the
-    // client throws for all three). A search-service outage must never surface
-    // as a 5xx, so this falls back to the native, distance/recency-ordered
-    // paged fetch `/network/item/fetch` uses — but now applying `q`/`filters`
-    // natively too (value-match on public item_state + declared, non-private
-    // facet fields; #394 dropped the `filterable` gate — see
-    // `resolveTextSearchFields`/`resolveAllowedFacetFilters` in `facet_guard.ts`,
-    // applied by `buildWhereClause`), the same mechanisms `/markers` uses. So
-    // only relevance RANKING is unavailable; `meta.source: 'native_fallback'`/
-    // `degraded: true` tell the UI to show the "basic matches" note.
-    //
-    // Radius honesty (#394 review fix): `radius_meters` below is
-    // `effectiveDistanceMeters`, NOT `body.distance_meters` — the UI never
-    // sends `distance_meters` (only lat/lng), so gating on the raw body field
-    // would silently skip the radius bound in `buildWhereClause` while
-    // `meta.distance_meters` still reported a radius as if it were applied.
-    // `effectiveDistanceMeters` is undefined exactly when no location was
-    // sent, matching `buildWhereClause`'s own radius-clause gate.
-    //
-    // Multi-instance limitation (single-instance is the target): the facet
-    // `item_state` filter forwards to peers (each re-guards it), but `q` does
-    // NOT (the peer `/fetch_local` body has no `q`), so on a federated network
-    // a text query filters only this instance's rows; peers contribute live,
-    // public, facet-filtered (but not text-filtered) rows. Documented follow-up.
+    // Native fallback for a timeout, a non-2xx/invalid response, or an
+    // unconfigured signals-search: an outage must never surface as a 5xx. `q`
+    // and facet filters still apply natively; only ranking is lost. `q` is not
+    // forwarded to peers, so on a federated network it filters only this
+    // instance's rows.
     const nativeGeoFilters = resolveNativeGeoFilters({
       sortApplied,
       hasAreaFilter,
@@ -503,12 +361,6 @@ const discover_items_handler = async (
           item_network: body.item_network,
           item_domain: body.item_domain,
           item_type: body.item_type,
-          // Native ordering (#644, contract §7). `buildDistanceOrderBy` keys
-          // off lat/lng ONLY, while `buildWhereClause` adds a radius clause
-          // only when lat, lng AND radius_meters are all present
-          // (item_fetch_runtime.ts:328-332). So `nearest` sends coordinates
-          // with NO radius — distance-ordered and unbounded — and `newest`
-          // sends none at all, falling through to created_at DESC.
           ...nativeGeoFilters,
           limit: body.limit,
           offset: body.offset,
@@ -542,15 +394,10 @@ const discover_items_handler = async (
           offset: nativeResult.meta.offset,
           source: 'native_fallback' as const,
           degraded: true,
-          // The native path has no anchor concept, so the anchor — if one was
-          // sent — did not survive. Text filtering DOES still apply here
-          // (`buildWhereClause` narrows on `q` unconditionally), but the
-          // caller cannot know that from `source` alone.
+          // The native path has no anchor concept; `q` still filters here.
           anchor_applied: false,
           distance_meters: effectiveDistanceMeters,
-          // The native path does no ranking, so a relevance request genuinely
-          // got recency. Report that rather than claiming an order we did not
-          // deliver.
+          // No native ranking: a relevance request got recency.
           sort_applied: sortApplied === 'relevance' ? ('newest' as const) : sortApplied,
         },
         items,
@@ -561,9 +408,8 @@ const discover_items_handler = async (
       const searchResult = await searchSignals(searchInput);
 
       if (searchResult.meta.sort_applied === undefined) {
-        // Otherwise INVISIBLE: a 200 with a missing field and no trace. Only
-        // reachable against a signals-search predating the explicit sort, so
-        // the message names the version skew rather than the symptom.
+        // Logged because it is otherwise invisible. Only a signals-search
+        // predating explicit sort omits the field.
         request.log.warn(
           {
             itemNetwork: body.item_network,
@@ -575,8 +421,7 @@ const discover_items_handler = async (
         );
       }
 
-      // signals-search's order is already the ranked order — mapped straight
-      // through, no local-DB hydrate/re-read by id (see module doc comment).
+      // signals-search's order is the ranked order; no local re-read by id.
       const items = searchResult.items.map(mapSignalsSearchItemToDiscoverItem);
 
       return reply.code(200).send({
@@ -590,29 +435,19 @@ const discover_items_handler = async (
           // Reached only when signals-search did NOT reject the anchor, so an
           // anchor that was sent was also used.
           anchor_applied: body.anchor_item_id !== undefined,
-          // signals-search is the authority on what it actually did, and
-          // absent means UNKNOWN — never our own guess. A version predating
-          // its sort support ignores `intent.sort` entirely rather than just
-          // omitting the field, so no resolution here could predict its order;
-          // claiming ours would put distance pills over a recency-ordered list
-          // for `nearest`, and a recency label over a cosine order for
-          // `newest` with an anchor. Left undefined, the UI shows no card
-          // metric and stops short of naming an order.
+          // signals-search is the authority; absent means unknown, never our
+          // guess. A version predating sort support ignores `intent.sort`, so
+          // its order cannot be predicted here, and the UI then names no order.
           sort_applied: searchResult.meta.sort_applied,
         },
         items,
       });
     } catch (searchErr) {
-      // Anchor relevance (#394): an anchor signals-search can't use is a
-      // client-input condition, not a search-service outage — retry ONCE
-      // without the anchor rather than degrading to the native fallback
-      // (which loses ranking). Two anchor cases: `404 ANCHOR_NOT_FOUND` (the
-      // anchor isn't indexed yet) and `403 INTERACTION_NOT_ALLOWED` (the
-      // anchor's domain has no interaction with the browsed domain per the
-      // network's interaction matrix — e.g. a seeker anchor browsing seekers;
-      // the UI already avoids sending the anchor for such pairs, this is the
-      // server-side safety net). Any other error (no anchor sent, or a real
-      // search failure) falls straight through to the native fallback below.
+      // An unusable anchor is a client-input condition, not an outage: retry
+      // once without it rather than losing ranking to the native fallback.
+      // `404 ANCHOR_NOT_FOUND` = not indexed yet; `403 INTERACTION_NOT_ALLOWED`
+      // = the network's interaction matrix has no edge between the anchor's
+      // domain and the browsed one. Any other error falls through to native.
       const isRecoverableAnchorError =
         body.anchor_item_id !== undefined &&
         searchErr instanceof SignalsSearchError &&
@@ -622,11 +457,8 @@ const discover_items_handler = async (
           searchErr.code === 'INTERACTION_NOT_ALLOWED');
 
       if (isRecoverableAnchorError) {
-        // Logged because this path is otherwise INVISIBLE: it returns 200 with
-        // `source: 'signals_search'` and `degraded: false`, so the only
-        // outward sign is `sort_applied` coming back as something other than
-        // the requested `relevance`. On the test cluster that surfaced purely
-        // as "the sort control looks broken", with nothing to grep for.
+        // Logged because the retry is otherwise invisible: it returns 200,
+        // `degraded: false`, and only `sort_applied` differs.
         request.log.warn(
           {
             err: searchErr,
@@ -655,20 +487,9 @@ const discover_items_handler = async (
               source: 'signals_search' as const,
               degraded: false,
               distance_meters: effectiveDistanceMeters,
-              // The whole reason this field exists. An anchor was sent,
-              // signals-search rejected it, and this retry dropped it — which
-              // since §4 also stops `q` from filtering. Saying so is the only
-              // way the caller can tell this page apart from a narrowed one.
+              // The only way the caller can tell the anchor was dropped.
               anchor_applied: false,
-              // Same rule as the primary path: absent means UNKNOWN.
-              //
-              // This used to re-resolve without the anchor, which is the right
-              // instinct — `sortApplied` was resolved WITH one, so it may say
-              // `relevance` when the retry has no query vector left to rank
-              // by. But a re-resolution is still OUR answer, and a
-              // signals-search old enough to omit this field never read
-              // `intent.sort` at all, so its order cannot be predicted from
-              // here either. Left undefined instead of guessed.
+              // Same rule as the primary path: absent means unknown.
               sort_applied: retryResult.meta.sort_applied,
             },
             items,

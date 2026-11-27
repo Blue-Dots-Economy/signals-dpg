@@ -15,9 +15,8 @@ import {
 } from '@dpg/config';
 
 export function loadEnv() {
-  // Before any schema parse: `dual` was removed from AUTH_PROVIDER, and Zod's
-  // enum error would say only "Invalid input" without telling an operator what
-  // to switch to or that a user migration is now a prerequisite.
+  // Before any schema parse, so an unsupported AUTH_PROVIDER gets an
+  // actionable error instead of Zod's bare "Invalid input".
   assertAuthProviderSupported(process.env.AUTH_PROVIDER);
 
   const instance = InstanceSecretsSchema.parse(process.env);

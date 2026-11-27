@@ -1,13 +1,7 @@
 /**
- * The login-time terms/privacy gate, in one place.
- *
- * Four call sites used to carry their own copy of "fetch the config, merge the
- * brand override, diff the accepted versions against the current ones, build
- * the acceptance body": the OTP login, the Keycloak panel, the OIDC callback,
- * and `use-consent-gate`. Every copy read `config.documents` unconditionally,
- * so a known minor was shown the ADULT terms and had the acceptance recorded
- * against the adult version (#626) — one bug, replicated four times, which is
- * exactly what a fifth copy would do next. The logic lives here now.
+ * The login-time terms/privacy gate, shared by every caller (OTP login,
+ * Keycloak panel, OIDC callback, `use-consent-gate`) so the U18 document
+ * variant is applied consistently.
  *
  * @module lib/consent-gate
  */
@@ -22,12 +16,9 @@ export type GateCategory = 'terms' | 'privacy';
 export const GATE_CATEGORIES = ['terms', 'privacy'] as const satisfies readonly GateCategory[];
 
 /**
- * The terms/privacy pair that applies to `variant`.
- *
- * Falls back to the adult set when the brand ships no `u18_documents`. That
- * fallback is load-bearing, not defensive: most networks configure no U18 set
- * at all, and gating a minor against documents that do not exist would leave
- * them unable to satisfy the gate — locked out of login rather than protected.
+ * The terms/privacy pair that applies to `variant`. Falls back to the adult set
+ * when the brand ships no `u18_documents`: most networks configure none, and
+ * gating a minor against documents that do not exist would lock them out.
  */
 export function consentDocumentSet(
   config: ConsentConfigDocument,
@@ -48,10 +39,8 @@ export function currentGateVersions(
 }
 
 /**
- * Which gate documents this user still owes.
- *
- * Compared against the version set of `variant`, so a minor who accepted the
- * U18 terms is not re-prompted with the adult ones and vice versa.
+ * Which gate documents this user still owes, compared against `variant`'s
+ * versions so a minor who accepted the U18 terms is not re-prompted with the adult ones.
  */
 export function outstandingGateCategories(
   config: ConsentConfigDocument,
@@ -71,13 +60,9 @@ export interface OutstandingConsent {
 }
 
 /**
- * Builds the gate state from an already-fetched status + merged config, or
- * returns null when nothing is outstanding.
- *
- * Deliberately synchronous and side-effect free: each caller fetches on its own
- * terms (authenticated status vs. pre-login by-identifier) and keeps its own
- * error handling, which differs between them — the OTP login surfaces a toast,
- * the OIDC callback fails open.
+ * Builds the gate state from an already-fetched status and merged config, or
+ * returns null when nothing is outstanding. Synchronous and side-effect free:
+ * each caller fetches and handles errors its own way.
  */
 export function buildOutstandingConsent(args: {
   config: ConsentConfigDocument;

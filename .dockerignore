@@ -14,10 +14,15 @@ coverage
 tsconfig.tsbuildinfo
 v10
 
-# Local environment files
-.env
-.env.*
-!.env.example
+# Local environment files. `**/` because .dockerignore patterns are anchored
+# to the context root: a bare `.env` misses apps/ui/.env, which Vite then
+# reads at build time and bakes into the bundle.
+**/.env
+**/.env.*
+!**/.env.example
+# Gitignored local stand-in for the chart's runtime config. Baked into the
+# image it overrides VITE_NETWORK_NAME and pins the UI to the wrong network.
+apps/ui/public/config.js
 .DS_Store
 
 # Editor / tooling

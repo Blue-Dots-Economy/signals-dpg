@@ -5,18 +5,11 @@ import { resolveNetworkBrandName, resolveNotifierConfig } from './notify_actions
 import { resolveOwnerEmail } from './resolve_owner';
 
 /**
- * Fire-and-forget notifier for the retire → counterparty email (#418).
+ * Sends the `retire.cancel` email to each counterparty whose open connection
+ * `cancelItemConnections` ended. Call after the retire transaction commits.
  *
- * Called from the lifecycle route AFTER the retire transaction commits, with
- * the counterparties whose open connections `cancelItemConnections` ended. For
- * each, resolves the (local) owner email and sends one branded email using the
- * dedicated `retire.cancel` email case. Reuses the action-notifier config,
- * brand resolution, owner-email lookup, and the central email sender.
- *
- * Never throws and never blocks the route (mirrors `dispatchActionNotifications`).
- * No-op when notifications aren't configured. A counterparty with no local user
- * (owner-less, or hosted on another instance) resolves to no email and is
- * skipped — this is the v1 "local counterparties only" rule.
+ * Never throws. No-op when notifications are not configured. Counterparties
+ * with no local user (owner-less or on another instance) are skipped.
  *
  * @param brandNetwork the retired item's network id, for the brand sign-off.
  */
@@ -44,9 +37,8 @@ export async function dispatchRetireCancelNotifications(
       const email = await resolveOwnerEmail(cp.ownerUserId);
       if (!email) continue;
 
-      // `dispatch_email` renders `args.ctaUrl ?? ''` into the shell, so an
-      // unresolved URL ships an `<a href="">` whose button does nothing —
-      // guard the same dead-`href` case as the action dispatcher (#569).
+      // Links to the counterparty's own portal; without a URL the CTA would be
+      // `<a href="">`, so skip.
       const ctaUrl = config.resolveCtaUrl(cp.domain);
       if (!ctaUrl) {
         log.warn(
@@ -61,8 +53,6 @@ export async function dispatchRetireCancelNotifications(
         to: email,
         fromName: brandName,
         network: cp.network,
-        // The counterparty's own domain — this mail goes to THEM, so it links
-        // to their portal, not the retiring owner's (#569).
         ctaUrl,
         dedupeId: `retire_cancel:${cp.actionId}:${cp.ownerUserId}`,
         log: (message, meta) => log.warn(meta ?? {}, message),

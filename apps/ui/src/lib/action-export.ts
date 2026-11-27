@@ -1,10 +1,9 @@
 import { createApiClient } from './api-client';
 
 /**
- * Client side of the engagement bulk export (#771): groups a My Actions
- * selection by counterparty type, calls `POST /api/v1/action/export`, and
- * saves the returned Excel file. The server applies every rule (eligibility, reveal
- * gate, skips); this only shapes the request and reports the outcome.
+ * Client side of the engagement bulk export: groups a My Actions selection by
+ * counterparty type, calls `POST /api/v1/action/export`, and saves the returned
+ * Excel file. The server applies every rule (eligibility, reveal gate, skips).
  */
 
 const apiClient = createApiClient();

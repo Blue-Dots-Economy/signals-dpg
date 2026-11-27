@@ -11,12 +11,7 @@ import { getAvailableLanguages } from '@/i18n';
 import { cn } from '@/lib/utils';
 
 interface LanguageSwitcherProps {
-  /**
-   * When true, hide the current-language label on small screens (icon only),
-   * showing it again at sm+. Lets tight mobile toolbars (e.g. the tourist app
-   * bar) keep everything on one line. Defaults to false → label always shown
-   * (signals behaviour unchanged).
-   */
+  /** Icon-only below sm, for tight mobile toolbars. */
   compact?: boolean;
 }
 

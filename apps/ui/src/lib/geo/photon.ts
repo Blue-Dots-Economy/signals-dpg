@@ -17,7 +17,7 @@ interface PhotonFeature {
   };
 }
 
-/** Feature types too coarse to stand in for an address (#788). */
+/** Feature types too coarse to stand in for an address. */
 const COARSE_TYPES = new Set(['country', 'state']);
 
 /**
@@ -55,9 +55,9 @@ export function parsePhotonFeatures(json: unknown): GeoSuggestion[] {
 }
 
 /**
- * `country` (ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions to that
- * country (#788): sent as Photon's `countrycode` param and re-checked on every
- * feature, since an older Photon server answers worldwide regardless.
+ * `country` (ISO 3166-1 alpha-2, e.g. `IN`) restricts suggestions: sent as
+ * Photon's `countrycode` and re-checked on every feature, since an older
+ * Photon server answers worldwide regardless.
  */
 export function createPhotonProvider(baseUrl = DEFAULT_PHOTON_URL, country?: string): GeoProvider {
   return {

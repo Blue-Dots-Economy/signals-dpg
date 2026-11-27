@@ -52,7 +52,7 @@ describe('UpsertParticipantRequest — identity refine', () => {
 });
 
 describe('UpsertParticipantRequest — phone_number must be E.164', () => {
-  it.each(['+911234567890', '+1234567890', '+123456789012345'])('accepts %s', (phone_number) => {
+  it.each(['+919876543210', '+1234567890', '+123456789012345'])('accepts %s', (phone_number) => {
     expect(UpsertParticipantRequest.safeParse({ ...base, phone_number }).success).toBe(true);
   });
 
@@ -62,13 +62,21 @@ describe('UpsertParticipantRequest — phone_number must be E.164', () => {
     ['too long', '+1234567890123456'],
     ['spaces', '+91 98765 43210'],
     ['letters', '+91abcdefghij'],
+    ['+91 and 7 digits', '+919876543'],
   ])('rejects a phone_number with %s', (_label, phone_number) => {
     const result = UpsertParticipantRequest.safeParse({ ...base, phone_number });
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues[0].message).toBe('must be E.164 (e.g. +911234567890)');
+      expect(result.error.issues[0].message).toBe(
+        'must be E.164: + and 10-15 digits (e.g. +919876543210)',
+      );
     }
+  });
+
+  it('leaves the per-country check (e.g. a +91 landline) to the handler', () => {
+    const stored = { ...base, phone_number: '+911234567890' };
+    expect(UpsertParticipantRequest.safeParse(stored).success).toBe(true);
   });
 });
 
@@ -598,5 +606,38 @@ describe('GetParticipantResponse', () => {
 
   it('rejects a missing compliance array entirely', () => {
     expect(GetParticipantResponse.safeParse({ user_id: 'usr_1', items: [] }).success).toBe(false);
+  });
+});
+
+describe('GetParticipantRequest — lifecycle_status filter', () => {
+  const parse = (lifecycle_status?: string) =>
+    GetParticipantRequest.safeParse({ email: 'a@b.co', lifecycle_status });
+
+  it('is optional', () => {
+    expect(parse().success).toBe(true);
+  });
+
+  it.each(['live', 'draft', 'paused', 'live,draft', 'live,draft,paused'])('accepts %s', (v) => {
+    expect(parse(v).success).toBe(true);
+  });
+
+  it.each(['retired', 'live,retired', 'active', 'live,', ' live', ''])('rejects %j', (v) => {
+    expect(parse(v).success).toBe(false);
+  });
+});
+
+describe('GetParticipantRequest — limit', () => {
+  const parse = (limit?: string) => GetParticipantRequest.safeParse({ email: 'a@b.co', limit });
+
+  it('is optional', () => {
+    expect(parse().success).toBe(true);
+  });
+
+  it.each(['1', '20', '100', '1000'])('accepts %s', (v) => {
+    expect(parse(v).success).toBe(true);
+  });
+
+  it.each(['0', '1001', '-5', '2.5', 'abc'])('rejects %s', (v) => {
+    expect(parse(v).success).toBe(false);
   });
 });

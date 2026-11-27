@@ -1,14 +1,15 @@
 import z from '@dpg/schemas';
 import { type FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
+import { MobilePhoneField } from '@/services/phone';
 import { selfSignup } from '@/services/auth/self_signup';
 
 const SignupBody = z.object({
   name: z.string().min(1).max(200),
   email: z.email().optional(),
-  phoneNumber: z.string().min(1).optional(),
+  phoneNumber: MobilePhoneField.optional(),
   /** Network domain to join. Validated against served domains server-side. */
   domain: z.string().min(1).optional(),
-  /** Age in years, derived from the birth year on the client (#331). Drives U18 gating once applied. */
+  /** Age in years, derived from the birth year on the client. Drives U18 gating once applied. */
   age: z.coerce.number().int().min(0).max(120).optional(),
 });
 

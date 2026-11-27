@@ -4,11 +4,10 @@ import type { DotNetworkSchema } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
 
 /**
- * Locate a single item by id for the edit form. The item's domain is unknown
- * up front, so we probe the network's domains in order and return the first
- * match. Returns `null` when the search finishes with no match (distinct from
- * `undefined` = not loaded), so the caller can redirect on a genuine miss.
- * Own-data tier: 60 s staleTime.
+ * Finds one item by id for the edit form. Its domain is unknown, so the
+ * network's domains are probed in order. Resolves to `null` on a genuine miss
+ * (distinct from `undefined`, not loaded) so the caller can redirect.
+ * Own-data tier: 60s staleTime.
  */
 export function useEditItem(network: DotNetworkSchema | null, itemId: string | null) {
   return useQuery({

@@ -34,17 +34,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "Dhiway",
+  "author": "Blue Dots Economy",
   "license": "MIT",
   "engines": {
     "node": ">=24"
   },
   "packageManager": "pnpm@11.1.2",
   "devDependencies": {
-    "@types/node": "^26.6.3",
-    "tsup": "^8.5.1",
+    "@types/node": "^26.6.5",
+    "tsup": "^9.0.0",
     "tsx": "^4.23.15",
-    "turbo": "^2.11.5",
+    "turbo": "^2.11.10",
     "typescript": "^7.0.2"
   }
 }

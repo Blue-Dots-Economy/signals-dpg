@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
+import { updaterConfigMessage } from './updater-config-message';
 import { useQueryClient } from '@tanstack/react-query';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
@@ -18,7 +19,6 @@ import { useNetworkConfig } from '@/hooks/use-network-config';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 
-// Desktop: Dialog
 import {
   Dialog,
   DialogContent,
@@ -27,7 +27,6 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 
-// Mobile: Drawer
 import {
   Drawer,
   DrawerContent,
@@ -35,6 +34,7 @@ import {
 
 import { useUpdateActionStatus, actionKeys } from '@/hooks/use-actions';
 import { toast } from 'sonner';
+import { apiErrorMessage } from '@/lib/api-error';
 
 interface ActionStatusUpdaterProps {
   action: Action | null;
@@ -62,11 +62,11 @@ export function ActionStatusUpdater({
     cancelled: t('actions.toast_status_cancelled_title'),
   };
 
-  // Minor-ward guardian OTP: an update-status that returns GUARDIAN_OTP_REQUIRED
-  // is stashed and replayed with the guardian's code (see useGuardianOtpGate).
+  // An update that returns GUARDIAN_OTP_REQUIRED is stashed and replayed with
+  // the guardian's code.
   const gate = useGuardianOtpGate<UpdateActionStatusPayload>(async (payload, otp) => {
     await updateActionStatus(payload, otp);
-    queryClient.invalidateQueries({ queryKey: actionKeys.all });
+    void queryClient.invalidateQueries({ queryKey: actionKeys.all });
     toast.success(successTitleByStatus[payload.action_status] ?? t('actions.toast_status_accepted_title'), {
       description: t('actions.toast_updated_desc'),
     });
@@ -80,7 +80,6 @@ export function ActionStatusUpdater({
     cancelled: t('actions.status_label_cancelled'),
   };
 
-  // Friendly subtitles per resolved status — drives the colored header band.
   const STATUS_SUBTITLES: Record<string, string> = {
     accepted: t('actions.status_subtitle_accepted'),
     rejected: t('actions.status_subtitle_rejected'),
@@ -91,18 +90,21 @@ export function ActionStatusUpdater({
   const targetStatus = suggestedStatus ?? '';
   const [consentChecked, setConsentChecked] = React.useState(false);
   const [remarks, setRemarks] = React.useState('');
+  const [attempted, setAttempted] = React.useState(false);
 
   React.useEffect(() => {
     if (open) {
       setConsentChecked(false);
       setRemarks('');
+      setAttempted(false);
       gate.setChallenge(null);
     }
   }, [open]);
 
-  // Resolve the interaction from the network config so consent fields are
-  // always available without prop drilling from the action list.
-  const { data: networkConfig } = useNetworkConfig(action?.target_item_network ?? null);
+  // Resolved from the network config, so consent fields need no prop drilling.
+  const { data: networkConfig, isError: networkConfigFailed } = useNetworkConfig(
+    action?.target_item_network ?? null,
+  );
 
   const interaction = React.useMemo(() => {
     if (!networkConfig || !action) return null;
@@ -126,9 +128,9 @@ export function ActionStatusUpdater({
     );
   }, [networkConfig, action]);
 
-  // Reset form state when the resolved interaction changes mid-session
-  // (e.g. networkConfig finishes loading after the modal opened) so a stale
-  // consentChecked from the pre-load render can't bypass a freshly-required gate.
+  // Reset when the resolved interaction changes (e.g. the network config loads
+  // after opening), so a stale consentChecked cannot bypass a newly required
+  // consent.
   React.useEffect(() => {
     setConsentChecked(false);
     setRemarks('');
@@ -139,7 +141,6 @@ export function ActionStatusUpdater({
 
   if (!action) return null;
 
-  // Determine whether consent is required for this status transition.
   const revealStatuses = interaction?.reveals_pii_on_status ?? [];
   const requiresConsent = revealStatuses.includes(targetStatus);
   const acceptDoc = config?.actions?.[action.action_type]?.accept;
@@ -152,6 +153,15 @@ export function ActionStatusUpdater({
   );
 
   const handleSubmit = () => {
+    setAttempted(true);
+    // Without the config we cannot tell whether consent is required; the
+    // message under the buttons says so.
+    // Only accepting needs the network config: it says whether consent is asked.
+    if (!networkConfig && targetStatus === 'accepted') return;
+    if (requiresConsent && !consentChecked) {
+      document.getElementById('consent-acknowledge')?.focus();
+      return;
+    }
     if (!targetStatus) {
       toast.error(t('actions.toast_no_status_title'), {
         description: t('actions.toast_no_status_desc'),
@@ -183,13 +193,11 @@ export function ActionStatusUpdater({
         onOpenChange(false);
       },
       onError: (error: Error) => {
-        // A minor ward: the accept/reject/etc. requires guardian confirmation.
-        // Stash the exact payload and open the OTP challenge instead of the
-        // generic error toast — adults never see a GUARDIAN_OTP_* code here.
-        // The form hides while the challenge is open; closing it here would
-        // clear the parent's action and unmount the OTP dialog with it.
+        // A minor ward needs guardian confirmation: open the OTP challenge
+        // instead of an error toast. The form hides while the challenge is
+        // open; closing it here would unmount the OTP dialog with it.
         if (gate.captureIfGuardianRequired(error, payload)) return;
-        toast.error(t('actions.toast_update_failed', { message: error.message }));
+        toast.error(t('actions.toast_update_failed', { message: apiErrorMessage(error, t) }));
       },
     });
   };
@@ -201,6 +209,11 @@ export function ActionStatusUpdater({
           text={consentText}
           checked={consentChecked}
           onCheckedChange={setConsentChecked}
+          error={
+            attempted && !consentChecked
+              ? t('actions.consent_required_error', 'Tick the box to agree before you confirm.')
+              : undefined
+          }
         />
       ) : (
         <div className="space-y-2">
@@ -216,8 +229,7 @@ export function ActionStatusUpdater({
     </div>
   );
 
-  // Drive the header band from the target status — falls back to the action
-  // type when nothing's chosen yet (the typical "first paint").
+  // Header band from the target status, else the action type.
   const headerKey = targetStatus || action.action_type || 'connect';
   const display = getActionDisplay(headerKey);
   const actionLabel = statusLabels[targetStatus] ?? display.label;
@@ -234,18 +246,32 @@ export function ActionStatusUpdater({
     />
   );
 
+  const configMessage = updaterConfigMessage(
+    attempted && targetStatus === 'accepted',
+    Boolean(networkConfig),
+    networkConfigFailed,
+    t,
+  );
+
   const footer = (
-    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-      <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-        {t('common.cancel')}
-      </Button>
-      <Button
-        onClick={handleSubmit}
-        disabled={isPending || !networkConfig || (requiresConsent && !consentChecked)}
-        className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
-      >
-        {isPending ? t('actions.btn_updating') : t('actions.btn_submit')}
-      </Button>
+    <div className="space-y-2">
+      {configMessage && (
+        <p role="alert" className="text-sm text-destructive sm:text-right">
+          {configMessage}
+        </p>
+      )}
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
+          {t('common.cancel')}
+        </Button>
+        <Button
+          onClick={handleSubmit}
+          disabled={isPending}
+          className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
+        >
+          {isPending ? t('actions.btn_updating') : t('actions.btn_submit')}
+        </Button>
+      </div>
     </div>
   );
 

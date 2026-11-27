@@ -11,7 +11,7 @@ const LifecycleEnum = z.enum(['draft', 'live', 'paused', 'retired']);
  * domain       — narrows the response to one of org.metadata.domains.
  * status       — filter item rows by profile_status.
  * lifecycle    — comma-separated lifecycle_status values; default 'live,draft'.
- * q            — free-text search (accepted, not yet wired).
+ * q            — accepted but currently ignored.
  * refresh      — force recompute, bypass TTL, blocking advisory lock.
  */
 export const DashboardRequestQuery = z.object({
@@ -32,7 +32,7 @@ export const ItemRollup = z.object({
   has_applications: z.number(),
   by_status: z.record(StatusEnum, z.number()),
 
-  // directional action rollups (replace the former blended by_action_status)
+  // directional action rollups
   by_initiated_action_status: z.record(BucketEnum, z.number()),
   by_received_action_status: z.record(BucketEnum, z.number()),
 
@@ -45,13 +45,12 @@ export const ItemRollup = z.object({
 
 /**
  * One item row — one row per profile. `profile_item_id` is the required
- * per-row key (a user with N profiles is N rows, so `user_id` is not unique
- * per row). `user_id` is an optional passthrough for traceability / future
- * profile→user drill-in; no aggregator compute depends on it.
+ * per-row key (a user with N profiles is N rows). `user_id` is an optional
+ * passthrough for traceability; no aggregator compute depends on it.
  *
  * `initiated` / `received` are full count maps (every bucket present).
- * `last_initiated_at` / `last_received_at` are SPARSE — only buckets that
- * actually occurred carry a timestamp; absent buckets are omitted (no nulls).
+ * `last_initiated_at` / `last_received_at` are sparse: buckets that never
+ * occurred are omitted, not null.
  */
 export const ItemRow = z.object({
   profile_item_id: z.string(),

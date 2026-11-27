@@ -116,7 +116,7 @@ export function MyActionsToolbar({
   refreshing,
 }: Readonly<MyActionsToolbarProps>) {
   const { t } = useTranslation();
-  const isMobile = useIsMobile(); // phones get cards — no columns to pick
+  const isMobile = useIsMobile(); // phones get cards, so no column picker
   const [q, setQ] = React.useState(filter.q);
   React.useEffect(() => setQ(filter.q), [filter.q]);
 

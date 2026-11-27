@@ -153,6 +153,20 @@ describe('<ConsentGateBody />', () => {
     expect(onAccept).not.toHaveBeenCalled();
   });
 
+  it('says what is missing when the CTA is pressed early, instead of doing nothing silently', () => {
+    const onAccept = vi.fn();
+    render(<ConsentGateBody docs={docs} onAccept={onAccept} />);
+    fireEvent.scroll(stubScroller(0));
+    fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+    expect(document.getElementById('consent-scroll-hint')).toHaveClass('text-destructive');
+
+    fireEvent.scroll(stubScroller(400));
+    fireEvent.click(screen.getByRole('button', { name: /accept/i }));
+    expect(onAccept).not.toHaveBeenCalled();
+    expect(screen.getByText('Tick the box to agree before you continue.')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-invalid', 'true');
+  });
+
   it('cannot be ticked by clicking the locked checkbox before reading', () => {
     render(<ConsentGateBody docs={docs} onAccept={vi.fn()} />);
     fireEvent.scroll(stubScroller(0));

@@ -76,6 +76,7 @@ vi.mock('@/config', () => ({
     middleware_enabled: false,
     url: 'http://source.local/api/auth',
     create_test_otp: false,
+    phone_countries: ['IN'],
   },
   getCurrentApiBaseUrl: () => 'http://source.local',
   instance: { INSTANCE_NAME: 'test', INSTANCE_ENV: 'development' },
@@ -192,6 +193,8 @@ vi.mock('@/lib/profile_item', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   updateItemInternal: vi.fn(async (..._a: unknown[]) => {
     if (state.updateItemFail) throw state.updateItemFail;
     return {
@@ -208,13 +211,14 @@ vi.mock('@/services/item_service', () => ({
 vi.mock('@/services/participant_consent', () => ({
   recordParticipantConsent: vi.fn(async (..._a: unknown[]) => {
     if (state.consentFail) throw state.consentFail;
-    return { recorded: state.consentRecorded, promoted: false };
+    return { recorded: state.consentRecorded, promoted: false, blockedByLiveLimit: false };
   }),
   // Returns the keys of the drafts it promoted (#557) — the route publishes one
-  // item event per key, so this must be an array, not void.
-  promoteEligibleDraftsForUser: vi.fn(
-    async (_tx: unknown, _userId: string) => [] as Array<Record<string, string>>,
-  ),
+  // item event per key, so `promoted` must be an array, not void.
+  promoteEligibleDraftsForUser: vi.fn(async (_tx: unknown, _userId: string) => ({
+    promoted: [] as Array<{ item_network: string; item_domain: string; item_type: string; item_id: string }>,
+    blockedItemIds: [] as string[],
+  })),
 }));
 
 vi.mock('@/utils/publish_item_event', () => {
@@ -683,6 +687,52 @@ describe('POST /admin/participant — write/failure paths', () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toBe('MISSING_IDENTIFIER');
+    expect(state.txCalls).toBe(0);
+  });
+
+  it('existing user stored with a landline-range number is still found and updated', async () => {
+    state.userRows = [{ ...EXISTING_USER, email: null, phoneNumber: '+918020123456' }];
+
+    const res = await run({ body: { phone_number: '+918020123456', age: 24 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user_id).toBe(EXISTING_USER.id);
+  });
+
+  it('existing user from a country no longer listed is still found and updated', async () => {
+    state.userRows = [{ ...EXISTING_USER, email: null, phoneNumber: '+447400123456' }];
+
+    const res = await run({ body: { phone_number: '+447400123456', age: 24 } });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.user_id).toBe(EXISTING_USER.id);
+  });
+
+  it('new user with a landline-range number → 400 INVALID_PHONE and nothing written', async () => {
+    const res = await run({ body: { phone_number: '+918020123456', item_state: { x: 1 } } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
+    expect(state.txCalls).toBe(0);
+    expect(state.userInserts).toHaveLength(0);
+  });
+
+  it('new user from a country not listed → 400 INVALID_PHONE and nothing written', async () => {
+    const res = await run({ body: { phone_number: '+447400123456', item_state: { x: 1 } } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
+    expect(state.txCalls).toBe(0);
+    expect(state.userInserts).toHaveLength(0);
+  });
+
+  it('a number that is not valid anywhere → 400 INVALID_PHONE before the lookup', async () => {
+    state.userRows = [{ ...EXISTING_USER }];
+
+    const res = await run({ body: { phone_number: '+9112345', age: 24 } });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('INVALID_PHONE');
     expect(state.txCalls).toBe(0);
   });
 

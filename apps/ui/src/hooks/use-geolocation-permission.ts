@@ -1,16 +1,11 @@
 import * as React from 'react';
 
 /**
- * Tracks the browser's geolocation PERMISSION state via the Permissions API.
- *
- * The geolocation error code is PERMISSION_DENIED for both a real "block" and a
- * merely-dismissed prompt, so it can't distinguish them. The Permissions API
- * can: it reports 'denied' only on a real block and stays 'prompt' when
- * dismissed. Use 'denied' to decide when re-prompting is futile (hide the
- * "Enable location" button and point the user to browser settings instead).
- *
- * Returns 'unknown' when the Permissions API is unavailable (SSR / older
- * browsers) — callers should treat 'unknown' as "not known to be blocked".
+ * Tracks the browser's geolocation permission via the Permissions API. The
+ * geolocation error is PERMISSION_DENIED for both a block and a dismissed
+ * prompt; the Permissions API reports 'denied' only for a block, which is when
+ * re-prompting is futile. Returns 'unknown' when the API is unavailable; treat
+ * that as "not known to be blocked".
  */
 export function useGeolocationPermission(): PermissionState | 'unknown' {
   const [state, setState] = React.useState<PermissionState | 'unknown'>('unknown');

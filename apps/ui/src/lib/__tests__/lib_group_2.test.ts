@@ -285,24 +285,24 @@ describe('fetchNetworkMarkers', () => {
   });
 });
 
-describe('fetchNetworkConfigs / fetchNetworkConfig', () => {
-  it('returns only the network_config schemas, dropping item/consent schema entries', async () => {
+describe('fetchSchemaEntries / networkConfigsIn / fetchNetworkConfig', () => {
+  it('fetches every entry unfiltered, and networkConfigsIn keeps only the network_config schemas', async () => {
     const { mod, get } = await loadNetworkApi();
     const blueDot = { id: 'blue_dot', domains: [] };
     const yellowDot = { id: 'yellow_dot', domains: [] };
-    get.mockResolvedValue({
-      data: [
-        { cache_key: 'a', kind: 'domain_item_schema', schema: { id: 'not-a-network' } },
-        { cache_key: 'b', kind: 'network_config', schema: blueDot },
-        { cache_key: 'c', kind: 'consent_config', schema: { id: 'consent' } },
-        { cache_key: 'd', kind: 'network_config', schema: yellowDot },
-      ],
-    });
+    const data = [
+      { cache_key: 'a', kind: 'domain_item_schema', network: 'blue_dot', schema: { id: 'not-a-network' } },
+      { cache_key: 'b', kind: 'network_config', network: 'blue_dot', schema: blueDot },
+      { cache_key: 'c', kind: 'consent_config', network: 'blue_dot', schema: { id: 'consent' } },
+      { cache_key: 'd', kind: 'network_config', network: 'yellow_dot', schema: yellowDot },
+    ];
+    get.mockResolvedValue({ data });
 
-    const configs = await mod.fetchNetworkConfigs();
+    const entries = await mod.fetchSchemaEntries();
 
-    expect(get.mock.calls[0][0]).toBe('/api/v1/network/schemas');
-    expect(configs).toEqual([blueDot, yellowDot]);
+    expect(get.mock.calls[0]).toEqual(['/api/v1/network/schemas']);
+    expect(entries).toEqual(data);
+    expect(mod.networkConfigsIn(entries)).toEqual([blueDot, yellowDot]);
   });
 
   it('fetches one network by id, passing it as the `network` query param', async () => {
@@ -311,7 +311,7 @@ describe('fetchNetworkConfigs / fetchNetworkConfig', () => {
     get.mockResolvedValue({
       data: [
         { cache_key: 'x', kind: 'item_schema_url', schema: { id: 'other' } },
-        { cache_key: 'y', kind: 'network_config', schema: blueDot },
+        { cache_key: 'y', kind: 'network_config', network: 'blue_dot', schema: blueDot },
       ],
     });
 

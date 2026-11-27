@@ -21,11 +21,6 @@ vi.mock('@/lib/match-score-api', async () => {
   );
   return { ...actual, calculateMatchScore: vi.fn() };
 });
-vi.mock('@/engine/wallet/wallet-registry', () => ({
-  getRegisteredWalletProviders: vi.fn(),
-  getConfiguredWalletProviders: vi.fn(),
-  getWalletProvider: vi.fn(),
-}));
 vi.mock('@/lib/consent-api', () => ({
   submitU18Dob: vi.fn(),
   submitGuardian: vi.fn(),
@@ -41,26 +36,14 @@ vi.mock('@/hooks/use-consent-config', () => ({
 import { useAuth } from '@/contexts/auth-context';
 import { usePendingActionsCount } from '@/hooks/use-actions';
 import { calculateMatchScore } from '@/lib/match-score-api';
-import {
-  getConfiguredWalletProviders,
-  getRegisteredWalletProviders,
-  getWalletProvider,
-} from '@/engine/wallet/wallet-registry';
 import { submitGuardian } from '@/lib/consent-api';
 import type { User } from '@/lib/auth-api';
 import type { Item } from '@/lib/item-api';
 import type { MapMarker } from '@/engine/types';
-import type {
-  WalletImportContext,
-  WalletImportProviderProps,
-  WalletImportResult,
-  WalletProvider,
-} from '@/engine/wallet/types';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { UserMenu } from '@/components/auth/user-menu';
 import { MarkerPopupCard, getPrecisionInfo } from '@/components/map/marker-popup-card';
 import { MatchScoreCard } from '@/components/match-score/match-score-card';
-import { WalletImportModal } from '@/components/wallet/wallet-import-modal';
 import { U18GuardianFlow } from '@/components/consent/u18/u18-guardian-flow';
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
@@ -611,237 +594,6 @@ describe('MatchScoreCard modal hand-off', () => {
     expect(
       await screen.findByText('Comparing Your Profile with Target Profile'),
     ).toBeInTheDocument();
-  });
-});
-
-// ── WalletImportModal (provider picker) ────────────────────────────────────
-
-const walletContext: WalletImportContext = {
-  user: { email: 'ada@example.com', phoneNumber: null, name: 'Ada Lovelace' },
-  networkId: 'blue_dot',
-  domainId: 'student',
-  schema: { type: 'object', properties: { full_name: { type: 'string' } } },
-  formData: {},
-};
-
-const importedResult: WalletImportResult = {
-  data: { full_name: 'Ada Lovelace' },
-  providerName: 'demo_wallet',
-  providerLabel: 'Demo Wallet',
-  summary: 'Imported 1 verified field',
-};
-
-/** A stand-in provider whose component exposes the success/cancel edges. */
-function fakeProvider(overrides: Partial<WalletProvider> = {}): WalletProvider {
-  const Component = ({ context, onSuccess, onCancel }: WalletImportProviderProps) => (
-    <div>
-      <p>Signed in as {context.user.name}</p>
-      <button type="button" onClick={() => onSuccess(importedResult)}>
-        Finish import
-      </button>
-      <button type="button" onClick={onCancel}>
-        Abort import
-      </button>
-    </div>
-  );
-  return {
-    name: 'demo_wallet',
-    label: 'Demo Wallet',
-    description: 'Import verified credentials from the demo wallet.',
-    component: Component,
-    isConfigured: () => true,
-    ...overrides,
-  };
-}
-
-/** Point the mocked registry at exactly these providers. */
-function installProviders(providers: WalletProvider[]) {
-  vi.mocked(getRegisteredWalletProviders).mockReturnValue(providers);
-  vi.mocked(getConfiguredWalletProviders).mockReturnValue(
-    providers.filter((p) => p.isConfigured()),
-  );
-  vi.mocked(getWalletProvider).mockImplementation((name: string) =>
-    providers.find((p) => p.name === name),
-  );
-}
-
-describe('WalletImportModal', () => {
-  it('says so when the build registered no wallet providers at all', () => {
-    installProviders([]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    expect(screen.getByText('No wallet providers are registered.')).toBeInTheDocument();
-    expect(
-      screen.getByText('Configure at least one provider before importing credentials.'),
-    ).toBeInTheDocument();
-  });
-
-  it('lists each provider and only enables the ones that are configured', () => {
-    installProviders([
-      fakeProvider(),
-      fakeProvider({
-        name: 'unconfigured_hinted',
-        label: 'Hinted Wallet',
-        isConfigured: () => false,
-        getConfigurationHint: () => 'Set VITE_HINTED_WALLET_URL to enable this provider.',
-      }),
-      fakeProvider({
-        name: 'unconfigured_bare',
-        label: 'Bare Wallet',
-        isConfigured: () => false,
-      }),
-    ]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Use Demo Wallet' })).toBeEnabled();
-    expect(screen.getByText('Ready to import.')).toBeInTheDocument();
-
-    // An unconfigured provider is listed but not usable, and explains itself —
-    // its own hint when it has one, a generic line when it doesn't.
-    expect(screen.getByRole('button', { name: 'Use Hinted Wallet' })).toBeDisabled();
-    expect(
-      screen.getByText('Set VITE_HINTED_WALLET_URL to enable this provider.'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Use Bare Wallet' })).toBeDisabled();
-    expect(screen.getByText('Provider is not configured.')).toBeInTheDocument();
-
-    // At least one provider IS configured, so the "configure one" nudge is gone.
-    expect(
-      screen.queryByText('Configure at least one provider before importing credentials.'),
-    ).toBeNull();
-  });
-
-  it('nudges to configure a provider even when one is registered but unusable', () => {
-    installProviders([fakeProvider({ isConfigured: () => false })]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    expect(screen.queryByText('No wallet providers are registered.')).toBeNull();
-    expect(
-      screen.getByText('Configure at least one provider before importing credentials.'),
-    ).toBeInTheDocument();
-  });
-
-  it('swaps the list for the chosen provider UI, and Back returns to the list', async () => {
-    const user = userEvent.setup();
-    installProviders([fakeProvider()]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Use Demo Wallet' }));
-
-    // The provider's own flow takes over, and receives the import context.
-    expect(screen.getByText('Signed in as Ada Lovelace')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Use Demo Wallet' })).toBeNull();
-
-    await user.click(screen.getByRole('button', { name: /back to providers/i }));
-
-    expect(screen.getByRole('button', { name: 'Use Demo Wallet' })).toBeInTheDocument();
-    expect(screen.queryByText('Signed in as Ada Lovelace')).toBeNull();
-  });
-
-  it('hands a completed import up to the caller and closes itself', async () => {
-    const user = userEvent.setup();
-    const onImported = vi.fn((_result: WalletImportResult) => {});
-    const onOpenChange = vi.fn((_open: boolean) => {});
-    installProviders([fakeProvider()]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={onOpenChange}
-        context={walletContext}
-        onImported={onImported}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Use Demo Wallet' }));
-    await user.click(screen.getByRole('button', { name: 'Finish import' }));
-
-    expect(onImported).toHaveBeenCalledWith(importedResult);
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
-  it('closes without importing anything when the provider flow is cancelled', async () => {
-    const user = userEvent.setup();
-    const onImported = vi.fn((_result: WalletImportResult) => {});
-    const onOpenChange = vi.fn((_open: boolean) => {});
-    installProviders([fakeProvider()]);
-    render(
-      <WalletImportModal
-        open
-        onOpenChange={onOpenChange}
-        context={walletContext}
-        onImported={onImported}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Use Demo Wallet' }));
-    await user.click(screen.getByRole('button', { name: 'Abort import' }));
-
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-    expect(onImported).not.toHaveBeenCalled();
-  });
-
-  it('forgets the chosen provider once closed, so it reopens on the picker', async () => {
-    const user = userEvent.setup();
-    installProviders([fakeProvider()]);
-    const { rerender } = render(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Use Demo Wallet' }));
-    expect(screen.getByText('Signed in as Ada Lovelace')).toBeInTheDocument();
-
-    rerender(
-      <WalletImportModal
-        open={false}
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-    rerender(
-      <WalletImportModal
-        open
-        onOpenChange={() => {}}
-        context={walletContext}
-        onImported={() => {}}
-      />,
-    );
-
-    expect(screen.getByRole('button', { name: 'Use Demo Wallet' })).toBeInTheDocument();
-    expect(screen.queryByText('Signed in as Ada Lovelace')).toBeNull();
   });
 });
 

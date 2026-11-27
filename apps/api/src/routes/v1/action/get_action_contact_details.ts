@@ -96,11 +96,9 @@ export const get_action_contact_details_handler = async (
     });
   }
 
-  // Fetch the masked (public) view of the counterparty first. It always exists
-  // locally and carries lifecycle_status; private state is only decrypted later
-  // (a second fetch) once we know a reveal is allowed. Retired items are
-  // included here (the owner-list exclusion is opt-in) so we can message the
-  // counterparty rather than 404/500.
+  // Masked view of the counterparty first; private state is decrypted only
+  // once a reveal is allowed. Retired items are included so the response can
+  // say "retired" rather than 404/500.
   const maskedResult = await fetchLocalItems({
     item_id: other.id,
     item_network: other.network,
@@ -126,10 +124,9 @@ export const get_action_contact_details_handler = async (
     updated_at: item.updated_at instanceof Date ? item.updated_at : new Date(item.updated_at as string),
   });
 
-  // Counterparty retired their profile (#347): PII is wiped and the connection
-  // was cancelled. Short-circuit to a clear "retired" state (masked public
-  // view, revealed:false) instead of the PII_NOT_REVEALED / error path — this
-  // must run BEFORE the reveal-status gate, since the action is now cancelled.
+  // Counterparty retired: PII is wiped and the connection cancelled. Answer a
+  // "retired" state (masked view, revealed:false); must run before the
+  // reveal-status gate, since the action is now cancelled.
   if (maskedItem.lifecycle_status === 'retired') {
     reply.header('Cache-Control', 'no-store');
     return reply.code(200).send({
@@ -192,10 +189,8 @@ export const get_action_contact_details_handler = async (
   const callerLive = callerSnapshot ? callerSnapshot.lifecycle_status === 'live' : true;
 
   const revealAllowed = callerLive && maskedItem.lifecycle_status === 'live';
-  // Why the reveal is blocked, so the client can say whose profile is the
-  // reason: `self` = the viewer's own profile isn't live (resume it to see
-  // details); `other` = the counterparty's profile isn't live. Self takes
-  // precedence — it's the one the viewer can act on.
+  // Whose profile blocks the reveal: `self` (the viewer's own is not live)
+  // takes precedence over `other`, since it is the one the viewer can act on.
   const revealBlockedReason: 'self' | 'other' | undefined = revealAllowed
     ? undefined
     : !callerLive

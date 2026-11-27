@@ -8,20 +8,13 @@ export type CardMetric =
   | null;
 
 /**
- * The card metric IS the ranking basis (#646 C1).
+ * The card metric is the ranking basis: it shows whatever drove the item's
+ * position and nothing when the metric did not determine the order, so the
+ * list's order and each card's number always agree.
  *
- * Users conflated the list's ORDER with the number on each card. They look
- * like they should agree, and under an explicit sort they visibly would not —
- * an item would be ordered by one quantity (distance, or date) and badged with
- * another (cosine similarity), permanently and on every card.
- *
- * So the metric shown is always whatever drove the position, and it is NEVER
- * shown when it did not determine the order.
- *
- * Keyed off the sort the SERVER applied, never the requested one: a
+ * Keyed off the sort the server applied, never the requested one: a
  * `relevance` request with neither an anchor nor typed text degrades to
- * `newest` server-side, and reading the request would badge a percentage onto
- * a date-ordered list.
+ * `newest` server-side.
  */
 export function resolveCardMetric(input: {
   sortApplied: BrowseSort | undefined;
@@ -29,9 +22,8 @@ export function resolveCardMetric(input: {
   distanceMeters?: number | null;
   createdAt?: Date | null;
   /**
-   * `VITE_FREETEXT_MATCH_SCORE_ENABLED` — kept as a real per-deployment
-   * product choice (spec D15): does this instance show a score for free-text
-   * matches, or only for profile matches?
+   * `VITE_FREETEXT_MATCH_SCORE_ENABLED`: whether this deployment shows a score
+   * for free-text matches, or only for profile matches.
    */
   freeTextScoreEnabled: boolean;
   hasProfile: boolean;
@@ -39,8 +31,8 @@ export function resolveCardMetric(input: {
   switch (input.sortApplied) {
     case 'relevance': {
       if (input.score == null) return null;
-      // With no profile the score is typed-text↔item, not profile↔item — a
-      // different quantity, which some deployments choose not to surface.
+      // Without a profile the score is typed-text↔item, a different quantity
+      // some deployments choose not to surface.
       if (!input.hasProfile && !input.freeTextScoreEnabled) return null;
       return { kind: 'relevance', percent: input.score };
     }
@@ -51,8 +43,7 @@ export function resolveCardMetric(input: {
     case 'newest':
       return input.createdAt == null ? null : { kind: 'age', createdAt: input.createdAt };
     default:
-      // No reported sort (e.g. before the first response) — show nothing
-      // rather than guess at a basis.
+      // No reported sort (e.g. before the first response): do not guess.
       return null;
   }
 }
@@ -75,10 +66,9 @@ export function formatCardMetric(metric: CardMetric, t: TFunction): string | nul
 }
 
 /**
- * The full basis sentence — for the pill tooltip and the explanation panel,
- * NOT the pill itself. The pill stays icon-only (spec D22) because the sticky
- * toolbar states the basis once; repeating it on twenty cards would add
- * nothing and would not survive translation into the footer's shared space.
+ * The full basis sentence, for the pill tooltip and the explanation panel.
+ * The pill itself stays icon-only because the sticky toolbar states the basis
+ * once.
  */
 export function describeCardMetric(
   metric: CardMetric,

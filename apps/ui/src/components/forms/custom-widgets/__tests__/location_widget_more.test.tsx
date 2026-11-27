@@ -338,6 +338,7 @@ function renderWidget(
     id: 'root_location',
     value: '',
     onChange,
+    onBlur: vi.fn(),
     schema: {},
     options: { isPrimaryLocation: true },
     label: 'Location',

@@ -8,7 +8,7 @@ vi.mock('@/config', () => ({
   geocodingConfig: { cache_ttl_seconds: 2592000, cache_negative_ttl_seconds: 3600 },
 }));
 
-import { normalizeGeoKey, buildGeoCacheKey, getCachedCoordinates } from '../geo_cache.js';
+import { normalizeGeoKey, buildPlaceCacheKey, getCachedPlace } from '../geo_cache.js';
 
 describe('normalizeGeoKey', () => {
   it('lowercases, trims, and collapses internal whitespace', () => {
@@ -20,64 +20,67 @@ describe('normalizeGeoKey', () => {
   });
 });
 
-describe('buildGeoCacheKey', () => {
-  it('prefixes the normalized query with geo:place:', () => {
-    expect(buildGeoCacheKey(' Noida ')).toBe('geo:place:noida');
+describe('buildPlaceCacheKey', () => {
+  it('prefixes the normalized query with geo:place:v2:', () => {
+    expect(buildPlaceCacheKey(' Noida ')).toBe('geo:place:v2:noida');
   });
-  it('scopes the key by country when geocoding is restricted (#785)', () => {
-    expect(buildGeoCacheKey(' Noida ', 'IN')).toBe('geo:place:IN:noida');
+  it('scopes the key by country when geocoding is restricted', () => {
+    expect(buildPlaceCacheKey(' Noida ', 'IN')).toBe('geo:place:v2:IN:noida');
   });
 });
 
-describe('getCachedCoordinates', () => {
+const place = { point: { lat: 1, lng: 2 }, label: 'Noida', precision: 'city' as const };
+
+describe('getCachedPlace', () => {
   beforeEach(() => { get.mockReset(); set.mockReset(); });
 
-  it('returns cached coords on a positive hit without calling the loader', async () => {
-    get.mockResolvedValueOnce(JSON.stringify({ lat: 12.97, lng: 77.59 }));
+  it('returns the cached place on a positive hit without calling the loader', async () => {
+    get.mockResolvedValueOnce(JSON.stringify(place));
     const loader = vi.fn();
-    const result = await getCachedCoordinates('Bengaluru', loader);
-    expect(result).toEqual({ lat: 12.97, lng: 77.59 });
+    const result = await getCachedPlace('Noida', loader);
+    expect(result).toEqual({ kind: 'found', place });
     expect(loader).not.toHaveBeenCalled();
     expect(set).not.toHaveBeenCalled();
   });
 
-  it('returns null on a cached negative sentinel without calling the loader', async () => {
+  it('returns not_found on a cached negative sentinel without calling the loader', async () => {
     get.mockResolvedValueOnce('__no_result__');
     const loader = vi.fn();
-    const result = await getCachedCoordinates('Nowhere', loader);
-    expect(result).toBeNull();
+    const result = await getCachedPlace('Nowhere', loader);
+    expect(result).toEqual({ kind: 'not_found' });
     expect(loader).not.toHaveBeenCalled();
   });
 
-  it('on a miss, calls the loader and stores a positive result with the long TTL', async () => {
+  it('on a miss, calls the loader and stores a found place with the long TTL', async () => {
     get.mockResolvedValueOnce(null);
-    const loader = vi.fn().mockResolvedValue({ lat: 1, lng: 2 });
-    const result = await getCachedCoordinates('Noida', loader);
-    expect(result).toEqual({ lat: 1, lng: 2 });
+    const loader = vi.fn().mockResolvedValue({ kind: 'found', place });
+    const result = await getCachedPlace('Noida', loader);
+    expect(result).toEqual({ kind: 'found', place });
     expect(loader).toHaveBeenCalledTimes(1);
-    expect(set).toHaveBeenCalledWith('geo:place:noida', JSON.stringify({ lat: 1, lng: 2 }), 'EX', 2592000);
+    expect(set).toHaveBeenCalledWith('geo:place:v2:noida', JSON.stringify(place), 'EX', 2592000);
   });
 
-  it('on a miss that resolves to null, stores the sentinel with the negative TTL', async () => {
+  it('on a miss that is not_found, stores the sentinel with the negative TTL', async () => {
     get.mockResolvedValueOnce(null);
-    const loader = vi.fn().mockResolvedValue(null);
-    const result = await getCachedCoordinates('Gibberish', loader);
-    expect(result).toBeNull();
-    expect(set).toHaveBeenCalledWith('geo:place:gibberish', '__no_result__', 'EX', 3600);
+    const loader = vi.fn().mockResolvedValue({ kind: 'not_found' });
+    const result = await getCachedPlace('Gibberish', loader);
+    expect(result).toEqual({ kind: 'not_found' });
+    expect(set).toHaveBeenCalledWith('geo:place:v2:gibberish', '__no_result__', 'EX', 3600);
+  });
+
+  it('does not cache an unavailable result', async () => {
+    get.mockResolvedValueOnce(null);
+    const loader = vi.fn().mockResolvedValue({ kind: 'unavailable', reason: 'timeout' });
+    const result = await getCachedPlace('Noida', loader);
+    expect(result).toEqual({ kind: 'unavailable', reason: 'timeout' });
+    expect(set).not.toHaveBeenCalled();
   });
 
   it('falls through to the loader when Redis get throws', async () => {
     get.mockRejectedValueOnce(new Error('redis down'));
-    const loader = vi.fn().mockResolvedValue({ lat: 3, lng: 4 });
-    const result = await getCachedCoordinates('Delhi', loader);
-    expect(result).toEqual({ lat: 3, lng: 4 });
-    expect(loader).toHaveBeenCalledTimes(1);
-  });
-
-  it('returns null without throwing when Redis get throws AND the loader throws', async () => {
-    get.mockRejectedValueOnce(new Error('redis down'));
-    const loader = vi.fn().mockRejectedValue(new Error('provider 500'));
-    await expect(getCachedCoordinates('Delhi', loader)).resolves.toBeNull();
+    const loader = vi.fn().mockResolvedValue({ kind: 'found', place });
+    const result = await getCachedPlace('Delhi', loader);
+    expect(result).toEqual({ kind: 'found', place });
     expect(loader).toHaveBeenCalledTimes(1);
   });
 });

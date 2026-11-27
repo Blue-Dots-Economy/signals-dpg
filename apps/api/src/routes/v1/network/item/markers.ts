@@ -14,6 +14,7 @@ import { getNetworkConfigById } from '@/network_configs';
 import { fetchMarkersAcrossInstances } from '@/utils/inter_instance_fetch';
 import { peer_instance_guard } from '@/middleware/peer_instance_guard';
 import { resolveTextSearchFields } from '@/utils/facet_guard';
+import { apiConfig } from '@/config';
 
 type FetchMarkersAggregateRequest = FastifyRequest<{
   Querystring: z.infer<typeof MarkersQuerySchema>;
@@ -121,7 +122,7 @@ const fetch_network_markers_handler = async (
         min_lng,
         max_lat,
         max_lng,
-        limit,
+        limit: Math.min(limit, apiConfig.markers_max_limit),
         offset,
         lifecycle_filter: 'live_only',
         text_search: q
@@ -162,11 +163,9 @@ const fetch_local_markers_handler = async (
   }
 
   try {
-    // The peer body carries only the raw `q` (#394) — never a resolved field
-    // allowlist (see MarkersSchemaBase's doc comment). This instance resolves
-    // its OWN non-private field set from its OWN network config rather than
-    // trusting anything the requesting peer computed, mirroring every other
-    // item_state guard in this file/module.
+    // The peer body carries only the raw `q`, never a field allowlist; this
+    // instance resolves its own non-private field set from its own network
+    // config rather than trusting the requesting peer.
     let textSearchFields: string[] = [];
     if (body.q) {
       const networkConfig = await getNetworkConfigById(body.item_network);
@@ -181,6 +180,7 @@ const fetch_local_markers_handler = async (
       await fetchLocalMarkers(
         {
           ...body,
+          limit: Math.min(body.limit, apiConfig.markers_max_limit),
           lifecycle_filter: 'live_only',
           text_search: body.q ? { q: body.q, fields: textSearchFields } : undefined,
         },

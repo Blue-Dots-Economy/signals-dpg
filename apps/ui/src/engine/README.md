@@ -27,6 +27,6 @@ Two `$ref`-resolution functions exist in `schema/resolve-schema.ts` and **both a
 
 Both share the same underlying cache (`schema-loader.ts`'s `getCachedSchema`/`setCachedSchema`, keyed by ref string) and the same `resolveJsonPointer`/`extractSchema`/`mergeAllOf` utilities exported from this module's `index.ts`.
 
-## Map / wallet "registries" — a different mechanism, don't conflate
+## Map "registry" — a different mechanism, don't conflate
 
-`map/map-registry.ts` and `wallet/wallet-registry.ts` are **not** schema-driven — they're small runtime provider registries (`Map<string, Component>`) selected by name (`getRuntimeEnv('VITE_MAP_PROVIDER')`, defaulting to `leaflet`; similarly for wallet providers like Dhiway/DigiLocker). A network's schema never dictates which map/wallet provider renders — that's a deployment-level choice (env var), while everything else in this directory is schema-level. If you're adding a new provider, register it via `registerMapProvider`/similar — don't try to route the choice through `network.json`.
+`map/map-registry.ts` is **not** schema-driven — it's a small runtime provider registry (`Map<string, Component>`) selected by name (`getRuntimeEnv('VITE_MAP_PROVIDER')`, defaulting to `leaflet`). A network's schema never dictates which map provider renders — that's a deployment-level choice (env var), while everything else in this directory is schema-level. If you're adding a new provider, register it via `registerMapProvider`/similar — don't try to route the choice through `network.json`.

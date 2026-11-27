@@ -7,25 +7,16 @@ import type { LoadedSmsTemplatesFile } from '@dpg/config';
 import { loadSmsTemplateIndex, type SmsTemplateIndex } from './sms_templates';
 
 /**
- * Boot-time loader for the SMS template registry (#595 Phase 2) — the SMS
- * counterpart of `email/messages.ts`, deliberately not the same code.
+ * Loader for the SMS template registry. Layers: bundled defaults <
+ * `SMS_MESSAGES_PATH` < network `sms.properties` < brand `sms.properties`.
  *
- * Layering mirrors the copy files: bundled defaults < `SMS_MESSAGES_PATH` <
- * network `sms.properties` < brand `sms.properties`. Everything above the file
- * discovery differs, though. `loadSmsTemplateIndex` merges per key into
- * `{ templateId, body, vars }` and treats a BLANK `template_id` as meaningful —
- * it is the "not DLT-approved yet" signal that makes `dispatchSms` skip the
- * send. The email merge discards empty values, which would arm every
- * unapproved template.
- *
- * Failure policy differs too. Email is critical path, so a defect in its
- * bundled file throws at boot. SMS is best-effort end to end, so every failure
- * here degrades to "fewer templates configured" — which just means more sends
- * are skipped. An SMS problem must never stop the API from starting.
+ * Separate from `email/messages.ts` because a blank `template_id` is
+ * meaningful here ("not DLT-approved yet", so `dispatchSms` skips), whereas the
+ * email merge discards empty values. SMS is best-effort, so every load failure
+ * degrades to fewer templates and never stops the API from starting.
  */
 
-// Resolves next to this module: apps/api/src in dev (tsx/vitest), dist/ in the
-// tsup bundle — tsup's onSuccess copies the file there (see tsup.config.ts).
+// Resolves next to this module: src/ in dev, dist/ in the bundle (copied by tsup.config.ts).
 const DEFAULTS_URL = new URL('./sms.default.properties', import.meta.url);
 
 let templatesPromise: Promise<SmsTemplateIndex> | null = null;
@@ -43,12 +34,7 @@ async function readOverrideText(): Promise<string | null> {
   }
 }
 
-/**
- * The layered SMS template index, loaded once per process.
- *
- * Layer order is the contract: `loadSmsTemplateIndex` applies layers left to
- * right and later layers win, so defaults come first and the brand file last.
- */
+/** The layered SMS template index, loaded once per process. Later layers win. */
 export function getSmsTemplates(): Promise<SmsTemplateIndex> {
   if (templatesPromise) return templatesPromise;
 
@@ -65,16 +51,13 @@ export function getSmsTemplates(): Promise<SmsTemplateIndex> {
         networks,
       });
     } catch (err) {
-      // Mirrors the copy loader: a bad network/brand file must never take SMS
-      // down any more than a bad SMS_MESSAGES_PATH does.
+      // A bad network/brand file must not take SMS down.
       console.warn(
         `sms templates: cannot read network/brand template files (${String(err)}) — using bundled/instance templates only`,
       );
     }
 
-    // Network layer before brand layer. The loader already returns them in
-    // that order; sorting makes this independent of that, because getting it
-    // backwards would silently prefer the network file over the brand's.
+    // Network layer before brand layer, so the brand file wins.
     const ordered = [...files].sort(
       (a, b) => Number(a.brand !== null) - Number(b.brand !== null),
     );
@@ -85,9 +68,7 @@ export function getSmsTemplates(): Promise<SmsTemplateIndex> {
       ...ordered.map((f) => f.text),
     ]);
 
-    // Make the inert state legible in deploy logs: "0 with a template_id" is
-    // the expected reading until DLT registration lands, and the number going
-    // UP is how an operator confirms a newly-approved id actually shipped.
+    // Lets operators confirm in deploy logs that a newly-approved template id shipped.
     const configured = [...index.values()].filter((t) => t.templateId).length;
     console.info(
       `sms templates: ${index.size} cases loaded from ${ordered.length + (overrideText ? 1 : 0) + 1} layer(s), ` +
@@ -96,9 +77,7 @@ export function getSmsTemplates(): Promise<SmsTemplateIndex> {
 
     return index;
   })().catch((err: unknown) => {
-    // Never latch a rejection — the next call retries — and never throw past
-    // here: SMS is best-effort, so an unreadable bundled file means "no
-    // templates configured", not "the API does not start".
+    // Do not cache the failure (the next call retries) and do not throw: SMS is best-effort.
     templatesPromise = null;
     console.warn(`sms templates: load failed (${String(err)}) — no templates configured`);
     return new Map() as SmsTemplateIndex;

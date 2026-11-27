@@ -45,6 +45,8 @@ vi.mock('@api/db/postgres/drizzle_config', () => ({
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   isItemOwnedBy: (...a: any[]) => isItemOwnedBy(...a),
   promoteItemOnProfileConsent: (...a: any[]) => promoteItemOnProfileConsent(...a),
 }));
@@ -105,7 +107,7 @@ beforeEach(() => {
   isItemOwnedBy.mockResolvedValue(true);
   hasAcceptedTermsAndPrivacy.mockResolvedValue(true);
   resolveConsentVersion.mockResolvedValue(3);
-  promoteItemOnProfileConsent.mockResolvedValue(true);
+  promoteItemOnProfileConsent.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
 });
 
 describe('accept_profile_consent — search indexing after promotion (#557)', () => {
@@ -128,10 +130,20 @@ describe('accept_profile_consent — search indexing after promotion (#557)', ()
     );
   });
 
+  it('records consent and carries the live-limit message when the limit kept it in draft', async () => {
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, blockedByLiveLimit: true });
+
+    const reply = await call();
+
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ recorded: 1, message: 'LIVE_LIMIT_DRAFT' });
+    expect(publishItemEvent).not.toHaveBeenCalled();
+  });
+
   it('does not publish when consent recorded but the item was not promoted', async () => {
     // An incomplete profile, or a minor still awaiting guardian consent: nothing
     // about the indexed row changed, so there is nothing to tell search about.
-    promoteItemOnProfileConsent.mockResolvedValue(false);
+    promoteItemOnProfileConsent.mockResolvedValue({ promoted: false, blockedByLiveLimit: false });
 
     await call();
 

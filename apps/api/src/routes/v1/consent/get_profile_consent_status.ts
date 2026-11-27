@@ -43,10 +43,9 @@ export const get_profile_consent_status_handler = async (
   const { network } = request.query;
 
   try {
-    // For a MINOR, profile_creation consent must be GUARDIAN-given (D13). The
-    // self row `create_item` writes at create time (source='profile') does NOT
-    // satisfy it, so the client keeps prompting until the guardian confirms via
-    // OTP (which writes source='guardian'). Adults: any profile_creation row.
+    // For a minor, profile_creation consent must be guardian-given
+    // (source='guardian'); the self row create_item writes (source='profile')
+    // does not satisfy it. Adults: any profile_creation row.
     const age = await getWardAge(userId);
     const isMinorWard = age !== null && isMinor(age);
 

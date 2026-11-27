@@ -10,13 +10,12 @@ import {
 } from '@/support/attachments';
 
 /**
- * `GET /api/v1/support/config` (#551) — what the support form is allowed to
- * submit on this instance.
+ * `GET /api/v1/support/config`: what the support form may submit on this
+ * instance.
  *
- * The limits live here rather than in a `VITE_` variable so there is one source
- * of truth: a UI-side copy would drift from the API and show up as the server
- * rejecting a file the form had accepted. `enabled` also lets the UI hide the
- * entry point instead of submitting blind and surfacing a 503.
+ * Served by the API rather than a `VITE_` variable so the form's limits cannot
+ * drift from the server's. `enabled` lets the UI hide the entry point instead
+ * of surfacing a 503.
  *
  * The `/support` group has no group-level auth hook, so this route sets its own
  * `preHandler` — see `apps/api/CLAUDE.md`, "Route auth wiring".

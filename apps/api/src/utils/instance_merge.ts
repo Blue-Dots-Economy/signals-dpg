@@ -1,7 +1,5 @@
-// Pure cross-instance merge core for scatter-gather top-K (#203 §4.4).
-// Each domain instance returns its own top rows; this merges the union on
-// the requesting (Node) instance and slices the requested page. No DB, no
-// Fastify, no side effects.
+// Pure cross-instance merge for scatter-gather top-K: merges the union of
+// each instance's top rows and slices the requested page.
 
 import { nearestLocationMeters, type LatLng } from './geo_distance.js';
 
@@ -25,27 +23,15 @@ function createdAtMillis(createdAt: Date | string | undefined): number {
 }
 
 /**
- * Merge the union of per-instance rows into a single ordered page.
+ * Merges per-instance rows into one ordered page.
  *
- * - `opts.center` set AND the order is distance: ascending nearest-distance
- *   (no-location rows last via `Infinity`), tie-broken by `created_at`
- *   descending (newer first).
- * - otherwise: `created_at` descending only.
+ * - `center` set and the order is distance: nearest first (no-location rows
+ *   last), tie-broken by `created_at` descending.
+ * - otherwise: `created_at` descending.
  *
- * `opts.orderBy` exists because a centre is present for a RADIUS FILTER too,
- * not just for a distance sort. Keying the merge off `center` alone meant a
- * federated `sort: 'newest'` request that also carried a radius came back
- * distance-ordered — the same infer-from-coordinates bug `order_by` was added
- * to kill on the SQL side (#644 P3), reappearing in the merge. Omitted means
- * "infer from `center`", which is what every pre-sort caller expects.
- *
- * Ties that are fully equal on the sort key(s) preserve original relative
- * order (stable), by decorating each row with its original index and using
- * that index as the final tie-break — this keeps ordering well-defined even
- * on engines that don't guarantee a stable Array.sort.
- *
- * Does not mutate `rows`. Returns `rows.slice(offset, offset + limit)` after
- * sorting.
+ * `orderBy` exists because a centre is also present for a radius filter, so
+ * the centre alone must not force a distance order. Omitted means infer from
+ * `center`. Full ties keep their original order. Does not mutate `rows`.
  */
 export function mergeSortAndSlice<T extends MergeableRow>(
   rows: T[],

@@ -12,9 +12,9 @@ import {
 
 export interface MatchScoreBadgeProps {
   /**
-   * The ranking basis for this card (#646 C1) — a relevance %, a distance, or
-   * an age, resolved from the sort the SERVER applied. Never a score badged
-   * onto a list ordered by something else.
+   * The card's ranking basis (relevance %, distance or age), resolved from the
+   * sort the server applied, so a list is never badged with a metric it was
+   * not ordered by.
    */
   metric: CardMetric;
   /**
@@ -38,20 +38,12 @@ const METRIC_STYLES: Record<
 };
 
 /**
- * The card's ranking-basis pill (#646 C1, spec §7.4).
+ * The card's ranking-basis pill: icon and value only. The basis is stated once
+ * in the pinned browse toolbar, and the label would not fit beside Connect in
+ * longer languages; the full sentence is in the tooltip.
  *
- * ICON-ONLY by design (spec D22): the pill shows the icon and the value, never
- * the basis label. The basis is stated ONCE in the browse toolbar, which
- * `PageShell` keeps on screen at every scroll position — so repeating "matches
- * your profile" on all twenty cards would add nothing, and would not fit the
- * footer slot it shares with the Connect button once translated into Hindi or
- * Kannada. The full sentence lives in the tooltip and the explanation panel.
- *
- * Colour is keyed to the metric KIND, not to its value. The old
- * Excellent/Good/Moderate/Low bands are gone (#646 §5.5): their
- * 0.85/0.70/0.50 thresholds implied a calibration BGE-M3 similarities do not
- * have — profile-to-profile scores cluster in a narrow range, so the band read
- * as near-constant across a result set while looking authoritative.
+ * Colour follows the metric kind, not its value: BGE-M3 similarities are not
+ * calibrated, so value bands would look authoritative while barely varying.
  */
 export function MatchScoreBadge({
   metric,
@@ -62,8 +54,7 @@ export function MatchScoreBadge({
 }: Readonly<MatchScoreBadgeProps>) {
   const { t } = useTranslation();
 
-  // Nothing determined this card's position, so there is nothing honest to
-  // show. Callers gate on this too; returning null keeps it safe either way.
+  // Nothing determined this card's position, so there is nothing to show.
   if (!metric) return null;
 
   const styles = METRIC_STYLES[metric.kind];
@@ -91,10 +82,8 @@ export function MatchScoreBadge({
     className,
   );
 
-  // A <span> when there is nothing to open. Rendering a <button> regardless
-  // made every pill focusable and hoverable as though it were actionable —
-  // and only a relevance pill has details to show (an age or a distance has
-  // no explanation panel behind it).
+  // A <span> when there is nothing to open, so non-actionable pills are not
+  // focusable.
   const badge = onClick ? (
     <button
       type="button"

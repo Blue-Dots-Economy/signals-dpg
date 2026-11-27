@@ -1,22 +1,14 @@
 /**
- * Signup data that has nowhere to live until the account exists.
+ * Signup data that has nowhere to live until the account exists. Self-signup
+ * creates the Keycloak identity, but the local `user` row only appears at first
+ * login, so the domain and age from the signup form are parked in Redis with a
+ * short TTL, keyed on the signup identifier (as `signup_guardian.ts` does).
  *
- * Under Keycloak, self-signup creates the identity but the local `user` row only
- * appears at first successful login (see `self_signup.ts` for why). So the
- * signals-specific fields collected on the signup form — the domain the person
- * is joining, and their age — have to be parked somewhere in between.
+ * The Redis key is a hash of the identifier; a raw email or phone number must
+ * never sit in a Redis key.
  *
- * Keyed on the signup identifier and held in Redis with a short TTL, exactly the
- * pattern the pre-auth guardian capture already uses
- * (`signup_guardian.ts`): at signup time there is no user id to key anything on,
- * so the identifier is all we have.
- *
- * **The Redis key is a hash of the identifier, never the identifier itself** —
- * a raw email or phone number must not sit in a Redis key. Same rule as
- * signup_guardian.
- *
- * Read-once: `takeSignupExtras` deletes on read, so a stash can't be replayed
- * onto a second account.
+ * `takeSignupExtras` deletes on read, so a stash can't be replayed onto a
+ * second account.
  */
 
 import { createHash } from 'node:crypto';
@@ -33,10 +25,10 @@ export interface SignupExtras {
 }
 
 /**
- * What is actually stored. `keys` records every key this stash was written under
- * so a read that arrives with only ONE identifier can still clear the sibling
- * copy — otherwise a phone-keyed leftover could later be applied to a different
- * account that happens to use that number. Hashes only; no raw identifiers.
+ * What is stored. `keys` records every key this stash was written under, so a
+ * read with only one identifier still clears the sibling copy; otherwise a
+ * phone-keyed leftover could be applied to a different account using that
+ * number. Hashes only.
  */
 interface StoredExtras extends SignupExtras {
   keys: string[];
@@ -56,7 +48,7 @@ function normalizePhone(value: string): string {
   return value.trim();
 }
 
-/** SHA-256 hex of the normalized identifier — never the raw identifier. */
+/** SHA-256 hex of the normalized identifier. */
 function hashIdentifier(normalizedValue: string): string {
   return createHash('sha256').update(normalizedValue).digest('hex');
 }
@@ -77,11 +69,8 @@ function keysFor(identifiers: ExtrasIdentifiers): string[] {
 }
 
 /**
- * Park the signup extras. No-op when there is nothing worth keeping, so callers
- * don't have to check.
- *
- * Never throws: failing to stash costs the user a domain selection they can redo
- * later, and must not fail the signup itself.
+ * Park the signup extras. No-op when there is nothing to keep. Throws on a
+ * Redis error; the caller treats it as best-effort.
  */
 export async function stashSignupExtras(
   identifiers: ExtrasIdentifiers,
@@ -97,20 +86,9 @@ export async function stashSignupExtras(
 }
 
 /**
- * Read and delete the stash for these identifiers. Returns null when there is
- * nothing parked — the normal case for a migrated or admin-onboarded user.
- *
- * Never throws: a Redis outage here must not fail a login that has otherwise
- * succeeded. The user simply lands without a domain, which is recoverable.
- */
-/**
- * Read the stash WITHOUT deleting it. The welcome email uses this to learn the
- * signup domain (seeker vs provider copy) at `afterUserCreate` time — the
- * user's `domains` column is not written until the later `POST /user/domains`,
- * so the parked stash is the only source of the domain at that point.
- *
- * Non-consuming so it can't race the Keycloak path's `takeSignupExtras`.
- * Never throws: a miss/outage just yields the generic (domain-less) welcome.
+ * Read the stash without deleting it, so it cannot race `takeSignupExtras`.
+ * Used to pick the welcome copy's domain. Never throws: a miss or Redis error
+ * returns null.
  */
 export async function peekSignupExtras(
   identifiers: ExtrasIdentifiers
@@ -134,6 +112,11 @@ export async function peekSignupExtras(
   return null;
 }
 
+/**
+ * Read and delete the stash for these identifiers. Returns null when nothing is
+ * parked (the normal case for a migrated or admin-onboarded user). Throws on a
+ * Redis error; provisioning catches it so the login still succeeds.
+ */
 export async function takeSignupExtras(
   identifiers: ExtrasIdentifiers
 ): Promise<SignupExtras | null> {
@@ -151,8 +134,8 @@ export async function takeSignupExtras(
       stored = null;
     }
 
-    // Clear every key this stash was written under — the ones we looked up AND
-    // any sibling recorded in the payload — so no copy survives to be reapplied.
+    // Clear the keys looked up and any sibling recorded in the payload, so no
+    // copy survives to be reapplied.
     const toDelete = new Set([...keys, ...(stored?.keys ?? [])]);
     await Promise.all([...toDelete].map((k) => redis.del(k)));
 

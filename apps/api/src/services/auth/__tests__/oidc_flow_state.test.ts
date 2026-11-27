@@ -49,11 +49,11 @@ describe('flow storage', () => {
     expect(key).not.toContain('the-state');
   });
 
-  it('expires the flow after five minutes', async () => {
+  it('expires the flow with the Keycloak 30-minute login timeout', async () => {
     await saveFlowState('s', FLOW);
 
     expect(redisSet.mock.calls[0][2]).toBe('EX');
-    expect(redisSet.mock.calls[0][3]).toBe(300);
+    expect(redisSet.mock.calls[0][3]).toBe(1800);
   });
 
   it('keeps the PKCE verifier server-side, in the stored value', async () => {

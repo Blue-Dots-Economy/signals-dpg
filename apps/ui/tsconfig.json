@@ -33,6 +33,9 @@
       "@dpg/schemas/export_eligibility": [
         "../../packages/schemas/src/export_eligibility"
       ],
+      "@dpg/schemas/phone_rules": [
+        "../../packages/schemas/src/phone_rules"
+      ],
       "@dpg/*": [
         "../../packages/*/src"
       ]

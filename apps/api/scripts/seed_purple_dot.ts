@@ -1,5 +1,5 @@
 /**
- * Seed Purple Dot sample records — FAST-PATH FALLBACK.
+ * Seed Purple Dot sample records (fast-path fallback).
  *
  * This script bypasses the Aggregator-DPG handshake and writes directly to
  * Signals' DB. Useful for fast iteration on Signals-internal features.
@@ -115,7 +115,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_290',
-      mobile_number: '9000000290',
+      mobile_number: '+919000000290',
       age: 44,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -135,7 +135,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_294',
-      mobile_number: '9000000294',
+      mobile_number: '+919000000294',
       age: 41,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -156,7 +156,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_301',
-      mobile_number: '9000000301',
+      mobile_number: '+919000000301',
       age: 28,
       gender: 'Female',
       disability_type: ['Locomotor Disability'],
@@ -176,7 +176,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_319',
-      mobile_number: '9000000319',
+      mobile_number: '+919000000319',
       age: 21,
       gender: 'Male',
       disability_type: ['Blindness'],
@@ -198,7 +198,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_390',
-      mobile_number: '9000000390',
+      mobile_number: '+919000000390',
       age: 23,
       gender: 'Female',
       disability_type: ['Blindness'],
@@ -219,7 +219,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_414',
-      mobile_number: '9000000414',
+      mobile_number: '+919000000414',
       age: 10,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -240,7 +240,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_421',
-      mobile_number: '9000000421',
+      mobile_number: '+919000000421',
       age: 21,
       gender: 'Female',
       disability_type: ['Blindness'],
@@ -262,7 +262,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_516',
-      mobile_number: '9000000516',
+      mobile_number: '+919000000516',
       age: 30,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -282,7 +282,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_612',
-      mobile_number: '9000000612',
+      mobile_number: '+919000000612',
       age: 62,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -303,7 +303,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_722',
-      mobile_number: '9000000722',
+      mobile_number: '+919000000722',
       age: 45,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -323,7 +323,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_758',
-      mobile_number: '9000000758',
+      mobile_number: '+919000000758',
       age: 34,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -344,7 +344,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_778',
-      mobile_number: '9000000778',
+      mobile_number: '+919000000778',
       age: 56,
       gender: 'Other',
       disability_type: ['Locomotor Disability'],
@@ -365,7 +365,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_887',
-      mobile_number: '9000000887',
+      mobile_number: '+919000000887',
       age: 40,
       gender: 'Female',
       disability_type: ['Locomotor Disability'],
@@ -386,7 +386,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_991',
-      mobile_number: '9000000991',
+      mobile_number: '+919000000991',
       age: 36,
       gender: 'Male',
       disability_type: ['Locomotor Disability'],
@@ -407,7 +407,7 @@ const SEEKER_RECORDS: SeedRecord[] = [
   {
     state: {
       beneficiary_name: 'Name_1023',
-      mobile_number: '9000001023',
+      mobile_number: '+919000001023',
       age: 28,
       gender: 'Female',
       disability_type: ['Locomotor Disability'],
@@ -431,7 +431,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Test Provider 1',
-      contact_phone: '8005542316',
+      contact_phone: '+918005542316',
       contact_email: 'provider1@dironl.com',
       provider_category: 'Private Individual Practice',
       organisation_name: 'TestProvider1',
@@ -455,7 +455,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Rajesh Sharma',
-      contact_phone: '9879043213',
+      contact_phone: '+919879043213',
       contact_email: 'rajesh.sharma@hopedis-ability.org',
       provider_category: 'NGO / Trust',
       organisation_name: 'Hope Disability Foundation',
@@ -481,7 +481,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Dr Meena Kulkarni',
-      contact_phone: '8838812278',
+      contact_phone: '+918838812278',
       contact_email: 'meena@retailcare.in',
       provider_category: 'Private Individual Practice',
       organisation_name: 'RetailCare Physiotherapy',
@@ -505,7 +505,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Suresh Patil',
-      contact_phone: '9803123456',
+      contact_phone: '+919803123456',
       contact_email: 'suresh@mobilityworld.com',
       provider_category: 'Private Company',
       organisation_name: 'Mobility World India',
@@ -529,7 +529,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Anita Desai',
-      contact_phone: '9883752426',
+      contact_phone: '+919883752426',
       contact_email: 'anita.desai@sambhavyam-incl.org',
       provider_category: 'NGO / Trust',
       organisation_name: 'Sambhavyam Inclusion Centre',
@@ -554,7 +554,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Mohammed Irfan',
-      contact_phone: '9712345697',
+      contact_phone: '+919712345697',
       contact_email: 'irfan@soundbridge.in',
       provider_category: 'Private Company',
       organisation_name: 'SoundBridge Hearing Solutions',
@@ -574,7 +574,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Priya Hegde',
-      contact_phone: '9832123478',
+      contact_phone: '+919832123478',
       contact_email: 'priya@enableindia.org',
       provider_category: 'NGO / Trust',
       organisation_name: 'Enable India Mysuru Chapter',
@@ -601,7 +601,7 @@ const PROVIDER_RECORDS: SeedRecord[] = [
   {
     state: {
       contact_name: 'Dr. Venkatesh Rao',
-      contact_phone: '9843979834',
+      contact_phone: '+919843979834',
       contact_email: 'venkatesh@spandana.org',
       provider_category: 'Hospital / Clinic',
       organisation_name: 'Spandana Rehabilitation Centre',
@@ -653,24 +653,26 @@ function recordIdentity(
   const state = record.state as Record<string, unknown>;
   if (domain === 'seeker') {
     const phone = String(state.mobile_number ?? '');
+    const digits = phone.replace(/^\+91/, ''); // ids and emails keep the 10 digits
     const name = String(state.beneficiary_name ?? `Seeker ${phone}`);
     return {
-      id: `usr_pds_seek_${phone}`,
+      id: `usr_pds_seek_${digits}`,
       name,
-      email: `seeker-${phone}@${PARTICIPANT_EMAIL_DOMAIN}`,
+      email: `seeker-${digits}@${PARTICIPANT_EMAIL_DOMAIN}`,
       phone,
     };
   }
   const phone = String(state.contact_phone ?? '');
+  const digits = phone.replace(/^\+91/, '');
   const name = String(state.contact_name ?? `Provider ${phone}`);
   const stateEmail =
     typeof state.contact_email === 'string' && state.contact_email.length > 0
       ? state.contact_email
       : null;
   return {
-    id: `usr_pds_prov_${phone}`,
+    id: `usr_pds_prov_${digits}`,
     name,
-    email: stateEmail ?? `provider-${phone}@${PARTICIPANT_EMAIL_DOMAIN}`,
+    email: stateEmail ?? `provider-${digits}@${PARTICIPANT_EMAIL_DOMAIN}`,
     phone,
   };
 }
@@ -690,9 +692,8 @@ async function ensureSeedUser(
     .onConflictDoNothing({ target: userTable.id });
 }
 
-// Mirrors apps/api/src/routes/v1/admin/aggregator/upsert.ts:62 — the
-// aggregator dashboard route reads org.metadata.domains and 400s with
-// NO_DOMAINS_CONFIGURED if absent.
+// Same metadata shape as admin/aggregator/upsert.ts: the aggregator dashboard
+// 400s with NO_DOMAINS_CONFIGURED when org.metadata.domains is absent.
 const AGGREGATOR_METADATA = JSON.stringify({
   external_id: 'purple_dot_aggregator_seed',
   domains: ['seeker', 'provider'],
@@ -732,11 +733,8 @@ async function ensureAggregatorOrg(
     return;
   }
 
-  // Existing row: only overwrite metadata when domains is missing/empty,
-  // so a customized metadata blob (e.g. set via admin upsert, or whatever
-  // the Aggregator wrote at registration time) is preserved. slug, name,
-  // and type are NEVER overwritten — those belong to the Aggregator when
-  // ORG_ID_OVERRIDE is set, and to a prior run otherwise.
+  // Existing row: overwrite metadata only when domains is missing/empty, so a
+  // customised blob is preserved. slug, name and type are never overwritten.
   let needs_patch = !existing.metadata;
   if (existing.metadata) {
     try {
@@ -943,14 +941,9 @@ async function main() {
     return;
   }
 
-  // Defer DB-side imports until we know we will actually touch the DB so the
-  // dry-run path can run without a configured PG connection.
-  //
-  // Build a standalone pg Pool + drizzle instance rather than importing
-  // `../db/postgres/drizzle_config`, which transitively pulls in the API's
-  // full Zod env validation (INSTANCE_NAME, INSTANCE_ENV, etc.). A DB-only
-  // seed shouldn't require app-context env vars — matches db_init.ts and
-  // seed_service_users.ts.
+  // DB imports are deferred so the dry run needs no PG connection. A
+  // standalone pool rather than the API's drizzle_config, which runs the full
+  // Zod env validation a DB-only seed should not need.
   const {
     ensureItemPartition,
     ensureActionPartition,
@@ -970,10 +963,8 @@ async function main() {
   const pool = new Pool({ connectionString: pgUrl, ssl: false });
   const db = drizzle(pool);
 
-  // Org / seed user / member setup runs UNCONDITIONALLY (not gated by the
-  // items short-circuit below) so re-running against an already-seeded DB
-  // still applies the metadata.domains patch on the aggregator org. All
-  // three helpers are idempotent.
+  // Org / seed user / member setup runs even when items already exist, so a
+  // re-run still applies the metadata.domains patch. All three are idempotent.
   await ensureAggregatorOrg(db, organization);
   await ensureSeedUser(db, user);
   await ensureMember(db, member, SEED_USER_ID, AGGREGATOR_ORG_ID, 'service');

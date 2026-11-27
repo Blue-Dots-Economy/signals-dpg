@@ -12,15 +12,9 @@ export interface ResolveDisplayNameInput {
 }
 
 /**
- * Resolves an item's display name for the aggregator dashboard.
- *
- * 1. If the item's schema declares `display_name_field` AND the value at
- *    `item_state[display_name_field]` is a non-empty trimmed string, return it.
- * 2. Otherwise return `item_id` as the fallback.
- *
- * Privacy is enforced upstream by the network-config validator (a schema with
- * `display_name_field` pointing at a `private: true` property fails to load),
- * so this function does not re-check privacy at recompute time.
+ * An item's public display name: the trimmed `item_state[display_name_field]`
+ * when non-empty, else `item_id`. No privacy check here: the network-config
+ * validator rejects a `display_name_field` that points at a private property.
  */
 export const resolve_display_name = (i: ResolveDisplayNameInput): string => {
   const field = i.schema.display_name_field;

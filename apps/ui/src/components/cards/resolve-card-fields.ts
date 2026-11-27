@@ -36,7 +36,7 @@ function isHidden(key: string): boolean {
   return key.startsWith('_') || HIDDEN_KEYS.has(key);
 }
 
-/** Mirrors card-field.tsx: empty string/array/nullish hide; boolean `false` stays. */
+/** Empty string, empty array and nullish are empty; boolean `false` is not. */
 export function isEmptyValue(value: unknown): boolean {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return value.trim().length === 0;
@@ -44,7 +44,7 @@ export function isEmptyValue(value: unknown): boolean {
   return false;
 }
 
-/** Split camelCase / snake_case into a Title Cased phrase. Schema `title` wins over this. */
+/** camelCase / snake_case to a Title Cased phrase. A schema `title` wins over this. */
 export function humaniseFieldKey(key: string): string {
   return key
     .replaceAll('_', ' ')
@@ -83,11 +83,9 @@ export function getInitials(label: string): string {
 }
 
 /**
- * A field whose `x-show-if` this item does not satisfy is not on the card — the
- * same rule the form uses to hide it. Covers both a conditional default row
- * that would otherwise render a `—` placeholder on every card, and a value
- * left over from before the controlling field changed (the API merges an edit
- * onto the stored state, so clearing a hidden field never removes it).
+ * A field whose `x-show-if` the item does not satisfy is not on the card, as
+ * in the form. This also hides stale values: the API merges edits onto stored
+ * state, so a field hidden later keeps its old value.
  */
 function isShown(key: string, props: Record<string, RJSFSchema>, data: Record<string, unknown>): boolean {
   return !isHidden(key) && isFieldVisible((props[key] ?? {}) as Record<string, unknown>, data);
@@ -131,16 +129,13 @@ function makeRow(
 }
 
 /**
- * Turn an item's schema + data + per-domain `card` config into the rows an
- * ItemCard renders. Designed to never throw and to degrade gracefully across
- * heterogeneous schemas (the "nothing breaks when switching dots" guarantee):
+ * Turns an item's schema, data and `card` config into ItemCard rows. Never
+ * throws, so any network's schemas render:
  *
- *  - `default_fields` keys render only if present in the active schema;
- *    keys absent from this schema are skipped silently (handles multi-schema
- *    domains and configs aimed at a different dot).
- *  - A present-but-empty default field still renders (placeholder `—`).
- *  - With no `card` config, or when none of its fields resolve, falls back to
- *    the first few non-empty fields — so dots without a `card` block still work.
+ *  - `default_fields` keys absent from this schema are skipped.
+ *  - A present but empty default field renders as `—`.
+ *  - With no `card` config, or none of its fields resolving, the first few
+ *    non-empty fields are used.
  */
 export function resolveCardFields(
   schema: RJSFSchema | null | undefined,
@@ -160,14 +155,13 @@ export function resolveCardFields(
     ? stringValue(data[cardConfig.subtitle_field])
     : undefined;
 
-  // Pull default rows from config where keys exist in this schema.
   const configured = (cardConfig?.default_fields ?? []).filter(
     (key) => key in props && isShown(key, props, data)
   );
 
   let defaultKeys = configured;
   if (defaultKeys.length === 0) {
-    // Fallback: first N non-hidden, non-empty fields (today's behavior).
+    // Fallback: the first N shown, non-empty fields.
     const source = hasSchemaProps ? Object.keys(props) : Object.keys(data);
     defaultKeys = source
       .filter((key) => isShown(key, props, data) && !isEmptyValue(data[key]))
@@ -176,9 +170,8 @@ export function resolveCardFields(
 
   const defaultSet = new Set(defaultKeys);
 
-  // When `extra_fields` is configured, it is the exhaustive, ordered list of
-  // extra rows — any other schema field is intentionally omitted from the card.
-  // Otherwise fall back to "every remaining non-empty field, in schema order".
+  // A configured `extra_fields` is the exhaustive, ordered extra list; otherwise
+  // every remaining non-empty field, in schema order.
   let extraKeys: string[];
   if (cardConfig?.extra_fields && cardConfig.extra_fields.length > 0) {
     extraKeys = cardConfig.extra_fields.filter(

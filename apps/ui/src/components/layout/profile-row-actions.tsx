@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { Pencil, Pause, Play, Trash2 } from 'lucide-react';
 import {
   Dialog,
@@ -26,10 +27,8 @@ export interface ProfileRowActionsProps {
 }
 
 /**
- * Icon-only per-profile lifecycle actions shown on each "My Profiles" row
- * (#346 pause / #347 retire): Edit · Pause/Resume · Retire. Pause + retire are
- * confirmed first (retire is terminal + irreversible); resume is applied
- * directly. Lives here — the row — not inside the edit form.
+ * Icon-only lifecycle actions on each "My Profiles" row: Edit, Pause/Resume,
+ * Retire. Pause, resume and retire each confirm first; retire is terminal.
  */
 export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: ProfileRowActionsProps) {
   const { t } = useTranslation();
@@ -39,8 +38,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
   const [retireConfirm, setRetireConfirm] = React.useState(false);
 
   const status = profile.lifecycle_status;
-  // Pause offered only on a live profile when the network allows it; resume on a
-  // paused one (always allowed, so a paused profile can be recovered).
+  // Resume is always allowed, so a paused profile can be recovered.
   const showPause = status === 'live' && pauseEnabled;
   const showResume = status === 'paused';
 
@@ -58,8 +56,12 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
               : t('profile.toast_unpaused_draft', 'Profile resumed, but it needs completing before it goes live.'),
       );
       onChanged();
-    } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
+    } catch (err) {
+      const generic = t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.');
+      // Unpause with the live profile limit full: the server says why and what to do.
+      toast.error(
+        readApiError(err).code === 'PROFILE_LIMIT_REACHED' ? apiErrorMessage(err, t, generic) : generic,
+      );
     } finally {
       setBusy(false);
       setPauseConfirm(false);
@@ -197,7 +199,7 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
         </DialogContent>
       </Dialog>
 
-      {/* Confirm before retiring — terminal, irreversible, wipes PII (#347). */}
+      {/* Confirm before retiring: terminal, irreversible, wipes PII. */}
       <Dialog open={retireConfirm} onOpenChange={setRetireConfirm}>
         <DialogContent className="max-h-[90dvh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
           <DialogHeader>

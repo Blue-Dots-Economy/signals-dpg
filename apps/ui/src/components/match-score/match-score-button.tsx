@@ -17,14 +17,9 @@ export interface MatchScoreButtonProps {
   networkItem: Item;
   score: MatchScoreResult | null;
   /**
-   * The card's ranking basis (#646 C1), resolved by the caller from the sort
-   * the SERVER applied. Null when nothing determined this card's position —
-   * the calculate CTA then shows instead.
-   *
-   * OMIT it outside a sorted list (the detail modal trigger, a public profile,
-   * My Actions): there is no sort there, so the only meaningful metric is the
-   * profile relevance score, and that is what the default below uses. Passing
-   * it explicitly is required only on the browse list, where the sort decides.
+   * The card's ranking basis from the sort the server applied; null when
+   * nothing determined the position (the calculate CTA shows instead). Omit
+   * outside a sorted list, where the profile relevance score is the default.
    */
   metric?: CardMetric;
   /** Which quantity `relevance` means; only used for the tooltip. */
@@ -48,24 +43,16 @@ export function MatchScoreButton({
   disabled = false,
 }: MatchScoreButtonProps) {
   const { t } = useTranslation();
-  // #646 C1: the pill shows the RANKING BASIS, resolved by the caller from
-  // the sort the server applied — so under `nearest`/`newest` it is a distance
-  // or an age rather than a score badged onto a differently-ordered list.
-  // `undefined` means the caller had no sort context (a share preview, a
-  // public profile), so fall back to the profile relevance score. An explicit
-  // `null` means the caller HAS a sort and it produced no metric — respect it.
+  // `undefined`: no sort context, so use the profile relevance score. `null`:
+  // the sort produced no metric, which is respected.
   let effectiveMetric: CardMetric = metric ?? null;
   if (metric === undefined && score?.score != null) {
     effectiveMetric = { kind: 'relevance', percent: score.score };
   }
 
   if (effectiveMetric && !error) {
-    // Only a RELEVANCE pill opens the score modal. Under `newest`/`nearest`
-    // the pill is an age or a distance, and that modal explains a cosine
-    // score — so clicking a "Today" pill opened "Match Score Details" and,
-    // with no score computed, an empty "No match score available" dialog.
-    // Passing no handler also makes the badge render as plain text, so it
-    // stops advertising "Tap for details" for a metric that has none.
+    // Only a relevance pill opens the score modal, which explains a cosine
+    // score. Without a handler the badge renders as plain text.
     const opensDetails = effectiveMetric.kind === 'relevance';
     return (
       <MatchScoreBadge
@@ -76,7 +63,6 @@ export function MatchScoreButton({
     );
   }
 
-  // If there was an error, show error state
   if (error) {
     return (
       <TooltipProvider>
@@ -102,7 +88,6 @@ export function MatchScoreButton({
     );
   }
 
-  // Loading state
   if (isLoading) {
     return (
       <Button
@@ -117,7 +102,6 @@ export function MatchScoreButton({
     );
   }
 
-  // Default state - calculate button
   const isDisabled = disabled || !localItem;
   
   return (

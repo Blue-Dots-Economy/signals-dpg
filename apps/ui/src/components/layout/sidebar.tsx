@@ -35,8 +35,7 @@ interface AppSidebarProps {
   onActiveProfileChange?: (profileId: string) => void;
   onProfilesChanged?: () => void;
   userSchemas?: Record<string, RJSFSchema>;
-  /** Hide the Browse (domain selector) group — used on the create/edit form
-   * page, where browsing has no meaning. */
+  /** Hide the Browse (domain selector) group. */
   hideBrowse?: boolean;
 }
 
@@ -63,26 +62,18 @@ function PendingActionsBadge() {
 }
 
 /**
- * Which domain's `my_items_label` (network.json) should title the "My items"
- * group — e.g. blue_dot provider → "My Jobs".
- *
- * The viewer's own profiles decide it when they are all in one domain. Before
- * sign-in there are none, and the group used to fall back to the generic
- * "My Profile(s)" — but a per-domain portal already knows its domain from
- * VITE_SERVED_BINDINGS (the same signal the login form uses to auto-select the
- * domain when only one is served), so a seeker portal can say "My Profiles"
- * and a provider portal "My Jobs" to a signed-out visitor too.
- *
- * Own profiles win over the portal binding: a viewer holding items is the
- * stronger signal, and the two can disagree while a mis-routed user is being
- * bounced to the right portal.
+ * Which domain's `my_items_label` (network.json) titles the "My items" group,
+ * e.g. "My Jobs". The viewer's own profiles decide when they share one domain;
+ * otherwise a portal serving a single domain (VITE_SERVED_BINDINGS) decides,
+ * so signed-out visitors get it too. Own profiles win, since the two can
+ * disagree while a mis-routed user is bounced to the right portal.
  */
 export function resolveMyItemsDomainId(
   profileDomainIds: string[],
   servedDomainIds: string[] | null,
 ): string | null {
   if (profileDomainIds.length === 1) return profileDomainIds[0];
-  if (profileDomainIds.length > 1) return null; // mixed — the generic label covers it
+  if (profileDomainIds.length > 1) return null; // mixed: the generic label
   return servedDomainIds && servedDomainIds.length === 1 ? servedDomainIds[0] : null;
 }
 
@@ -103,7 +94,6 @@ export function AppSidebar({
   const navigate = useNavigate();
   const { t } = useTranslation();
 
-  // Group profiles by domain
   const profilesByDomain = myItems.reduce<Record<string, Item[]>>((acc, item) => {
     const key = item.item_domain;
     if (!acc[key]) acc[key] = [];
@@ -113,26 +103,20 @@ export function AppSidebar({
 
   const domainKeys = Object.keys(profilesByDomain);
 
-  // "My items" group label is domain-aware: a network can override the generic
-  // "My Profile(s)" heading per domain via `my_items_label` in network.json
-  // (e.g. blue_dot provider → "My Jobs"). Only applied when the group holds a
-  // single domain; otherwise the generic label covers the mix. Falls back to the
-  // generic label when the domain sets no override.
   const labelDomainId = resolveMyItemsDomainId(domainKeys, getServedScope()?.domains ?? null);
   const myItemsGroupLabel =
     domains.find((d) => d.id === labelDomainId)?.my_items_label ??
     t('nav.my_profiles_group');
 
-  // Find which domain the active profile belongs to
   const activeDomain = myItems.find((i) => i.item_id === activeProfileId)?.item_domain ?? null;
 
-  // Expanded state: default open the domain of the active profile (or all if none)
+  // Opens the active profile's domain, or all when there is none.
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(() => {
     if (activeDomain) return new Set([activeDomain]);
     return new Set(domainKeys);
   });
 
-  // When active profile changes, ensure its domain is expanded
+  // Expand the active profile's domain when it changes.
   useEffect(() => {
     if (activeDomain) {
       setExpandedDomains((prev) => {
@@ -162,7 +146,7 @@ export function AppSidebar({
         <PortalHeader />
       </SidebarHeader>
       <SidebarContent>
-        <nav aria-label="Primary" className="flex flex-1 flex-col gap-2">
+        <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col gap-2">
         {showNetworkSelector && (
           <SidebarGroup>
             <SidebarGroupLabel>{t('nav.networks_group')}</SidebarGroupLabel>
@@ -184,12 +168,8 @@ export function AppSidebar({
           </SidebarGroup>
         )}
         {showNetworkSelector && <SidebarSeparator />}
-        {/* The Browse domain selector only appears when there is MORE THAN ONE
-            browseable domain (i.e. >1 distinct interaction `to_domain`). With a
-            single target domain there is no choice to make — a lone tab (and an
-            "All") is redundant — so the whole selector and its separator are
-            hidden, and that domain's listings render directly in the main view.
-            Driven by the network's interactions; not network-specific. */}
+        {/* Shown only with more than one browsable domain; with one there is
+            no choice to make. */}
         {!hideBrowse && domains.length > 1 && (
           <>
             <SidebarGroup>
@@ -227,9 +207,10 @@ export function AppSidebar({
             <SidebarSeparator />
           </>
         )}
-        <SidebarGroup>
+        {/* Only the profile list scrolls; the groups around it stay in place. */}
+        <SidebarGroup className="min-h-0 flex-1">
           <SidebarGroupLabel>{myItemsGroupLabel}</SidebarGroupLabel>
-          <SidebarGroupContent>
+          <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
             {domainKeys.length === 0 ? (
               <SidebarMenu>
                 <SidebarMenuItem>
@@ -240,121 +221,9 @@ export function AppSidebar({
                 </SidebarMenuItem>
               </SidebarMenu>
             ) : (
-              <div className="space-y-1">
-                {domainKeys.map((domainId) => {
-                  const profiles = profilesByDomain[domainId];
-                  const Icon = getDomainIcon(domainId, selectedNetwork);
-                  const label = formatDomainLabel(domainId, domains);
-                  // A single domain group (always the case in a domain-bound
-                  // portal) needs no accordion header — show its profiles
-                  // directly, always expanded.
-                  const singleGroup = domainKeys.length === 1;
-                  const isExpanded = singleGroup || expandedDomains.has(domainId);
-                  const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
-
-                  return (
-                    <div key={domainId}>
-                      {/* Accordion header — only when there's more than one
-                          domain group; a single group is shown flat. */}
-                      {!singleGroup && (
-                        <button
-                          onClick={() => toggleDomain(domainId)}
-                          className={[
-                            'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
-                            'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                            hasActiveProfile
-                              ? 'font-semibold text-primary'
-                              : 'text-sidebar-foreground/70',
-                          ].join(' ')}
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0" />
-                          <span className="flex-1 truncate text-left">{label}</span>
-                          <span className="text-xs text-muted-foreground tabular-nums">
-                            {profiles.length}
-                          </span>
-                          <ChevronRight
-                            className={[
-                              'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
-                              isExpanded ? 'rotate-90' : '',
-                            ].join(' ')}
-                          />
-                        </button>
-                      )}
-
-                      {/* Accordion body */}
-                      {isExpanded && (
-                        <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
-                          <SidebarMenu>
-                            {profiles.map((profile) => {
-                              const schema = userSchemas?.[profile.item_domain];
-                              const titleKey = schema ? findTitleField(schema) : null;
-                              const title = titleKey
-                                ? String(profile.item_state[titleKey] ?? t('nav.profile_fallback'))
-                                : t('nav.profile_fallback');
-                              const isActiveProfile = profile.item_id === activeProfileId;
-
-                              return (
-                                <SidebarMenuItem
-                                  key={profile.item_id}
-                                  className={[
-                                    'flex items-center gap-1 rounded-md pr-1',
-                                    isActiveProfile
-                                      ? 'bg-primary/12 border-l-2 border-primary rounded-l-none hover:bg-primary/15'
-                                      : 'hover:bg-sidebar-accent',
-                                  ].join(' ')}
-                                >
-                                  <SidebarMenuButton
-                                    onClick={() => onActiveProfileChange?.(profile.item_id)}
-                                    className={[
-                                      'min-w-0 flex-1 bg-transparent hover:bg-transparent',
-                                      isActiveProfile ? 'text-primary font-medium pl-2' : '',
-                                    ].join(' ')}
-                                  >
-                                    <span className="truncate" title={title}>{title}</span>
-                                    {/* Lifecycle chip lives INSIDE the button pill
-                                        (Active / Paused / Draft) so it reads as part
-                                        of the profile, not floating on the row. */}
-                                    {profile.lifecycle_status && (
-                                      <span
-                                        data-tour="profile-status"
-                                        className={[
-                                          'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
-                                          profile.lifecycle_status === 'live'
-                                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
-                                            : profile.lifecycle_status === 'paused'
-                                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
-                                              : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
-                                        ].join(' ')}
-                                      >
-                                        {t(
-                                          `nav.status_${profile.lifecycle_status}`,
-                                          profile.lifecycle_status === 'live'
-                                            ? 'Active'
-                                            : profile.lifecycle_status,
-                                        )}
-                                      </span>
-                                    )}
-                                  </SidebarMenuButton>
-                                  {/* Per-profile actions (Edit · Pause/Resume ·
-                                      Retire), icon-only, always visible. */}
-                                  <ProfileRowActions
-                                    profile={profile}
-                                    pauseEnabled={
-                                      networks?.find((n) => n.id === profile.item_network)?.pause_enabled !== false
-                                    }
-                                    onEdit={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
-                                    onChanged={() => onProfilesChanged?.()}
-                                  />
-                                </SidebarMenuItem>
-                              );
-                            })}
-                          </SidebarMenu>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                <SidebarMenu className="mt-1">
+              <div className="flex min-h-0 flex-1 flex-col gap-1">
+                {/* Above the list, so it stays reachable however many profiles there are. */}
+                <SidebarMenu className="mb-1">
                   <SidebarMenuItem>
                     <SidebarMenuButton onClick={() => navigate(`/profile/new?network=${selectedNetwork ?? ''}`)}>
                       <Plus className="h-4 w-4" />
@@ -362,12 +231,122 @@ export function AppSidebar({
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </SidebarMenu>
+                <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+                  {domainKeys.map((domainId) => {
+                    const profiles = profilesByDomain[domainId];
+                    const Icon = getDomainIcon(domainId, selectedNetwork);
+                    const label = formatDomainLabel(domainId, domains);
+                    // A single domain group needs no accordion header.
+                    const singleGroup = domainKeys.length === 1;
+                    const isExpanded = singleGroup || expandedDomains.has(domainId);
+                    const hasActiveProfile = profiles.some((p) => p.item_id === activeProfileId);
+
+                    return (
+                      <div key={domainId}>
+                        {/* Accordion header, only with several groups. */}
+                        {!singleGroup && (
+                          <button
+                            onClick={() => toggleDomain(domainId)}
+                            className={[
+                              'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors',
+                              'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                              hasActiveProfile
+                                ? 'font-semibold text-primary'
+                                : 'text-sidebar-foreground/70',
+                            ].join(' ')}
+                          >
+                            <Icon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="flex-1 truncate text-left">{label}</span>
+                            <span className="text-xs text-muted-foreground tabular-nums">
+                              {profiles.length}
+                            </span>
+                            <ChevronRight
+                              className={[
+                                'h-3.5 w-3.5 shrink-0 transition-transform duration-200',
+                                isExpanded ? 'rotate-90' : '',
+                              ].join(' ')}
+                            />
+                          </button>
+                        )}
+
+                        {/* Accordion body */}
+                        {isExpanded && (
+                          <div className={singleGroup ? 'mt-0.5' : 'ml-3 mt-0.5 border-l border-border pl-2'}>
+                            <SidebarMenu>
+                              {profiles.map((profile) => {
+                                const schema = userSchemas?.[profile.item_domain];
+                                const titleKey = schema ? findTitleField(schema) : null;
+                                const title = titleKey
+                                  ? String(profile.item_state[titleKey] ?? t('nav.profile_fallback'))
+                                  : t('nav.profile_fallback');
+                                const isActiveProfile = profile.item_id === activeProfileId;
+
+                                return (
+                                  <SidebarMenuItem
+                                    key={profile.item_id}
+                                    className={[
+                                      'flex items-center gap-1 rounded-md pr-1',
+                                      isActiveProfile
+                                        ? 'bg-primary/12 border-l-2 border-primary rounded-l-none hover:bg-primary/15'
+                                        : 'hover:bg-sidebar-accent',
+                                    ].join(' ')}
+                                  >
+                                    <SidebarMenuButton
+                                      onClick={() => onActiveProfileChange?.(profile.item_id)}
+                                      className={[
+                                        'min-w-0 flex-1 bg-transparent hover:bg-transparent',
+                                        isActiveProfile ? 'text-primary font-medium pl-2' : '',
+                                      ].join(' ')}
+                                    >
+                                      <span className="truncate" title={title}>{title}</span>
+                                      {/* Lifecycle chip inside the pill, so it reads
+                                          as part of the profile. */}
+                                      {profile.lifecycle_status && (
+                                        <span
+                                          data-tour="profile-status"
+                                          className={[
+                                            'ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none capitalize',
+                                            profile.lifecycle_status === 'live'
+                                              ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-300'
+                                              : profile.lifecycle_status === 'paused'
+                                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300'
+                                                : 'bg-slate-200 text-slate-700 dark:bg-slate-500/25 dark:text-slate-300',
+                                          ].join(' ')}
+                                        >
+                                          {t(
+                                            `nav.status_${profile.lifecycle_status}`,
+                                            profile.lifecycle_status === 'live'
+                                              ? 'Active'
+                                              : profile.lifecycle_status,
+                                          )}
+                                        </span>
+                                      )}
+                                    </SidebarMenuButton>
+                                    {/* Per-profile actions, always visible. */}
+                                    <ProfileRowActions
+                                      profile={profile}
+                                      pauseEnabled={
+                                        networks?.find((n) => n.id === profile.item_network)?.pause_enabled !== false
+                                      }
+                                      onEdit={() => navigate(`/profile/${profile.item_id}/edit?network=${encodeURIComponent(profile.item_network)}`)}
+                                      onChanged={() => onProfilesChanged?.()}
+                                    />
+                                  </SidebarMenuItem>
+                                );
+                              })}
+                            </SidebarMenu>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarSeparator />
-        <SidebarGroup>
+        <SidebarSeparator className="shrink-0" />
+        <SidebarGroup className="shrink-0">
           <SidebarGroupLabel>{t('nav.actions_group')}</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>

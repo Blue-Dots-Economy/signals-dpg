@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as React from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent, { PointerEventsCheckLevel } from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -9,7 +9,6 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain, DotNetworkInstance, DotNetworkSchema } from '@/engine/types';
 import type { CreateItemPayload, Item, UpdateItemPayload } from '@/lib/item-api';
 import type { GeoSuggestion } from '@/lib/geo/types';
-import type { WalletImportResult } from '@/engine/wallet/types';
 import { queryKeys } from '@/lib/query-keys';
 
 // Third companion to `profile-form-page.test.tsx` (PageShell/create/edit-of-draft
@@ -20,7 +19,6 @@ import { queryKeys } from '@/lib/query-keys';
 //     the picked-suggestion path that suppresses it
 //   • the create payload's instance_url / custom item-schema URL wiring
 //   • the successful plain-edit path (locations included vs deliberately omitted)
-//   • wallet credential import (mapped / partially-mapped / unmatched)
 //   • the one-shot signup-domain handoff
 //   • an already-consented draft that must not re-prompt
 //   • the app-shell sidebar callbacks (network / domain / active profile / refresh)
@@ -121,14 +119,6 @@ let consentConfigResult: { config: typeof CONSENT_CONFIG | null; isLoading: bool
 let paramsMock: { id?: string } = {};
 /** What the (mocked) SchemaForm hands to `onSubmit`. */
 let formSubmitData: Record<string, unknown> = { 'Full Name': 'Asha' };
-/** How many wallet providers `getConfiguredWalletProviders()` reports. */
-let walletProviderCount = 0;
-/** What the (stubbed) wallet modal emits through `onImported`. */
-let walletResult: WalletImportResult = {
-  data: {},
-  providerName: 'digilocker',
-  providerLabel: 'DigiLocker',
-};
 
 /** Point both network hooks at `net` — they must agree, as in production. */
 function useNetwork(net: DotNetworkSchema): void {
@@ -142,7 +132,7 @@ const acceptMock = vi.fn((_args: unknown): Promise<void> => Promise.resolve());
 const setActiveProfileMock = vi.fn((_networkId: string, _profileId: string): void => undefined);
 const suggestMock = vi.fn((_query: string): Promise<GeoSuggestion[]> => Promise.resolve([]));
 const createItemMock = vi.fn(
-  (_payload: CreateItemPayload): Promise<{ item_id: string; item_type: string }> =>
+  (_payload: CreateItemPayload): Promise<{ item_id: string; item_type: string; message?: string }> =>
     Promise.resolve({ item_id: 'new-1', item_type: 'profile_1.0' }),
 );
 const updateItemMock = vi.fn(
@@ -259,38 +249,6 @@ vi.mock('@/components/forms/schema-form', () => ({
       </form>
     );
   },
-}));
-
-// The wallet modal owns provider selection + the provider's own network calls
-// (covered by its own tests) — stub it down to "emit an import result".
-vi.mock('@/components/wallet/wallet-import-modal', () => ({
-  WalletImportModal: (p: {
-    open: boolean;
-    onOpenChange: (open: boolean) => void;
-    onImported: (result: WalletImportResult) => void;
-  }) =>
-    p.open ? (
-      <div data-testid="wallet-modal">
-        <button
-          type="button"
-          data-testid="wallet-emit"
-          onClick={() => {
-            p.onImported(walletResult);
-            p.onOpenChange(false);
-          }}
-        >
-          finish import
-        </button>
-      </div>
-    ) : null,
-}));
-
-vi.mock('@/engine/wallet/wallet-registry', () => ({
-  getConfiguredWalletProviders: () =>
-    Array.from({ length: walletProviderCount }, (_, i) => ({ name: `provider-${i}` })),
-  getRegisteredWalletProviders: () =>
-    Array.from({ length: walletProviderCount }, (_, i) => ({ name: `provider-${i}` })),
-  getWalletProvider: () => undefined,
 }));
 
 vi.mock('@/lib/geo/provider', () => ({
@@ -417,8 +375,6 @@ beforeEach(() => {
   consentConfigResult = { config: null, isLoading: false };
   paramsMock = {};
   formSubmitData = { 'Full Name': 'Asha', Address: 'MG Road, Bengaluru' };
-  walletProviderCount = 0;
-  walletResult = { data: {}, providerName: 'digilocker', providerLabel: 'DigiLocker' };
   getServedScope.mockReturnValue({ network: 'blue_dot', domains: ['seeker'] });
   createItemMock.mockResolvedValue({ item_id: 'new-1', item_type: 'profile_1.0' });
   updateItemMock.mockResolvedValue({});
@@ -448,6 +404,21 @@ describe('ProfileFormPage submit-time geocoding', () => {
     expect(createItemMock.mock.calls[0][0].item_locations).toEqual([
       { lat: 12.9716, lng: 77.5946 },
     ]);
+  });
+
+  it('warns, with the server message, when a new profile was saved as a draft by the live limit', async () => {
+    createItemMock.mockResolvedValueOnce({
+      item_id: 'new-1',
+      item_type: 'profile_1.0',
+      message: 'Live profile limit reached. Saved as a draft.',
+    });
+    await renderPage();
+
+    await submitForm(/create profile/i);
+
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile created!')).toBeNull();
   });
 
   it('geocodes every entry of a multi-value address and drops the entries with no match', async () => {
@@ -603,6 +574,17 @@ describe('ProfileFormPage successful live edit', () => {
     expect(acceptMock).not.toHaveBeenCalled();
   });
 
+  it('warns, with the server message, when the live profile limit kept the profile in draft', async () => {
+    updateItemMock.mockResolvedValueOnce({ message: 'Live profile limit reached. Saved as a draft.' });
+    await renderPage('/profile/item-1');
+
+    await submitForm(/^update$/i);
+
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile updated!')).toBeNull();
+  });
+
   it('omits item_locations entirely when nothing geocoded, so the stored coordinate survives', async () => {
     // Mirrors the masked-PII case: the address renders as "***", so the geocoder
     // returns nothing and the update must not overwrite the stored coarse point.
@@ -615,83 +597,6 @@ describe('ProfileFormPage successful live edit', () => {
     const payload = updateItemMock.mock.calls[0][1];
     expect(payload).toEqual({ item_state: { 'Full Name': 'Asha', Address: 'MG Road, Bengaluru' } });
     expect('item_locations' in payload).toBe(false);
-  });
-});
-
-// ---- Wallet credential import ---------------------------------------------
-
-describe('ProfileFormPage wallet credential import', () => {
-  beforeEach(() => {
-    walletProviderCount = 1;
-  });
-
-  it('hides the import control when no wallet provider is configured', async () => {
-    walletProviderCount = 0;
-
-    await renderPage();
-
-    await screen.findByTestId('schema-form');
-    expect(screen.queryByRole('button', { name: /import credentials/i })).not.toBeInTheDocument();
-  });
-
-  it('opens the wallet modal and seeds the form with the mapped fields', async () => {
-    walletResult = {
-      data: { fullName: 'Asha Rao' },
-      providerName: 'digilocker',
-      providerLabel: 'DigiLocker',
-      summary: 'Verified via DigiLocker',
-    };
-
-    await renderPage();
-
-    expect(screen.queryByTestId('wallet-modal')).not.toBeInTheDocument();
-    await ui().click(await screen.findByRole('button', { name: /import credentials/i }));
-
-    const modal = await screen.findByTestId('wallet-modal');
-    await ui().click(within(modal).getByTestId('wallet-emit'));
-
-    expect(await screen.findByText('Imported 1 field from DigiLocker.')).toBeInTheDocument();
-    expect(screen.getByText('Verified via DigiLocker')).toBeInTheDocument();
-    // `fullName` was mapped onto the schema's "Full Name" property.
-    await waitFor(() =>
-      expect(screen.getByTestId('schema-form').getAttribute('data-form-data')).toContain(
-        '"Full Name":"Asha Rao"',
-      ),
-    );
-    // Importing closes the modal.
-    expect(screen.queryByTestId('wallet-modal')).not.toBeInTheDocument();
-  });
-
-  it('reports the imported fields that this schema has no home for', async () => {
-    walletResult = {
-      data: { fullName: 'Asha Rao', bloodGroup: 'O+' },
-      providerName: 'digilocker',
-      providerLabel: 'DigiLocker',
-    };
-
-    await renderPage();
-    await ui().click(await screen.findByRole('button', { name: /import credentials/i }));
-    await ui().click(within(await screen.findByTestId('wallet-modal')).getByTestId('wallet-emit'));
-
-    expect(await screen.findByText('Imported 1 field from DigiLocker.')).toBeInTheDocument();
-    expect(screen.getByText('1 field did not match this schema.')).toBeInTheDocument();
-  });
-
-  it('an import that matches nothing is reported as an error and leaves the form untouched', async () => {
-    walletResult = {
-      data: { favouriteColour: 'teal' },
-      providerName: 'digilocker',
-      providerLabel: 'DigiLocker',
-    };
-
-    await renderPage();
-    await ui().click(await screen.findByRole('button', { name: /import credentials/i }));
-    await ui().click(within(await screen.findByTestId('wallet-modal')).getByTestId('wallet-emit'));
-
-    expect(
-      await screen.findByText('Imported from DigiLocker, but none of the fields matched this form.'),
-    ).toBeInTheDocument();
-    expect(screen.getByTestId('schema-form').getAttribute('data-form-data')).toBe('null');
   });
 });
 
@@ -825,7 +730,8 @@ describe('ProfileFormPage geocode failure', () => {
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Couldn't create your profile");
-    expect(alert).toHaveTextContent('geo write failed');
+    expect(alert).toHaveTextContent('Something went wrong on our side. Please try again in a moment.');
+    expect(alert).not.toHaveTextContent('geo write failed');
     expect(errorSpy).toHaveBeenCalledWith('Failed to save profile:', expect.any(Error));
   });
 });

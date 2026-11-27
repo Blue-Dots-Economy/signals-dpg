@@ -1,43 +1,26 @@
 /**
- * Keyboard navigation for the autocomplete widgets' suggestion lists.
+ * Keyboard navigation for the location, multi-location and reference
+ * autocomplete suggestion lists.
  *
- * Those lists were mouse-only: an input, and a list of clickable items with no
- * key handling, no roles and no active-option tracking. A keyboard user could
- * type a query, watch suggestions appear, and have no way to reach them —
- * arrow keys did nothing at all.
- *
- * One hook rather than three copies, because the three widgets (location,
- * multi-location, reference) differ only in what selecting does.
- *
- * The ARIA half is not decoration: `aria-activedescendant` is how a screen
- * reader announces the option the arrow keys moved to, and it only works when
- * the referenced element is a `role="option"` inside a `role="listbox"`. Wiring
- * the keys without it would look fixed for a sighted keyboard user while
- * staying silent for assistive tech, which is why the widgets' items changed
- * from `<button>` to `role="option"` at the same time.
- *
- * @module components/forms/custom-widgets/use-suggestion-keyboard
+ * `aria-activedescendant` is how a screen reader announces the option the
+ * arrow keys moved to, and it only works when the referenced element is a
+ * `role="option"` inside a `role="listbox"`, so the widgets' items use those
+ * roles.
  */
 import * as React from 'react';
 
 interface UseSuggestionKeyboardArgs {
   /**
-   * The suggestions currently listed, in display order.
-   *
-   * The array itself, not its length: the highlight has to be dropped whenever
-   * the RESULTS change, and a new result set is frequently the same size as the
-   * one it replaced. Callers must pass a referentially stable array (all three
-   * do — `useState` or `useMemo`), because a fresh identity every render would
-   * clear the highlight on every render.
+   * The suggestions in display order. Must be referentially stable: a new
+   * identity resets the highlight.
    */
   items: readonly unknown[];
-  /** Whether the list is showing. */
   open: boolean;
-  /** Reveal the list — ArrowDown/ArrowUp on a closed list with results. */
+  /** ArrowDown/ArrowUp on a closed list with results. */
   onOpen: () => void;
-  /** Dismiss the list — Escape, or Tab away. */
+  /** Escape, or Tab away. */
   onClose: () => void;
-  /** Commit the suggestion at `index` — Enter. */
+  /** Enter on the active suggestion. */
   onSelect: (index: number) => void;
   /** Stable prefix for the generated option ids; must be unique per field. */
   idPrefix: string;
@@ -48,20 +31,14 @@ interface UseSuggestionKeyboardResult {
   activeIndex: number;
   /** Set by pointer hover so mouse and keyboard don't disagree about the highlight. */
   setActiveIndex: (index: number) => void;
-  /** The DOM id for option `index`, for the option element itself. */
   optionId: (index: number) => string;
   /**
-   * What the input's `aria-activedescendant` should be — the active option's
-   * id, or `undefined`.
-   *
-   * Undefined whenever the list is closed, not merely when nothing is active:
-   * the list is unmounted while closed, so pointing `aria-activedescendant` at
-   * one of its options would reference an element that isn't in the document.
+   * For the input's `aria-activedescendant`. Undefined while the list is
+   * closed, because the closed list is unmounted.
    */
   activeDescendantId: string | undefined;
   /** The listbox's own id, for the input's `aria-controls`. */
   listboxId: string;
-  /** Attach to the text input. */
   onKeyDown: (event: React.KeyboardEvent) => void;
 }
 
@@ -79,31 +56,22 @@ export function useSuggestionKeyboard({
   const listboxId = `${idPrefix}-listbox`;
   const optionId = React.useCallback((index: number) => `${idPrefix}-option-${index}`, [idPrefix]);
 
-  // A new set of results has no active option. Keyed on the results themselves,
-  // which is load-bearing in two ways that an earlier `[count, open]` got wrong:
-  //
-  //   - Not on `count`. A replacement set is often the same size, and a stale
-  //     index then points at whichever suggestion now occupies that slot — so
-  //     Enter committed something the reader had never moved to. That is the
-  //     exact failure this reset exists to prevent.
-  //   - Not on `open`. Revealing the list from a keypress sets the entry index
-  //     and flips `open` in the same commit, so an `open` dependency wiped the
-  //     highlight the keypress had just set: ArrowDown on a closed list opened
-  //     it with nothing highlighted and had to be pressed twice.
+  // A new result set has no active option. Keyed on `items`, not `count` (a
+  // same-size replacement would keep a stale index, so Enter would commit an
+  // unseen option) and not `open` (opening via ArrowDown sets the index in the
+  // same commit, which an `open` dependency would wipe).
   React.useEffect(() => {
     setActiveIndex(-1);
   }, [items]);
 
-  // Keep the highlighted option in view: the list scrolls (`max-h-60`), so
-  // holding ArrowDown otherwise walks the highlight out of sight.
+  // Keep the highlighted option in view in the scrolling list.
   React.useEffect(() => {
     if (activeIndex < 0) return;
     document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, optionId]);
 
-  // A closed list responds to exactly two keys: either arrow reveals it, and
-  // entering at the near end (top for Down, bottom for Up) is what a native
-  // combobox does.
+  // On a closed list, either arrow opens it at the near end, like a native
+  // combobox.
   const handleClosedKey = React.useCallback(
     (event: React.KeyboardEvent): void => {
       if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
@@ -119,16 +87,13 @@ export function useSuggestionKeyboard({
       switch (event.key) {
         case 'ArrowDown':
           event.preventDefault();
-          // Clamped, not wrapped: a list that jumps back to the top when you
-          // reach the bottom hides the fact that you have seen everything.
+          // Clamped, not wrapped, so the user can tell they reached the end.
           setActiveIndex((i) => Math.min(i + 1, count - 1));
           return;
 
         case 'ArrowUp':
           event.preventDefault();
-          // From nothing, ArrowUp enters the list at its END. Clamping from -1
-          // would have entered at the start instead, making ArrowUp and
-          // ArrowDown do the same thing.
+          // From nothing, ArrowUp enters at the end.
           setActiveIndex((i) => (i < 0 ? count - 1 : Math.max(i - 1, 0)));
           return;
 
@@ -143,8 +108,8 @@ export function useSuggestionKeyboard({
           return;
 
         case 'Enter':
-          // Only swallowed when it actually commits a suggestion — otherwise
-          // Enter must still reach the form and submit it.
+          // Swallowed only when it commits a suggestion; otherwise Enter must
+          // still submit the form.
           if (activeIndex < 0) return;
           event.preventDefault();
           onSelect(activeIndex);
@@ -157,8 +122,8 @@ export function useSuggestionKeyboard({
           return;
 
         case 'Tab':
-          // Not prevented: moving on should move on. The list just shouldn't
-          // be left hanging over the next field.
+          // Not prevented; just closes the list so it does not cover the next
+          // field.
           onClose();
           return;
 

@@ -28,6 +28,7 @@ vi.mock('@/lib/bff-session', () => ({
 vi.mock('@/lib/auth-api', () => ({
   getSession: vi.fn().mockResolvedValue(null),
   signOut: vi.fn().mockResolvedValue(undefined),
+  verifyOtp: vi.fn(),
   fetchMe: vi.fn().mockResolvedValue({
     id: 'u1',
     name: 'Aadhya',
@@ -247,6 +248,48 @@ describe('AuthProvider — a late session restore must not clobber a fresh login
     });
 
     expect(result.current.isAuthenticated).toBe(true);
+  });
+
+  it('stops loading after an OTP login that lands while the restore is pending', async () => {
+    const authApi = await import('@/lib/auth-api');
+    vi.mocked(authApi.fetchAuthConfig).mockResolvedValue({
+      selfSignupAllowed: false,
+      loginChannels: ['phone', 'email'],
+      authProvider: 'keycloak',
+      keycloak: { url: 'http://kc.test/auth', realm: 'bluedots', clientId: 'signals-ui' },
+    } as Awaited<ReturnType<typeof authApi.fetchAuthConfig>>);
+    vi.mocked(authApi.verifyOtp).mockResolvedValue({
+      user: { id: 'u1', name: 'Aadhya' },
+    } as Awaited<ReturnType<typeof authApi.verifyOtp>>);
+
+    let releaseRestore: (() => void) | undefined;
+    let markStarted: (() => void) | undefined;
+    const restoreGate = new Promise<void>((res) => {
+      releaseRestore = res;
+    });
+    const restoreStarted = new Promise<void>((res) => {
+      markStarted = res;
+    });
+    bff.fetchBffSession = async () => {
+      markStarted?.();
+      await restoreGate;
+      return { authenticated: false };
+    };
+    const { result } = renderHook(() => useAuth(), { wrapper: createWrapper(new QueryClient()) });
+    await act(async () => {
+      await restoreStarted;
+    });
+
+    await act(async () => {
+      await result.current.verifyOtp({ phoneNumber: '+919620388881' }, '123456');
+    });
+    await act(async () => {
+      releaseRestore?.();
+      await Promise.resolve();
+    });
+
+    expect(result.current.isAuthenticated).toBe(true);
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
   });
 });
 

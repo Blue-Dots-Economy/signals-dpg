@@ -1,36 +1,21 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 /**
- * Keeps the exact JSON bytes of a request alongside the parsed body.
+ * Keeps the exact JSON bytes of a request as `request.rawBody`.
  *
- * `peer_instance_guard` verifies an HMAC the sender computed over the wire body.
- * It used to re-derive that string with `JSON.stringify(request.body)` — the body
- * AFTER Zod validation, which strips undeclared keys and injects defaults. Any
- * such difference changes the hash and 401s a legitimate peer.
- *
- * That has bitten twice (`lifecycle_filter`, then `order_by`) and each time it
- * read as an unrelated feature bug, because the symptom is a signature mismatch
- * that names no field. Hashing the raw bytes removes the whole class: what the
- * sender signed is what the receiver checks, so adding a field to a peer request
- * can no longer silently break federation.
- *
- * Registered on the app rather than inlined so the peer-auth tests can exercise
- * the shipped parser instead of a copy of it.
+ * `peer_instance_guard` verifies the peer HMAC over these raw bytes. Hashing
+ * `JSON.stringify(request.body)` instead would hash the Zod-validated body
+ * (undeclared keys stripped, defaults injected) and reject legitimate peers.
  */
 export function registerRawBodyCapture(app: FastifyInstance): void {
   app.addContentTypeParser(
     'application/json',
     { parseAs: 'string' },
-    // `parseAs: 'string'` means `raw` is always a string — no Buffer branch.
     (request, raw: string, done) => {
       (request as FastifyRequest & { rawBody?: string }).rawBody = raw;
-      // An empty body parses to `undefined` rather than erroring, so the route's
-      // own schema decides. Nearly every POST/PUT/PATCH here declares one — the
-      // exception is `network/schema/refetch_schemas`, which declares only
-      // `tags`/`response`, so an empty body reaches its handler instead of
-      // Fastify's 400. Benign there (the handler never reads the body, and it
-      // sits behind auth plus a `network_service` check), but a new bodyless
-      // route should not assume the parser will reject an empty payload.
+      // An empty body parses to `undefined`, so only the route's body schema can
+      // reject it. A route without a body schema (e.g. `POST /refetch_schemas`)
+      // receives an empty body unchallenged.
       if (raw.length === 0) return done(null, undefined);
       try {
         done(null, JSON.parse(raw));

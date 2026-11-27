@@ -71,10 +71,8 @@ export const get_consent_status_handler = async (
       }
     }
 
-    // A known minor must be gated against the U18 document set, not the adult
-    // one (#626). Resolved here rather than by the client: the client has no
-    // access to the age, and letting it choose would let it choose which terms
-    // it is bound by.
+    // A known minor is gated against the U18 document set. Resolved server-side:
+    // a client choosing would choose which terms bind it.
     const variant = await resolveUserConsentVariant(userId);
 
     return reply.code(200).send({

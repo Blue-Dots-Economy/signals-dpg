@@ -15,8 +15,6 @@ const NEXT: Record<ThemeMode, ThemeMode> = {
   system: 'light',
 };
 
-// Labels are i18n keys; the component resolves them via t() at render so the
-// tooltip + aria-label read in the active locale.
 const META: Record<ThemeMode, { labelKey: string; Icon: typeof Sun }> = {
   light: { labelKey: 'theme.label_light', Icon: Sun },
   dark: { labelKey: 'theme.label_dark', Icon: Moon },

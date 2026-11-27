@@ -18,21 +18,6 @@ interface CountOptions {
   onError?: (err: unknown) => void;
 }
 
-/**
- * Totals for the My Actions saved views, over the caller's own actions scoped
- * by profile and action type only — status, direction, search and facets are
- * what the views themselves vary, so they are not applied here. One grouped
- * query; each group's interaction decides which statuses count:
- *
- * - `needs_response`: received, and the status is in the interaction's
- *   `metric_categories.create` bucket (a request still waiting on the caller).
- * - `ready_to_export`: the caller's side may export this interaction
- *   (`export.requester_domains`) and the status reveals the counterparty.
- * - `sent`: initiated by the caller, any status.
- *
- * A group whose interaction cannot be resolved still counts toward `all` /
- * `sent`, never toward the status-dependent views (fail closed).
- */
 interface CountGroup {
   action_type: string;
   action_status: string;
@@ -66,13 +51,27 @@ function addStatusViews(counts: OwnedActionViewCounts, g: CountGroup, cfg: Netwo
   }
 }
 
+/**
+ * Totals for the My Actions saved views, over the caller's own actions scoped
+ * by profile and action type only (status, direction, search and facets are
+ * what the views vary). One grouped query; each group's interaction decides
+ * which statuses count:
+ *
+ * - `needs_response`: received, and the status is in the interaction's
+ *   `metric_categories.create` bucket.
+ * - `ready_to_export`: the caller's side may export this interaction
+ *   (`export.requester_domains`) and the status reveals the counterparty.
+ * - `sent`: initiated by the caller, any status.
+ *
+ * A group whose interaction or config cannot be resolved still counts toward
+ * `all` / `sent`, never toward the status-dependent views (fail closed).
+ */
 export async function countOwnedActionsForViews(
   userId: string,
   opts: CountOptions
 ): Promise<OwnedActionViewCounts> {
-  // Grouped by the owner columns themselves (not `owner = $n` expressions —
-  // Postgres treats two placeholders as different expressions, so an
-  // expression in both SELECT and GROUP BY is rejected). Sides are derived below.
+  // Grouped by the owner columns, not `owner = $n` expressions: Postgres sees
+  // two placeholders as different expressions and rejects the GROUP BY.
   const groups = await db
     .select({
       action_type: item_actions.action_type,

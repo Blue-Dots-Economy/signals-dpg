@@ -1,35 +1,23 @@
 /**
  * One-shot handoff of a wrong-portal bounce across the Keycloak logout redirect.
  *
- * Why this exists: when the domain gate turns a user away (they hold a profile
- * in a domain this portal does not serve), both login paths call `signOut()`
- * and then `navigate('/auth/login', { state: { wrongPortalDomain } })`, and the
- * login page turns that router state into the `auth.wrong_portal` toast.
+ * When the domain gate turns a user away, the caller signs out and then
+ * navigates to `/auth/login` with `wrongPortalDomain` router state. Under
+ * Keycloak, `signOut()` → `endBffSession()` does a full-page navigation to the
+ * end-session endpoint, so that `navigate` never runs and Keycloak returns the
+ * browser with a fresh document and no router state.
  *
- * That works on the better-auth path, where `signOut()` is a local API call.
- * Under Keycloak it does not: `signOut()` → `endBffSession()` →
- * `userManager.signoutRedirect()`, a FULL-PAGE navigation to Keycloak's
- * end-session endpoint. The await never resolves, so the `navigate` after it
- * never runs; Keycloak then returns the browser to `postLogoutRedirectUri`
- * (the site root) with a fresh document and no router state. The user was
- * correctly blocked and signed out, but landed on the logged-out home page
- * with no explanation of why.
- *
- * Router state cannot survive a full page load, so the reason is parked here
- * instead — same read-once localStorage pattern as `pending-consent.ts` and
- * `pending-signup-extras.ts` — and surfaced by `<WrongPortalToast />`, which is
- * mounted app-wide precisely because the landing route is whatever
- * `postLogoutRedirectUri` points at, not `/auth/login`.
+ * The reason is therefore parked in localStorage (read-once, like
+ * `pending-consent.ts`) and surfaced by `<WrongPortalToast />`, which is
+ * mounted app-wide so it does not depend on the post-logout landing route.
  */
 
 const STORAGE_KEY = 'pendingWrongPortal';
 
 /**
- * How long a parked bounce stays worth showing. The gap between parking and
- * landing is one Keycloak round-trip (seconds), so anything older belongs to an
- * abandoned logout — the tab was closed mid-redirect, or Keycloak never came
- * back. Without this, that stale entry would ambush the user with an
- * out-of-nowhere error on some later, unrelated visit.
+ * How long a parked bounce stays worth showing. Parking to landing is one
+ * Keycloak round trip, so anything older is from an abandoned logout and must
+ * not surface as an unexplained error on a later visit.
  */
 const MAX_AGE_MS = 5 * 60 * 1000;
 
@@ -39,8 +27,8 @@ interface PendingWrongPortal {
 }
 
 /**
- * Park the blocked domain immediately BEFORE signing out — `signOut()` may
- * never return control on the Keycloak path.
+ * Park the blocked domain immediately before signing out, since `signOut()`
+ * may never return control.
  *
  * @param domain - The domain the user already holds a profile in.
  * @param now - Injectable clock for tests.
@@ -49,8 +37,8 @@ export function setPendingWrongPortal(domain: string, now: number = Date.now()):
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ domain, at: now } satisfies PendingWrongPortal));
   } catch {
-    // Storage unavailable (private mode, quota). The bounce itself still
-    // happened — only the explanation is lost, which is today's behaviour.
+    // Storage unavailable (private mode, quota). The bounce still happens;
+    // only the explanation is lost.
   }
 }
 

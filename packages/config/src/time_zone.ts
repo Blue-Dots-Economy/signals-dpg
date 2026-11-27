@@ -5,7 +5,7 @@ export function isValidTimeZone(timeZone: string): boolean {
     new Intl.DateTimeFormat('en-US', { timeZone });
     return true;
   } catch {
-    // Intl throws RangeError for an unknown zone — that IS the answer.
+    // Intl throws RangeError for an unknown zone.
     return false;
   }
 }

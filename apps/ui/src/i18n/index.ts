@@ -4,21 +4,18 @@ import { initReactI18next } from 'react-i18next';
 
 import { getRuntimeEnv } from '@/lib/runtime-env';
 
-// Eagerly import all locale JSON files. `import: 'default'` makes each value
-// the parsed JSON object itself — without it, eager glob yields the module
-// namespace ({ default: {...} }), which would bury every translation key one
-// level deep under `default` and make every t() lookup miss.
+// Eagerly import all locale JSON. `import: 'default'` yields the parsed JSON
+// itself; without it every key would sit under `default` and every t() would
+// miss.
 const modules = import.meta.glob('./locales/*.json', {
   eager: true,
   import: 'default',
 });
 
-// Build resources object: { [code]: { translation: <file contents> } }
 const resources: Record<string, { translation: Record<string, unknown> }> = {};
 const discoveredCodes: string[] = [];
 
 for (const path of Object.keys(modules)) {
-  // Extract language code from path: './locales/en.json' → 'en'
   const match = /\.\/locales\/([^/]+)\.json$/.exec(path);
   if (!match) continue;
   const code = match[1];
@@ -28,15 +25,10 @@ for (const path of Object.keys(modules)) {
   };
 }
 
-// Parse VITE_ENABLED_LANGUAGES.
-//
-// `getRuntimeEnv` reads the chart's runtime config (window.__DPG_UI_CONFIG__,
-// served from /config.js) and falls back to the build-time value. Reading
-// `import.meta.env` directly does NOT work for a deployed instance: Vite
-// inlines it at build time and CI publishes the UI image with no VITE_ build
-// args, so every deployment fell through to DEFAULT_ENABLED_CODES no matter
-// what the chart set. Runtime config is what lets ONE image serve en,hi in one
-// region and en,hi,kn in another.
+// VITE_ENABLED_LANGUAGES comes from `getRuntimeEnv` (the chart's runtime
+// config, falling back to build time). `import.meta.env` alone would not work:
+// it is inlined at build and CI builds the image with no VITE_ args, so one
+// image could not serve en,hi in one region and en,hi,kn in another.
 const rawEnabled = getRuntimeEnv('VITE_ENABLED_LANGUAGES');
 const enabledCodes: string[] =
   rawEnabled
@@ -44,12 +36,11 @@ const enabledCodes: string[] =
     .map((s: string) => s.trim())
     .filter((s: string) => s.length > 0) ?? [];
 
-// Default active languages when VITE_ENABLED_LANGUAGES is unset. Curated
-// (NOT "all discovered") so retained-but-inactive locales like kn stay off by
-// default — set VITE_ENABLED_LANGUAGES to override (e.g. "en,hi,kn").
+// Default active languages when VITE_ENABLED_LANGUAGES is unset. Curated, not
+// "all discovered", so retained-but-inactive locales like kn stay off.
 const DEFAULT_ENABLED_CODES = ['en', 'hi'];
 
-// supportedLngs: env list (if set) else the curated default; always include 'en'
+// supportedLngs: the env list if set, else the default; always includes 'en'.
 const supportedLngs: string[] =
   enabledCodes.length > 0
     ? Array.from(new Set(['en', ...enabledCodes]))
@@ -67,11 +58,9 @@ void i18next
     resources,
     fallbackLng: 'en',
     supportedLngs,
-    // Our locale files use FLAT dotted keys (e.g. "common.login") rather than
-    // nested objects. i18next defaults to '.' as a nested-key separator, which
-    // would make every flat key unresolvable (it echoes the key back). Disable
-    // key nesting so the full string is treated as one literal key. nsSeparator
-    // (':') is left at its default since no key contains a colon.
+    // Locale files use flat dotted keys ("common.login"), so disable key
+    // nesting or every key would be unresolvable. nsSeparator (':') stays;
+    // no key contains a colon.
     keySeparator: false,
     detection: {
       order: ['querystring', 'localStorage', 'navigator'],
@@ -87,12 +76,9 @@ void i18next
 export default i18next;
 
 /**
- * Returns the list of available languages for the dropdown.
- * If VITE_ENABLED_LANGUAGES is set, returns those codes in order (intersected
- * with discovered locale files). If unset, returns the curated default
- * (DEFAULT_ENABLED_CODES — en, hi) intersected with discovered locales.
- * Each entry has `code` and `name` (the `_name` field from the JSON, or code
- * as fallback).
+ * Languages for the dropdown: the VITE_ENABLED_LANGUAGES codes in order, else
+ * DEFAULT_ENABLED_CODES, intersected with the discovered locale files. `name`
+ * is the JSON's `_name` field, or the code.
  */
 export function getAvailableLanguages(): Array<{ code: string; name: string }> {
   const orderedCodes =

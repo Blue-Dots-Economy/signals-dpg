@@ -198,6 +198,8 @@ vi.mock('@dpg/schemas', () => {
       boolean: () => leaf,
     },
     PerformNetworkActionBodySchema: {},
+    // Only `instanceof` is used on it; a plain class keeps that check working.
+    JsonSchemaValidationError: class JsonSchemaValidationError extends Error {},
     FetchItemsBodySchema: {},
     FetchItemsCountBodySchema: {},
     FetchItemsQuerySchema: {},

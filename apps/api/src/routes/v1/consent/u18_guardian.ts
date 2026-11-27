@@ -18,6 +18,7 @@ import {
 } from '@/services/minor_guardian_repo';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { issueGuardianOtp, guardianOtpErrorReply } from '@/services/guardian_otp';
+import { cleanMobilePhone } from '@/services/phone';
 import { guardianUserConsentRow } from '@/services/guardian_consent_rows';
 
 type Req = FastifyRequest<{ Body: U18GuardianBody }>;
@@ -42,6 +43,9 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   if (!apiConfig.served_domains.some((b) => b.network === body.network)) {
     return reply.code(400).send({ error: 'UNKNOWN_NETWORK', message: `Network "${body.network}" is not served` });
   }
+  const phone = cleanMobilePhone(body.guardianPhone);
+  if (!phone.ok) return reply.code(400).send({ error: 'INVALID_PHONE', message: phone.message });
+  const guardianPhone = phone.value;
 
   const age = await getWardAge(userId);
   if (age === null) return reply.code(409).send({ error: 'DOB_REQUIRED', message: 'Submit age before guardian details' });
@@ -56,10 +60,9 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     wardEmail: ward?.email,
     wardPhone: ward?.phoneNumber,
     guardianEmail: body.guardianEmail,
-    guardianPhone: body.guardianPhone,
+    guardianPhone,
   });
-  // Hard block: a ward may not be their own guardian. (Allowing it with an ack
-  // is a possible FUTURE use case — deliberately disabled for now.)
+  // Hard block: a ward may not be their own guardian.
   if (matchesWard) {
     return reply.code(409).send({
       error: 'SAME_CONTACT_NOT_ALLOWED',
@@ -68,7 +71,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
   }
 
   // Cap: at most MAX_WARDS_PER_GUARDIAN wards may share one guardian contact.
-  const channel = resolveOtpChannel({ guardianEmail: body.guardianEmail, guardianPhone: body.guardianPhone });
+  const channel = resolveOtpChannel({ guardianEmail: body.guardianEmail, guardianPhone });
   if (await isGuardianWardLimitReached(channel.contact, userId)) {
     return reply.code(409).send({
       error: 'GUARDIAN_WARD_LIMIT',
@@ -76,7 +79,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     });
   }
 
-  // Record the ward's guardian-validity attestation (D12): source='self', u18.
+  // Record the ward's guardian-validity attestation: source='self', u18.
   const declVersion = await resolveConsentVersion({
     network: body.network, brand: body.brand, category: 'guardian_declaration', variant: 'u18',
   });
@@ -88,7 +91,7 @@ export const u18_guardian_handler = async (request: Req, reply: FastifyReply) =>
     await upsertGuardianDetails(userId, {
       guardianName: body.guardianName,
       guardianEmail: body.guardianEmail ?? null,
-      guardianPhone: body.guardianPhone ?? null,
+      guardianPhone: guardianPhone ?? null,
     });
     await db.insert(consent_record).values(guardianUserConsentRow({
       category: 'guardian_declaration',

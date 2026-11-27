@@ -223,6 +223,7 @@ describe('NetworkRuntimeSecretsSchema', () => {
     expect(parsed.CONSENT_SUPPORT_EMAIL).toBe('hello@bluedotseconomy.org');
     expect(parsed.ALLOW_EXTRA_SCHEMA_DATA).toBe(false);
     expect(parsed.BULK_MAX_ITEMS).toBe(100);
+    expect(parsed.MARKERS_MAX_LIMIT).toBe(25000);
     expect(parsed.EXPORT_MAX_ROWS).toBe(10000);
     expect(parsed.EXPORT_TIMEZONE).toBe('Asia/Kolkata');
     expect(parsed.EXPORT_RATE_LIMIT_PER_HOUR).toBe(20);
@@ -237,6 +238,7 @@ describe('NetworkRuntimeSecretsSchema', () => {
     const parsed = NetworkRuntimeSecretsSchema.parse({
       ...base,
       BULK_MAX_ITEMS: '250',
+      MARKERS_MAX_LIMIT: '50000',
       EXPORT_MAX_ROWS: '5000',
       MAX_WARDS_PER_GUARDIAN: '3',
       MAX_PROFILES_PER_USER: '10',
@@ -244,6 +246,7 @@ describe('NetworkRuntimeSecretsSchema', () => {
     });
 
     expect(parsed.BULK_MAX_ITEMS).toBe(250);
+    expect(parsed.MARKERS_MAX_LIMIT).toBe(50000);
     expect(parsed.EXPORT_MAX_ROWS).toBe(5000);
     expect(parsed.MAX_WARDS_PER_GUARDIAN).toBe(3);
     expect(parsed.MAX_PROFILES_PER_USER).toBe(10);
@@ -252,6 +255,8 @@ describe('NetworkRuntimeSecretsSchema', () => {
 
   it('rejects non-positive or fractional caps', () => {
     expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, BULK_MAX_ITEMS: '0' })).toThrow();
+    expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, MARKERS_MAX_LIMIT: '0' })).toThrow();
+    expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, MARKERS_MAX_LIMIT: '100001' })).toThrow();
     expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_MAX_ROWS: '0' })).toThrow();
     expect(() => NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_TIMEZONE: 'IST+5' })).toThrow();
     expect(NetworkRuntimeSecretsSchema.parse({ ...base, EXPORT_TIMEZONE: 'UTC' }).EXPORT_TIMEZONE).toBe('UTC');

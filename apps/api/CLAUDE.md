@@ -6,7 +6,7 @@ Guidance specific to working inside `apps/api`. Read the root `CLAUDE.md` and `A
 
 There is no single auth default a new route inherits. Three patterns coexist in `src/routes/v1/`:
 
-1. **Group-level hook** — `action_routes.ts`, `admin_routes.ts`, `aggregator_routes.ts` call `fastify.addHook('preHandler', auth_middleware_if_enabled)` (plus an acting-org hook) once, and every route registered under that group gets it for free. `action_routes.ts:10-20` has the canonical explanation of *why* the ordering matters — read it before touching hook order anywhere:
+1. **Group-level hook** — `action_routes.ts`, `admin_routes.ts`, `aggregator_routes.ts` call `fastify.addHook('preHandler', auth_middleware_if_enabled)` (plus an acting-org hook) once, and every route registered under that group gets it for free. The comment above the hooks in `action_routes.ts` has the canonical explanation of *why* the ordering matters — read it before touching hook order anywhere:
 
    > Fastify runs plugin-level `preHandler` hooks (registration order) before the route-level `preHandler` chain, so installing auth at the plugin scope guarantees `request.user` is set before the acting-org check reads it. Each route also declares its own `auth_middleware_if_enabled` for handler-local readability — `auth_middleware` is idempotent, so the second pass costs nothing.
 

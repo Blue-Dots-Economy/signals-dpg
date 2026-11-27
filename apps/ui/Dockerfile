@@ -147,7 +147,10 @@ ${MAP_ENTRIES}    }"
     }"
 else
   MAP_BLOCK=""
-  CONFIG_LOCATION="location = /config.js { alias /usr/share/nginx/html/config.js; }"
+  CONFIG_LOCATION="location = /config.js {
+        alias /usr/share/nginx/html/config.js;
+        add_header Cache-Control \"no-cache\" always;
+    }"
 fi
 
 # Port 80, unchanged from the pre-hardening image. This runs as uid 65532, which
@@ -159,7 +162,20 @@ server {
     listen 80;
     root ${ROOT};
     index index.html;
+    gzip on;
+    gzip_vary on;
+    # Kong adds a Via header, and nginx does not gzip requests that carry one unless this is set.
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/css text/plain text/javascript application/javascript application/json image/svg+xml;
     ${CONFIG_LOCATION}
+    location ^~ /assets/ {
+        # No "always": a 404 seen mid rolling deploy must not be cached for a year.
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files \$uri =404;
+    }
+    location = /index.html { add_header Cache-Control "no-cache" always; }
     location / { try_files \$uri /index.html; }
 }
 NGINXCONF

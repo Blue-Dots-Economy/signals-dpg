@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  spotGroupArea,
   deriveBrowseParams,
   domainsInteract,
   anchorItemIdForTarget,
@@ -378,5 +379,30 @@ describe('deriveBrowseParams — area is opt-in (#644)', () => {
     expect(p.q).toBe('solar');
     expect(p.filters).toEqual([{ field: 'sector', values: ['energy'] }]);
     expect(p.relevance).toBe(true);
+  });
+});
+
+describe('spotGroupArea', () => {
+  const group = {
+    key: 'c:1',
+    count: 3,
+    breakdown: [{ domain: 'provider', count: 3 }],
+    exact: true,
+    bounds: { minLat: 60, minLng: 10, maxLat: 60, maxLng: 10 },
+  };
+
+  it('pads a one-point group by about 5 m on each side', () => {
+    const area = spotGroupArea(group);
+    if (area.mode !== 'viewport') throw new Error('expected a viewport area');
+    const dLat = 5 / 111_320;
+    expect(area.bounds.minLat).toBeCloseTo(60 - dLat, 9);
+    expect(area.bounds.maxLat).toBeCloseTo(60 + dLat, 9);
+    expect(area.bounds.minLng).toBeCloseTo(10 - dLat / Math.cos((60 * Math.PI) / 180), 9);
+    expect(area.bounds.maxLng).toBeCloseTo(10 + dLat / Math.cos((60 * Math.PI) / 180), 9);
+  });
+
+  it('records whether the group is one exact spot', () => {
+    expect(spotGroupArea(group)).toMatchObject({ mode: 'viewport', spot: { exact: true } });
+    expect(spotGroupArea({ ...group, exact: false })).toMatchObject({ spot: { exact: false } });
   });
 });

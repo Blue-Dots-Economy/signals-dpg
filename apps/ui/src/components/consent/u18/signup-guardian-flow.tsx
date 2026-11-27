@@ -21,21 +21,17 @@ export interface SignupGuardianFlowProps {
   identifier: SignupIdentifier;
   /** Ward's age captured on the birth-year step. */
   age: number;
-  /** Guardian OTP verified server-side — caller proceeds to the ward's own OTP. */
+  /** Guardian OTP verified server-side; the caller creates the ward's account. */
   onComplete: () => void;
   /** Back to the birth-year step (rendered on the previous screen). */
   onBack?: () => void;
 }
 
 /**
- * PRE-AUTH guardian consent flow, run DURING signup for an under-18 ward,
- * BEFORE the ward's own login OTP (U18 option A). Rendered inline as the auth
- * page's content (inside AuthShell) — it REPLACES the signup form, matching
- * the DOB step, rather than stacking as a modal over it.
- *
- * Age was already collected on the previous step, so there's no birth-year step
- * here: guardian details → guardian OTP. The captured guardian + consent are
- * materialized onto the new user id once better-auth creates it.
+ * Pre-auth guardian consent for an under-18 ward during signup, before the
+ * account exists: guardian details, then guardian OTP. Rendered inline in
+ * place of the signup form. The server keys this on the signup identifier and
+ * attaches the guardian and consent to the user when the account is created.
  */
 export function SignupGuardianFlow({
   network,
@@ -47,9 +43,8 @@ export function SignupGuardianFlow({
   onBack,
 }: SignupGuardianFlowProps) {
   const { t } = useTranslation();
-  // 'verified' is an explicit hand-off step AFTER the guardian OTP: the ward's
-  // own verification is a separate thing, so we don't silently jump to the user
-  // OTP screen — they click to continue.
+  // 'verified' is an explicit hand-off: the ward clicks to continue to their
+  // own account step rather than being moved on silently.
   const [step, setStep] = React.useState<'guardian' | 'otp' | 'verified'>('guardian');
   const [guardianBody, setGuardianBody] = React.useState<SubmitGuardianBody | null>(null);
 

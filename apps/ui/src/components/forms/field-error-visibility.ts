@@ -1,20 +1,10 @@
 import type { ErrorSchema } from '@rjsf/utils';
 
 /**
- * Which fields are allowed to display a validation error yet.
- *
- * The form feeds RJSF its errors through `extraErrors` rather than turning on
- * `liveValidate`, and this module decides what goes in. That distinction is the
- * whole point: `liveValidate` hands an error to EVERY invalid field, and the
- * theme's own input/select templates redden their borders straight off
- * `rawErrors` — so a pristine form lit up the moment anything was typed. Keeping
- * an untouched field out of `extraErrors` means it never receives an error at
- * all, so every renderer (our field template, the theme's templates, and the
- * custom widgets that draw their own error text) stays quiet without each one
- * needing to know about this rule.
- *
- * RJSF still validates natively on submit, so filtering display errors here
- * cannot let invalid data through.
+ * Which fields may display a validation error yet. The form passes errors via
+ * `extraErrors` instead of `liveValidate`, which would error every invalid
+ * field at once; keeping untouched fields out means no renderer shows them.
+ * RJSF still validates on submit.
  */
 
 /** RJSF field ids look like "root_website" / "root_reference_links_0". */
@@ -35,15 +25,9 @@ export function isFieldVisited(property: string, touchedFieldIds: ReadonlySet<st
 }
 
 /**
- * Narrow a full error schema to the fields the user has actually visited.
- *
- * Returns nothing at all once a submit has been attempted: from that point RJSF
- * has validated natively and renders every field's error itself, so supplying
- * ours as well would print each message twice.
- *
- * Root-level `__errors` are dropped: they are not attributable to a field the
- * user could have visited, and showing them would reintroduce the "pristine form
- * shouts at you" problem this exists to prevent.
+ * Narrows an error schema to visited fields. Returns nothing once a submit
+ * was attempted, since RJSF then renders every error itself and ours would
+ * duplicate them. Root-level `__errors` are dropped, as no field owns them.
  */
 export function filterErrorSchemaToVisited(
   errorSchema: ErrorSchema,

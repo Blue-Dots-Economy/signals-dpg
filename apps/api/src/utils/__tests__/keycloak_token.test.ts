@@ -31,6 +31,7 @@ vi.mock('@/config', () => ({ keycloakConfig: mockKeycloakConfig }));
 
 const {
   verifyKeycloakToken,
+  verifyKeycloakLogoutToken,
   looksLikeKeycloakToken,
   extractBearerToken,
   resetKeycloakJwksCache,
@@ -307,6 +308,97 @@ describe('verifyKeycloakToken', () => {
     mockKeycloakConfig.accepted_client_ids = ['signals-ui', 'signals-api', 'aggregator-dpg'];
     const result = await verifyKeycloakToken(await mintToken({ azp: 'aggregator-dpg' }));
     expect(result.ok).toBe(true);
+  });
+});
+
+const LOGOUT_EVENT = 'http://schemas.openid.net/event/backchannel-logout';
+
+/** Mint a back-channel logout token shaped the way Keycloak sends one. */
+async function mintLogoutToken(
+  overrides: {
+    aud?: string;
+    claims?: Record<string, unknown>;
+    omit?: string[];
+    key?: CryptoKey;
+    issuedAt?: number;
+  } = {}
+): Promise<string> {
+  const { aud = 'signals-ui', claims = {}, omit = [], key = privateKey, issuedAt } = overrides;
+  const payload: Record<string, unknown> = {
+    sid: 'kc-session-1',
+    events: { [LOGOUT_EVENT]: {} },
+    jti: 'logout-jti-1',
+    ...claims,
+  };
+  for (const name of omit) delete payload[name];
+  return new SignJWT(payload)
+    .setProtectedHeader({ alg: 'RS256', kid: KID })
+    .setIssuer(issuer)
+    .setAudience(aud)
+    .setSubject('11111111-2222-3333-4444-555555555555')
+    .setIssuedAt(issuedAt)
+    .sign(key);
+}
+
+describe('verifyKeycloakLogoutToken', () => {
+  it('rejects a replayed logout token issued minutes ago', async () => {
+    const tenMinutesAgo = Math.floor(Date.now() / 1000) - 600;
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ issuedAt: tenMinutesAgo }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('accepts a logout token for the signals client and returns its session id', async () => {
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken());
+    expect(result).toEqual({ ok: true, sid: 'kc-session-1' });
+  });
+
+  it('rejects a logout token addressed to another client in the shared realm', async () => {
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ aud: 'aggregator-portal' }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('rejects a logout token signed by a key that is not in the realm JWKS', async () => {
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ key: foreignPrivateKey }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('rejects an unsigned token', async () => {
+    const [, body] = (await mintLogoutToken()).split('.');
+    const unsigned = `${Buffer.from('{"alg":"none"}').toString('base64url')}.${body}.`;
+    expect(await verifyKeycloakLogoutToken(unsigned)).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('rejects a signed realm token that is not a logout event', async () => {
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ omit: ['events'] }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('rejects a logout token that carries a nonce', async () => {
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken({ claims: { nonce: 'n' } }));
+    expect(result).toMatchObject({ ok: false, code: 'TOKEN_INVALID' });
+  });
+
+  it('rejects a logout token without a session id or a jti', async () => {
+    expect(await verifyKeycloakLogoutToken(await mintLogoutToken({ omit: ['sid'] }))).toMatchObject({
+      ok: false,
+      code: 'TOKEN_INVALID',
+    });
+    expect(await verifyKeycloakLogoutToken(await mintLogoutToken({ omit: ['jti'] }))).toMatchObject({
+      ok: false,
+      code: 'TOKEN_INVALID',
+    });
+  });
+
+  it('reports an unreachable JWKS as unavailable', async () => {
+    jwksServerFails = true;
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken());
+    expect(result).toMatchObject({ ok: false, code: 'KEYCLOAK_UNAVAILABLE' });
+  });
+
+  it('refuses to verify anything when Keycloak is not configured', async () => {
+    mockKeycloakConfig.issuer = '';
+    const result = await verifyKeycloakLogoutToken(await mintLogoutToken());
+    expect(result).toMatchObject({ ok: false, code: 'KEYCLOAK_NOT_CONFIGURED' });
   });
 });
 

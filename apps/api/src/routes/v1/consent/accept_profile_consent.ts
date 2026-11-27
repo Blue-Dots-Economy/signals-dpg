@@ -11,11 +11,20 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { apiConfig } from '@/config';
 import { resolveConsentVersion } from '@/services/consent_version';
 import { hasAcceptedTermsAndPrivacy } from '@/services/consent_acceptance';
-import { promoteItemOnProfileConsent, isItemOwnedBy } from '@/services/item_service';
+import {
+  promoteItemOnProfileConsent,
+  isItemOwnedBy,
+  liveLimitMessage,
+  type PromotionResult,
+} from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 
-const ProfileConsentAcceptResponseSchema = z.object({ recorded: z.number().int() });
+const ProfileConsentAcceptResponseSchema = z.object({
+  recorded: z.number().int(),
+  // Present only when the live profile limit kept the profile in draft.
+  message: z.string().optional(),
+});
 
 type Req = FastifyRequest<{ Body: ProfileConsentAcceptBody }>;
 
@@ -136,7 +145,7 @@ export const accept_profile_consent_handler = async (
     });
   }
 
-  let promoted = false;
+  let promotion: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
       await tx.insert(consent_record).values({
@@ -150,20 +159,15 @@ export const accept_profile_consent_handler = async (
         source: 'profile',
         acceptedAt: new Date(),
       });
-      // Recording profile consent can make a complete draft discoverable
-      // (aggregator-dpg#464). Promote in the same transaction so the ledger
-      // write and the lifecycle flip are atomic.
-      promoted = await promoteItemOnProfileConsent(tx, body.item_id);
+      // Profile consent can make a complete draft live. Promote in the same
+      // transaction so the ledger write and lifecycle flip are atomic.
+      promotion = await promoteItemOnProfileConsent(tx, body.item_id);
     });
   } catch (err) {
-    // consent_record is append-only, so the idempotency check + insert are not
-    // transactional. If a unique index exists, a concurrent double-submit can
-    // slip a second request past the "already recorded" check and produce a PG
-    // unique violation (23505) on insert. Treat only that as already-recorded
-    // (the read above confirmed the row was absent at check time) and return
-    // recorded:0 — making concurrent double-submits safe. Any other insert
-    // error is a genuine write failure and must not be masked as success, or
-    // the UI would falsely proceed past the consent modal.
+    // The idempotency check and insert are not atomic, so a concurrent
+    // double-submit can hit a unique violation (23505); only that is treated
+    // as already-recorded. Any other insert error is a real failure and must
+    // not be masked as success, or the UI would proceed past the consent modal.
     const e = err as { code?: string } | null;
     if (e?.code === '23505') {
       request.log.warn(
@@ -180,13 +184,10 @@ export const accept_profile_consent_handler = async (
     });
   }
 
-  // A promotion changed lifecycle_status, so both item read caches now hold a
-  // stale `draft`: the 1 s local one the owner's "My Profiles" list reads
-  // through, and the domain-TTL inter-instance ones (5 min for blue_dot/seeker)
-  // that would otherwise keep the freshly-live profile out of everyone else's
-  // browse feed. Sweep both, as the lifecycle route does. Best-effort — a cache
-  // miss must never fail an already-recorded consent.
-  if (promoted) {
+  // A promotion leaves a stale `draft` in both item read caches (the 1 s local
+  // one and the domain-TTL inter-instance ones). Best-effort: a cache failure
+  // must never fail an already-recorded consent.
+  if (promotion.promoted) {
     await invalidateItemFetchCache(body.network, body.item_domain).catch((err) =>
       request.log.warn(
         { err },
@@ -194,16 +195,10 @@ export const accept_profile_consent_handler = async (
       ),
     );
 
-    // The promotion also changed what search must return, and the search index is
-    // maintained by signals-search off item events (#557). Without this the
-    // profile stays `draft` in item_search while `items` says `live` — invisible
-    // in every ranked feed and every map viewport, with the owner's own UI showing
-    // it as Active — until the next reconciliation sweep, or permanently when the
-    // sweep can't see it (signals-search#122).
-    //
-    // AFTER the transaction, never inside it: an event published pre-commit lets
-    // the worker read the row before the promotion is visible and re-index the
-    // stale value, which is the very race that made this bug permanent.
+    // signals-search maintains item_search from item events; without this the
+    // profile stays `draft` there while `items` says `live`. Published after
+    // the transaction, never inside it, so the worker cannot re-index the
+    // pre-promotion row.
     await publishItemEvent(
       {
         item_network: body.network,
@@ -218,5 +213,5 @@ export const accept_profile_consent_handler = async (
     );
   }
 
-  return reply.code(200).send({ recorded: 1 });
+  return reply.code(200).send({ recorded: 1, ...liveLimitMessage(promotion) });
 };

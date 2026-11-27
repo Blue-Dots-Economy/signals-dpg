@@ -1,7 +1,6 @@
-// Pure geo-distance helpers used by the cross-instance merge (#203 §4.4).
-// No DB, no Fastify, no side effects — only inputs in, numbers out.
+// Pure geo-distance helpers.
 
-/** Mean earth radius in meters, matching apps/api/src/services/geocoding conventions. */
+/** Mean earth radius in meters (the same sphere as Postgres earth_distance). */
 const EARTH_RADIUS_METERS = 6371000;
 
 export interface LatLng {
@@ -48,14 +47,9 @@ export function nearestLocationMeters(
 }
 
 /**
- * Minimum haversine distance between two items' location sets (#439 Task 7 —
- * my-actions distance sort/display). Unlike `nearestLocationMeters` above
- * (single center vs. an array, used by the cross-instance merge),
- * `item_locations` on BOTH sides of an action can carry more than one point,
- * so this checks every pairwise combination. Returns `null` — never
- * `Infinity` — when either side has no locations, so a caller can
- * distinguish "distance unknown" (render nothing) from a real, very-large
- * distance, and so it never becomes a NULLS-FIRST sort key by accident.
+ * Minimum distance over every pair of points from two location sets. Returns
+ * `null`, not `Infinity`, when either side has no locations, so "unknown" is
+ * distinguishable from a real distance and never sorts as a value.
  */
 export function nearestDistanceMeters(
   as: readonly LatLng[] | null | undefined,

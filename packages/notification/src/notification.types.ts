@@ -6,14 +6,13 @@ export type NotificationPriority = 'realtime' | 'other';
 /**
  * Payload sent to the `/notify` endpoint.
  *
- * `variables` MUST conform to the JSON Schema returned
- * by `/providers` for the given `channel`.
+ * `variables` must conform to the JSON Schema returned by `/providers` for
+ * the given `channel`.
  */
 export interface NotifyRequest<TVariables extends Record<string, unknown>> {
   /**
-   * Notification channel/provider (e.g. email, sms, whatsapp).
-   *
-   * ⚠️ Do NOT hardcode allowed values.
+   * Notification channel/provider (e.g. email, sms, whatsapp). Not an enum:
+   * the allowed values come from `/providers`.
    */
   channel: string;
 
@@ -29,21 +28,13 @@ export interface NotifyRequest<TVariables extends Record<string, unknown>> {
    */
   to: string;
 
-  /**
-   * Processing priority.
-   */
   priority: NotificationPriority;
 
-  /**
-   * Provider-specific variables.
-   *
-   * Must satisfy the provider JSON schema.
-   */
   variables: TVariables;
 
   /**
-   * Optional idempotency key. The notification-service dedupes on this key
-   * (defaulting to `${channel}:${to}:${template_id}` when omitted).
+   * Optional idempotency key. Without it the notification-service dedupes on a
+   * hash of channel, to, template_id and variables.
    */
   dedupe_id?: string;
 }

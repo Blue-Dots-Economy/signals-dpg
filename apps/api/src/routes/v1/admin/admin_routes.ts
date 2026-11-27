@@ -8,10 +8,11 @@ import { participant_decrypt } from './participant_decrypt.js';
 
 /**
  * Mounts /api/v1/admin/*. Every request through this scope passes through:
- *   1. auth_middleware — populates request.user from apikey / session.
+ *   1. auth_middleware — populates request.user (api key, session cookie or
+ *      service bearer).
  *   2. acting_org preHandler — populates request.acting_org from the
  *      x-acting-org-id header, validating it points at an aggregator or
- *      network_service org and that the caller is a registered service user.
+ *      network_service org and that the caller is a member of some org.
  */
 export const admin_routes: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', auth_middleware_if_enabled);

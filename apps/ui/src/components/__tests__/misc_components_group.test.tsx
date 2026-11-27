@@ -26,7 +26,8 @@ vi.mock('@/lib/support-api', () => ({
 }));
 vi.mock('@/hooks/use-match-score', () => ({ useMatchScore: vi.fn() }));
 vi.mock('@/hooks/use-actions', () => ({ usePendingActionsCount: vi.fn() }));
-vi.mock('@/lib/auth-api', () => ({
+vi.mock('@/lib/auth-api', async (importOriginal) => ({
+  isValidPhoneNumber: (await importOriginal<typeof import('@/lib/auth-api')>()).isValidPhoneNumber,
   getSession: vi.fn(),
   signOut: vi.fn(),
   checkUser: vi.fn(),
@@ -351,7 +352,7 @@ describe('SupportDialog', () => {
     expect(screen.getByLabelText('Phone')).toHaveValue('');
 
     await userEvent.type(screen.getByLabelText('Name'), '  Ravi  ');
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), '  App keeps logging me out  ');
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -405,7 +406,7 @@ describe('SupportDialog', () => {
     renderSupportDialog(onOpenChange);
 
     await userEvent.type(screen.getByLabelText('Name'), 'Ravi');
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), 'Still broken');
     await userEvent.click(screen.getByRole('checkbox'));
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
@@ -419,7 +420,7 @@ describe('SupportDialog', () => {
 
   it('guards a submit that bypasses the disabled button: missing details', async () => {
     renderSupportDialog();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
 
     fireEvent.submit(supportForm());
 
@@ -439,7 +440,7 @@ describe('SupportDialog', () => {
 
   it('guards a submit that bypasses the disabled button: consent not given', async () => {
     renderSupportDialog();
-    await userEvent.type(screen.getByLabelText('Phone'), '+919111111111');
+    await userEvent.type(screen.getByLabelText('Phone'), '9111111111');
     await userEvent.type(screen.getByLabelText('Details'), 'Reachable but no consent');
 
     fireEvent.submit(supportForm());

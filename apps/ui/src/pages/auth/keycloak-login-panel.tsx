@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Loader2, LockKeyhole, OctagonX, UserPlus } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { AuthShell } from '@/components/layout/auth-shell';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PhoneInput, toE164 } from '@/components/auth/phone-input';
+import { PhoneInput } from '@/components/auth/phone-input';
 import { toast } from 'sonner';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
+import { InlineFieldError, fieldErrorAria } from '@/components/forms/inline-field-error';
 import { useAuth } from '@/contexts/auth-context';
 import { useAuthConfig } from '@/hooks/use-auth-config';
 import { useNetworkConfig } from '@/hooks/use-network-config';
@@ -42,9 +45,8 @@ import { formatDomainLabel } from '@/lib/domain-icons';
 import { SessionExpiredNotice } from './session-expired-notice';
 
 /**
- * Same shape as `local@rest` with an inner dot in `rest` — the check the OTP
- * screen applies. Scanned with string operations rather than the equivalent
- * `/^[^\s@]+@[^\s@]+\.[^\s@]+$/`, whose backtracking is super-linear.
+ * `local@rest` with an inner dot in `rest`. Scanned with string operations
+ * because the equivalent regex backtracks super-linearly.
  */
 function hasEmailShape(value: string): boolean {
   if (/\s/.test(value)) return false;
@@ -55,32 +57,117 @@ function hasEmailShape(value: string): boolean {
   return dot !== -1 && dot < rest.length - 1;
 }
 
-/** Re-narrow to the discriminated pair the guardian flow's props take. */
+/** Re-narrows to the discriminated pair the guardian flow's props take. */
 function toSignupIdentifier(identifier: AuthIdentifier): SignupIdentifier {
   return (identifier.email
     ? { email: identifier.email }
     : { phoneNumber: identifier.phoneNumber }) as SignupIdentifier;
 }
 
+/** Sign-up fields the API can reject, each flagged when it did. */
+interface SignupServerErrors {
+  name?: boolean;
+  email?: boolean;
+  phone?: boolean;
+}
+
+/** The sign-up fields a `400` named, or `null` when it named none. */
+function signupFieldRejection(err: unknown): Required<SignupServerErrors> | null {
+  const { status, fields } = readApiError(err);
+  const bad = { name: Boolean(fields?.name), email: Boolean(fields?.email), phone: Boolean(fields?.phoneNumber) };
+  return status === 400 && (bad.name || bad.email || bad.phone) ? bad : null;
+}
+
+/** What {@link signupFieldErrors} reads from the sign-up form. */
+interface SignupFieldState {
+  channel: LoginChannel;
+  name: string;
+  phoneNumber: string;
+  email: string;
+  serverFieldErrors: SignupServerErrors;
+  submitAttempted: boolean;
+  contactTouched: boolean;
+  /** How many domains the sign-up offers; a single one is picked for the user. */
+  domainChoices: number;
+  domain: string;
+  /** True when the picked domain asks for a birth year. */
+  ageAsked: boolean;
+  age: number | undefined;
+}
+
+/** `message` once Submit was pressed while `missing` holds, else `null`. */
+function messageAfterSubmit(submitted: boolean, missing: boolean, message: string): string | null {
+  return submitted && missing ? message : null;
+}
+
+/** The name field's message: rejected by the API, else required after a Submit. */
+function signupNameError(
+  f: SignupFieldState,
+  required: (label: string) => string,
+  invalid: (message: string) => string,
+  t: TFunction,
+): string | null {
+  if (f.serverFieldErrors.name) {
+    return invalid(t('form.invalid_format', 'Please enter a valid {{field}}.', { field: t('auth.label_name') }));
+  }
+  return f.submitAttempted && !f.name.trim() ? required(t('auth.label_name')) : null;
+}
+
+/** The phone or email field's message: wrong (once left) or rejected, else required after a Submit. */
+function signupContactError(
+  f: SignupFieldState,
+  isPhone: boolean,
+  contactRaw: string,
+  contactValid: boolean,
+  required: (label: string) => string,
+  invalid: (message: string) => string,
+  t: TFunction,
+): string | null {
+  const serverRejected = isPhone ? f.serverFieldErrors.phone : f.serverFieldErrors.email;
+  const shownWrong = Boolean(contactRaw) && !contactValid && (f.contactTouched || f.submitAttempted);
+  if (serverRejected || shownWrong) {
+    return invalid(t(isPhone ? 'auth.toast_invalid_phone_desc' : 'auth.toast_invalid_email_desc'));
+  }
+  if (!f.submitAttempted || contactRaw) return null;
+  return required(isPhone ? t('auth.label_mobile') : t('auth.label_email'));
+}
+
+/**
+ * The sign-up form's messages: required fields after a Submit, a wrong phone
+ * or email once the field is left, and fields the API rejected.
+ */
+function signupFieldErrors(f: SignupFieldState, t: TFunction) {
+  const isPhone = f.channel === 'phone';
+  const required = (label: string) => t('form.error_required', '{{label}} is required.', { label });
+  const invalid = (message: string) => t('form.error_invalid', 'Invalid entry. {{message}}', { message });
+  const contactRaw = isPhone ? f.phoneNumber : f.email.trim();
+  const contactValid = isPhone ? isValidPhoneNumber(f.phoneNumber) : hasEmailShape(contactRaw);
+
+  const nameError = signupNameError(f, required, invalid, t);
+  const contactError = signupContactError(f, isPhone, contactRaw, contactValid, required, invalid, t);
+
+  return {
+    contactValid,
+    nameError,
+    contactError,
+    domainError: messageAfterSubmit(f.submitAttempted, f.domainChoices > 1 && !f.domain, t('auth.select_domain_required')),
+    ageError: messageAfterSubmit(f.submitAttempted, f.ageAsked && f.age === undefined, t('auth.signup_dob_required')),
+  };
+}
+
 /**
  * The login screen for deployments where the API reports `authProvider:
- * 'keycloak'`.
+ * 'keycloak'`. Starts with a chooser (existing user vs. new) because identity
+ * lookup lives inside Keycloak.
  *
- * Two states. First a **chooser** — existing user vs. new — because the two go to
- * very different places, and the OTP screen's "type an identifier and we'll work
- * it out" trick isn't available here: identity lookup lives inside Keycloak now.
- *
- * Signing in is a pure hand-off: identifier entry, OTP delivery, verification and
+ * Sign-in is a pure hand-off: identifier entry, OTP delivery, verification and
  * the consent gates all live in Keycloak's flow (the custom OTP authenticator).
  *
- * Signing up **cannot** be a hand-off. The OTP SPI is login-only — it fails with
- * `user_not_found` for an unknown identifier and cannot create users — and
- * Keycloak's built-in registration form is password-based, which breaks the
- * passwordless model. So signals creates the identity via
- * `POST /api/v1/auth/signup`, parks the signals-only fields (domain, DOB) against
- * the identifier, and then sends the person through the normal login. Nothing
- * exists in signals until that login succeeds; provisioning applies the parked
- * fields at that point.
+ * Sign-up cannot be a hand-off: the OTP SPI is login-only (it cannot create
+ * users) and Keycloak's registration form is password-based. So the API creates
+ * the identity via `POST /api/v1/auth/signup`, parks the signals-only fields
+ * (domain, age) against the identifier, and the person then signs in normally.
+ * Provisioning applies the parked fields at that first login.
  */
 export function KeycloakLoginPanel() {
   const navigate = useNavigate();
@@ -94,56 +181,52 @@ export function KeycloakLoginPanel() {
   const [isRedirecting, setIsRedirecting] = useState(false);
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [contactTouched, setContactTouched] = useState(false);
+  // The API's per-field rejections, cleared when that field is edited.
+  const [serverFieldErrors, setServerFieldErrors] = useState<SignupServerErrors>({});
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [domain, setDomain] = useState('');
   /**
-   * Age snapshot derived from the birth YEAR the user picks (#331) — the day
-   * and month are never collected, here or anywhere else in the app. Undefined
-   * until a year is chosen; `BirthYearSelect` owns the year itself and hands
-   * back only `currentYear - birthYear`.
+   * Age derived from the birth year the user picks; day and month are never
+   * collected. Undefined until a year is chosen.
    */
   const [age, setAge] = useState<number | undefined>(undefined);
   /**
-   * Set only for a brand-new MINOR signing up into a guardian-gated domain.
-   * Renders the pre-auth guardian capture BEFORE the account is created, exactly
-   * as the OTP flow does (U18 option A): `startSignupGuardian` parks the capture
-   * against the signup identifier, and provisioning's `materializeSignupGuardian`
-   * writes it onto the user row at first login.
-   *
-   * A minor does NOT go through the ordinary terms/privacy gate — the guardian
-   * flow records their consent guardian-sourced instead.
+   * Set only for a new minor signing up into a guardian-gated domain. The
+   * guardian is captured before the account exists, parked against the signup
+   * identifier, and written onto the user row at first login
+   * (`materializeSignupGuardian`). A minor skips the ordinary terms/privacy
+   * gate; the guardian flow records their consent as guardian-sourced.
    */
   const [guardianGate, setGuardianGate] = useState<{
     identifier: AuthIdentifier;
     domain: string;
     age: number;
   } | null>(null);
-  // Set when terms/privacy need accepting before the account is created —
-  // mirrors the OTP screen's gate (`runConsentThenOtp` in login-page.tsx).
+  // Set when terms/privacy need accepting before the account is created.
   const [consentGate, setConsentGate] = useState<
     (OutstandingConsent & { identifier: AuthIdentifier }) | null
   >(null);
 
-  // Same contract as the OTP login: RequireAuth sends the intended path here
-  // as ?redirect=, and it must survive the round-trip through Keycloak.
+  // RequireAuth passes the intended path as ?redirect=; it must survive the
+  // round trip through Keycloak.
   const redirectTo = searchParams.get('redirect') ?? '/';
 
   const channels: LoginChannel[] = config?.loginChannels ?? ['phone', 'email'];
   const canSignup = config?.selfSignupAllowed === true;
 
   /**
-   * Which identifier the new account is created with. Phone is the default when
-   * both channels are enabled, matching the OTP screen — but it is a *default*,
-   * not the only option: a signup may use either channel the instance allows,
-   * exactly as `POST /api/v1/auth/signup` accepts either.
+   * Identifier channel for the new account. Phone is the default; a signup may
+   * use either channel the instance allows.
    */
   const [signupChannel, setSignupChannel] = useState<LoginChannel>('phone');
 
-  // The config arrives after first paint, so the default above can be a channel
-  // this instance doesn't run. Same correction the OTP screen applies to `mode`.
+  // The config arrives after first paint, so the default may be a channel this
+  // instance does not run.
   useEffect(() => {
     if (config && !config.loginChannels.includes(signupChannel)) {
       setSignupChannel(config.loginChannels[0]);
@@ -151,19 +234,11 @@ export function KeycloakLoginPanel() {
   }, [config, signupChannel]);
 
   /**
-   * Domain options come from the served network's own schema — not user input —
-   * so a signup can only ever name a domain the network actually defines. The
-   * API validates against served domains again; this is just the picker.
-   *
-   * Via React Query (the app's caching layer — see apps/ui/CLAUDE.md) rather
-   * than a hand-rolled effect, which buys three things that matter here:
-   * `isLoading` distinct from `isError` (an empty list otherwise cannot say
-   * whether it is still loading or failed), automatic retry, and retention of
-   * the last successful config across a failed refetch — so a blip can never
-   * empty the list that `guardian_consent_required` is read from.
-   *
-   * Passing `null` outside signup mode leaves the query disabled, matching the
-   * old effect's early return.
+   * Domain options come from the served network's own schema, so a signup can
+   * only name a domain the network defines (the API validates again). React
+   * Query keeps the last good config across a failed refetch, so a blip cannot
+   * empty the list `guardian_consent_required` is read from. Disabled outside
+   * signup mode.
    */
   const {
     data: networkConfig,
@@ -173,8 +248,7 @@ export function KeycloakLoginPanel() {
   } = useNetworkConfig(mode === 'signup' ? themeId : null);
   const networkDomains = useMemo(() => networkConfig?.domains ?? [], [networkConfig]);
 
-  // Memoised (like the OTP screen) so the auto-select effect below has a stable
-  // dependency instead of re-running on every render.
+  // Memoised so the auto-select effect below has a stable dependency.
   const servedScope = useMemo(() => getServedScope(), []);
   const domainOptions = useMemo(
     () =>
@@ -184,15 +258,9 @@ export function KeycloakLoginPanel() {
     [servedScope, networkDomains],
   );
 
-  // Single-domain / split portal: exactly one served domain means there is no
-  // choice to make. Auto-select it and hide the picker in the JSX — a
-  // one-option toggle is meaningless and would force a pointless click.
-  // Mirrors login-page.tsx's OTP signup form.
-  //
-  // This makes the signup carry a domain, which is what lets `handleSignup`
-  // reach the gated-domain branch at all. Enforcing that branch is a separate
-  // guard there (a gated domain rejects a blank DOB); auto-selection alone
-  // would leave the U18 path reachable but skippable.
+  // Exactly one served domain: auto-select it and hide the picker. This lets
+  // `handleSignup` reach the gated-domain branch; that branch is enforced by a
+  // separate guard there (a gated domain rejects a missing age).
   useEffect(() => {
     if (domainOptions.length === 1 && !domain) {
       setDomain(domainOptions[0].id);
@@ -200,45 +268,29 @@ export function KeycloakLoginPanel() {
   }, [domainOptions, domain]);
 
   /**
-   * Whether the domain being signed up for routes minors through the guardian
-   * flow. Only such a domain has any use for a birth year — a provider has no
-   * U18 flow at all, so asking them is pure friction. Drives both the field's
-   * visibility and the minor check in `handleSignup`, so the two cannot disagree.
-   *
-   * Unknown while the network config is still loading (`networkDomains` empty),
-   * which resolves to "not gated" and simply hides the field until it arrives.
+   * Whether the chosen domain routes minors through the guardian flow; only
+   * then is a birth year asked for. Resolves to false while the network config
+   * is loading, which just hides the field. `handleSignup` re-reads the flag
+   * from the resolved domain entry before deciding the U18 gate.
    */
   const selectedDomainIsGated =
     networkDomains.find((d) => d.id === domain)?.guardian_consent_required ?? false;
 
   /**
-   * The picker is unmounted whenever the chosen domain isn't guardian-gated,
-   * and `BirthYearSelect` owns the year internally — so switching seeker →
-   * provider → seeker would show an empty picker while a previously derived
-   * age still sat here and rode along with the signup. Clear it whenever the
-   * field is not on screen, so what's submitted is always what's displayed.
+   * The picker unmounts when the domain is not gated and `BirthYearSelect` owns
+   * the year, so clear a stale age whenever the field is off screen; what is
+   * submitted is always what is displayed.
    */
   useEffect(() => {
     if (!selectedDomainIsGated) setAge(undefined);
   }, [selectedDomainIsGated]);
 
   /**
-   * Clear the busy flags when this page comes BACK from the bfcache.
-   *
-   * Clicking "Sign in" sets `isRedirecting` and hands the browser to
-   * Keycloak — the code after `startKeycloakLogin` never runs, by design.
-   * Pressing Back then restores this page from the browser's back/forward
-   * cache with its JS heap intact, busy flags included, so every choice
-   * renders disabled with a spinner and stays that way until a manual
-   * reload.
-   *
-   * `pageshow` with `persisted: true` is the one signal that distinguishes a
-   * bfcache restore from a fresh load (a fresh load re-runs the module and
-   * resets the state on its own, which is why this only ever bites on Back).
-   *
-   * Not reproducible under `vite dev`: its HMR WebSocket makes the page
-   * ineligible for the bfcache, so Back re-executes the app instead of
-   * restoring it — the bug only appears on a deployed build.
+   * Clears the busy flags when the page is restored from the bfcache (Back
+   * after the Keycloak redirect), which would otherwise leave every choice
+   * disabled. `pageshow` with `persisted: true` is the only signal for a
+   * bfcache restore. Not reproducible under `vite dev`, whose HMR socket makes
+   * the page ineligible for the bfcache.
    */
   useEffect(() => {
     const onPageShow = (event: PageTransitionEvent) => {
@@ -258,22 +310,17 @@ export function KeycloakLoginPanel() {
       // On success the browser navigates to Keycloak and never gets here.
     } catch (err) {
       setIsRedirecting(false);
-      setError(err instanceof Error ? err.message : t('auth.oidc_error_desc'));
+      setError(apiErrorMessage(err, t, t('auth.oidc_error_desc')));
     }
   };
 
   /**
-   * The selected domain's entry in the list actually loaded, or null after
-   * telling the user why it can't be resolved.
-   *
-   * A miss must BLOCK rather than fall through: `guardian_consent_required` is
-   * read from this entry, so treating "not in the list" as "not gated" is what
-   * lets a failed refetch quietly switch off the U18 gate for a domain that is
-   * still selected.
+   * The selected domain's entry in the loaded list, or null after telling the
+   * user why. A miss must block rather than fall through: treating "not in the
+   * list" as "not gated" would let a failed refetch switch off the U18 gate.
    */
   const resolveSelectedDomain = (): DotNetworkDomain | null => {
-    // Submitting mid-fetch reports "still loading", not a failure — and does
-    // not retry, so the in-flight request is left to finish.
+    // Mid-fetch: report "still loading" and let the in-flight request finish.
     if (domainsLoading) {
       toast.error(t('auth.signup_options_loading'));
       return null;
@@ -283,98 +330,86 @@ export function KeycloakLoginPanel() {
     if (meta) return meta;
 
     if (domainsError) {
-      // Transient — offer a retry, so a blip that outlived React Query's own
-      // retries recovers on the next attempt instead of needing a reload.
+      // Transient: retry so the next attempt can recover without a reload.
       refetchNetworkConfig();
       toast.error(t('auth.signup_options_unavailable'));
     } else if (domainOptions.length === 0) {
-      // Loaded, but nothing is selectable: a config problem (the network
-      // defines no domains, or VITE_SERVED_BINDINGS names one it doesn't
-      // define). Retrying cannot fix that, so don't spin on it.
+      // Loaded but nothing selectable is a config problem (no domains, or
+      // VITE_SERVED_BINDINGS names an undefined one); retrying cannot fix it.
       toast.error(t('auth.signup_options_unavailable'));
     } else {
-      toast.error(t('auth.select_domain_required'));
+      // Shown under the domain buttons.
+      document.getElementById('signup-domain')?.querySelector('button')?.focus();
     }
     return null;
   };
 
+  const { contactValid, nameError, contactError, domainError, ageError } = signupFieldErrors(
+    {
+      channel: signupChannel,
+      name,
+      phoneNumber,
+      email,
+      serverFieldErrors,
+      submitAttempted,
+      contactTouched,
+      domainChoices: domainOptions.length,
+      domain,
+      ageAsked: selectedDomainIsGated,
+      age,
+    },
+    t,
+  );
+
   const handleSignup = async () => {
     setError(null);
+    setSubmitAttempted(true);
 
     if (!name.trim()) {
-      setError(t('auth.signup_name_required'));
+      document.getElementById('signup-name')?.focus();
       return;
     }
-    if (signupChannel === 'phone' && !isValidPhoneNumber(phoneNumber)) {
-      toast.error(t('auth.toast_invalid_phone'), {
-        description: t('auth.toast_invalid_phone_desc'),
-      });
+    // The API takes `z.email()`, so catch a malformed address here.
+    if (!contactValid) {
+      document.getElementById(`signup-${signupChannel}`)?.focus();
       return;
     }
-    // Same shape check the OTP screen applies — the API takes `z.email()`, so a
-    // malformed address is a 400 the user can't act on if it gets that far.
-    if (signupChannel === 'email' && !hasEmailShape(email.trim())) {
-      toast.error(t('auth.toast_invalid_email'), {
-        description: t('auth.toast_invalid_email_desc'),
-      });
-      return;
-    }
-    /**
-     * A signup must always carry a domain — the same guard the OTP screen
-     * applies. `domain` is optional on POST /auth/signup, so submitting without
-     * one creates an account with no `user.domains`: the single-domain lock
-     * never binds, and (on a guardian-gated domain) the DOB/guardian branch
-     * below is skipped because it keys off the selected domain.
-     */
+    // A signup must carry a domain: `domain` is optional on POST /auth/signup,
+    // and without one the single-domain lock never binds and the U18 branch
+    // below is skipped.
     const selectedDomainMeta = resolveSelectedDomain();
     if (!selectedDomainMeta) return;
 
-    /**
-     * Normalise ONCE, here, and use this everywhere downstream.
-     *
-     * The pre-auth guardian capture is keyed on a hash of the identifier and the
-     * server only trims it — it does not convert to E.164. Handing the guardian
-     * flow the raw national number while the Keycloak token later carries the
-     * E.164 form means `materializeSignupGuardian` finds no match at first login
-     * and silently no-ops: the user completes the guardian OTP, the account is
-     * created, and the guardian record is dropped. `login-page` avoids this the
-     * same way (`toE164` before building its identifier).
-     */
+    // Normalise once and use it everywhere: the pre-auth guardian capture is
+    // keyed on a hash of the identifier and the server only trims it, so a
+    // non-E.164 phone here would not match the Keycloak token at first login and
+    // the guardian record would be silently dropped.
     const identifier: AuthIdentifier =
-      signupChannel === 'phone' ? { phoneNumber: toE164(phoneNumber) } : { email: email.trim() };
+      signupChannel === 'phone' ? { phoneNumber } : { email: email.trim() };
 
-    // Read from the resolved entry, not the render-time flag: that one falls
-    // back to `false` for an unknown domain, which is fine for hiding a field
-    // but must never decide whether the U18 gate applies.
+    // Read from the resolved entry, not the render-time flag, which falls back
+    // to `false` for an unknown domain.
     const domainIsGated = selectedDomainMeta.guardian_consent_required === true;
 
-    /**
-     * On a guardian-gated domain the age must be known BEFORE the account
-     * exists. The OTP screen enforces that with a blocking DOB step whose
-     * continue button stays disabled until a year is picked
-     * (`components/consent/u18/signup-dob-step.tsx`). Here the field is inline
-     * and optional, so without this guard an unpicked year yields
-     * `age === undefined`, the minor check below never fires, and a minor is
-     * signed up as an adult — the U18 path skipped entirely rather than
-     * merely deferred.
-     */
+    // On a gated domain the age must be known before the account exists; the
+    // field is optional in the form, so an unpicked year would sign a minor up
+    // as an adult.
     if (domainIsGated && age === undefined) {
-      toast.error(t('auth.signup_dob_required'));
+      document.getElementById('signup-dob-year')?.focus();
       return;
     }
 
-    // A minor in a guardian-gated domain must have a guardian captured and
-    // OTP-verified before the account exists — same ordering as the OTP flow.
-    // Mirrors the server check in services/minor.ts; the server re-checks and
-    // rejects an adult with NOT_A_MINOR.
+    // A minor in a gated domain needs a guardian captured and OTP-verified
+    // before the account exists. The server re-checks (`services/minor.ts`)
+    // and rejects an adult with NOT_A_MINOR.
     if (domainIsGated && age !== undefined && isMinorFromAge(age)) {
       setGuardianGate({ identifier, domain, age });
       return;
     }
 
     setIsSigningUp(true);
-    // Terms/privacy must be accepted BEFORE the account is created, matching the
-    // OTP flow's ordering. If the gate opens, `handleConsentAccept` resumes here.
+    // Terms/privacy must be accepted before the account is created. If the
+    // gate opens, `handleConsentAccept` resumes here.
     const gated = await openConsentGateIfNeeded(identifier);
     if (gated) {
       setIsSigningUp(false);
@@ -384,16 +419,13 @@ export function KeycloakLoginPanel() {
   };
 
   /**
-   * Consent pre-check, mirroring `runConsentThenOtp` in login-page.tsx.
-   *
-   * Returns true when the modal is now showing and signup should pause. Fails
-   * OPEN on error, exactly as the OTP flow does — a consent-service blip must not
-   * block registration; the user is re-prompted on their next login.
+   * Consent pre-check. Returns true when the modal is showing and signup
+   * should pause. Fails open: a consent-service blip must not block
+   * registration; the user is re-prompted on their next login.
    */
   const openConsentGateIfNeeded = async (identifier: AuthIdentifier): Promise<boolean> => {
     try {
-      // Normalize the phone to the canonical E.164 form the API stores, or the
-      // exact-match lookup misses and the gate re-prompts every time.
+      // Canonical E.164, or the exact-match lookup misses and re-prompts.
       const identifierParam = consentStatusIdentifier(identifier);
 
       const [consentStatus, configEntries] = await Promise.all([
@@ -415,39 +447,35 @@ export function KeycloakLoginPanel() {
         source: 'signup',
         accepted: consentStatus.statuses,
         // No variant: `status-by-identifier` is unauthenticated and does not
-        // report one, so this gate is always the adult set. A minor gets the
-        // U18 documents post-auth from the guardian flow (#453/#626).
+        // report one, so this is always the adult set. A minor gets the U18
+        // documents post-auth from the guardian flow.
       });
       if (!outstanding) return false;
 
       setConsentGate({ ...outstanding, identifier });
       return true;
     } catch {
-      // Fail open — same posture as the OTP flow's pre-check.
+      // Fail open.
       return false;
     }
   };
 
   /**
-   * Accepted in the modal. The acceptance can't be written yet — the accept
-   * endpoint is authenticated — so park it for the callback page to flush once
-   * the session exists, then carry on creating the account.
+   * Accepted in the modal. The accept endpoint is authenticated, so park the
+   * acceptance for the callback page to flush once the session exists.
    */
   const handleConsentAccept = async () => {
     if (!consentGate) return;
     const { pendingConsent, identifier } = consentGate;
-    // Bind the parked acceptance to THIS login. The same id is routed through
-    // Keycloak in the OIDC `state`, so only the callback for this redirect can
-    // consume it — without that, an abandoned round trip on a shared device
-    // gets written against whoever signs in next. See lib/pending-consent.ts.
+    // Bind the parked acceptance to this login: the id travels in the OIDC
+    // `state`, so only this redirect's callback can consume it and an abandoned
+    // round trip on a shared device is never written against the next user.
     const consentAttempt = newConsentAttemptId();
     if (consentAttempt) {
       setPendingConsent(pendingConsent, consentAttempt);
     } else {
-      // No CSPRNG, so the acceptance cannot be bound to this login. Park
-      // nothing rather than parking something any later login could claim —
-      // the gate re-prompts once signed in, which is the safe direction to
-      // fail. Also drop anything already sitting there for the same reason.
+      // No CSPRNG, so the acceptance cannot be bound. Park nothing (and drop
+      // anything already parked); the gate re-prompts once signed in.
       clearPendingConsent();
     }
     setConsentGate(null);
@@ -456,9 +484,9 @@ export function KeycloakLoginPanel() {
   };
 
   /**
-   * Guardian captured and verified. Create the account straight away — the
-   * guardian flow has already recorded terms/privacy guardian-sourced, so the
-   * ordinary consent gate must not also run.
+   * Guardian captured and verified. The guardian flow already recorded
+   * terms/privacy as guardian-sourced, so the ordinary consent gate must not
+   * run.
    */
   const handleGuardianComplete = async () => {
     if (!guardianGate) return;
@@ -477,16 +505,14 @@ export function KeycloakLoginPanel() {
         ...(age !== undefined ? { age } : {}),
       });
 
-      // Park the same fields client-side for the callback to write over an
-      // authenticated session. The server already stashed them in Redis, but
-      // that stash has a 30-minute TTL and fails silently — see
-      // lib/pending-signup-extras.ts. Both paths are idempotent.
+      // Also park the fields client-side for the callback to write over an
+      // authenticated session: the server's Redis stash has a 30-minute TTL and
+      // fails silently. Both writes are idempotent.
       if (domain) {
         setPendingSignupExtras({ domain, ...(age !== undefined ? { age } : {}) });
       }
 
-      // Either way the next step is the same — sign in. An identifier that is
-      // already taken isn't something the user needs to act on differently.
+      // An identifier that is already taken needs no different action: sign in.
       toast.success(
         result.alreadyRegistered
           ? t('auth.signup_existing_title')
@@ -499,13 +525,12 @@ export function KeycloakLoginPanel() {
       );
       await handleSignIn(consentAttempt);
     } catch (err) {
-      const apiMessage = (err as { response?: { data?: { message?: unknown } } } | null)
-        ?.response?.data?.message;
-      setError(
-        typeof apiMessage === 'string' && apiMessage.trim() !== ''
-          ? apiMessage
-          : t('auth.oidc_error_desc')
-      );
+      const bad = signupFieldRejection(err);
+      if (bad) {
+        setServerFieldErrors(bad);
+      } else {
+        setError(apiErrorMessage(err, t, t('auth.oidc_error_desc')));
+      }
     } finally {
       setIsSigningUp(false);
     }
@@ -541,14 +566,9 @@ export function KeycloakLoginPanel() {
           />
         )}
 
-        {/* Gated instance: explain why "Create an account" is missing. This
-            is shown on ARRIVAL, before any identifier is entered, so it must
-            not claim the account was looked up and not found — which is what
-            `auth.signup_disabled_message` says. That string is the
-            better-auth path's post-lookup result (login-page.tsx sets
-            `signupBlocked` only after `exists === false`), and reusing it
-            here told every visitor "User doesn't exist" before they had
-            typed anything. */}
+        {/* Invite-only instance: shown on arrival, before any identifier is
+            entered, so it must not say the account was looked up and not
+            found (`auth.signup_disabled_message`). */}
         {!canSignup && (
           <p className="pt-1 text-sm text-muted-foreground">
             {t('auth.signup_invite_only')}
@@ -557,10 +577,7 @@ export function KeycloakLoginPanel() {
       </div>
     ) : (
       <div className="space-y-4">
-        {/* Phone / Email pill toggle — the account can be created against
-            either identifier, so it is only hidden when the instance runs a
-            single channel and there is nothing to choose. Mirrors the OTP
-            screen's toggle. */}
+        {/* Hidden when the instance runs a single channel. */}
         {channels.length > 1 && (
           <div className="flex rounded-full border border-border bg-muted p-1 text-sm">
             {channels.map((c) => (
@@ -590,16 +607,32 @@ export function KeycloakLoginPanel() {
           <Input
             id="signup-name"
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              setServerFieldErrors((prev) => ({ ...prev, name: false }));
+            }}
             placeholder={t('auth.placeholder_name')}
             autoComplete="name"
+            {...fieldErrorAria('signup-name-error', nameError)}
           />
+          <InlineFieldError id="signup-name-error" message={nameError} />
         </div>
 
         {signupChannel === 'phone' ? (
           <div className="space-y-1.5">
             <Label htmlFor="signup-phone">{t('auth.label_mobile')}</Label>
-            <PhoneInput id="signup-phone" value={phoneNumber} onChange={setPhoneNumber} />
+            <PhoneInput
+              id="signup-phone"
+              value={phoneNumber}
+              onChange={(v) => {
+                setPhoneNumber(v);
+                setServerFieldErrors((prev) => ({ ...prev, phone: false }));
+              }}
+              onBlur={() => setContactTouched(true)}
+              invalid={Boolean(contactError)}
+              describedBy="signup-contact-error"
+            />
+            <InlineFieldError id="signup-contact-error" message={contactError} />
           </div>
         ) : (
           <div className="space-y-1.5">
@@ -608,20 +641,29 @@ export function KeycloakLoginPanel() {
               id="signup-email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setServerFieldErrors((prev) => ({ ...prev, email: false }));
+              }}
+              onBlur={() => setContactTouched(true)}
               placeholder={t('auth.placeholder_email')}
               autoComplete="email"
+              {...fieldErrorAria('signup-contact-error', contactError)}
             />
+            <InlineFieldError id="signup-contact-error" message={contactError} />
           </div>
         )}
 
-        {/* Shown only when there is a real choice (>1 served domain); a
-            single-domain portal auto-selects it above and hides this. */}
+        {/* Shown only for more than one served domain. */}
         {domainOptions.length > 1 && (
           <div className="space-y-1.5">
             <Label className="text-sm font-medium">{t('auth.label_domain')}</Label>
-            {/* Segmented toggle, matching the OTP signup form's domain picker. */}
-            <div className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm">
+            {/* Segmented toggle. */}
+            <fieldset
+              id="signup-domain"
+              {...fieldErrorAria('signup-domain-error', domainError)}
+              className="flex flex-wrap gap-1 rounded-full border border-border bg-muted p-1 text-sm"
+            >
               {domainOptions.map((d) => (
                 <button
                   key={d.id}
@@ -638,18 +680,17 @@ export function KeycloakLoginPanel() {
                   {formatDomainLabel(d.id, networkDomains)}
                 </button>
               ))}
-            </div>
+            </fieldset>
+            <InlineFieldError id="signup-domain-error" message={domainError} />
           </div>
         )}
 
-        {/* Only a guardian-gated domain (e.g. seeker) needs an age; a provider
-            is never routed through the U18 flow, so the field is hidden. The
-            YEAR alone is collected (#331) — same control the OTP screen's DOB
-            step uses, so both signup entry points ask for the same thing. */}
+        {/* Only a guardian-gated domain needs an age; only the year is
+            collected. */}
         {selectedDomainIsGated && (
           <div className="space-y-1.5">
             <Label htmlFor="signup-dob-year">{t('auth.signup_dob_label_ym')}</Label>
-            <BirthYearSelect idPrefix="signup-dob" onChange={setAge} />
+            <BirthYearSelect idPrefix="signup-dob" onChange={setAge} error={ageError} />
             <p className="text-xs text-muted-foreground">{t('auth.signup_dob_hint')}</p>
           </div>
         )}
@@ -738,8 +779,8 @@ export function KeycloakLoginPanel() {
 }
 
 /**
- * One of the two entry choices. A button rather than a link because both do work
- * (one redirects to Keycloak, one swaps the panel) — nothing here is navigation.
+ * One of the two entry choices. A button, not a link: both choices do work
+ * (redirect to Keycloak, or swap the panel).
  */
 function ChoiceCard({
   icon,

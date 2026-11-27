@@ -1,11 +1,9 @@
 import { escapeHtml } from './substitute';
 
 /**
- * HTML shells + code-built fragments for externalized email copy (#529).
- * The shell is the escaping/layout boundary and stays in code on purpose —
- * the properties file holds words, not structure. Fragments returned by
- * `renderOtpBox`/`renderOrgList` are the only values allowed into `html`
- * tokens: built here from escaped parts.
+ * HTML shells and code-built fragments for email copy. Layout stays in code;
+ * the properties file holds words only. `html` tokens take only code-built
+ * fragments whose parts are escaped, like the ones here.
  */
 
 /** Branded action shell (greeting, body, CTA button + fallback link, sign-off). */
@@ -40,7 +38,7 @@ export function renderPlainShell(bodyHtml: string): string {
   </div>`;
 }
 
-/** The monospace OTP code box (shared by guardian + login OTP emails). */
+/** The monospace OTP code box for OTP emails. */
 export function renderOtpBox(otp: string): string {
   return `<div style="
       font-size: 20px;
@@ -55,28 +53,18 @@ export function renderOtpBox(otp: string): string {
 }
 
 /**
- * The platform link for plain-shell emails (login OTP, welcome) as an `html`
- * token, so copy never carries raw `href="{{token}}"` plumbing.
- *
- * Built here rather than substituted as text because an unset
- * FRONTEND_BASE_URL must not leave a dead `<a href="">` or a user-visible
- * `{{siteUrl}}` in a real email: with no URL there is simply no anchor, and
- * the sentence still reads ("… sign in to the platform:").
+ * The platform link as an `html` token. With no URL it renders the words
+ * "the platform" instead of a dead `<a href="">`.
  */
 export function renderSiteLink(url: string | undefined): string {
   if (!url) return 'the platform';
   const safe = escapeHtml(url);
-  // Inline colour + underline, not the browser default: several mail clients
-  // (Zoho and Outlook among them) drop the user-agent link styling and render
-  // an unstyled anchor in the surrounding body colour, so the URL reads as
-  // plain black text and nobody realises it is clickable. Email CSS has to be
-  // inline to survive sanitisers. A fixed accessible blue rather than the
-  // network's brand colour, which on the lighter palettes would be unreadable
-  // as body-sized text.
+  // Inline style because some mail clients (Zoho, Outlook) drop default link
+  // styling. Fixed blue, since lighter brand colours are unreadable as body text.
   return `<a href="${safe}" style="color: #1a56db; text-decoration: underline;">${safe}</a>`;
 }
 
-/** Numbered provider-org list for the guardian bulk email (#393). */
+/** Numbered provider-org list for the guardian bulk email. */
 export function renderOrgList(names: string[]): string {
   if (names.length === 0) return '<p>the selected organisations</p>';
   const items = names.map((n) => '<li>' + escapeHtml(n) + '</li>').join('');

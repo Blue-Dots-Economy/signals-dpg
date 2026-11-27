@@ -42,17 +42,46 @@ describe('GuardianFormStep', () => {
     vi.clearAllMocks();
   });
 
-  it('keeps Send OTP disabled until name + a contact are given', async () => {
+  it('an empty Continue shows each missing field under it and sends nothing', async () => {
     await renderForm(vi.fn());
     const submit = screen.getByRole('button', { name: /continue/i });
-    expect(submit).toBeDisabled();
-
-    await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
-    expect(submit).toBeDisabled(); // no contact yet
-
-    // Consent is captured in the popup on submit, not a pre-req to enable.
-    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '9876543210');
     expect(submit).toBeEnabled();
+    await userEvent.click(submit);
+
+    expect(screen.getByText('Guardian Name is required.')).toBeInTheDocument();
+    expect(screen.getByText("Enter your guardian's email or phone number.")).toBeInTheDocument();
+    const name = screen.getByLabelText(/guardian name/i);
+    expect(name).toHaveAttribute('aria-invalid', 'true');
+    expect(name).toHaveAttribute('aria-describedby', 'u18-guardian-name-error');
+    expect(submitGuardian).not.toHaveBeenCalled();
+
+    await userEvent.type(name, 'Asha Guardian');
+    expect(screen.queryByText('Guardian Name is required.')).toBeNull();
+  });
+
+  it('a partial phone shows "Invalid entry" once the field is left', async () => {
+    await renderForm(vi.fn());
+    await userEvent.type(screen.getByLabelText(/guardian phone number/i), '98765');
+    expect(screen.queryByText(/Invalid entry/)).toBeNull();
+    await userEvent.tab();
+    expect(
+      screen.getByText('Invalid entry. Please enter a valid Guardian Phone Number.'),
+    ).toBeInTheDocument();
+  });
+
+  it('puts a server field rejection under that field', async () => {
+    submitGuardian.mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 400, data: { message: 'body/guardianEmail Invalid email' } },
+    });
+    await renderForm(vi.fn());
+    await userEvent.type(screen.getByLabelText(/guardian name/i), 'Asha Guardian');
+    await userEvent.type(screen.getByLabelText(/guardian email/i), 'a@b');
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(
+      await screen.findByText('Invalid entry. Please enter a valid Guardian Email.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/body\/guardianEmail/)).toBeNull();
   });
 
   it('guardian phone takes only the 10-digit national number (+91 fixed prefix)', async () => {
@@ -109,9 +138,8 @@ describe('GuardianFormStep', () => {
 
     expect(screen.getByText(/can't be the same as your own/i)).toBeInTheDocument();
 
-    // No acknowledgement path — the submit stays disabled.
-    const submit = screen.getByRole('button', { name: /continue/i });
-    expect(submit).toBeDisabled();
+    // No acknowledgement path — a click sends nothing.
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
     expect(screen.queryByLabelText(/yes, that's okay/i)).not.toBeInTheDocument();
     expect(submitGuardian).not.toHaveBeenCalled();
     expect(onSubmitted).not.toHaveBeenCalled();
@@ -132,7 +160,8 @@ describe('GuardianFormStep', () => {
     );
     expect(onSubmitted).not.toHaveBeenCalled();
 
-    const submit = screen.getByRole('button', { name: /continue/i });
-    expect(submit).toBeDisabled();
+    // Resubmitting the same contact is refused without another request.
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+    expect(submitGuardian).toHaveBeenCalledTimes(1);
   });
 });

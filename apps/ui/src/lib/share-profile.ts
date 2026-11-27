@@ -1,10 +1,9 @@
 import type { Item } from '@/lib/item-api';
 
 /**
- * Canonical public share URL for a profile, built from its key.
- * Includes `?network=` because the network theme provider resolves the brand
- * from that query param (URL-wins), so a cold-loaded link renders in the
- * profile's own network theme. The path also carries the network for the fetch.
+ * Canonical public share URL for a profile, built from its key. Carries
+ * `?network=` because the theme provider resolves the network from that query
+ * param, so a cold-loaded link renders in the profile's own theme.
  */
 export function buildProfileShareUrl(
   item: Pick<Item, 'item_network' | 'item_domain' | 'item_type' | 'item_id'>,
@@ -16,9 +15,9 @@ export function buildProfileShareUrl(
 }
 
 /**
- * Copy text to the clipboard. Prefers the async Clipboard API; falls back to a
- * hidden textarea + `execCommand('copy')` for browsers without it (or when the
- * Clipboard API rejects, e.g. permissions). Returns true on success.
+ * Copy text to the clipboard via the Clipboard API, falling back to a hidden
+ * textarea + `execCommand('copy')` when it is missing or rejects. Returns true
+ * on success.
  */
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   try {

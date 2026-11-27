@@ -17,12 +17,12 @@ export interface UseBrowserLocationReturn {
   /** Whether this browser exposes the geolocation API at all. */
   isSupported: boolean;
   /**
-   * Request the current location. MUST be called from a user gesture (a click) —
-   * geolocation prompts for permission. Resolves to the location, or null if it
-   * failed/was denied (in which case `error`/`status` are also set).
+   * Requests the current location. Call from a user gesture, since it prompts
+   * for permission. Resolves to null on failure or denial, with
+   * `error`/`status` set.
    */
   request: (options?: GetBrowserLocationOptions) => Promise<BrowserLocation | null>;
-  /** Clear state and cancel any in-flight request. */
+  /** Clears state and cancels any in-flight request. */
   reset: () => void;
 }
 

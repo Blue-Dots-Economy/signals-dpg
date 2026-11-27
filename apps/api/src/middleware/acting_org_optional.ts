@@ -9,17 +9,10 @@ const get_header_value = (raw: string | string[] | undefined): string | undefine
 };
 
 /**
- * Optional variant of `acting_org_preHandler`.
- *
- * - Header absent (or blank-after-trim) → leave `request.acting_org`
- *   undefined and resolve. The downstream route handler decides whether
- *   that's allowed.
- * - Header present → delegate to the strict preHandler, which either
- *   attaches `request.acting_org` or terminates the request with an
- *   error reply.
- *
- * Mount this on routes that need to accept BOTH self-acted calls and
- * acting_org-scoped calls (e.g. `/api/v1/action/*`).
+ * Optional variant of `acting_org_preHandler`, for routes that accept both
+ * self-acted and acting-org calls (e.g. `/api/v1/action/*`). With no header
+ * (or a blank one), `request.acting_org` stays undefined and the route decides;
+ * otherwise the strict preHandler runs.
  */
 export const acting_org_preHandler_optional = async (
   request: FastifyRequest,

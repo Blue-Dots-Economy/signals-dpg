@@ -482,6 +482,16 @@ or every entry was `false`/unrecognised).
   per-item `profile_consent_accepted` + `lifecycle_status`, so callers can see
   what's outstanding and which profile is usable. It replaced
   `user_consent { terms_accepted, … }` in #692.
+- `GET /admin/participant?lifecycle_status=live,draft` returns only items in
+  those statuses (**additive, #927**; any of `draft`, `live`, `paused`,
+  comma-separated). Omitted, every item comes back as before, retired included.
+  A user who owns no item in the requested statuses gets `items: []` with the
+  real `compliance` values; a user owned by another aggregator gets
+  `items: []` with every flag `false`, so do not read an empty filtered list as
+  "owned elsewhere". An unknown value (or `retired`) is a `400`.
+- `GET /admin/participant?limit=20` returns only the newest 20 items, after any
+  `lifecycle_status` filter (**additive, #927**; 1–1000). Omitted, every item
+  comes back. The POST response is never limited.
 - **Every consent flag is version-scoped** (#692). `value` is `true` only when
   the consent was accepted at the document version this instance currently
   serves — resolved with the **same three discriminators the write side uses**:
@@ -520,6 +530,9 @@ or every entry was `false`/unrecognised).
 | `GET /admin/participant` + `?network=` naming an unserved network | 400 | `NETWORK_NOT_SERVED` | **not additive (#692).** A typo (`blue-dot`) previously returned 200 with every flag `false`. Callers that omit `?network=` are unaffected. |
 | `item_state` fails the item schema | 400 | `INVALID_ITEM_STATE` | **additive (#785).** `message` names each failing field (`Invalid item_state: mobile_number: Enter a 10-digit mobile number, ncsJobId: is not an allowed field`), and the body carries the same as `fields: { "<field>": "<message>" }` (nested fields dotted, e.g. `address.city`). A failed `pattern` uses the field's `x-error-message` from `network.json`, else `Please enter a valid <title>.`, and never the raw regex; an `enum` lists its allowed values. Map `fields` keys straight onto your form inputs or CSV columns. |
 | supplied `item_locations` point outside the instance's country | 400 | `LOCATION_OUTSIDE_COUNTRY` | see **Coordinates** above (#789). |
+| new profile when the account is at its total profile limit | 409 | `PROFILE_LIMIT_REACHED` | body adds `limit_type: "total"`. The `message` ("This account has reached its profile limit. Retire any profile to add another.") carries no numbers (#927). Retired profiles do not count. |
+| a profile that would go live while the account is at its live limit | 200 | — | **additive (#927).** Only on a domain with `profile_limits` in `network.json`. The profile is saved as `draft` and the body gains a top-level `message` ("Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it."); it is absent otherwise. Re-sending the profile by `item_id` once a slot is free makes it live. |
+| update by `item_id` when another write retires, pauses or publishes the profile during the save | 409 | `ITEM_CHANGED` | **additive (#927).** The edit is not saved. `message`: "This profile changed while it was being saved. Reload it and try again." Re-read the participant and retry. |
 
 ### `POST /api/v1/admin/participant/decrypt` — error matrix (additions)
 

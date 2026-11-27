@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { format } from 'date-fns';
 import { CalendarIcon } from 'lucide-react';
-import type { WidgetProps } from '@rjsf/utils';
+import { errorId, type WidgetProps } from '@rjsf/utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -17,26 +17,33 @@ export function DatePickerWidget({
   disabled,
   readonly,
   onChange,
+  onBlur,
   rawErrors,
 }: WidgetProps) {
   const [open, setOpen] = React.useState(false);
+  const invalid = Boolean(rawErrors && rawErrors.length > 0);
   const dateValue = value ? new Date(value as string) : undefined;
 
-  // The RJSF field template already renders the field label (and required
-  // asterisk); rendering our own <Label> here double-labelled every date
-  // field. Rely on the field template's label, like the other widgets.
+  // No <Label>: the field template already renders it.
   return (
     <div className="space-y-2">
-      <Popover open={open} onOpenChange={setOpen}>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) onBlur(id, value);
+        }}
+      >
         <PopoverTrigger asChild>
           <Button
             id={id}
             variant="outline"
             disabled={disabled || readonly}
+            {...(invalid ? { 'aria-invalid': true, 'aria-describedby': errorId(id) } : {})}
             className={cn(
               'w-full justify-start text-left font-normal',
               !dateValue && 'text-muted-foreground',
-              rawErrors && rawErrors.length > 0 && 'border-destructive'
+              invalid && 'border-destructive'
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
@@ -52,15 +59,13 @@ export function DatePickerWidget({
                 onChange(format(date, 'yyyy-MM-dd'));
               }
               setOpen(false);
+              onBlur(id, value);
             }}
             disabled={disabled || readonly}
             autoFocus
           />
         </PopoverContent>
       </Popover>
-      {rawErrors && rawErrors.length > 0 && (
-        <p className="text-sm text-destructive">{rawErrors.join(', ')}</p>
-      )}
     </div>
   );
 }

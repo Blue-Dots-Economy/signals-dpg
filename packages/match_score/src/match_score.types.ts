@@ -16,21 +16,14 @@ export interface MatchScoreRequest {
 }
 
 /**
- * #646 §5.5: `band`, `confidence`, `reasoning`, `signals`, `prompt_version`,
- * `model_provider` and `model` are gone. They are dpg-scoring-era fields that
- * the `signals_search` provider never populates, so the detail modal offered
- * affordances that could never fill — a confidence line and a reasoning
- * paragraph that were always absent in practice.
- *
- * The one real signal they were carrying is preserved as
- * `unavailable_reason`: /v1/relevance answers 404 (one side not indexed yet —
- * common, since indexing is async) and 409 (embedded with different model
- * versions, so not comparable), and both are expected states rather than
- * outages. That used to be smuggled through `reasoning`.
+ * Result of one match-score call. /v1/relevance answers 404 (an item is not
+ * indexed yet, common because indexing is async) and 409 (embedded with
+ * different model versions); both are expected states, reported via
+ * `unavailable_reason` rather than as errors.
  */
 export interface MatchScoreResult {
   provider: string;
-  /** 0-100 (#646 §5.2 — one scale end to end). */
+  /** 0-100. */
   score?: number;
   version?: string;
   /** Why no score is available, for the two expected non-outage states. */
@@ -44,9 +37,9 @@ export interface MatchScoreClient {
 
 export type MatchScoreProvider = 'signals_search';
 
-// signals-search's in-network relevance API (POST /v1/relevance). Authenticated
-// with a single x-api-key (validated against Signals' own apikey store).
-// `path` overrides the default 'v1/relevance'.
+// signals-search's relevance API (POST /v1/relevance), authenticated with an
+// x-api-key from the shared Signals apikey store. `path` overrides
+// 'v1/relevance'.
 export interface SignalsSearchClientConfig {
   baseUrl: string;
   apiKey: string;

@@ -201,7 +201,7 @@ and restart both `dev:api` and `dev:ui`.
 | blue_dot *(default)* | `../../examples/schemas/blue_dot/network.json` | `blue_dot/seeker,blue_dot/provider` | `blue_dot` |
 | purple_dot | `../../examples/schemas/purple_dot/network.json` | `purple_dot/seeker,purple_dot/provider` | `purple_dot` |
 | orange_dot | `../../examples/schemas/orange_dot/network.json` | `orange_dot/practitioner` | `orange_dot` |
-| yellow_dot | `../../examples/schemas/yellow_dot/network.json` | `onest_yellow_dot/student` | `onest_yellow_dot` |
+| yellow_dot | `../../examples/schemas/yellow_dot/network.json` | `yellow_dot/student` | `yellow_dot` |
 
 ---
 

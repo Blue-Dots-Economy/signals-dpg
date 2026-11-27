@@ -1,8 +1,6 @@
-// Post-login routing (#376). Decides, once on login success, whether to send a
-// user to the profile create/edit page because they have no *completed* profile
-// yet — instead of dropping them on the home page where they wouldn't know what
-// to do. A user who already has a completed profile (live/paused/retired) is
-// left alone. See docs/superpowers/specs/2026-08-03-first-time-login-profile-redirect-design.md
+// Post-login routing: decides whether to send a user to the profile
+// create/edit page because they have no completed profile yet. A user with a
+// completed profile (live/paused/retired) lands normally.
 
 export type ProfileLite = {
   item_id: string;
@@ -10,9 +8,8 @@ export type ProfileLite = {
   lifecycle_status: string;
 };
 
-// A profile counts as "completed" (the user has been through creation) if it is
-// live now, or was live and is paused/retired. Only when EVERY profile is still
-// draft (or there are none) do we nudge them to complete one.
+// "Completed" means live now, or was live and is paused/retired. Only when
+// every profile is still draft (or there are none) is the user redirected.
 const COMPLETED_STATUSES = new Set(['live', 'paused', 'retired']);
 
 /**

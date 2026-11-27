@@ -19,11 +19,9 @@ interface ExportButtonsProps {
 }
 
 /**
- * The Download buttons in the My Actions bulk bar (#771): one per
- * counterparty type in the selection ("Download Seekers (2)", "Download
- * Service Providers (1)"), since the server returns one type per file and
- * each type has its own columns. Renders nothing until an exportable card is
- * selected.
+ * One Download button per counterparty type in the selection, since the
+ * server exports one type per file with its own columns. Renders nothing
+ * until an exportable card is selected.
  */
 export function ExportButtons({ groups, pending = false, onDownload }: Readonly<ExportButtonsProps>) {
   const { t } = useTranslation();

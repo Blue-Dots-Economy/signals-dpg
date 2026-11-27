@@ -3,26 +3,20 @@ import type { GeoProvider, GeoSuggestion } from './types';
 /** Default LRU cap for a memoized geo lookup (entries). */
 const DEFAULT_CACHE_CAP = 500;
 
-/**
- * Normalize a place query so case/spacing variants share one cache entry:
- * trim, lowercase, and collapse internal whitespace runs to a single space.
- */
+/** Trims, lowercases and collapses whitespace so query variants share a cache entry. */
 export function normalizeGeoKey(query: string): string {
   return query.trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 /**
- * Session-scoped memoizing wrapper for an async geo lookup. Bounded LRU
- * (insertion-order, `cap` entries) keyed by `normalizeGeoKey(query)`, with
- * in-flight dedup so concurrent identical lookups collapse to one call. Only
- * results for which `shouldCache(value)` is true are stored (so a transient
- * empty/error result is not cached).
+ * Session-scoped memoizer for an async geo lookup: bounded LRU keyed by
+ * `normalizeGeoKey(query)`, with in-flight dedup. Only values passing
+ * `shouldCache` are stored, so a transient empty/error result is not cached.
  *
- * Abort is ref-counted: the shared underlying call runs against an internal
- * AbortController, and that controller is aborted only once EVERY current
- * waiter has aborted its own signal. So a single caller aborting (e.g. the user
- * typing the next keystroke) cancels the still-running fetch, while a caller
- * that shares the in-flight request — or one with no signal — keeps it alive.
+ * Abort is ref-counted: the shared call is aborted only once every waiter has
+ * aborted its own signal, so one caller moving on (the next keystroke) cancels
+ * the fetch only if nobody else is waiting on it. A waiter with no signal keeps
+ * it alive.
  */
 export function memoizeGeoLookup<T>(
   fn: (query: string, signal?: AbortSignal) => Promise<T>,
@@ -100,9 +94,8 @@ export function memoizeGeoLookup<T>(
 }
 
 /**
- * Wraps a GeoProvider so `suggest` is transparently session-cached (see
- * memoizeGeoLookup). suggest results are cached only when non-empty, so a
- * transient empty/error result is not stuck for the session.
+ * Wraps a GeoProvider so `suggest` is session-cached; only non-empty results
+ * are cached.
  */
 export function withGeoCache(base: GeoProvider): GeoProvider {
   const cachedSuggest = memoizeGeoLookup<GeoSuggestion[]>(

@@ -2,7 +2,7 @@ import type { LatLng } from './types';
 
 export type PlatformKind = 'android' | 'ios' | 'other';
 
-/** Classify the platform from a user-agent string (pure). */
+/** Classifies the platform from a user-agent string. */
 export function detectPlatform(userAgent: string): PlatformKind {
   if (/android/i.test(userAgent)) return 'android';
   if (/iphone|ipad|ipod/i.test(userAgent)) return 'ios';
@@ -10,10 +10,8 @@ export function detectPlatform(userAgent: string): PlatformKind {
 }
 
 /**
- * Build a directions deep-link to `dest` for the given platform:
- *  - android: `geo:` URI → triggers the OS "open with…" map-app chooser.
- *  - ios:     Apple Maps universal link (opens the Maps app with destination set).
- *  - other:   Google Maps directions URL (web/app).
+ * Directions deep link to `dest`: a `geo:` URI on Android (OS map-app chooser),
+ * an Apple Maps universal link on iOS, a Google Maps directions URL otherwise.
  */
 export function directionsUrl(dest: LatLng, label: string | undefined, platform: PlatformKind): string {
   const { lat, lng } = dest;
@@ -49,9 +47,8 @@ export function normalizeWebsiteUrl(url: string): string {
 }
 
 /**
- * Open directions to `dest`. On mobile we navigate the current tab (so the OS
- * can hand off to a native maps app); on desktop we open a new tab.
- * `win` is injectable for testing.
+ * Opens directions to `dest`. Mobile navigates the current tab so the OS can
+ * hand off to a native maps app; desktop opens a new tab.
  */
 export function openDirections(dest: LatLng, label: string | undefined, win: Window = window): void {
   const platform = detectPlatform(win.navigator.userAgent);

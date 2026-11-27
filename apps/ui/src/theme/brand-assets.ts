@@ -1,16 +1,10 @@
 /**
- * Maps a network id (e.g. `purple_dot`) to logo URLs that live under
- * /public/brand/<kebab>/. Designer-shipped assets are copied verbatim
- * from aggregator-dpg into apps/ui/public/brand/.
- *
- * Variants mirror the keys in `brand.json.logo`:
- *   - default          : neutral logo (light bg)
- *   - withStrapline    : adds "Seeded by …" wordmark
- *   - light            : light text/marks for dark backgrounds
- *   - onBrand          : tuned for hero / coloured backgrounds
- *
- * If a network has no logo folder, returns null and callers should fall
- * back to text-only branding.
+ * Maps a network id (e.g. `purple_dot`) to logo URLs under
+ * /public/brand/<kebab>/. Variants mirror the keys in `brand.json.logo`:
+ * default (light background), withStrapline ("Seeded by …"), light (dark
+ * backgrounds), withStraplineLight, and onBrand (hero / coloured backgrounds).
+ * Returns null only when no network id is given; the file is not checked for
+ * existence.
  */
 export type BrandLogoVariant =
   | 'default'

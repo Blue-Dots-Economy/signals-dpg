@@ -82,6 +82,8 @@ const NETWORK_CONFIG = {
 const fetchNetworkConfig = vi.fn<() => Promise<typeof NETWORK_CONFIG>>();
 vi.mock('@/lib/network-api', () => ({
   fetchNetworkConfig: () => fetchNetworkConfig(),
+  fetchSchemaEntries: async () => [{ kind: 'network_config', schema: await fetchNetworkConfig() }],
+  networkConfigIn: (entries: { schema: unknown }[]) => entries[0].schema,
 }));
 /** Which domains this deployment serves. null = all (the default here). */
 let servedScope: { network: string; domains: string[] } | null = null;
@@ -298,7 +300,8 @@ describe('KeycloakLoginPanel', () => {
     renderAt(<LoginPage />);
     await userEvent.click(screen.getByRole('button', { name: /continue/i }));
 
-    expect(await screen.findByText('Keycloak is not configured')).toBeTruthy();
+    expect(await screen.findByText('Something went wrong while signing you in. Please try again.')).toBeTruthy();
+    expect(screen.queryByText('Keycloak is not configured')).toBeNull();
     // Re-enabled, so the user can retry.
     expect(screen.getByRole('button', { name: /continue/i })).toBeTruthy();
   });
@@ -544,13 +547,14 @@ describe('KeycloakLoginPanel — existing vs new user chooser', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /create account/i }));
 
-    expect(await screen.findByText(/please enter your name/i)).toBeTruthy();
+    expect(await screen.findByText('Your name is required.')).toBeTruthy();
+    expect(screen.getByLabelText(/your name/i)).toHaveAttribute('aria-invalid', 'true');
     expect(signupWithKeycloak).not.toHaveBeenCalled();
   });
 
-  it('surfaces the API refusal message', async () => {
+  it('surfaces a readable API refusal message', async () => {
     signupWithKeycloak.mockRejectedValueOnce({
-      response: { data: { code: 'SIGNUP_RATE_LIMITED', message: 'Too many sign-up attempts.' } },
+      response: { status: 409, data: { code: 'SIGNUP_RATE_LIMITED', message: 'Too many sign-up attempts.' } },
     });
 
     renderAt(<LoginPage />);

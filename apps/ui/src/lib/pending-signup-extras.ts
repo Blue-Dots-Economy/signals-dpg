@@ -1,28 +1,17 @@
 /**
- * One-shot handoff of the domain + age a NEW user picked on the Keycloak signup
+ * One-shot handoff of the domain + age a new user picked on the Keycloak signup
  * form, across the Keycloak redirect.
  *
- * Why this exists in addition to the server-side stash: `POST /api/v1/auth/signup`
- * already parks these in Redis (`services/auth/signup_extras.ts`) for
- * provisioning to apply at first login, but that stash has a **30-minute TTL and
- * fails silently**. A user who leaves Keycloak's OTP screen open too long, or
- * hits a Redis blip, lands with `domains = null` and `age = null` — and a null
- * age on a guardian-gated domain is fail-closed server-side
- * (`item_service.ts` `guardianGateBlocksGoLive`), so they cannot publish a
- * profile and have no in-app way to fix it.
+ * `POST /api/v1/auth/signup` also stashes these in Redis
+ * (`services/auth/signup_extras.ts`) for first-login provisioning, but that
+ * stash has a 30-minute TTL and fails silently. A user who misses it lands with
+ * no domain and no age, and a null age on a guardian-gated domain blocks
+ * go-live server-side (`guardianGateBlocksGoLive`) with no in-app fix. The
+ * callback therefore repeats the writes over the authenticated session; the
+ * two paths are idempotent together.
  *
- * The better-auth flow never had that problem: it carried these in router state
- * to `otp-page`, which wrote them over an authenticated session with no TTL.
- * This restores that durability for the Keycloak flow — the callback performs
- * the same authenticated writes. The Redis stash stays as the fast path; the two
- * are idempotent together (same domain, same age).
- *
- * That is gap G3 of
- * `docs/superpowers/plans/2026-07-31-replace-better-auth-with-keycloak.md`.
- *
- * Read-once, exactly like `pending-consent.ts`: the callback clears it as soon
- * as it is consumed, so a stale signup can never be replayed onto a later,
- * unrelated login.
+ * Read-once, like `pending-consent.ts`, so a stale signup is never replayed
+ * onto a later login.
  */
 
 import type { SignupExtras } from '@/lib/signup-domain';
@@ -34,8 +23,8 @@ export function setPendingSignupExtras(extras: SignupExtras): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(extras));
   } catch {
-    // Storage unavailable (private mode, quota). The server-side Redis stash is
-    // still in play, so this degrades to today's behaviour rather than failing.
+    // Storage unavailable (private mode, quota). The server-side Redis stash
+    // still applies.
   }
 }
 
@@ -46,8 +35,7 @@ export function takePendingSignupExtras(): SignupExtras | null {
     if (!raw) return null;
     localStorage.removeItem(STORAGE_KEY);
     const parsed = JSON.parse(raw) as SignupExtras;
-    // A payload with no domain is unusable — the domain is what the writes key
-    // on — so treat it as absent rather than calling the API with undefined.
+    // The domain is what the writes key on, so a payload without one is unusable.
     if (!parsed || typeof parsed.domain !== 'string' || parsed.domain === '') {
       return null;
     }

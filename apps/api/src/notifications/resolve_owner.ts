@@ -6,29 +6,21 @@ import { items } from '@dpg/database';
 import { getNetworkConfigById } from '@/network_configs';
 
 /**
- * Suffix of the synthetic address `/participant` (`participant.ts`) mints for a
- * phone-only signup (`${randomUUID()}@no-email.local`) because better-auth's
- * `signUpEmail` requires a non-null email. It is deliverable to nobody, so for
- * notification purposes it is "no email" — treating it as a real address would
- * hard-bounce thousands of sends from the OTP sender identity on a bulk
- * phone-only onboard, damaging login sender reputation (#592 Blocker 2).
+ * Placeholder address (`<uuid>@no-email.local`) that existing phone-only user
+ * rows may carry. Nothing mints it today, but it is undeliverable, so it counts
+ * as no email; sending to it would hard-bounce and hurt sender reputation.
  */
 const SYNTHETIC_EMAIL_SUFFIX = '@no-email.local';
 
-/**
- * A deliverable email, or null. Folds the phone-only synthetic address
- * ({@link SYNTHETIC_EMAIL_SUFFIX}) into null so callers skip the send.
- */
+/** A deliverable email, or null for a missing or placeholder address. */
 function deliverableEmail(email: string | null | undefined): string | null {
   if (!email) return null;
   return email.toLowerCase().endsWith(SYNTHETIC_EMAIL_SUFFIX) ? null : email;
 }
 
 /**
- * Resolves a local owner's email by better-auth user id. Returns null when the
- * user is unknown or has no email (phone-only). The email is used only to
- * address the notification-service request; it is never derived on the wire by
- * NS (which stays contact-blind).
+ * Resolves a local user's deliverable email, or null when the user is unknown
+ * or has none. notification-service never looks up contacts itself.
  */
 export async function resolveOwnerEmail(userId: string): Promise<string | null> {
   const rows = await db
@@ -69,11 +61,7 @@ export async function resolveOwnerNameEmail(userId: string): Promise<{
   };
 }
 
-/**
- * Resolves an org's display name by id (the `organization` table — `org_id`
- * from the acting-org context). Used to name the onboarding aggregator in the
- * initiation email. Null when unknown, so the caller can fall back.
- */
+/** Resolves an org's display name by id; null when unknown or blank. */
 export async function resolveOrgName(orgId: string): Promise<string | null> {
   const rows = await db
     .select({ name: organization.name })

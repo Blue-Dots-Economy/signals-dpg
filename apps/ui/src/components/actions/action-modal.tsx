@@ -15,14 +15,12 @@ import { cn } from '@/lib/utils';
 import { useConsentConfig } from '@/hooks/use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
 
-// Desktop: Dialog
 import {
   Dialog,
   DialogContent,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 
-// Mobile: Drawer
 import {
   Drawer,
   DrawerContent,
@@ -34,19 +32,23 @@ interface ActionModalProps {
   actionSchema: DotActionSchema;
   onSubmit: (formData: Record<string, unknown>) => void;
   loading?: boolean;
+  /** Values to re-seed the form with, e.g. after a failed submit. Must be stable. */
+  initialData?: Record<string, unknown>;
   /**
-   * Minor ward on a guardian-gated domain: ticking the consent IS the trigger —
-   * it submits immediately so the guardian confirm + OTP flow (owned by
-   * ActionHandler) starts right away, instead of waiting for a separate Confirm.
+   * Minor ward on a guardian-gated domain: ticking the consent submits, so
+   * ActionHandler's guardian confirm and OTP flow starts without a separate
+   * Confirm.
    */
   minor?: boolean;
+  /** The server's per-field messages from the last failed submit. */
+  serverErrors?: Record<string, string>;
 }
 
 const ACTION_FORM_ID = 'action-requirement-form';
+const CONSENT_ID = 'consent-acknowledge';
 
-// Friendly subtitle i18n keys per known action — the component resolves them
-// via t() so non-English locales render translated copy. Unknown action types
-// fall back to actions.modal_subtitle_fallback (with the action title interpolated).
+// Subtitle i18n keys per known action; others use
+// actions.modal_subtitle_fallback with the action title.
 const ACTION_SUBTITLE_KEYS: Record<string, string> = {
   connect: 'actions.modal_subtitle_connect',
   accept: 'actions.modal_subtitle_accept',
@@ -61,7 +63,9 @@ export function ActionModal({
   actionSchema,
   onSubmit,
   loading = false,
+  initialData,
   minor = false,
+  serverErrors,
 }: ActionModalProps) {
   const { t } = useTranslation();
   const isMobile = useIsMobile();
@@ -79,11 +83,16 @@ export function ActionModal({
   );
   const consentRequired = (actionSchema.reveals_pii_on_status?.length ?? 0) > 0;
   const [consentChecked, setConsentChecked] = useState(false);
+  const [consentAttempted, setConsentAttempted] = useState(false);
+  // Read at submit time: a minor's tick submits in the same event, before state updates.
+  const consentRef = React.useRef(false);
 
   React.useEffect(() => {
     if (!open) return;
 
     setConsentChecked(false);
+    consentRef.current = false;
+    setConsentAttempted(false);
 
     const reqSchema = actionSchema.requirement_schema;
     if (!reqSchema) {
@@ -100,12 +109,8 @@ export function ActionModal({
     }
   }, [open, actionSchema]);
 
-  const handleSubmit = (formData: Record<string, unknown>) => {
+  const submitPayload = (formData: Record<string, unknown>) => {
     const payload: Record<string, unknown> = { ...formData };
-    // A submit is only reachable once consent is acknowledged (adults: the
-    // Confirm button is gated on `consentChecked`; minors: submit is fired by
-    // the consent tick itself), so `consentRequired` here implies consented —
-    // don't read the possibly-stale `consentChecked` state.
     if (consentRequired) {
       payload[ACTION_CONSENT_SENTINEL] = {
         acknowledged: true as const,
@@ -116,12 +121,23 @@ export function ActionModal({
     onSubmit(payload);
   };
 
-  // Minor: ticking consent is the trigger. Submit right away — with a form,
-  // via its native submit (so validation runs); otherwise directly.
+  // Confirm: a missing tick shows its message under the consent box instead.
+  const handleSubmit = (formData: Record<string, unknown>) => {
+    if (consentRequired && !consentRef.current) {
+      setConsentAttempted(true);
+      document.getElementById(CONSENT_ID)?.focus();
+      return;
+    }
+    submitPayload(formData);
+  };
+
+  // Minor: the consent tick submits, via the form's native submit when there
+  // is a form so validation runs.
   const handleMinorConsentTick = () => {
     const formEl = document.getElementById(ACTION_FORM_ID) as HTMLFormElement | null;
-    if (resolvedSchema && formEl) formEl.requestSubmit();
-    else handleSubmit({});
+    if (resolvedSchema && formEl) {
+      formEl.requestSubmit();
+    } else submitPayload({});
   };
 
   const formContent = (
@@ -130,8 +146,11 @@ export function ActionModal({
         <SchemaForm
           id={ACTION_FORM_ID}
           schema={resolvedSchema}
+          formData={initialData}
           hideSubmit
+          disabled={loading}
           onSubmit={handleSubmit}
+          {...(serverErrors ? { serverErrors } : {})}
         />
       ) : (
         <p className="text-muted-foreground text-sm">{t('actions.modal_no_form')}</p>
@@ -139,8 +158,15 @@ export function ActionModal({
       {consentRequired && (
         <ConsentCheckbox
           text={consentText}
+          id={CONSENT_ID}
           checked={consentChecked}
+          error={
+            consentAttempted && !consentChecked
+              ? t('actions.consent_required_error', 'Tick the box to agree before you confirm.')
+              : undefined
+          }
           onCheckedChange={(v) => {
+            consentRef.current = v;
             setConsentChecked(v);
             if (v && minor) handleMinorConsentTick();
           }}
@@ -149,8 +175,6 @@ export function ActionModal({
     </>
   );
 
-  const consentGate = consentRequired && !consentChecked;
-
   const confirmButtonProps = resolvedSchema
     ? { type: 'submit' as const, form: ACTION_FORM_ID }
     : { type: 'button' as const, onClick: () => handleSubmit({}) };
@@ -158,8 +182,7 @@ export function ActionModal({
   const actionKey = actionSchema.action_type ?? 'connect';
   const display = getActionDisplay(actionKey);
   const actionTitle = display.label;
-  // When consent is required the consent card provides the user-facing framing,
-  // so the generic subtitle is suppressed to avoid redundancy.
+  // The consent card frames the action, so the generic subtitle is dropped.
   const subtitleKey = ACTION_SUBTITLE_KEYS[actionKey.toLowerCase()];
   const subtitle = consentRequired
     ? undefined
@@ -188,7 +211,7 @@ export function ActionModal({
       </Button>
       <Button
         {...confirmButtonProps}
-        disabled={loading || consentGate}
+        disabled={loading}
         className={cn('min-w-[120px] font-semibold shadow-sm', display.buttonClass)}
       >
         {loading ? t('actions.modal_processing') : t('actions.modal_confirm')}
@@ -210,9 +233,8 @@ export function ActionModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Fixed header + footer, scrollable body — mirrors the mobile Drawer so a
-          long consent statement scrolls WITHIN the modal instead of squeezing
-          the statement/checkbox and pushing Cancel/Confirm off. */}
+      {/* Fixed header and footer with a scrolling body, so a long consent
+          statement does not push Cancel/Confirm off screen. */}
       <DialogContent className="sm:max-w-[520px] max-h-[90dvh] overflow-hidden gap-0 p-0 flex flex-col">
         <div className="px-6 pt-6">{header}</div>
         <div className="px-6 py-4 overflow-y-auto">{formContent}</div>

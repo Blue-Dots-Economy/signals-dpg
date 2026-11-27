@@ -54,6 +54,7 @@ function referenceProps(overrides: Partial<WidgetProps> = {}): WidgetProps {
     id: 'root_college',
     value: '',
     onChange: vi.fn(),
+    onBlur: vi.fn(),
     schema: { type: 'string' },
     options: {},
     label: 'College',
@@ -93,6 +94,7 @@ function renderMultiLocation(overrides: Partial<WidgetProps> = {}) {
     id: 'root_cities',
     value: undefined,
     onChange,
+    onBlur: vi.fn(),
     schema: { type: 'array', items: { type: 'string' } },
     options: { isPrimaryLocation: true },
     label: 'Cities',
@@ -473,15 +475,31 @@ describe('ReferenceAutocompleteWidget — disabled state and errors', () => {
     expect(screen.getByRole('combobox')).toBeDisabled();
   });
 
-  it('renders the joined validation errors under the field', () => {
+  it('marks the input invalid and points it at the field error, leaving the text to the field template', () => {
     stubFetch(FLAT_ONE);
     renderReference({
       options: { source: uniqueSource() },
-      rawErrors: ['is a required property', 'must be a string'],
+      rawErrors: ['College is required.'],
     });
-    expect(
-      screen.getByText('is a required property, must be a string'),
-    ).toBeInTheDocument();
+    const input = screen.getByRole('combobox');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'root_college__error');
+    expect(screen.queryByText('College is required.')).toBeNull();
+  });
+
+  it('reports blur to RJSF once the suggestion list has closed', async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetch(FLAT_ONE);
+      const onBlur = vi.fn();
+      renderReference({ options: { source: uniqueSource() }, onBlur, value: 'Alpha' });
+      fireEvent.blur(screen.getByRole('combobox'));
+      expect(onBlur).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(200);
+      expect(onBlur).toHaveBeenCalledWith('root_college', 'Alpha');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders the schema placeholder on the input', () => {
@@ -600,9 +618,25 @@ describe('MultiLocationAutocompleteWidget — rows', () => {
     expect(screen.getByRole('button', { name: '+ Add city' })).toBeDisabled();
   });
 
-  it('renders the joined validation errors once for the whole field', () => {
-    renderMultiLocation({ value: ['Bengaluru'], rawErrors: ['must NOT have fewer than 1 items'] });
-    expect(screen.getByText('must NOT have fewer than 1 items')).toBeInTheDocument();
+  it('marks each row invalid and links it to the field error, leaving the text to the field template', () => {
+    renderMultiLocation({ value: ['Bengaluru'], rawErrors: ['Cities is required.'] });
+    const input = screen.getByRole('combobox');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'root_cities__error');
+    expect(screen.queryByText('Cities is required.')).toBeNull();
+  });
+
+  it('reports blur for the whole field after a row loses focus', () => {
+    vi.useFakeTimers();
+    try {
+      const onBlur = vi.fn();
+      renderMultiLocation({ value: ['Bengaluru'], onBlur });
+      fireEvent.blur(screen.getByRole('combobox'));
+      vi.advanceTimersByTime(200);
+      expect(onBlur).toHaveBeenCalledWith('root_cities', ['Bengaluru']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

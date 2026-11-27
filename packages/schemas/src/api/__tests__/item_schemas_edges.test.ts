@@ -79,9 +79,9 @@ describe('FetchItems pagination coercion vs strict body typing', () => {
     expect(FetchItemsQuerySchema.safeParse({ ...base, cache_ttl_seconds: '60' }).success).toBe(true);
   });
 
-  it('MarkersQuerySchema allows a far higher limit than the fetch cap', () => {
-    expect(MarkersQuerySchema.safeParse({ ...base, limit: '25000' }).success).toBe(true);
-    expect(MarkersQuerySchema.safeParse({ ...base, limit: '25001' }).success).toBe(false);
+  it('MarkersQuerySchema leaves the upper limit to the route, which caps it at MARKERS_MAX_LIMIT', () => {
+    expect(MarkersQuerySchema.safeParse({ ...base, limit: '25001' }).success).toBe(true);
+    expect(MarkersQuerySchema.safeParse({ ...base, limit: '0' }).success).toBe(false);
     const defaults = MarkersQuerySchema.safeParse({ ...base });
     if (defaults.success) expect(defaults.data.limit).toBe(200);
   });

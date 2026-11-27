@@ -8,6 +8,7 @@ import {
 } from '@/lib/consent-gate';
 import { useConsentConfig } from './use-consent-config';
 import { useNetworkTheme } from '@/theme/theme-provider';
+import { useAuth } from '@/contexts/auth-context';
 
 type ConsentCategory = 'terms' | 'privacy';
 
@@ -21,9 +22,8 @@ interface UseConsentGateResult {
   config: ConsentConfigDocument | null;
   currentVersions: CurrentVersions | null;
   /**
-   * Which document set applies (#626). Comes from the status endpoint, which
-   * derives it server-side from the user's recorded age — the client has no
-   * access to the age and must not decide this for itself.
+   * Which document set applies. The status endpoint derives it from the user's
+   * recorded age; the client has no access to the age and must not decide it.
    */
   variant: ConsentVariant;
   isLoading: boolean;
@@ -32,6 +32,7 @@ interface UseConsentGateResult {
 
 export function useConsentGate(): UseConsentGateResult {
   const { themeId } = useNetworkTheme();
+  const { isAuthenticated } = useAuth();
   const { config, isLoading: configLoading } = useConsentConfig();
 
   const {
@@ -41,7 +42,7 @@ export function useConsentGate(): UseConsentGateResult {
   } = useQuery({
     queryKey: ['consent-status', themeId],
     queryFn: () => getConsentStatus(themeId),
-    enabled: !!themeId,
+    enabled: !!themeId && isAuthenticated,
     staleTime: 0,
   });
 

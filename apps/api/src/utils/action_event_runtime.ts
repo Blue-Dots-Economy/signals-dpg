@@ -294,26 +294,21 @@ function isPlainObject(input: unknown): input is Record<string, unknown> {
 }
 
 /**
- * SSRF guard for the outbound event mirror. The mirror POSTs a full action-event
- * blob (containing PII) to `source_item.item_instance_url`, and that URL is
- * ultimately caller-asserted (via the unauthenticated /network/action/perform
- * body, then persisted and replayed from the DB on status updates). Without this
- * check any attacker can point it at an internal address (e.g. cloud IMDS) or an
- * exfiltration endpoint.
+ * SSRF guard for the outbound event mirror, which POSTs a full action event
+ * (with PII) to `source_item.item_instance_url`. That URL comes from the
+ * /network/action/perform body, is persisted, and is replayed on status
+ * updates, so it must not be able to target an internal address or an
+ * arbitrary endpoint.
  *
- * The allowlist is the source network's own registered `instances` — an instance
- * whose `domain_id` matches the source item's domain and whose `instance_url`
- * shares the source URL's origin. We validate against `networkConfig.instances`
- * directly (NOT the served-domains-filtered CORS origin list): the mirror target
- * is a *remote* peer, so filtering by locally-served domains would wrongly refuse
- * legitimate peers. Compared by origin (scheme+host+port) so a path/query on
- * either side can't smuggle a mismatch.
+ * Allowed: an instance in the network's registered `instances` with the
+ * source item's `domain_id` and the same origin (scheme+host+port). Checked
+ * against `networkConfig.instances`, not the served-domains CORS list, because
+ * the target is a remote peer.
  */
 async function isRegisteredSourceInstance(
   event: StoredActionEvent
 ): Promise<boolean> {
-  // The caller (mirrorActionEventToSourceInstance) has already parsed this URL
-  // via normalizeInstanceUrl before reaching here, so `new URL` cannot throw.
+  // Already parsed by normalizeInstanceUrl in the caller, so this cannot throw.
   const sourceOrigin = new URL(event.source_item.item_instance_url).origin;
 
   const networkConfig = await getNetworkConfigById(
@@ -374,15 +369,10 @@ export async function mirrorActionEventToSourceInstance(
           'content-type': 'application/json',
         },
         body: JSON.stringify(event),
-        // The origin allowlist above is checked once, against the URL we are
-        // about to call. Following a redirect would move the PII payload to an
-        // origin that was never checked, so a registered peer that 3xx's could
-        // still relay this body anywhere — refuse instead.
+        // The allowlist was checked against this URL only; following a
+        // redirect would send the PII payload to an unchecked origin.
         redirect: 'error',
-        // Without a deadline an unresponsive peer holds this request (and its
-        // socket) open indefinitely; the mirror is fire-and-forget, so a slow
-        // peer must not accumulate. Same knob every other outbound peer call
-        // uses (inter_instance_fetch.ts) — one timeout to tune, not two.
+        // Fire-and-forget: an unresponsive peer must not hold sockets open.
         signal: AbortSignal.timeout(apiConfig.peer_fetch_timeout_ms),
       }
     );

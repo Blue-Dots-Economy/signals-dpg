@@ -1,14 +1,7 @@
 /**
- * Builders for the U18 guardian `consent_record` rows. Every guardian-sourced
- * consent row shares the same skeleton — `source`, the `{ variant: 'u18' }`
- * metadata, `acceptedAt`, the level/category — and only the ids/version differ.
- * Hand-writing that skeleton per call site (5+ places across signup, the
- * guardian routes, the profile-consent routes, and both action handlers) is the
- * spot where a field (`source: 'guardian'` vs `'self'`, a missing `variant`)
- * silently drifts. Route every write through these so the shape is one thing.
- *
- * Callers still own version resolution + the actual insert/upsert (their
- * null-version and error handling differ), so these are pure value builders.
+ * Pure builders for U18 guardian `consent_record` rows, so every call site
+ * writes the same `source` and `{ variant: 'u18' }` metadata. Callers own
+ * version resolution and the insert.
  */
 import { consent_record } from '@api/db/postgres/schema';
 
@@ -62,10 +55,10 @@ export function guardianProfileConsentRow(args: {
 }
 
 /**
- * Item-level `action` consent row (perform → initiate, accept → accept). Covers
- * both the adult self path (`source: 'action'`, no variant) and the guardian
- * path (`source: 'guardian'`, `variant: 'u18'`) — the near-twin writes in the
- * two action handlers. `variant` present ⇒ the u18 metadata is attached.
+ * Item-level `action` consent row (perform → initiate, accept → accept), for
+ * both the adult path (`source: 'action'`) and the guardian path
+ * (`source: 'guardian'`, `variant: 'u18'`). The variant metadata is attached
+ * only when `variant` is set.
  */
 export function actionConsentRow(args: {
   actionType: string;

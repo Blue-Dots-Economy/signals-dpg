@@ -1,21 +1,18 @@
 import z from '@dpg/schemas';
 
 /**
- * The 4 canonical action buckets every action event in Signals maps into.
- * Network-specific event_schema.status enum values are mapped to these via
- * each interaction's `metric_categories` block in network.json. These names
- * appear in column names, API field names, and the status-rule DSL — they
- * are the Signals-internal vocabulary, not a network's wire format.
+ * The canonical action buckets. Network-specific `event_schema.status` values
+ * map to these via each interaction's `metric_categories` in network.json.
+ * These names appear in column names, API fields and the status-rule DSL.
  */
 export const CANONICAL_BUCKETS = Object.freeze(['create', 'accept', 'reject', 'cancel'] as const);
 export type CanonicalBucket = (typeof CANONICAL_BUCKETS)[number];
 export const CanonicalBucketSchema = z.enum(CANONICAL_BUCKETS);
 
 /**
- * The 4 fixed status buckets every item lands in after recompute. Rule
- * authors in network.json's status_rules MUST emit only these values;
- * the network-config validator rejects anything else. The final
- * `default` tail rule guarantees no item is left with a null status.
+ * The fixed statuses every item lands in after recompute. network.json
+ * status_rules may emit only these (the config validator rejects others), and
+ * the final `default` rule guarantees no item is left with a null status.
  */
 export const CANONICAL_STATUSES = Object.freeze(['new', 'active', 'at_risk', 'inactive'] as const);
 export type CanonicalStatus = (typeof CANONICAL_STATUSES)[number];

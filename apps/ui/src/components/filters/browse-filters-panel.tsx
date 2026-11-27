@@ -14,13 +14,8 @@ import type { EnumFilterField } from '@/lib/enum-filters';
 import { MultiSelectGroup, CHIP_THRESHOLD } from '@/components/filters/multi-select-group';
 
 /**
- * The facet editor for BOTH browse views.
- *
- * Renamed from `MapFiltersPanel` and moved out of `components/map/` (#645):
- * it has served the list view as well since #394, so the old name and location
- * misdescribed it to every reader. It is the EDITOR — the applied-filter chip
- * bar is the read-out (spec §7.1), and the two must not both try to own the
- * state.
+ * The facet editor for both browse views. The applied-filter chips are the
+ * read-out; only the caller owns the state.
  */
 export interface BrowseFiltersPanelProps {
   /** All visible domains (from the network config) to show as filter options. */
@@ -33,27 +28,18 @@ export interface BrowseFiltersPanelProps {
    * domain.
    */
   filterFieldDomains?: DotNetworkDomain[];
-  /**
-   * Currently selected enum-field filter values.
-   * Map of fieldKey → selected option values. Empty array = all.
-   */
+  /** Selected values per enum field key. A missing or empty entry means all. */
   selectedFields: Record<string, string[]>;
-  /** Called when any enum field filter selection changes. */
   onFieldsChange: (fields: Record<string, string[]>) => void;
   /** Current browse view — tailors the help text (map markers vs listings). */
   viewMode?: ViewMode;
   /**
-   * Where the trigger is mounted, which decides its chrome.
-   *
-   * `'toolbar'` (default) matches the Sort and Location pills it now sits
-   * beside — same radius, border and padding, no shadow. `'overlay'` keeps the
-   * raised, blurred chip the map needs, since there it floats over tiles
-   * rather than sitting in a row.
+   * Where the trigger is mounted. `'toolbar'` matches the Sort and Location
+   * pills beside it; `'overlay'` is the raised, blurred chip for floating over
+   * map tiles.
    */
   trigger?: 'toolbar' | 'overlay';
 }
-
-// ─── Chip toggle button ────────────────────────────────────────────────────────
 
 interface ChipProps {
   label: string;
@@ -85,8 +71,6 @@ function Chip({ label, selected, onToggle, title, ariaLabel }: Readonly<ChipProp
   );
 }
 
-// ─── Filter group (always expanded, chip-based) ───────────────────────────────
-
 interface FilterGroupProps {
   title: string;
   children: React.ReactNode;
@@ -103,20 +87,11 @@ function FilterGroup({ title, children }: Readonly<FilterGroupProps>) {
   );
 }
 
-// ─── Main panel ───────────────────────────────────────────────────────────────
-
 /**
- * A "Filters" pill button that opens a polished popover with chip-based filter
- * groups:
- *   1. Domain  — multi-select chips, one per visible domain.
- *   2+. Schema enum fields — one chip group per enum / array-of-enum property
- *       found in the visible domains' item schemas (derived generically).
- *
- * Groups with no options are hidden. All groups are always-expanded since chips
- * are compact. The panel scrolls when content exceeds max-height.
- *
- * Active-filter count is shown as a badge on the trigger pill.  A "Clear all"
- * link in the header resets all groups. An X button closes the popover.
+ * A "Filters" pill that opens one group per non-private enum or
+ * array-of-enum field in the filter domains' item schemas (a popover on
+ * desktop, a bottom sheet on mobile). Domain is not a group here; it lives in
+ * the toolbar's `DomainControl`. Renders nothing when there are no fields.
  */
 export function BrowseFiltersPanel({
   domains,
@@ -130,15 +105,8 @@ export function BrowseFiltersPanel({
   const isMobile = useIsMobile();
   const [open, setOpen] = React.useState(false);
 
-  // Derive enum filter fields generically from the filter-field domains
-  // (defaults to the visible domains) so the filters can reflect the
-  // counterpart being browsed independently of the domain chip selector.
-  //
-  // #394: the MAP and the LIST now offer the SAME full set of declared,
-  // non-private enum fields (restoring pre-Map-PR behavior) — the server's
-  // facet guard (`resolveAllowedFacetFields`) applies every one of them, not
-  // just a `filterable: true`-marked subset (that marker has been removed;
-  // see #360 for the proper long-term schema-driven declaration).
+  // Map and list offer the same set of declared, non-private enum fields; the
+  // server's facet guard (`resolveAllowedFacetFields`) applies all of them.
   const enumFilterFields: EnumFilterField[] = React.useMemo(
     () => getEnumFilterFieldsForDomains(filterFieldDomains ?? domains),
     [filterFieldDomains, domains],
@@ -146,15 +114,11 @@ export function BrowseFiltersPanel({
 
   const showEnumGroups = enumFilterFields.length > 0;
 
-  // Count of active selections across all enum fields
   const enumActiveCount = Object.values(selectedFields).reduce(
     (sum, vals) => sum + vals.length,
     0,
   );
 
-  // Facets ONLY. Domain used to be counted here, which made a single facet
-  // read as "2" on the trigger badge — domain moved out to the toolbar's
-  // DomainControl (#645 D10) and is no longer one of this panel's groups.
   const activeCount = enumActiveCount;
 
   const handleClearAll = () => {
@@ -175,9 +139,6 @@ export function BrowseFiltersPanel({
     onFieldsChange(updated);
   };
 
-  // Nothing to filter — don't render the pill at all. Facets are now the only
-  // group (domain moved to the toolbar's DomainControl), so this is the sole
-  // condition.
   if (!showEnumGroups) return null;
 
   const renderTrigger = (onClick?: () => void) => (
@@ -188,13 +149,10 @@ export function BrowseFiltersPanel({
       className={cn(
         'gap-1.5 text-xs',
         // Toolbar: identical chrome to the Sort and Location pills beside it.
-        // The raised/blurred treatment below was for floating over map tiles
-        // and read as a different KIND of control once it joined the row.
         trigger === 'toolbar'
           ? 'h-auto rounded-lg border-border bg-background px-2.5 py-1.5 font-semibold shadow-none'
-        // Square on touch like the icon-only Sort and Location beside it —
-        // three icon buttons in a row that are not the same size read as a
-        // mistake. Released from `sm` up, where all three show their text.
+        // Square on touch like the icon-only Sort and Location beside it;
+        // released from `sm` up, where all three show their text.
         + ' pointer-coarse:min-h-11 pointer-coarse:min-w-11 sm:pointer-coarse:min-w-0'
           : 'h-8 border-input bg-background/95 shadow-md backdrop-blur-sm',
         activeCount > 0 && 'border-primary/50 bg-primary/5',
@@ -202,9 +160,7 @@ export function BrowseFiltersPanel({
       aria-label={t('filters.open')}
     >
       <SlidersHorizontal className="size-3.5" />
-      {/* Icon-only below sm so the mobile top bar's control row fits on one
-          line (the button keeps its aria-label for accessibility); the label
-          returns from sm up. */}
+      {/* Icon-only below sm; the button keeps its aria-label. */}
       <span className="hidden sm:inline">{t('filters.title')}</span>
       {activeCount > 0 && (
         <Badge
@@ -218,11 +174,10 @@ export function BrowseFiltersPanel({
     </Button>
   );
 
-  // ── Header + scrollable groups — shared between the desktop popover and the
-  // mobile bottom sheet; only the surrounding chrome (Popover vs Drawer) differs.
+  // Shared by the desktop popover and the mobile bottom sheet.
   const panelBody = (
     <>
-      {/* ── Sticky header ──────────────────────────────────────────────────── */}
+      {/* Sticky header */}
       <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-popover px-4 py-3">
         <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
           {t('filters.title')}
@@ -238,7 +193,7 @@ export function BrowseFiltersPanel({
               {t('filters.clear_all')}
             </button>
           )}
-          {/* X close button */}
+          {/* Close */}
           <button
             type="button"
             onClick={() => setOpen(false)}
@@ -247,8 +202,7 @@ export function BrowseFiltersPanel({
               'bg-muted text-muted-foreground transition-colors',
               'hover:bg-accent hover:text-accent-foreground',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-              // Transparent, centered hit-area expansion for touch — mirrors the
-              // Button variant technique so the visual size-5 circle is unchanged.
+              // Enlarges the touch hit area without changing the size-5 circle.
               "pointer-coarse:before:absolute pointer-coarse:before:left-1/2 pointer-coarse:before:top-1/2 pointer-coarse:before:size-11 pointer-coarse:before:-translate-x-1/2 pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']",
             )}
             aria-label={t('filters.close')}
@@ -258,7 +212,7 @@ export function BrowseFiltersPanel({
         </div>
       </div>
 
-      {/* ── Scrollable filter groups ────────────────────────────────────────── */}
+      {/* Filter groups */}
       <div className="max-h-[75dvh] space-y-5 overflow-y-auto px-4 py-4">
         {enumFilterFields.map((field) => {
           const fieldSelected = selectedFields[field.key] ?? [];
@@ -300,25 +254,21 @@ export function BrowseFiltersPanel({
     </>
   );
 
-  // Mobile: the pill opens a bottom sheet (ResponsiveDialog renders a Drawer)
-  // instead of a popover — same header/groups markup, different chrome.
+  // Mobile: a bottom sheet (ResponsiveDialog renders a Drawer).
   if (isMobile) {
     return (
       <>
         {renderTrigger(() => setOpen(true))}
-        {/* The panel's own sticky header already has an X (below, in panelBody)
-            — suppress ResponsiveDialog's own close button so mobile doesn't
-            show two overlapping "Close" controls. */}
+        {/* The panel header has its own close button, so suppress the
+            dialog's. */}
         <ResponsiveDialog
           open={open}
           onOpenChange={setOpen}
           contentClassName="p-0"
           showCloseButton={false}
         >
-          {/* Radix's underlying Dialog requires an accessible name; the visible
-              "Filters" label lives in the panel's own sticky header (a plain
-              <span>, not a Dialog primitive), so give the sheet itself a
-              visually-hidden title rather than duplicating visible text. */}
+          {/* Radix Dialog requires an accessible name; the visible header is a
+              plain <span>, so the sheet gets a visually hidden title. */}
           <DrawerTitle className="sr-only">{t('filters.title')}</DrawerTitle>
           {panelBody}
         </ResponsiveDialog>
@@ -334,8 +284,7 @@ export function BrowseFiltersPanel({
         align="end"
         sideOffset={6}
         className="w-80 rounded-xl border border-border bg-popover p-0 shadow-lg"
-        // Must sit above the maximized map wrapper (z-[2000]) so the dropdown is
-        // visible/clickable in maximized mode, and above normal overlays otherwise.
+        // Above the maximized map wrapper (z-[2000]).
         style={{ zIndex: 2100 }}
       >
         {panelBody}

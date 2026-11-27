@@ -29,19 +29,15 @@ const ErrorResponse = z.object({
 /**
  * "Who am I", resolved from the local `user` mirror.
  *
- * Added for the Keycloak login flow (Build 2 of the migration design): after
- * the OIDC redirect the UI holds an access token but knows nothing about the
- * signals-side user, and better-auth's `/api/auth/get-session` is not on that
- * path. Hitting this endpoint both establishes the UI's session object and —
- * because it runs the normal auth middleware — is what triggers first-login
- * provisioning of the mirror.
+ * After login the UI knows nothing about the signals-side user; this endpoint
+ * gives it its session object and, because it runs the auth middleware, also
+ * triggers first-login provisioning of the mirror.
  *
- * Deliberately returns the mirror's view, not the token's claims: `role` and
- * the resolved id are signals-local, and the UI should render what the API
- * will actually authorize.
+ * Returns the mirror's view, not the token's claims: `role` and the id are
+ * signals-local, and the UI should render what the API will authorize.
  *
- * Note this group has no group-level auth hook (see apps/api/CLAUDE.md), so
- * the route declares its own preHandler.
+ * This group has no group-level auth hook (see apps/api/CLAUDE.md), so the
+ * route declares its own preHandler.
  */
 export const auth_me: FastifyPluginAsyncZod = function (fastify) {
   fastify.route({

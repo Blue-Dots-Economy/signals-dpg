@@ -5,36 +5,42 @@ import {
   Marker,
   Popup,
   useMap,
+  useMapEvents,
 } from 'react-leaflet';
-import MarkerClusterGroup from 'react-leaflet-cluster';
 import L from 'leaflet';
+import type { LucideIcon } from 'lucide-react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import type { MapMarker, MapProviderProps, MapViewport } from '@/engine/types';
+import type { MapMarker, MapProviderProps, MapViewport, OpenSpotGroup } from '@/engine/types';
 import { registerMapProvider } from '@/engine/map/map-registry';
 import { useThemeMode } from '@/theme/mode-provider';
 import { getIconForDomain } from '../domain-icons';
-import { tallyDomains } from '../cluster-breakdown';
+import type { DomainCount } from '../cluster-breakdown';
 import { FitBounds } from '../fit-bounds';
-import { MarkerPopupCard } from '../marker-popup-card';
+import { useMapClusters } from '../use-map-clusters';
+import { openSpotGroupOf } from '../map-clusters';
+import type { ClusterView, MapClusterItem } from '../map-clusters';
+import { useStableCallback } from '../use-stable-callback';
+import { PopupBody, PopupRendererProvider, SpotGroupBody, SpotGroupRendererProvider } from '../popup-renderer';
 import { createSelfMarkerDivIcon } from '../self-marker';
 import { useViewportReportEmitter } from './use-viewport-report';
 
 import 'leaflet/dist/leaflet.css';
-import 'react-leaflet-cluster/dist/assets/MarkerCluster.css';
-import 'react-leaflet-cluster/dist/assets/MarkerCluster.Default.css';
+
+const MAX_ZOOM = 18;
+// Stacking mirrors Google: self < item pins < bubbles (1000 + count), so a pin on the viewer's own spot stays visible.
+const SELF_Z_INDEX_OFFSET = 0;
+const ITEM_Z_INDEX_OFFSET = 500;
+const HOVERED_CLUSTER_Z_INDEX_OFFSET = 10_000_000;
 
 /**
- * Session-scoped sentinel for the "dark mode is off for the map" notice, so it
- * appears once rather than on every remount: the map remounts on route changes
- * and on the maximize toggle, and re-toasting there would nag. `sessionStorage`
- * rather than `localStorage` so a new tab says it again — the notice explains a
- * visible oddity, and someone who never saw it deserves to.
+ * Session-scoped flag so the "dark mode is off for the map" notice shows once,
+ * not on every remount (route change, maximize). `sessionStorage` so a new tab
+ * shows it again.
  */
 const DARK_BASEMAP_NOTICE_KEY = 'dpg-map-dark-basemap-notice';
 
-/** True the first time it's called in a session; false every time after. */
 function claimDarkBasemapNotice(): boolean {
   try {
     if (sessionStorage.getItem(DARK_BASEMAP_NOTICE_KEY)) return false;
@@ -47,19 +53,7 @@ function claimDarkBasemapNotice(): boolean {
   }
 }
 
-/**
- * Module-level WeakMap: L.Marker instance → domain string.
- * Populated via a ref callback on each <Marker>; read by createClusterDivIcon
- * to tally per-domain counts when building the badge row.
- */
-const markerDomainMap = new WeakMap<object, string>();
-
-/**
- * Imperatively pans/zooms the Leaflet map whenever the `center` or `zoom`
- * props change. Used when the caller manages the viewport explicitly (e.g.
- * when the user picks a different own profile from the selector).
- * Renders nothing — pure side-effect component.
- */
+/** Pans/zooms the map when `center`, `zoom` or `focusNonce` changes. */
 function SetView({
   center,
   zoom,
@@ -97,15 +91,9 @@ function SetView({
 }
 
 /**
- * Closes any open Leaflet popup when the caller bumps `closePopupNonce` (e.g.
- * right before Connect/Apply opens the consent modal, so it isn't hidden
- * behind the popup's high stacking context). Leaflet's `Map` tracks whichever
- * popup is currently open internally (react-leaflet doesn't lift that into
- * React state here), so `map.closePopup()` — which closes the open popup
- * regardless of which marker it belongs to — is the correct imperative
- * escape hatch. Guarded with a ref (mirrors `SetView`'s `focusNonce`
- * handling) so mount / an unchanged nonce never fires a spurious close.
- * Renders nothing — pure side-effect component, same shape as `SetView`.
+ * Closes the open popup when `closePopupNonce` changes. Leaflet tracks the
+ * open popup internally, so `map.closePopup()` is the escape hatch. The ref
+ * guard prevents a close on mount or an unchanged nonce.
  */
 function ClosePopupOnNonce({ closePopupNonce }: { closePopupNonce?: number }) {
   const map = useMap();
@@ -122,25 +110,13 @@ function ClosePopupOnNonce({ closePopupNonce }: { closePopupNonce?: number }) {
 }
 
 /**
- * Reports the map's viewport (center + half-diagonal radius, plus the raw
- * `map.getBounds()` corners — #203 map-serverside-search Task 4) to the
- * caller on debounced `moveend`. Only ever mounted when `onViewportChange` is provided
- * (see `LeafletMapProvider` below), so the tourist app — which never passes
- * it — attaches no `moveend` listener at all and is completely unaffected.
- * Renders nothing — pure side-effect component, same shape as `SetView`.
+ * Reports the viewport (centre, bounds corners, zoom) on debounced `moveend`.
+ * Mounted only when `onViewportChange` is provided.
  *
- * Also emits the CURRENT viewport once on mount (bypassing the debounce).
- * Leaflet fires its own initial `moveend` during map construction — before
- * this effect attaches the listener — so the only viewport-driven consumer
- * (`useMapMarkers`, gated on a non-null viewport) would otherwise never see
- * one until `SetView` runs, which only happens when a `focusPoint` /
- * `userLocation` exists. A user with no location (denied/unavailable) would
- * be stuck on the "no results" overlay forever. The mount emit is skipped if
- * the map's bounds aren't valid yet (rare, only just-constructed); nothing is
- * lost in that case because `moveend` will still fire normally later.
- *
- * Every emit also carries `map.getZoom()` (#203 §7) so the home-page can gate
- * anonymous count-first browsing on the zoom level without a separate event.
+ * Also emits the current viewport once on mount, bypassing the debounce:
+ * Leaflet's initial `moveend` fires before this listener attaches, so a
+ * viewer with no location would otherwise never get markers. Skipped when the
+ * bounds are not valid yet; a later `moveend` covers that case.
  */
 function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: MapViewport) => void }) {
   const map = useMap();
@@ -180,39 +156,23 @@ function ViewportReporter({ onViewportChange }: { onViewportChange: (viewport: M
   return null;
 }
 
-/**
- * Reads a CSS custom property from <html> (where the per-network theme sets
- * --primary / --primary-foreground). Falls back to a sensible default if the
- * variable is unset or we're in a non-DOM context.
- */
-function readCssVar(name: string, fallback: string): string {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
+/** The theme's marker fill and its foreground colour. */
+interface ThemeColours {
+  bg: string;
+  fg: string;
+}
+
+function readThemeColours(): ThemeColours {
+  const style = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
+  const read = (name: string, fallback: string) => style?.getPropertyValue(name).trim() || fallback;
+  return { bg: read('--primary', '#6b7280'), fg: read('--primary-foreground', '#ffffff') };
 }
 
 /**
- * Builds a Leaflet divIcon for a given marker.  The icon is a 32 × 32 px
- * circle with the precision-based colour as background and the domain lucide
- * icon as a white SVG glyph in the centre.  A small drop-shadow triangle
- * anchors it visually to the map point.
- *
- * Icons are NOT cached globally because each marker may have a unique domain +
- * precision combination.  The overhead is minimal — renderToStaticMarkup on
- * a tiny SVG is fast and happens only once per marker on mount.
+ * Builds a 32 px teardrop divIcon in the theme `--primary` colour with the
+ * marker's lucide icon in `--primary-foreground`.
  */
-function createMarkerDivIcon(
-  marker: MapMarker,
-  resolveIcon?: MapProviderProps['resolveIcon'],
-): L.DivIcon {
-  // Network-derived colours: same --primary / --primary-foreground the rest of
-  // the UI is themed with (blue_dot → blue, purple_dot → purple, …).
-  // Neutral gray fallback (not a specific network's brand colour) if unresolved.
-  const bg = readCssVar('--primary', '#6b7280');
-  const iconColor = readCssVar('--primary-foreground', '#ffffff');
-  const IconComponent = resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain);
-
-  // Render lucide icon to a static SVG string (16 × 16).
+function createMarkerDivIcon(IconComponent: LucideIcon, bg: string, iconColor: string): L.DivIcon {
   const svgString = renderToStaticMarkup(
     React.createElement(IconComponent, {
       size: 16,
@@ -221,7 +181,7 @@ function createMarkerDivIcon(
     })
   );
 
-  // Outer div: circle + pointer triangle via border trick.
+  // A square with one square corner, rotated -45deg, makes the teardrop.
   const html = `
     <div style="
       position: relative;
@@ -244,8 +204,7 @@ function createMarkerDivIcon(
 
   return L.divIcon({
     html,
-    // The visual anchor point is the bottom-left corner of the rotated square
-    // (which is the pointy tip of the teardrop shape).
+    // Anchored at the teardrop's tip.
     iconSize: [32, 32],
     iconAnchor: [16, 32],
     popupAnchor: [0, -34],
@@ -253,36 +212,34 @@ function createMarkerDivIcon(
   });
 }
 
+const markerIconCache = new WeakMap<LucideIcon, Map<string, L.DivIcon>>();
+
+/** One teardrop icon per glyph and theme colour pair, shared by every pin that uses it. */
+function getMarkerDivIcon(IconComponent: LucideIcon, { bg, fg }: ThemeColours): L.DivIcon {
+  const colourKey = `${bg}|${fg}`;
+  let byColour = markerIconCache.get(IconComponent);
+  if (!byColour) {
+    byColour = new Map();
+    markerIconCache.set(IconComponent, byColour);
+  }
+  let icon = byColour.get(colourKey);
+  if (!icon) {
+    icon = createMarkerDivIcon(IconComponent, bg, fg);
+    byColour.set(colourKey, icon);
+  }
+  return icon;
+}
+
 /**
- * Builds the cluster bubble icon (shown when overlapping markers collapse into
- * a count). Uses the active network theme colours (--primary /
- * --primary-foreground) instead of leaflet.markercluster's default blue/green.
- *
- * When the cluster spans more than one distinct domain, a row of mini badge
- * chips is rendered below the main circle — one chip per domain, sorted by
- * count descending, each showing the domain's icon + count.
+ * Builds the cluster bubble in the network theme colours. When the cluster
+ * spans several domains, a row of per-domain icon+count chips (largest first)
+ * renders below the circle.
  */
-function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChildMarkers?: () => L.Marker[] }): L.DivIcon {
-  const count = cluster.getChildCount();
-  // Neutral gray fallback (not a specific network's brand colour) if unresolved.
-  const bg = readCssVar('--primary', '#6b7280');
-  const fg = readCssVar('--primary-foreground', '#ffffff');
+export function createClusterDivIcon(count: number, breakdown: DomainCount[], { bg, fg }: ThemeColours): L.DivIcon {
   const size = count < 10 ? 34 : count < 100 ? 40 : 46;
 
-  // Tally per-domain counts using the WeakMap populated on each marker's ref.
-  const childMarkers: L.Marker[] = cluster.getAllChildMarkers?.() ?? [];
-  // Only tally markers whose domain is actually known. A marker whose ref has
-  // not registered in the WeakMap yet would otherwise fall back to '' and
-  // fabricate a phantom empty-domain group — making a single-domain cluster
-  // (e.g. all `practitioner`) look multi-domain. Unknown ones are still counted
-  // in the total (getChildCount), just not in the per-domain breakdown.
-  const domains = childMarkers
-    .map((m) => markerDomainMap.get(m as object))
-    .filter((d): d is string => Boolean(d));
-  const breakdown = tallyDomains(domains);
   const multiDomain = breakdown.length > 1;
 
-  // Build badge chips HTML (only when there are multiple distinct domains).
   let badgesHtml = '';
   if (multiDomain) {
     const chips = breakdown.map(({ domain, count: dc }) => {
@@ -350,25 +307,188 @@ function createClusterDivIcon(cluster: { getChildCount: () => number; getAllChil
     </div>
   `.trim();
 
-  // iconSize: make the height tall enough to include badges. The width is set
-  // generously so chips are never clipped; Leaflet clips the div icon's
-  // overflow, so we ensure the container is wide enough.
+  // Size the icon to include the badge row, since Leaflet clips overflow.
   const badgeRowH = multiDomain ? 22 : 0; // 18px chip + 4px margin
   const totalH = size + badgeRowH;
-  // Estimate badge row width: each chip ~(12 icon + 3 gap + ~10 text + 10 padding) ≈ 35px; gap 3px between chips
+  // ~35px per chip plus 3px gaps.
   const estimatedBadgeW = multiDomain ? breakdown.length * 38 + (breakdown.length - 1) * 3 : size;
   const totalW = Math.max(size, estimatedBadgeW);
 
   return L.divIcon({
     html,
     className: '',
-    // Centre the anchor on the main circle (top half of the icon).
+    // Anchor on the main circle, not the badge row.
     iconSize: L.point(totalW, totalH),
     iconAnchor: L.point(totalW / 2, size / 2),
   });
 }
 
+function readClusterView(map: L.Map): ClusterView | null {
+  const bounds = map.getBounds();
+  if (!bounds.isValid()) return null;
+  const ne = bounds.getNorthEast();
+  const sw = bounds.getSouthWest();
+  const wraps = sw.lng > ne.lng;
+  return {
+    west: wraps ? -180 : sw.lng,
+    south: sw.lat,
+    east: wraps ? 180 : ne.lng,
+    north: ne.lat,
+    zoom: map.getZoom(),
+  };
+}
 
+function sameView(a: ClusterView | null, b: ClusterView | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.west === b.west && a.south === b.south && a.east === b.east && a.north === b.north && a.zoom === b.zoom;
+}
+
+/** The map's current bounds and zoom, updated on `moveend` and `zoomend`; null until the map has valid bounds. */
+function useLeafletClusterView(): ClusterView | null {
+  const map = useMap();
+  const [view, setView] = React.useState<ClusterView | null>(null);
+  const refresh = React.useCallback(() => {
+    const next = readClusterView(map);
+    setView((prev) => (sameView(prev, next) ? prev : next));
+  }, [map]);
+  const handlers = React.useMemo(() => ({ moveend: refresh, zoomend: refresh }), [refresh]);
+  useMapEvents(handlers);
+  React.useEffect(refresh, [refresh]);
+  return view;
+}
+
+const ClusterMarker = React.memo(function ClusterMarker({
+  item,
+  colours,
+  showPopup,
+  onZoomTo,
+  onSpotGroupSelect,
+}: {
+  item: Extract<MapClusterItem, { kind: 'cluster' }>;
+  colours: ThemeColours;
+  showPopup: boolean;
+  onZoomTo: (lat: number, lng: number, expansionZoom: number) => void;
+  onSpotGroupSelect?: (group: OpenSpotGroup) => void;
+}) {
+  const map = useMap();
+  const icon = React.useMemo(
+    () => createClusterDivIcon(item.count, item.breakdown, colours),
+    [item.count, item.breakdown, colours],
+  );
+  const group = React.useMemo(() => openSpotGroupOf(item), [item]);
+  const [hovered, setHovered] = React.useState(false);
+  const eventHandlers = React.useMemo(
+    () => ({
+      click: () => {
+        if (!group) onZoomTo(item.lat, item.lng, item.expansionZoom);
+        else if (!showPopup) onSpotGroupSelect?.(group);
+      },
+      mouseover: () => setHovered(true),
+      mouseout: () => setHovered(false),
+    }),
+    [group, showPopup, onSpotGroupSelect, onZoomTo, item.lat, item.lng, item.expansionZoom],
+  );
+  const close = React.useCallback(() => map.closePopup(), [map]);
+  return (
+    <Marker
+      position={[item.lat, item.lng]}
+      icon={icon}
+      eventHandlers={eventHandlers}
+      zIndexOffset={hovered ? HOVERED_CLUSTER_Z_INDEX_OFFSET : 1000 + item.count}
+    >
+      {group && showPopup && (
+        <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={360}>
+          <SpotGroupBody group={group} onClose={close} />
+        </Popup>
+      )}
+    </Marker>
+  );
+});
+
+interface PointMarkerProps {
+  marker: MapMarker;
+  colours: ThemeColours;
+  showPopup: boolean;
+  onMarkerClick?: (id: string) => void;
+  resolveIcon?: NonNullable<MapProviderProps['resolveIcon']>;
+}
+
+const PointMarker = React.memo(function PointMarker({
+  marker,
+  colours,
+  showPopup,
+  onMarkerClick,
+  resolveIcon,
+}: PointMarkerProps) {
+  const icon = getMarkerDivIcon(resolveIcon ? resolveIcon(marker) : getIconForDomain(marker.domain), colours);
+  const eventHandlers = React.useMemo(() => ({ click: () => onMarkerClick?.(marker.id) }), [onMarkerClick, marker.id]);
+  return (
+    <Marker position={[marker.lat, marker.lng]} icon={icon} eventHandlers={eventHandlers} zIndexOffset={ITEM_Z_INDEX_OFFSET}>
+      {showPopup && (
+        <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
+          <PopupBody marker={marker} onViewDetails={onMarkerClick} />
+        </Popup>
+      )}
+    </Marker>
+  );
+});
+
+interface ClusterLayerProps {
+  markers: MapMarker[];
+  showPopup: boolean;
+  onMarkerClick?: (id: string) => void;
+  resolveIcon?: NonNullable<MapProviderProps['resolveIcon']>;
+  onSpotGroupSelect?: NonNullable<MapProviderProps['onSpotGroupSelect']>;
+}
+
+/** Draws only the bubbles and pins in view, as computed by the shared clustering module. */
+function ClusterLayer({
+  markers,
+  showPopup,
+  onMarkerClick,
+  resolveIcon,
+  onSpotGroupSelect,
+}: Readonly<ClusterLayerProps>) {
+  const map = useMap();
+  const view = useLeafletClusterView();
+  const items = useMapClusters(markers, view, { maxZoom: MAX_ZOOM });
+  const { resolved: themeMode } = useThemeMode();
+  const colours = React.useMemo(() => readThemeColours(), [themeMode]);
+
+  const zoomTo = React.useCallback(
+    (lat: number, lng: number, expansionZoom: number) => {
+      const zoom = Math.min(Math.max(expansionZoom, map.getZoom() + 1), MAX_ZOOM);
+      map.setView([lat, lng], zoom);
+    },
+    [map],
+  );
+
+  return (
+    <>
+      {items.map((item) =>
+        item.kind === 'cluster' ? (
+          <ClusterMarker
+            key={item.key}
+            item={item}
+            colours={colours}
+            showPopup={showPopup}
+            onZoomTo={zoomTo}
+            onSpotGroupSelect={onSpotGroupSelect}
+          />
+        ) : (
+          <PointMarker
+            key={item.key}
+            marker={item.marker}
+            colours={colours}
+            showPopup={showPopup}
+            onMarkerClick={onMarkerClick}
+            resolveIcon={resolveIcon}
+          />
+        ),
+      )}
+    </>
+  );
+}
 
 export function LeafletMapProvider({
   center,
@@ -383,26 +503,23 @@ export function LeafletMapProvider({
   showPopup = true,
   resolveIcon,
   onViewportChange,
+  renderSpotGroup,
+  onSpotGroupSelect,
 }: MapProviderProps) {
   const { t } = useTranslation();
   const { resolved: themeMode } = useThemeMode();
   const isDark = themeMode === 'dark';
+  const stableMarkerClick = useStableCallback(onMarkerClick);
+  const stableResolveIcon = useStableCallback(resolveIcon);
+  const stableSpotGroupSelect = useStableCallback(onSpotGroupSelect);
 
-  /*
-   * Dark theme + Leaflet is the only combination where the map deliberately
-   * disagrees with the app's theme (see the TileLayer note below), so say so —
-   * once. Living inside this provider is what scopes it: the Google provider
-   * has a real dark style and never reaches here, and light mode returns
-   * before anything is shown.
-   */
+  // Leaflet has no dark basemap (see the TileLayer note), so tell the user
+  // once per session. The Google provider has a dark style and no notice.
   React.useEffect(() => {
     if (!isDark) return;
     if (!claimDarkBasemapNotice()) return;
     toast.info(t('map.dark_basemap_notice'), {
-      // Stable id: a second call updates the existing toast instead of stacking
-      // a duplicate, even if two maps mount at once. Auto-dismisses — the app's
-      // <Toaster> sets a global duration; this one runs slightly longer because
-      // it's an explanation, not a confirmation.
+      // Stable id so two mounting maps update one toast instead of stacking.
       id: 'map-dark-basemap',
       duration: 6000,
     });
@@ -416,88 +533,35 @@ export function LeafletMapProvider({
       scrollWheelZoom
     >
       {/*
-       * ONE basemap in every theme: light OSM. The dark basemap used to be
-       * CARTO `dark_all`, which is now API-key-gated — a keyless request still
-       * returns HTTP 200, but the PNG itself carries an "API KEY REQUIRED"
-       * watermark, so dark mode rendered a defaced map with nothing to catch it
-       * (no failed request, no console error, no broken image). OSM needs no
-       * key, so the map stays light while the rest of the app follows the
-       * theme. The user is told once per session by the notice effect above.
+       * Light OSM in every theme. CARTO `dark_all` is API-key-gated and serves
+       * a watermarked tile with HTTP 200 when keyless, so it fails silently.
        */}
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {/*
-       * In viewport-markers mode (onViewportChange provided) the query itself
-       * drives what's shown for the current pan/zoom, so auto-fitting bounds
-       * on every `markers` change would fight it: fitBounds() fires moveend →
-       * onViewportChange → useMapMarkers refetches a tighter radius → new
-       * (fewer) markers → FitBounds fits tighter again — a jumpy, redundant
-       * fit↔fetch loop. Skip it whenever onViewportChange is set; the tourist
-       * app (no onViewportChange) keeps fitting bounds exactly as before.
+       * No auto-fit when the viewport drives the query: fitBounds fires
+       * moveend, which refetches, which refits, in a loop.
        */}
       <FitBounds markers={markers} skip={initialViewSet || Boolean(onViewportChange)} />
       {initialViewSet && <SetView center={center} zoom={zoom} focusNonce={focusNonce} />}
       {onViewportChange && <ViewportReporter onViewportChange={onViewportChange} />}
       <ClosePopupOnNonce closePopupNonce={closePopupNonce} />
+      <PopupRendererProvider value={renderPopup}>
+        <SpotGroupRendererProvider value={renderSpotGroup}>
+          <ClusterLayer
+            markers={markers}
+            showPopup={showPopup}
+            onMarkerClick={stableMarkerClick}
+            resolveIcon={stableResolveIcon}
+            onSpotGroupSelect={stableSpotGroupSelect}
+          />
+        </SpotGroupRendererProvider>
+      </PopupRendererProvider>
       {/*
-       * MarkerClusterGroup wraps all markers so that:
-       *  - at low zoom levels, nearby markers collapse into a cluster badge
-       *    showing the count (handled by leaflet.markercluster internals).
-       *  - at maximum zoom (or when all overlapping markers share the exact
-       *    same coordinate), the group spiderfies them so every pin is
-       *    individually clickable.
-       * spiderfyOnMaxZoom + zoomToBoundsOnClick are both true by default in
-       * leaflet.markercluster; we set them explicitly for clarity.
-       */}
-      <MarkerClusterGroup
-        chunkedLoading
-        spiderfyOnMaxZoom
-        zoomToBoundsOnClick
-        maxClusterRadius={80}
-        iconCreateFunction={createClusterDivIcon}
-      >
-        {markers.map((marker) => {
-          const icon = createMarkerDivIcon(marker, resolveIcon);
-          const domain = marker.domain ?? '';
-
-          return (
-            <Marker
-              key={marker.id}
-              position={[marker.lat, marker.lng]}
-              icon={icon}
-              ref={(leafletMarker) => {
-                // Populate the WeakMap so createClusterDivIcon can look up the
-                // domain for this marker when building the badge row. react-leaflet
-                // passes the underlying L.Marker instance to `ref` callbacks.
-                if (leafletMarker) {
-                  markerDomainMap.set(leafletMarker as object, domain);
-                }
-              }}
-              eventHandlers={{
-                click: () => onMarkerClick?.(marker.id),
-              }}
-            >
-              {showPopup && (
-                <Popup closeButton={false} className="dpg-marker-popup" minWidth={300} maxWidth={300}>
-                  {renderPopup ? (
-                    renderPopup(marker)
-                  ) : (
-                    <MarkerPopupCard marker={marker} onViewDetails={onMarkerClick} />
-                  )}
-                </Popup>
-              )}
-            </Marker>
-          );
-        })}
-      </MarkerClusterGroup>
-      {/*
-       * "You are here" self-marker: the user's own resolved location (profile
-       * or browser geolocation). Rendered OUTSIDE MarkerClusterGroup so it is
-       * never folded into an item cluster, and `interactive={false}` so it has
-       * no popup and never intercepts clicks on the pins beneath it. A high
-       * zIndexOffset keeps it above item pins.
+       * "You are here": outside the cluster layer so it is never clustered,
+       * non-interactive so it never intercepts clicks on pins beneath it.
        */}
       {selfLocation && (
         <Marker
@@ -505,12 +569,11 @@ export function LeafletMapProvider({
           icon={createSelfMarkerDivIcon(t('map.you_are_here_short'))}
           interactive={false}
           keyboard={false}
-          zIndexOffset={1000}
+          zIndexOffset={SELF_Z_INDEX_OFFSET}
         />
       )}
     </MapContainer>
   );
 }
 
-// Self-register on import
 registerMapProvider({ name: 'leaflet', component: LeafletMapProvider });
