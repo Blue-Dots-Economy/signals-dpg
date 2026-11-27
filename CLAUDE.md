@@ -27,6 +27,8 @@ Other load-bearing docs:
 - `.claude/rules/network-fetch.md` — instance-local vs inter-instance item reads, when to use which. Triggers on item/network routes and the inter-instance fetch utils.
 - `.claude/rules/database-conventions.md` — migration editing rule, partition pruning, `user.tags`, PII location jitter. Triggers on routes/services/utils, `packages/database`, `apps/api/db`.
 - `.claude/rules/env-vars.md` — the two-places-must-change-together rule for new env vars. Triggers on `packages/config/src/secrets.ts` and `turbo.json`.
+- `.claude/rules/typescript-style.md` — language baseline: no `any`, no `as` casts (validate with Zod), `===`, string-literal unions over `enum`, discriminated unions over optional-field piles, `Promise.all` for independent calls, named exports, `@dpg/*` imports. Triggers on any `.ts`/`.tsx`.
+- `.claude/rules/react-ui.md` — React baseline for the Vite UI: component size, stable list keys, no state mutation, functional setters, derive-don't-mirror, minimal effects with cleanup, TanStack Query instead of fetching in `useEffect`, and the reminder that the UI is never the control. Triggers on `apps/ui/src/**/*.tsx` and `apps/ui/src/hooks/**`.
 
 One rule has no `paths` and loads in every session: `.claude/rules/pull-requests.md` — one PR per block (api, ui, infra/config), with package and doc changes in the PR of the block they belong to, linked as a GitHub stack with `gh stack`; a combined PR only for a small change and only with the user's explicit approval; CI started by hand on stacked PRs.
 
