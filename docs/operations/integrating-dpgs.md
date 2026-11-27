@@ -532,6 +532,7 @@ or every entry was `false`/unrecognised).
 | supplied `item_locations` point outside the instance's country | 400 | `LOCATION_OUTSIDE_COUNTRY` | see **Coordinates** above (#789). |
 | new profile when the account is at its total profile limit | 409 | `PROFILE_LIMIT_REACHED` | body adds `limit_type: "total"`. The `message` ("This account has reached its profile limit. Retire any profile to add another.") carries no numbers (#927). Retired profiles do not count. |
 | a profile that would go live while the account is at its live limit | 200 | — | **additive (#927).** Only on a domain with `profile_limits` in `network.json`. The profile is saved as `draft` and the body gains a top-level `message` ("Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it."); it is absent otherwise. Re-sending the profile by `item_id` once a slot is free makes it live. |
+| update by `item_id` when another write retires, pauses or publishes the profile during the save | 409 | `ITEM_CHANGED` | **additive (#927).** The edit is not saved. `message`: "This profile changed while it was being saved. Reload it and try again." Re-read the participant and retry. |
 
 ### `POST /api/v1/admin/participant/decrypt` — error matrix (additions)
 

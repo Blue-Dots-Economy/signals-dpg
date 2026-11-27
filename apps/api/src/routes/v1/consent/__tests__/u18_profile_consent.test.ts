@@ -376,6 +376,13 @@ describe('finalize', () => {
     expect(reply.body).toEqual({ promoted: false });
   });
 
+  it('carries the live-limit message when the limit kept the profile in draft', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: true });
+    const reply = await call(url, ITEM);
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ promoted: false, message: 'LIVE_LIMIT_DRAFT' });
+  });
+
   it('409 GUARDIAN_PRECREATE_REQUIRED when no guardian OTP was verified (D13)', async () => {
     // The self consent row written at create time does not satisfy the gate —
     // only a verified guardian OTP token does.
@@ -477,6 +484,13 @@ describe('profile-consent/verify', () => {
         documentVersion: 3,
       },
     );
+  });
+
+  it('carries the live-limit message when the limit kept the profile in draft', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: true });
+    const reply = await call(url, { ...ITEM, otp: '123456' });
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ verified: true, promoted: false, message: 'LIVE_LIMIT_DRAFT' });
   });
 
   it('resolves the consent version BEFORE consuming the single-use OTP', async () => {

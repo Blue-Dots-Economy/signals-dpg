@@ -23,15 +23,17 @@ const {
   publishItemEvent,
   invalidateItemFetchCache,
   resolveGoLiveGates,
-  resolveLiveSlotFree,
-  readLifecycleStatus,
+  liveSlotForTransition,
 } = vi.hoisted(() => ({
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  readLifecycleStatus: vi.fn(async (..._a: any[]) => 'paused' as string | null),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolveGoLiveGates: vi.fn(async (..._a: any[]) => ['schema_required'] as string[]),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  resolveLiveSlotFree: vi.fn(async (..._a: any[]) => undefined as boolean | undefined),
+  liveSlotForTransition: vi.fn(
+    async (..._a: any[]) =>
+      ({ stale: false, liveSlotFree: undefined }) as
+        | { stale: true }
+        | { stale: false; liveSlotFree: boolean | undefined },
+  ),
   rowQueue: [] as unknown[][],
   updates: [] as { table: unknown; values: Record<string, unknown>; where: unknown }[],
   // Resettable failure flag — never monkey-patch the shared row queue, an
@@ -186,18 +188,10 @@ vi.mock('@/services/item_service', () => ({
   LIVE_LIMIT_UNPAUSE_MESSAGE: 'LIVE_LIMIT_UNPAUSE',
   isBlockedOnlyByLiveLimit: (c: { failed_gates?: string[] }) =>
     c.failed_gates?.length === 1 && c.failed_gates[0] === 'live_limit',
-  // Same contract as the real helper, over the two mocks below.
-  liveSlotForTransition: async (_tx: unknown, gates: unknown, item: { item_id: string }, expected: string) => {
-    const liveSlotFree = await resolveLiveSlotFree(_tx, gates, item);
-    if (liveSlotFree !== undefined && (await readLifecycleStatus(_tx, item.item_id)) !== expected) {
-      return { stale: true };
-    }
-    return { stale: false, liveSlotFree };
-  },
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  liveSlotForTransition: (...a: any[]) => liveSlotForTransition(...a),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   resolveGoLiveGates: (...a: any[]) => resolveGoLiveGates(...a),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  resolveLiveSlotFree: (...a: any[]) => resolveLiveSlotFree(...a),
 }));
 
 vi.mock('@/services/items/retire_pii', () => ({
@@ -328,8 +322,7 @@ beforeEach(() => {
   dbState.updateMatched = true;
   vi.clearAllMocks();
   resolveGoLiveGates.mockResolvedValue(['schema_required']);
-  resolveLiveSlotFree.mockResolvedValue(undefined);
-  readLifecycleStatus.mockResolvedValue('paused');
+  liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: undefined });
   getNetworkConfigById.mockResolvedValue({ pause_enabled: true });
   getOrFetchSchemaByUrl.mockResolvedValue({
     required: ['name'],
@@ -622,7 +615,7 @@ describe('item_lifecycle_handler — pause / unpause', () => {
   it('opts into the live limit only, when the domain sets profile_limits', async () => {
     rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
     resolveGoLiveGates.mockResolvedValue(['schema_required', 'consent_required', 'live_limit']);
-    resolveLiveSlotFree.mockResolvedValue(true);
+    liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: true });
 
     const reply = await call(ownerRequest('unpause'));
 
@@ -635,8 +628,8 @@ describe('item_lifecycle_handler — pause / unpause', () => {
   it('unpause double-submit: the second sees the item already live and is refused, not 409 limit', async () => {
     rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
     resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
-    resolveLiveSlotFree.mockResolvedValue(false);
-    readLifecycleStatus.mockResolvedValue('live'); // the first request already resumed it
+    // The first request already resumed it.
+    liveSlotForTransition.mockResolvedValue({ stale: true });
 
     const reply = await call(ownerRequest('unpause'));
 
@@ -660,7 +653,7 @@ describe('item_lifecycle_handler — pause / unpause', () => {
   it('unpause with the live limit full: 409 PROFILE_LIMIT_REACHED, stays paused', async () => {
     rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
     resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
-    resolveLiveSlotFree.mockResolvedValue(false);
+    liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: false });
     classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
 
     const reply = await call(ownerRequest('unpause'));
