@@ -8,7 +8,7 @@ import type { RJSFSchema } from '@rjsf/utils';
 import type { DotNetworkDomain, DotNetworkSchema } from '@/engine/types';
 import type { Item } from '@/lib/item-api';
 
-const toastMock = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn() }));
+const toastMock = vi.hoisted(() => ({ info: vi.fn(), success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock('sonner', () => ({ toast: toastMock }));
 
 // Task 3 — ProfileFormPage renders inside PageShell (variant='form') for the
@@ -335,6 +335,21 @@ describe('ProfileFormPage inline consent on edit-of-draft (Task 5)', () => {
     expect(screen.queryByRole('checkbox', { name: /agree/i })).not.toBeInTheDocument();
   });
 
+  it('edit-of-draft held by the live limit: warns and skips the consent step', async () => {
+    updateItemMock.mockResolvedValue({ message: 'Live profile limit reached. Saved as a draft.' });
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('checkbox', { name: /agree/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /save & publish/i }));
+
+    await waitFor(() =>
+      expect(toastMock.warning).toHaveBeenCalledWith('Saved as draft', {
+        description: 'Live profile limit reached. Saved as a draft.',
+      }),
+    );
+    expect(acceptMock).not.toHaveBeenCalled();
+  });
+
   it('edit-of-draft submit (adult) updates then records consent', async () => {
     await renderPage('/profile/item-1');
 
@@ -350,6 +365,17 @@ describe('ProfileFormPage inline consent on edit-of-draft (Task 5)', () => {
         }),
       ),
     );
+  });
+
+  it('edit-of-draft: once consent is recorded, returns to the network home', async () => {
+    acceptMock.mockImplementation(async (opts: { onDone: () => void }) => opts.onDone());
+
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('checkbox', { name: /agree/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /save & publish/i }));
+
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/?network=blue_dot'));
   });
 
   it('edit-of-draft submit (minor, gated) routes through the guardian flow', async () => {
@@ -402,6 +428,19 @@ describe('ProfileFormPage edit with no changes', () => {
 
     await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith('No changes to save', expect.anything()));
     expect(updateItemMock).not.toHaveBeenCalled();
+  });
+
+  it('still saves an unchanged DRAFT: the save re-runs the go-live check (live limit)', async () => {
+    // No consent statement, so this is the plain edit path, not the consent one.
+    consentConfigResult = { config: null, isLoading: false };
+    const draft = liveEdit({ 'Full Name': 'Asha' });
+    editItemResult = { ...draft, data: { ...draft.data, lifecycle_status: 'draft' } as Item };
+    await renderPage('/profile/item-1');
+
+    await userEvent.click(await screen.findByRole('button', { name: /update|save/i }));
+
+    await waitFor(() => expect(updateItemMock).toHaveBeenCalledTimes(1));
+    expect(toastMock.info).not.toHaveBeenCalledWith('No changes to save', expect.anything());
   });
 
   it('saves when a field changed', async () => {

@@ -121,10 +121,13 @@ vi.mock('@/lib/consent-api', () => ({
 }));
 
 vi.mock('@/components/consent/u18/u18-guardian-flow', () => ({
-  U18GuardianFlow: (props: { initialStep: string; onComplete: () => void }) => (
+  U18GuardianFlow: (props: { initialStep: string; onComplete: () => void; onLogout: () => void }) => (
     <div data-testid="u18-guardian-flow" data-initial-step={props.initialStep}>
       <button type="button" onClick={props.onComplete}>
         guardian done
+      </button>
+      <button type="button" onClick={props.onLogout}>
+        guardian logout
       </button>
     </div>
   ),
@@ -344,6 +347,20 @@ describe('G4 — authenticated U18 guardian gate', () => {
     // Birth data already stored → skip straight to the guardian step.
     expect(flow.getAttribute('data-initial-step')).toBe('guardian');
     expect(navigate).not.toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('logging out of the guardian flow signs out and returns to the login page', async () => {
+    getU18Status.mockResolvedValue({
+      hasBirthData: true,
+      isMinor: true,
+      guardianVerified: false,
+    });
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'guardian logout' }));
+    expect(signOut).toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith('/auth/login', { replace: true });
   });
 
   it('starts at the DOB step when no birth data is stored', async () => {
@@ -702,6 +719,18 @@ describe('#558 — first-time-login profile redirect', () => {
 
       expect(await screen.findByText(/not configured/i)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /sign out and switch account/i })).toBeNull();
+    });
+
+    it('falls back to the login page when the server did not end the session', async () => {
+      // `false` means nothing is navigating to Keycloak, so the page must move.
+      rejectWith('TOKEN_AGGREGATOR_ACCOUNT', 'You are signed in as an aggregator account.');
+      endBffSession.mockResolvedValueOnce(false);
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /sign out and switch account/i }));
+      await waitFor(() =>
+        expect(navigate).toHaveBeenCalledWith('/auth/login', { replace: true }),
+      );
     });
 
     it('falls back to the login page when the sign-out cannot start', async () => {

@@ -278,6 +278,9 @@
                     },
                     "item_id": {
                       "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -854,6 +857,9 @@
                         "updated_at"
                       ],
                       "additionalProperties": false
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -6226,7 +6232,7 @@
                   },
                   "phone_number": {
                     "type": "string",
-                    "pattern": "^\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})$"
+                    "pattern": "^\\+[1-9]\\d{9,14}$"
                   },
                   "name": {
                     "type": "string",
@@ -6449,6 +6455,9 @@
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
                     },
+                    "message": {
+                      "type": "string"
+                    },
                     "onboarded_by_org_id": {
                       "nullable": true,
                       "type": "string"
@@ -6502,6 +6511,25 @@
             },
             "in": "query",
             "name": "network",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(draft|live|paused)(,(draft|live|paused))*$"
+            },
+            "in": "query",
+            "name": "lifecycle_status",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "in": "query",
+            "name": "limit",
             "required": false
           },
           {
@@ -7662,6 +7690,9 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -8052,6 +8083,9 @@
                     },
                     "promoted": {
                       "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -8244,6 +8278,9 @@
                   "properties": {
                     "promoted": {
                       "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -9003,7 +9040,8 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   },
                   "domain": {
                     "type": "string",
@@ -9183,7 +9221,8 @@
                   },
                   "phoneNumber": {
                     "type": "string",
-                    "pattern": "^(\\+(91[6-9]\\d{9}|[1-8]\\d{9,14}|9[02-9]\\d{8,13})|[6-9]\\d{9})$"
+                    "maxLength": 32,
+                    "pattern": "^\\+?[\\d\\s\\-().]+$"
                   }
                 },
                 "required": [
@@ -9469,8 +9508,7 @@
                     "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "phone": {
-                    "type": "string",
-                    "maxLength": 20
+                    "type": "string"
                   },
                   "type": {
                     "type": "string",

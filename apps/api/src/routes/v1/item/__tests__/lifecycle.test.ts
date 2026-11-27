@@ -22,12 +22,23 @@ const {
   dispatchItemLifecycleNotification,
   publishItemEvent,
   invalidateItemFetchCache,
+  resolveGoLiveGates,
+  liveSlotForTransition,
 } = vi.hoisted(() => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveGoLiveGates: vi.fn(async (..._a: any[]) => ['schema_required'] as string[]),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  liveSlotForTransition: vi.fn(
+    async (..._a: any[]) =>
+      ({ stale: false, liveSlotFree: undefined }) as
+        | { stale: true }
+        | { stale: false; liveSlotFree: boolean | undefined },
+  ),
   rowQueue: [] as unknown[][],
   updates: [] as { table: unknown; values: Record<string, unknown>; where: unknown }[],
   // Resettable failure flag — never monkey-patch the shared row queue, an
   // override there leaks into every later test in the file.
-  dbState: { failWith: null as Error | null },
+  dbState: { failWith: null as Error | null, updateMatched: true },
   // Params are declared on every mock because `vi.fn(() => ...)` infers a
   // ZERO-ARG signature, which breaks both the spread-through in the vi.mock
   // factory and `mock.calls[0][0]` under tsc.
@@ -46,8 +57,12 @@ const {
   decryptItemPrivate: vi.fn((..._a: any[]) => ({ mergedState: { name: 'Ada' } })),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   hasAcceptedProfileConsent: vi.fn(async (..._a: any[]) => true),
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  classify_item: vi.fn((..._a: any[]) => ({ lifecycle_status: 'live' })),
+  classify_item: vi.fn(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (..._a: any[]): { lifecycle_status: string; failed_gates?: string[] } => ({
+      lifecycle_status: 'live',
+    }),
+  ),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   buildRetiredItemState: vi.fn((..._a: any[]) => ({ scrubbed: true })),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,8 +102,13 @@ const fakeTx = {
     set: (values: Record<string, unknown>) => ({
       where: (where: unknown) => {
         if (dbState.failWith) return Promise.reject(dbState.failWith);
-        updates.push({ table, values, where });
-        return Promise.resolve([]);
+        // The pause/unpause write is conditional on the current status and
+        // reads back the rows it changed; `updateMatched: false` simulates a
+        // concurrent retire having moved the row on.
+        const matched = dbState.updateMatched;
+        if (matched) updates.push({ table, values, where });
+        const rows = matched ? [{ item_id: 'x' }] : [];
+        return Object.assign(Promise.resolve([]), { returning: () => Promise.resolve(rows) });
       },
     }),
   }),
@@ -116,6 +136,7 @@ vi.mock('@dpg/database', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
+  and: (...conds: unknown[]) => ({ op: 'and', conds }),
   eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
   // `sql` is used as a template tag (`sql\`now()\``).
   sql: (strings: TemplateStringsArray) => ({ sql: strings.join('?') }),
@@ -158,8 +179,19 @@ vi.mock('@/services/consent_acceptance', () => ({
 }));
 
 vi.mock('@/services/items/classifier', () => ({
+  DEFAULT_GO_LIVE_GATES: ['schema_required'],
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   classify_item: (...a: any[]) => classify_item(...a),
+}));
+
+vi.mock('@/services/item_service', () => ({
+  LIVE_LIMIT_UNPAUSE_MESSAGE: 'LIVE_LIMIT_UNPAUSE',
+  isBlockedOnlyByLiveLimit: (c: { failed_gates?: string[] }) =>
+    c.failed_gates?.length === 1 && c.failed_gates[0] === 'live_limit',
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  liveSlotForTransition: (...a: any[]) => liveSlotForTransition(...a),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  resolveGoLiveGates: (...a: any[]) => resolveGoLiveGates(...a),
 }));
 
 vi.mock('@/services/items/retire_pii', () => ({
@@ -287,7 +319,10 @@ beforeEach(() => {
   rowQueue.length = 0;
   updates.length = 0;
   dbState.failWith = null;
+  dbState.updateMatched = true;
   vi.clearAllMocks();
+  resolveGoLiveGates.mockResolvedValue(['schema_required']);
+  liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: undefined });
   getNetworkConfigById.mockResolvedValue({ pause_enabled: true });
   getOrFetchSchemaByUrl.mockResolvedValue({
     required: ['name'],
@@ -571,8 +606,66 @@ describe('item_lifecycle_handler — pause / unpause', () => {
       merged_state: { name: 'Ada' },
       current_status: 'draft',
       consent_accepted: true,
+      gates: ['schema_required'],
+      live_slot_free: undefined,
     });
     expect(updates[0]?.values.lifecycle_status).toBe('live');
+  });
+
+  it('opts into the live limit only, when the domain sets profile_limits', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    resolveGoLiveGates.mockResolvedValue(['schema_required', 'consent_required', 'live_limit']);
+    liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: true });
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(200);
+    expect(classify_item).toHaveBeenCalledWith(
+      expect.objectContaining({ gates: ['schema_required', 'live_limit'], live_slot_free: true }),
+    );
+  });
+
+  it('unpause double-submit: the second sees the item already live and is refused, not 409 limit', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
+    // The first request already resumed it.
+    liveSlotForTransition.mockResolvedValue({ stale: true });
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(409);
+    expect(reply.body).toMatchObject({ error: 'INVALID_LIFECYCLE_ACTION' });
+    expect(classify_item).not.toHaveBeenCalled();
+    expect(updates).toHaveLength(0);
+  });
+
+  it('a retire committed meanwhile is never overwritten: the conditional write matches nothing', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    dbState.updateMatched = false;
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(409);
+    expect(reply.body).toMatchObject({ error: 'INVALID_LIFECYCLE_ACTION' });
+    expect(publishItemEvent).not.toHaveBeenCalled();
+  });
+
+  it('unpause with the live limit full: 409 PROFILE_LIMIT_REACHED, stays paused', async () => {
+    rowQueue.push([existingItem({ lifecycle_status: 'paused' })]);
+    resolveGoLiveGates.mockResolvedValue(['schema_required', 'live_limit']);
+    liveSlotForTransition.mockResolvedValue({ stale: false, liveSlotFree: false });
+    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
+
+    const reply = await call(ownerRequest('unpause'));
+
+    expect(reply.statusCode).toBe(409);
+    expect(reply.body).toEqual({
+      error: 'PROFILE_LIMIT_REACHED',
+      limit_type: 'live',
+      message: 'LIVE_LIMIT_UNPAUSE',
+    });
+    expect(updates).toHaveLength(0);
+    expect(publishItemEvent).not.toHaveBeenCalled();
   });
 
   it('unpause of an incomplete/unconsented profile lands back in draft', async () => {

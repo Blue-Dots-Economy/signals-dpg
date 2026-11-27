@@ -52,7 +52,7 @@ export function UserMenu() {
 
   const handleNotificationsClick = () => {
     setPopoverOpen(false);
-    navigate('/my-actions');
+    void navigate('/my-actions');
   };
 
   return (

@@ -132,7 +132,7 @@ const acceptMock = vi.fn((_args: unknown): Promise<void> => Promise.resolve());
 const setActiveProfileMock = vi.fn((_networkId: string, _profileId: string): void => undefined);
 const suggestMock = vi.fn((_query: string): Promise<GeoSuggestion[]> => Promise.resolve([]));
 const createItemMock = vi.fn(
-  (_payload: CreateItemPayload): Promise<{ item_id: string; item_type: string }> =>
+  (_payload: CreateItemPayload): Promise<{ item_id: string; item_type: string; message?: string }> =>
     Promise.resolve({ item_id: 'new-1', item_type: 'profile_1.0' }),
 );
 const updateItemMock = vi.fn(
@@ -406,6 +406,21 @@ describe('ProfileFormPage submit-time geocoding', () => {
     ]);
   });
 
+  it('warns, with the server message, when a new profile was saved as a draft by the live limit', async () => {
+    createItemMock.mockResolvedValueOnce({
+      item_id: 'new-1',
+      item_type: 'profile_1.0',
+      message: 'Live profile limit reached. Saved as a draft.',
+    });
+    await renderPage();
+
+    await submitForm(/create profile/i);
+
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile created!')).toBeNull();
+  });
+
   it('geocodes every entry of a multi-value address and drops the entries with no match', async () => {
     useNetwork(buildNetwork([seekerDomain(MULTI_ADDRESS_SCHEMA)]));
     formSubmitData = { 'Full Name': 'Asha', Address: ['Pune', 'Nowheresville'] };
@@ -557,6 +572,17 @@ describe('ProfileFormPage successful live edit', () => {
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/?network=blue_dot'));
     // A live edit never re-captures profile_creation consent.
     expect(acceptMock).not.toHaveBeenCalled();
+  });
+
+  it('warns, with the server message, when the live profile limit kept the profile in draft', async () => {
+    updateItemMock.mockResolvedValueOnce({ message: 'Live profile limit reached. Saved as a draft.' });
+    await renderPage('/profile/item-1');
+
+    await submitForm(/^update$/i);
+
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile updated!')).toBeNull();
   });
 
   it('omits item_locations entirely when nothing geocoded, so the stored coordinate survives', async () => {

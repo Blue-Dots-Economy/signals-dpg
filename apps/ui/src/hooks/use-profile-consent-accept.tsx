@@ -78,15 +78,20 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
   // refreshes my-items (draft → live leaves the list stale). Shared by both
   // branches, so the success toast fires exactly once per acceptance.
   const recordAndFinish = React.useCallback(
-    (network: string, itemId: string, onDone: () => void) => {
+    (network: string, itemId: string, onDone: () => void, liveLimitMessage?: string) => {
       queryClient.setQueryData<Set<string>>(
         queryKeys.profileConsent(network),
         (prev) => new Set([...(prev ?? []), itemId]),
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network) });
-      toast.success(
-        t('profile.guardian_consent_recorded', 'Consent recorded — your profile is now live'),
-      );
+      // The live profile limit kept it in draft: never claim it is live.
+      if (liveLimitMessage) {
+        toast.warning(t('profile.toast_saved_as_draft'), { description: liveLimitMessage });
+      } else {
+        toast.success(
+          t('profile.guardian_consent_recorded', 'Consent recorded — your profile is now live'),
+        );
+      }
       onDone();
     },
     [queryClient, t],
@@ -167,7 +172,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
         }
         // Adult / ungated domain: the ward self-accepts.
         try {
-          await acceptProfileConsent({
+          const res = await acceptProfileConsent({
             network: args.network,
             brand: args.brand,
             item_domain: args.item.item_domain,
@@ -175,7 +180,7 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
             item_id: args.item.item_id,
             version: args.version,
           });
-          recordAndFinish(args.network, args.item.item_id, args.onDone);
+          recordAndFinish(args.network, args.item.item_id, args.onDone, res?.message);
         } catch (err) {
           // The caller keeps its prompt open to retry.
           toast.error(apiErrorMessage(err, t, t('profile.error_generic_desc')));
@@ -204,8 +209,8 @@ export function useProfileConsentAccept(): UseProfileConsentAcceptResult {
           if (!pending) return;
           // Throws on an invalid/expired code; GuardianOtpDialog shows the
           // inline error and stays open, so do not catch here.
-          await verifyProfileConsentOtp({ ...pending.ref, otp });
-          recordAndFinish(pending.ref.network, pending.ref.item_id, pending.onDone);
+          const res = await verifyProfileConsentOtp({ ...pending.ref, otp });
+          recordAndFinish(pending.ref.network, pending.ref.item_id, pending.onDone, res?.message);
           setGuardian(null);
         }}
       />

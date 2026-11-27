@@ -385,12 +385,18 @@ describe('realm-role gate on the human path (shared-realm defence in depth)', ()
     expect(provisionUserFromClaims).not.toHaveBeenCalled();
   });
 
-  it('names the aggregator account for a coordinator (aggregator_id claim)', async () => {
-    const failure = await resolveWith({
-      aggregator_id: 'agg-1',
-      realm_access: { roles: [] },
-    });
+  it('names the aggregator account for a coordinator (user_id claim)', async () => {
+    const failure = await resolveWith({ user_id: 'agg-1', realm_access: { roles: [] } });
+    expect(failure.status).toBe(403);
     expect(failure.code).toBe('TOKEN_AGGREGATOR_ACCOUNT');
+    expect(provisionUserFromClaims).not.toHaveBeenCalled();
+  });
+
+  it('keeps the generic message for a token that carries only aggregator_id', async () => {
+    // aggregator_id is the former claim name; no deployed realm maps it any more.
+    const failure = await resolveWith({ aggregator_id: 'agg-1', realm_access: { roles: [] } });
+    expect(failure.status).toBe(403);
+    expect(failure.code).toBe('TOKEN_ROLE_REJECTED');
     expect(provisionUserFromClaims).not.toHaveBeenCalled();
   });
 

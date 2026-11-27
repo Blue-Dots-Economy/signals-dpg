@@ -51,6 +51,8 @@ vi.mock('@api/db/secondary/redis', () => ({ redis: redisMock }));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   isItemOwnedBy: (...a: any[]) => isItemOwnedBy(...a),
   upsertGuardianProfileConsentAndPromote: (...a: any[]) => upsertGuardianProfileConsentAndPromote(...a),
 }));
@@ -157,7 +159,7 @@ function primeMinor() {
   verifyGuardianOtp.mockResolvedValue(true);
   assertVerifyAttemptAllowed.mockResolvedValue(undefined);
   issueGuardianOtp.mockResolvedValue({ sentTo: '******7347' });
-  upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+  upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
   guardianOtpErrorReply.mockReturnValue(null);
   redisMock.getdel.mockResolvedValue('1');
   redisMock.set.mockResolvedValue('OK');
@@ -368,10 +370,17 @@ describe('finalize', () => {
   });
 
   it('reports promoted:false when the item was not flipped to live', async () => {
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(false);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: false });
     const reply = await call(url, ITEM);
     expect(reply.statusCode).toBe(200);
     expect(reply.body).toEqual({ promoted: false });
+  });
+
+  it('carries the live-limit message when the limit kept the profile in draft', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: true });
+    const reply = await call(url, ITEM);
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ promoted: false, message: 'LIVE_LIMIT_DRAFT' });
   });
 
   it('409 GUARDIAN_PRECREATE_REQUIRED when no guardian OTP was verified (D13)', async () => {
@@ -477,6 +486,13 @@ describe('profile-consent/verify', () => {
     );
   });
 
+  it('carries the live-limit message when the limit kept the profile in draft', async () => {
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: true });
+    const reply = await call(url, { ...ITEM, otp: '123456' });
+    expect(reply.statusCode).toBe(200);
+    expect(reply.body).toEqual({ verified: true, promoted: false, message: 'LIVE_LIMIT_DRAFT' });
+  });
+
   it('resolves the consent version BEFORE consuming the single-use OTP', async () => {
     resolveConsentVersion.mockResolvedValue(null);
     const reply = await call(url, { ...ITEM, otp: '123456' });
@@ -540,7 +556,7 @@ describe.each([
   ['/u18/profile-consent/finalize', ITEM],
 ])('%s — after a promotion', (url, body) => {
   it('publishes an upsert item event so search re-indexes the now-live profile', async () => {
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
 
     const reply = await call(url, body);
 
@@ -558,7 +574,7 @@ describe.each([
   });
 
   it('sweeps the item-fetch caches, as the self-consent route already does', async () => {
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
 
     await call(url, body);
 
@@ -566,7 +582,7 @@ describe.each([
   });
 
   it('does nothing when the guardian consent did not promote the item', async () => {
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(false);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: false, blockedByLiveLimit: false });
 
     await call(url, body);
 
@@ -575,7 +591,7 @@ describe.each([
   });
 
   it('still returns 200 when the publish fails — consent is already committed', async () => {
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
     publishItemEvent.mockRejectedValue(new Error('redis down'));
 
     const reply = await call(url, body);
@@ -586,7 +602,7 @@ describe.each([
   it('still publishes and returns 200 when the cache sweep fails', async () => {
     // The consent row and the lifecycle flip are already committed, so a cache
     // miss must neither fail the request nor skip the search re-index behind it.
-    upsertGuardianProfileConsentAndPromote.mockResolvedValue(true);
+    upsertGuardianProfileConsentAndPromote.mockResolvedValue({ promoted: true, blockedByLiveLimit: false });
     invalidateItemFetchCache.mockRejectedValue(new Error('redis down'));
 
     const reply = await call(url, body);

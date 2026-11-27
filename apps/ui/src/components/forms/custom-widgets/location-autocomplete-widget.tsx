@@ -94,7 +94,7 @@ export function LocationAutocompleteWidget({
     runSearch(next);
   }
 
-  async function choose(s: GeoSuggestion) {
+  function choose(s: GeoSuggestion) {
     // Cancel any pending search so selecting never re-opens the list.
     window.clearTimeout(debounceRef.current);
     abortRef.current?.abort();
@@ -118,7 +118,7 @@ export function LocationAutocompleteWidget({
       onClose: () => setOpen(false),
       onSelect: (index) => {
         const s = suggestions[index];
-        if (s) void choose(s);
+        if (s) choose(s);
       },
       idPrefix: id,
     });
@@ -176,7 +176,7 @@ export function LocationAutocompleteWidget({
               // preventDefault keeps focus in the input.
               onMouseDown={(e) => {
                 e.preventDefault();
-                void choose(s);
+                choose(s);
               }}
               // Hover moves the keyboard highlight, so Enter takes what is shown.
               onMouseEnter={() => setActiveIndex(i)}

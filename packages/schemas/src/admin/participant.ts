@@ -1,6 +1,6 @@
 import z from 'zod';
 import { ItemLocationsArray } from '../api/item_schemas';
-import { PHONE_E164_PATTERN } from '../phone_rules';
+import { PHONE_E164_SHAPE } from '../phone_rules';
 
 /**
  * Body for POST /api/v1/admin/participant: an upsert called by integrating
@@ -12,9 +12,10 @@ import { PHONE_E164_PATTERN } from '../phone_rules';
  * `source_id` is opaque to Signals.
  */
 
+// The per-country check runs in the handler, which knows PHONE_COUNTRIES.
 const PhoneE164 = z
   .string()
-  .regex(PHONE_E164_PATTERN, 'must be E.164; +91 numbers need 10 digits (e.g. +919876543210)');
+  .regex(PHONE_E164_SHAPE, 'must be E.164: + and 10-15 digits (e.g. +919876543210)');
 
 // Lookup accepts the number with or without the leading "+"; the handler
 // prepends "+" before matching the stored E.164 value.
@@ -133,6 +134,9 @@ export const UpsertParticipantResponse = z.object({
   // consent_record rows written this call. Omitted on the rejected and
   // owned-elsewhere branches.
   consent_recorded: z.number().int().optional(),
+  // Present only when the live profile limit kept a profile that would have
+  // gone live in draft.
+  message: z.string().optional(),
   // Who owns this participant. The owner is not always the acting org: a
   // `network_service` caller gets the instance's default aggregator, or null
   // when no single default is nominated. Omitted on the rejected and
@@ -151,6 +155,21 @@ export const GetParticipantRequest = z
      * a multi-network one.
      */
     network: z.string().min(1).optional(),
+    /**
+     * Only return items in these lifecycle statuses, comma-separated (e.g.
+     * `live,draft`). Retired is not a filter value. Omitted returns every
+     * status, retired included: an empty list reads as "owned elsewhere" to
+     * aggregator-dpg, so an all-retired user must still list something.
+     */
+    lifecycle_status: z
+      .string()
+      .regex(
+        /^(draft|live|paused)(,(draft|live|paused))*$/,
+        'lifecycle_status must be a comma-separated list of draft, live, paused',
+      )
+      .optional(),
+    /** Return only the newest `limit` items (after `lifecycle_status`). Omitted returns all. */
+    limit: z.coerce.number().int().min(1).max(1000).optional(),
   })
   .refine((q) => Boolean(q.email) || Boolean(q.phone_number), {
     message: 'either email or phone_number is required',

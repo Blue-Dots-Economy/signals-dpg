@@ -1,4 +1,5 @@
 import { createApiClient } from './api-client';
+import { DEFAULT_DIAL_CODE, isMobilePhone, storedPhone } from '@/components/auth/phone-input';
 
 const apiClient = createApiClient();
 
@@ -51,38 +52,20 @@ export interface SessionResponse {
 }
 
 export function normalizePhoneNumber(phoneNumber: string): string {
+  const stored = storedPhone(phoneNumber); // the API's form, e.g. without a trunk 0
+  if (stored) return stored;
   // Strip whitespace, dashes and parens first so "+91 9876543210" and
   // "+919876543210" normalize to one canonical shape (no duplicate rows).
   const cleaned = phoneNumber.replace(/[\s\-()]/g, '');
   const digits = cleaned.replace(/\D/g, '');
   if (cleaned.startsWith('+')) return `+${digits}`;
-  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 10) return `${DEFAULT_DIAL_CODE}${digits}`;
   return `+${digits}`;
 }
 
-/**
- * Accepts a 10-digit Indian mobile (first digit 6-9), the same with +91, or any
- * other E.164 number ("+" and 8-15 digits, first digit 1-9). Whitespace,
- * dashes and parens are stripped first, as in normalizePhoneNumber.
- */
+/** A mobile in one of the deployment's countries; a number without `+` is read in the first. */
 export function isValidPhoneNumber(phoneNumber: string): boolean {
-  const cleaned = phoneNumber.replace(/[\s\-()]/g, '');
-  if (!cleaned) return false;
-  const digits = cleaned.replace(/\D/g, '');
-  // Indian-without-country-code shorthand kept for input convenience.
-  if (!cleaned.startsWith('+') && digits.length === 10) {
-    return /^[6-9]\d{9}$/.test(digits);
-  }
-  // +91 must be followed by exactly a 10-digit mobile; the generic E.164 rule
-  // would accept a too-long number like "+919620421129333".
-  if (cleaned.startsWith('+91')) {
-    return /^91[6-9]\d{9}$/.test(digits);
-  }
-  // Any other "+": generic E.164.
-  if (cleaned.startsWith('+')) {
-    return /^[1-9]\d{7,14}$/.test(digits);
-  }
-  return false;
+  return isMobilePhone(phoneNumber.trim());
 }
 
 /**

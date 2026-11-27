@@ -132,7 +132,8 @@ function pickValue(
 
 // Generates a string that satisfies a JSON Schema `pattern`. Recognises only
 // the digit-only patterns currently in use across the bundled network configs
-// (`^[0-9]{N}$`, `^\d{N}$`, `^[0-9]+$`, `^\d+$`). Other patterns throw with a
+// (`^[0-9]{N}$`, `^\d{N}$`, `^[0-9]+$`, `^\d+$`) and the E.164 phone pattern
+// (`^\+[1-9][0-9]{9,14}$`). Other patterns throw with a
 // pointer to extend this helper rather than producing silently-invalid data.
 function generateStringForPattern(pattern: string, name: string): string {
   const fixedDigits =
@@ -143,6 +144,9 @@ function generateStringForPattern(pattern: string, name: string): string {
   }
   if (/^\^?\[0-9\]\+\$?$/.test(pattern) || /^\^?\\d\+\$?$/.test(pattern)) {
     return '0123456789';
+  }
+  if (pattern === String.raw`^\+[1-9][0-9]{9,14}$`) {
+    return '+919876543210';
   }
   throw new Error(
     `generateMinimalItemState: property "${name}" has pattern "${pattern}" which is not recognised. ` +

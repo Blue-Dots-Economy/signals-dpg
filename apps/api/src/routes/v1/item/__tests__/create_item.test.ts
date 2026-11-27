@@ -133,7 +133,7 @@ vi.mock('@dpg/database', () => ({
 }));
 
 vi.mock('@dpg/schemas', () => ({
-  default: { object: () => ({}), string: () => ({}) },
+  default: { object: () => ({}), string: () => ({ optional: () => ({}) }) },
   CreateItemBodySchema: {},
 }));
 
@@ -159,6 +159,8 @@ vi.mock('@/utils/publish_item_event', () => ({
 }));
 
 vi.mock('@/services/item_service', () => ({
+  liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+    r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
   ItemServiceError: FakeItemServiceError,
   createItemInternal: (...a: unknown[]) => {
     order.push('createItem');
@@ -231,6 +233,7 @@ function baseBody(over: Record<string, unknown> = {}) {
 async function call(req: {
   user?: { id: string; role?: string };
   headers?: Record<string, string>;
+  acting_org?: { org_id: string; org_type: string };
   body: Record<string, unknown>;
 }) {
   const reply = makeReply();
@@ -619,6 +622,52 @@ describe('create_item_handler — lifecycle notification seam', () => {
       network: 'blue_dot',
       domain: 'student',
       lifecycleStatus: 'draft',
+    });
+  });
+
+  it('a complete profile the live limit kept in draft: 201 with message, no email', async () => {
+    createItemInternal.mockResolvedValue({
+      itemId: 'item-1',
+      itemType: 'profile_1.0',
+      lifecycleStatus: 'draft',
+      blockedByLiveLimit: true,
+    });
+
+    const reply = await call({
+      user: { id: 'u1' },
+      body: baseBody({ consent: { category: 'profile_creation', version: 1 } }),
+    });
+
+    expect(reply.statusCode).toBe(201);
+    expect(reply.body).toEqual({
+      item_type: 'profile_1.0',
+      item_id: 'item-1',
+      message: 'LIVE_LIMIT_DRAFT',
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(dispatchItemLifecycleNotification).not.toHaveBeenCalled();
+  });
+
+  it('an aggregator create blocked by the live limit still sends the onboarding email', async () => {
+    createItemInternal.mockResolvedValue({
+      itemId: 'item-1',
+      itemType: 'profile_1.0',
+      lifecycleStatus: 'draft',
+      blockedByLiveLimit: true,
+    });
+
+    const reply = await call({
+      user: { id: 'admin1', role: 'admin' },
+      headers: { 'x-api-key': 'k' },
+      acting_org: { org_id: 'org_agg_1', org_type: 'aggregator' },
+      body: baseBody({ created_by: 'u2' }),
+    });
+
+    expect(reply.statusCode).toBe(201);
+    await vi.waitFor(() => expect(dispatchItemLifecycleNotification).toHaveBeenCalledTimes(1));
+    expect(dispatchItemLifecycleNotification.mock.calls[0]![0]).toMatchObject({
+      op: 'create',
+      actingOrgType: 'aggregator',
     });
   });
 

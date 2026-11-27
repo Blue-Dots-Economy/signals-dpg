@@ -82,8 +82,8 @@
             "contact_phone": {
               "type": "string",
               "title": "Contact Phone",
-              "description": "Your 10-digit contact number — shown publicly so travellers can reach you directly.",
-              "pattern": "^[0-9]{10}$"
+              "description": "Your contact number — shown publicly so travellers can reach you directly.",
+              "pattern": "^\\+[1-9][0-9]{9,14}$"
             },
             "website": {
               "type": "string",

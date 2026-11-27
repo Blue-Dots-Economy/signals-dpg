@@ -53,7 +53,7 @@ export function OtpPage() {
   const identifierLabel = state?.email ?? state?.phoneNumber;
 
   useEffect(() => {
-    if (!identifierLabel) navigate('/auth/login');
+    if (!identifierLabel) void navigate('/auth/login');
   }, [identifierLabel, navigate]);
 
   // Final step once verification (and any guardian flow) has settled: toast
@@ -67,7 +67,7 @@ export function OtpPage() {
         : t('auth.toast_account_created_desc'),
     });
     const landing = await resolvePostLoginLanding(themeId, state.redirectTo ?? '/');
-    navigate(landing, { replace: true });
+    void navigate(landing, { replace: true });
   };
 
   const handleOtpComplete = async (otp: string) => {
@@ -97,7 +97,7 @@ export function OtpPage() {
         const gate = evaluateDomainGate(held, scope.domains);
         if (!gate.allow) {
           await signOut();
-          navigate('/auth/login', { replace: true, state: { wrongPortalDomain: gate.heldDomain } });
+          void navigate('/auth/login', { replace: true, state: { wrongPortalDomain: gate.heldDomain } });
           return;
         }
       }
@@ -206,7 +206,7 @@ export function OtpPage() {
           onNotMinor={finishSignIn}
           onLogout={() => {
             void signOut();
-            navigate('/auth/login', { replace: true });
+            void navigate('/auth/login', { replace: true });
           }}
         />
       </AuthShell>

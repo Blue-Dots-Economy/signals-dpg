@@ -1,4 +1,4 @@
-import z, { EXPORT_ACTION_IDS_MAX } from '@dpg/schemas';
+import z, { EXPORT_ACTION_IDS_MAX, readPhoneCountries } from '@dpg/schemas';
 import { isValidTimeZone } from './time_zone';
 import { ConfigError } from './config_error.js';
 
@@ -39,6 +39,17 @@ export const AuthSecretsSchema = z.object({
   SELF_SIGNUP_MODE: z.enum(['gated', 'allowed']).default('gated'),
   // Comma-separated login identifier channels (phone, email). Parsed by parseLoginChannels().
   LOGIN_CHANNELS: z.string().default('phone,email'),
+  // Accepted phone countries, e.g. `IN:+91,GB:+44`; the first is the default. Blank means
+  // India. A bad entry fails startup. Same format as the UI's VITE_PHONE_COUNTRIES.
+  PHONE_COUNTRIES: z
+    .string()
+    .optional()
+    .transform((raw, ctx) => {
+      const read = readPhoneCountries(raw);
+      if (read.ok) return read.value;
+      ctx.addIssue({ code: 'custom', message: read.error.message });
+      return z.NEVER;
+    }),
   // Keycloak is the only provider. Kept as an enum so assertAuthProviderSupported
   // can give a removed value ('dual', 'betterauth') an actionable error instead
   // of Zod's bare "Invalid input".
@@ -314,8 +325,8 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .string()
     .default('true')
     .transform((val) => val === 'true'),
-  // Global default cap on profiles a single user may own per (network, domain,
-  // item_type). A network.json domain's `max_profiles_per_user` overrides this.
+  // Default total cap on profiles a single user may own per (network, domain,
+  // item_type). A network.json domain's `profile_limits` replaces it.
   MAX_PROFILES_PER_USER: z.coerce.number().int().positive().default(5),
   // Per-peer timeout for inter-instance fan-out, so one slow peer cannot stall
   // the aggregate.

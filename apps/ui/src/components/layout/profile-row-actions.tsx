@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { apiErrorMessage, readApiError } from '@/lib/api-error';
 import { Pencil, Pause, Play, Trash2 } from 'lucide-react';
 import {
   Dialog,
@@ -55,8 +56,12 @@ export function ProfileRowActions({ profile, pauseEnabled, onEdit, onChanged }: 
               : t('profile.toast_unpaused_draft', 'Profile resumed, but it needs completing before it goes live.'),
       );
       onChanged();
-    } catch {
-      toast.error(t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.'));
+    } catch (err) {
+      const generic = t('profile.toast_lifecycle_failed', 'Could not update profile status. Try again.');
+      // Unpause with the live profile limit full: the server says why and what to do.
+      toast.error(
+        readApiError(err).code === 'PROFILE_LIMIT_REACHED' ? apiErrorMessage(err, t, generic) : generic,
+      );
     } finally {
       setBusy(false);
       setPauseConfirm(false);

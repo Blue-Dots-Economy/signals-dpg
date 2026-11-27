@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchItems, type Item } from '@/lib/item-api';
+import { fetchAllItems, type Item } from '@/lib/item-api';
 import { useAuth } from '@/contexts/auth-context';
 import type { DotNetworkSchema } from '@/engine/types';
 import { queryKeys } from '@/lib/query-keys';
@@ -28,18 +28,15 @@ export function useMyItems(network: DotNetworkSchema | null): UseMyItemsResult {
         (network.domains ?? []).map((domain) => {
           const itemTypeKeys = domain.item_schemas ? Object.keys(domain.item_schemas) : [];
           const itemType = itemTypeKeys.length > 0 ? itemTypeKeys[0] : 'profile';
-          return fetchItems(
+          return fetchAllItems(
             {
               item_network: network.id,
               item_domain: domain.id,
               item_type: itemType,
               created_by_me: true,
-              limit: 100,
             },
             signal,
-          )
-            .then((res) => res.items)
-            .catch(() => [] as Item[]);
+          ).catch(() => [] as Item[]);
         }),
       );
       return results.flat();

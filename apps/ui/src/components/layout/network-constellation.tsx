@@ -84,7 +84,7 @@ export function NetworkConstellation({ className }: { className?: string }) {
         className="constellation-dot-pulse"
         cx="480"
         cy="200"
-        r="3.5"
+        r="3"
         fill="var(--brand-hero-glow)"
         fillOpacity="0.9"
         style={{ animationDelay: '1s' }}
@@ -102,7 +102,7 @@ export function NetworkConstellation({ className }: { className?: string }) {
         className="constellation-dot-pulse-slow"
         cx="60"
         cy="310"
-        r="2.5"
+        r="2"
         fill="var(--brand-hero-glow)"
         fillOpacity="0.8"
         style={{ animationDelay: '0.5s' }}
@@ -111,7 +111,7 @@ export function NetworkConstellation({ className }: { className?: string }) {
         className="constellation-dot-pulse-slow"
         cx="540"
         cy="60"
-        r="2.5"
+        r="2"
         fill="var(--brand-hero-glow)"
         fillOpacity="0.8"
         style={{ animationDelay: '1.5s' }}

@@ -186,7 +186,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
         item_type: 'profile_1.0',
         item_state: {
           beneficiary_name: 'Alice Consent Seeker',
-          mobile_number: '9000099100',
+          mobile_number: '+919000099100',
           age: 28,
           gender: 'Female',
           disability_type: ['Locomotor Disability'],
@@ -230,7 +230,7 @@ describeIf(`consent flow integration (purple_dot/connect)${
         item_type: 'profile_1.0',
         item_state: {
           contact_name: 'Bob Consent Provider',
-          contact_phone: '9000099101',
+          contact_phone: '+919000099101',
           contact_email: 'bob.consent@signals.local',
           provider_category: 'NGO / Trust',
           organisation_name: 'Consent Test NGO',

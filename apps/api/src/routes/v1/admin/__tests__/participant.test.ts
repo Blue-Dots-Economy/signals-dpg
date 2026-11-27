@@ -27,6 +27,7 @@ const mockAuthConfig = vi.hoisted(() => ({
   url: 'http://source.local/api/auth',
   create_test_otp: false,
   keycloak_enabled: true,
+  phone_countries: ['IN'],
 }));
 
 // --- mock @/config so loadEnv() never runs ---
@@ -109,10 +110,10 @@ vi.mock('@/utils/publish_item_event', () => {
 // --- mock the consent service: it is unit-tested separately; here we only
 //     assert the route calls it with the right args and stays green.
 vi.mock('@/services/participant_consent', () => ({
-  recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false })),
+  recordParticipantConsent: vi.fn(async () => ({ recorded: 0, promoted: false, blockedByLiveLimit: false })),
   // Returns the keys of the drafts an age write promoted (#557) — the route has to
   // publish an item event for each so signals-search re-indexes them.
-  promoteEligibleDraftsForUser: vi.fn(async () => [] as unknown[]),
+  promoteEligibleDraftsForUser: vi.fn(async () => ({ promoted: [] as never[], blockedItemIds: [] as string[] })),
 }));
 
 // --- mock @dpg/schemas: keep real exports + neutralize the merge helper for tests ---
@@ -143,6 +144,7 @@ const dbState: {
     email: string | null;
     phoneNumber: string | null;
     onboardedByOrgId: string | null;
+    age?: number | null;
   }>;
   itemsByUser: Map<string, ItemRow[]>;
   itemOwnerLookup: Map<string, string>; // item_id -> user_id
@@ -406,6 +408,8 @@ vi.mock('@/services/item_service', () => {
   }
   return {
     ItemServiceError,
+    liveLimitMessage: (r: { blockedByLiveLimit?: boolean }) =>
+      r.blockedByLiveLimit ? { message: 'LIVE_LIMIT_DRAFT' } : {},
     updateItemInternal: vi.fn(
       async (
         _tx: unknown,
@@ -508,6 +512,7 @@ const resetDbState = () => {
     vi.mocked(recordParticipantConsent).mockResolvedValue({
       recorded: 0,
       promoted: false,
+      blockedByLiveLimit: false,
     });
 };
 
@@ -741,6 +746,41 @@ describe('POST /admin/participant', () => {
     expect(dbState.inserts).toHaveLength(1);
   });
 
+  it('insert_item: a profile the live limit kept in draft → 200 with message', async () => {
+    const user_id = 'usr_own_held';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({
+      recorded: 1,
+      promoted: false,
+      blockedByLiveLimit: true,
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({ method: 'POST', url: '/participant', payload: baseBody() });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toBe('LIVE_LIMIT_DRAFT');
+  });
+
+  it('insert_item: no message when nothing was held', async () => {
+    const user_id = 'usr_own_free';
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1' },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+
+    const res = await app.inject({ method: 'POST', url: '/participant', payload: baseBody() });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('message');
+  });
+
   it('aggregator + existing OWN user + no item_state → 200 account_only: items returned, no writes', async () => {
     const user_id = 'usr_own_no_state';
     dbState.existingUserRows = [
@@ -800,6 +840,7 @@ describe('POST /admin/participant', () => {
     vi.mocked(recordParticipantConsent).mockResolvedValueOnce({
       recorded: 2,
       promoted: false,
+      blockedByLiveLimit: false,
     });
     const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
     const res = await app.inject({
@@ -1549,9 +1590,12 @@ describe('POST /admin/participant', () => {
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
-    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
-      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
-    ]);
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({
+      promoted: [
+        { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+      ],
+      blockedItemIds: [],
+    });
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
 
     const res = await app.inject({
@@ -1567,6 +1611,50 @@ describe('POST /admin/participant', () => {
     ]);
   });
 
+  async function updateWithAgeSweep(blockedItemIds: string[]) {
+    const user_id = 'usr_update_sweep_' + blockedItemIds.length;
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_ns_1' },
+    ];
+    dbState.itemsByUser.set(user_id, [
+      {
+        item_id: VALID_UUID_A,
+        item_network: 'blue_dot',
+        item_domain: 'seeker',
+        item_type: 'profile_1.0',
+        item_state: { v: 1 },
+        item_private_state: '',
+        created_at: new Date('2026-01-01T00:00:00Z'),
+        updated_at: new Date('2026-01-01T00:00:00Z'),
+      },
+    ]);
+    dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
+    lastQueriedUserId = user_id;
+    lastQueriedItemId = VALID_UUID_A;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({ promoted: [], blockedItemIds });
+    const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
+    return app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_id: VALID_UUID_A, item_state: { v: 2 }, age: 25 }),
+    });
+  }
+
+  it('update_item + age: another draft blocked by the live limit does not put a message on this profile', async () => {
+    const res = await updateWithAgeSweep(['itm_some_other_draft']);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('message');
+  });
+
+  it('update_item + age: the named profile blocked by the live limit gets the message', async () => {
+    const res = await updateWithAgeSweep([VALID_UUID_A]);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toBe('LIVE_LIMIT_DRAFT');
+  });
+
   it('insert_item branch: publishes the inserted item AND the drafts the age write promoted', async () => {
     const user_id = 'usr_insert_collateral';
     dbState.existingUserRows = [
@@ -1575,9 +1663,12 @@ describe('POST /admin/participant', () => {
     dbState.itemsByUser.set(user_id, []);
     lastQueriedUserId = user_id;
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
-    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
-      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
-    ]);
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({
+      promoted: [
+        { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_other_draft' },
+      ],
+      blockedItemIds: [],
+    });
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
 
     const res = await app.inject({
@@ -1640,7 +1731,7 @@ describe('POST /admin/participant', () => {
     dbState.itemOwnerLookup.set(VALID_UUID_A, user_id);
     lastQueriedUserId = user_id;
     lastQueriedItemId = VALID_UUID_A;
-    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({ recorded: 1, promoted: true });
+    vi.mocked(recordParticipantConsent).mockResolvedValueOnce({ recorded: 1, promoted: true, blockedByLiveLimit: false });
     const { updateItemInternal } = await import('@/services/item_service');
     vi.mocked(updateItemInternal).mockClear();
     const app = await buildApp({ org_id: 'org_ns_1', org_type: 'network_service' });
@@ -1672,6 +1763,40 @@ describe('POST /admin/participant', () => {
   // changed what search must return, and the account_only branch published nothing
   // at all — so the profiles stayed `draft` in item_search: invisible in every
   // ranked feed and every map viewport while `items` said live.
+  async function accountOnlyAge(ageOnFile: number | null) {
+    const user_id = 'usr_age_msg_' + String(ageOnFile);
+    dbState.existingUserRows = [
+      { id: user_id, email: VALID_EMAIL, phoneNumber: null, onboardedByOrgId: 'org_agg_1', age: ageOnFile },
+    ];
+    dbState.itemsByUser.set(user_id, []);
+    lastQueriedUserId = user_id;
+    const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({
+      promoted: [],
+      blockedItemIds: ['itm_held'],
+    });
+    const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
+    return app.inject({
+      method: 'POST',
+      url: '/participant',
+      payload: baseBody({ item_state: undefined, age: 31 }),
+    });
+  }
+
+  it('account_only + age: no limit message when an adult age was already on file (nothing newly unblocked)', async () => {
+    const res = await accountOnlyAge(30);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).not.toHaveProperty('message');
+  });
+
+  it('account_only + age: limit message when the age could unblock drafts (none on file before)', async () => {
+    const res = await accountOnlyAge(null);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().message).toBe('LIVE_LIMIT_DRAFT');
+  });
+
   it('account_only branch: publishes an upsert for each draft the age write promoted', async () => {
     const user_id = 'usr_age_promotes_drafts';
     dbState.existingUserRows = [
@@ -1680,10 +1805,13 @@ describe('POST /admin/participant', () => {
     dbState.itemsByUser.set(user_id, []);
     lastQueriedUserId = user_id;
     const { promoteEligibleDraftsForUser } = await import('@/services/participant_consent');
-    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce([
-      { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'itm_a' },
-      { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_b' },
-    ]);
+    vi.mocked(promoteEligibleDraftsForUser).mockResolvedValueOnce({
+      promoted: [
+        { item_network: 'blue_dot', item_domain: 'seeker', item_type: 'profile_1.0', item_id: 'itm_a' },
+        { item_network: 'blue_dot', item_domain: 'provider', item_type: 'profile_1.0', item_id: 'itm_b' },
+      ],
+      blockedItemIds: [],
+    });
     const app = await buildApp({ org_id: 'org_agg_1', org_type: 'aggregator' });
 
     const res = await app.inject({

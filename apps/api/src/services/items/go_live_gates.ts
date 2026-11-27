@@ -26,6 +26,8 @@ export interface GoLiveContext {
    * item's own state and must stay that way.
    */
   currentStatus: 'draft' | 'live' | 'paused' | 'retired';
+  /** `live_limit`: whether the owner has a free live slot in this scope. */
+  liveSlotFree: boolean;
 }
 
 /**
@@ -65,10 +67,18 @@ export const GO_LIVE_GATE_CHECKS: Record<GoLiveGate, (ctx: GoLiveContext) => boo
     // before one does.
     return ctx.hasOwner;
   },
+  // An already-live profile keeps its slot, so an edit never demotes it.
+  live_limit: (ctx) => ctx.currentStatus === 'live' || ctx.liveSlotFree,
 };
+
+/** The configured gates that fail for this context, in configured order. */
+export const failedGoLiveGates = (
+  gates: readonly GoLiveGate[],
+  ctx: GoLiveContext,
+): GoLiveGate[] => gates.filter((gate) => !GO_LIVE_GATE_CHECKS[gate](ctx));
 
 /** True when every configured gate passes for this context. */
 export const passesGoLiveGates = (
   gates: readonly GoLiveGate[],
   ctx: GoLiveContext,
-): boolean => gates.every((gate) => GO_LIVE_GATE_CHECKS[gate](ctx));
+): boolean => failedGoLiveGates(gates, ctx).length === 0;

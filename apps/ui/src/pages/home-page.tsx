@@ -1310,7 +1310,7 @@ export function HomePage() {
 
         const env = await performActionsBulk(payloads, sourceItemInstanceUrl);
         // New actions surface without waiting for the poll.
-        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         setBulkConnectOpen(false);
 
         // `resolveBulkOutcome` makes the three-way decision; this reacts to it.
@@ -1757,7 +1757,7 @@ export function HomePage() {
         const ch = bulkGuardianChallenge;
         if (!ch) return;
         const env2 = await performActionsBulk(ch.payloads, ch.sourceInstanceUrl, otp);
-        queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
         if (env2.summary.failed === 0) {
           const otherFailedIds = ch.otherFailedIds ?? [];
           setBulkGuardianChallenge(null);
@@ -2063,7 +2063,7 @@ export function HomePage() {
       activeProfileId={activeProfileId}
       onActiveProfileChange={handleActiveProfileChange}
       onProfilesChanged={() => {
-        if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        if (network) void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
       }}
       userSchemas={userSchemas}
       search={search}
@@ -2157,7 +2157,7 @@ export function HomePage() {
               guardianOtp
             );
             // New actions surface without waiting for the poll.
-            queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
+            void queryClient.invalidateQueries({ queryKey: queryKeys.actions.all });
             toast.success(t('home.toast_action_sent', { action: actionType.charAt(0).toUpperCase() + actionType.slice(1) }), {
               description: t('home.toast_action_sent_desc'),
             });
@@ -2379,6 +2379,7 @@ export function HomePage() {
                     the maximize overlay. */}
                 <MapCountPill
                   total={mapMarkers.total}
+                  own={mapMarkers.markers.length - mapItems.length}
                   shown={mapItems.length}
                   truncated={mapMarkers.truncated}
                 />

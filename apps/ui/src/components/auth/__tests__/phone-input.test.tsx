@@ -78,6 +78,8 @@ describe('PhoneInput', () => {
     expect(onValue).toHaveBeenLastCalledWith('+919876543210');
     expect(nationalFromInput('919876543210', '+91').national).toBe('9876543210');
     expect(nationalFromInput('098765 43210', '+91').national).toBe('9876543210');
+    expect(nationalFromInput('+91 09876 543210', '+91').national).toBe('9876543210');
+    expect(nationalFromInput('0091 98765 43210', '+91').national).toBe('9876543210');
   });
 
   it('stores only the 10 digits when the field takes no country code', () => {
@@ -97,7 +99,7 @@ describe('PhoneInput', () => {
     expect(phoneValueMode('^(\\+91[6-9][0-9]{9}|[6-9][0-9]{9}|\\+[1-8][0-9]{9,14}|\\+9[02-9][0-9]{8,13})$')).toBe('international');
   });
 
-  it('blue_dot phone rules: a seeker phone is a mobile, a hiring-manager phone may be a landline', () => {
+  it('blue_dot phone rules: every phone field takes the + form only', () => {
     const network = JSON.parse(
       readFileSync(resolve(__dirname, '../../../../../../examples/schemas/blue_dot/network.json'), 'utf8'),
     );
@@ -111,15 +113,16 @@ describe('PhoneInput', () => {
       return new RegExp(found!);
     };
     const mobile = patternOf('phone');
-    for (const ok of ['+919353500020', '9353500020', '+447911123456', '+12025550123', '+971501234567']) {
+    for (const ok of ['+919353500020', '+447911123456', '+12025550123', '+971501234567']) {
       expect(mobile.test(ok)).toBe(true);
     }
-    for (const bad of ['+91935350002', '+915353500020', '935350002', '+9193535000201', '+911123456789']) {
+    // The schema checks the shape only; the country rules are applied by parsePhone.
+    for (const bad of ['9353500020', '935350002', '12345', '+0919353500020', '+9193535000201234']) {
       expect(mobile.test(bad)).toBe(false);
     }
     const contact = patternOf('hiringManagerPhoneNumber');
-    for (const ok of ['+911123456789', '01123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
-    for (const bad of ['+91935350002', '12345', '0000000000', '0123456789', '+910000000000']) {
+    for (const ok of ['+911123456789', '+919353500020']) expect(contact.test(ok)).toBe(true);
+    for (const bad of ['01123456789', '1123456789', '12345', '0000000000', '+0911123456789']) {
       expect(contact.test(bad)).toBe(false);
     }
   });
@@ -138,15 +141,17 @@ describe('PhoneInput', () => {
     expect(isAcceptedPhone('12345')).toBe(false);
     expect(isAcceptedPhone('+91935350600')).toBe(false);
     expect(isAcceptedPhone('+9193535060012')).toBe(false);
-    expect(isAcceptedPhone('+447911123456')).toBe(true);
+    expect(isAcceptedPhone('+447911123456')).toBe(false);
     for (const bad of ['0000000000', '0123456789', '+910000000000']) expect(isAcceptedPhone(bad)).toBe(false);
   });
 });
 
 describe('phone country list from runtime config', () => {
-  it('reads ISO:dial code pairs in order and skips bad or repeated entries', () => {
-    const list = parsePhoneCountries(' in:+91, GB:44 ,XX, US:+1, CA:+1, FR:+0');
+  it('reads ISO:dial code pairs in order, and falls back to India on any bad entry', () => {
+    const list = parsePhoneCountries(' in:+91, GB:44 , US:+1');
     expect(list.map((c) => `${c.iso}${c.code}`)).toEqual(['IN+91', 'GB+44', 'US+1']);
+    expect(parsePhoneCountries('US:+1,CA:+1').map((c) => c.code)).toEqual(['+91']); // one country per dial code
+    expect(parsePhoneCountries('IN:+91,XX').map((c) => c.code)).toEqual(['+91']);
     expect(list[0]).toMatchObject({ flag: '🇮🇳', nationalDigits: 10 });
     expect(parsePhoneCountries('AE:+971')[0]).toMatchObject({ code: '+971', flag: '🇦🇪' });
   });
@@ -183,7 +188,7 @@ describe('phone country list from runtime config', () => {
       render(<single.PhoneInput id="p" value="" onChange={vi.fn()} />);
       expect(screen.queryByRole('combobox')).toBeNull();
       expect(screen.getByLabelText('Country code')).toHaveTextContent('+971');
-      expect(single.nationalMaxLength('+971')).toBe(12);
+      expect(single.nationalMaxLength('+971')).toBe(9);
     } finally {
       await loadWith(undefined);
     }

@@ -76,6 +76,12 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r test
+      - name: Phone test cases match bluedots-schemas
+        shell: bash # -o pipefail, so a failed download fails the step
+        run: >-
+          curl -fsS --proto '=https' --tlsv1.2 --retry 3
+          https://raw.githubusercontent.com/Blue-Dots-Economy/bluedots-schemas/main/schemas/phone-cases.json
+          | diff - packages/schemas/src/__tests__/fixtures/phone-cases.json
 
   sonar:
     runs-on: ubuntu-latest

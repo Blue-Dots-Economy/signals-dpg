@@ -33,7 +33,7 @@ export function MatchScoreContainer({
   });
 
   const handleCalculate = React.useCallback(() => {
-    calculate();
+    void calculate();
   }, [calculate]);
 
   const handleViewDetails = React.useCallback(() => {
@@ -45,7 +45,7 @@ export function MatchScoreContainer({
   }, []);
 
   const handleRecalculate = React.useCallback(() => {
-    recalculate();
+    void recalculate();
   }, [recalculate]);
 
   return (

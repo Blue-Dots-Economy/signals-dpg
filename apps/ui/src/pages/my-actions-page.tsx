@@ -539,8 +539,8 @@ export function MyActionsPage() {
   const mapUrl = `/?network=${encodeURIComponent(targetNetworkId ?? '')}&view=map`;
   const handleBack = () => {
     const idx = (window.history.state as { idx?: number } | null)?.idx ?? 0;
-    if (idx > 0) navigate(-1);
-    else navigate(mapUrl);
+    if (idx > 0) void navigate(-1);
+    else void navigate(mapUrl);
   };
 
   // Nothing filtered and still no rows: the caller has no actions yet, so
@@ -570,7 +570,7 @@ export function MyActionsPage() {
       { replace: true },
     );
   const handleProfilesChanged = () => {
-    if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+    if (network) void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
   };
 
   return (
