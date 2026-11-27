@@ -194,6 +194,7 @@ import {
   guardianGateBlocksGoLive,
   isItemOwnedBy,
   jitterPrivateLocations,
+  liveLimitMessage,
   primaryLocation,
   promoteItemOnProfileConsent,
   sameLocations,
@@ -890,18 +891,14 @@ describe('createItemInternal — profile cap', () => {
     expect(rec.order).toEqual(['execute', 'insert']);
   });
 
-  it('counts with no cap when the network config cannot be read', async () => {
-    // resolveProfileLimit swallows the config error and uses the global default.
-    apiConfig.max_profiles_per_user = 1;
+  it('fails the create, not with a limit error, when the limits cannot be read', async () => {
     getNetworkConfigById
       .mockResolvedValueOnce({ domains: [{ id: 'student' }] })
       .mockRejectedValueOnce(new Error('config down'));
-    const { exec, queue } = makeExec();
-    queue.push([{ n: 1 }]);
+    const { exec, rec } = makeExec();
 
-    await expect(createItemInternal(exec, createParams())).rejects.toMatchObject({
-      errorCode: 'PROFILE_LIMIT_REACHED',
-    });
+    await expect(createItemInternal(exec, createParams())).rejects.toThrow('config down');
+    expect(rec.order).not.toContain('insert');
   });
 });
 
@@ -1161,20 +1158,16 @@ describe('promoteItemOnProfileConsent — live limit', () => {
     expect(JSON.stringify(rec.updates[0].where)).toContain('draft');
   });
 
-  it('fails closed (no free slot) when the limits cannot be re-read', async () => {
+  it('throws instead of reporting the limit when the limits cannot be re-read', async () => {
     const cfg = { domains: [{ id: 'student', profile_limits: { live: 5, total: 9 } }] };
     getNetworkConfigById
       .mockResolvedValueOnce(cfg) // resolveGoLiveGates
-      .mockRejectedValueOnce(new Error('config down')) // resolveLiveSlotFree
-      .mockResolvedValueOnce(cfg); // guardianGateBlocksGoLive
-    classify_item.mockReturnValue({ lifecycle_status: 'draft', failed_gates: ['live_limit'] });
+      .mockRejectedValueOnce(new Error('config down')); // resolveLiveSlotFree
     const { exec, queue, rec } = makeExec();
     queue.push([draftItem]);
-    queue.push([{ lifecycle_status: 'draft' }]); // status re-read under the lock
 
-    await promoteItemOnProfileConsent(exec, 'i1');
-
-    expect(classify_item).toHaveBeenCalledWith(expect.objectContaining({ live_slot_free: false }));
+    await expect(promoteItemOnProfileConsent(exec, 'i1')).rejects.toThrow('config down');
+    expect(classify_item).not.toHaveBeenCalled();
     expect(rec.updates).toHaveLength(0);
   });
 
@@ -1707,5 +1700,25 @@ describe('ItemServiceError', () => {
     expect(err.statusCode).toBe(409);
     expect(err.errorCode).toBe('ITEM_RETIRED');
     expect(err.message).toBe('nope');
+  });
+});
+
+describe('liveLimitMessage', () => {
+  it('adds nothing when the live limit did not hold the profile back', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: false })).toEqual({});
+  });
+
+  it('names the one profile for a write about a single profile', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: true })).toEqual({
+      message:
+        'Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it.',
+    });
+  });
+
+  it('speaks of several drafts for a write that names no profile', () => {
+    expect(liveLimitMessage({ blockedByLiveLimit: true }, false)).toEqual({
+      message:
+        'Live profile limit reached. Some profiles have stayed as drafts. Pause or retire any live profile to publish them.',
+    });
   });
 });

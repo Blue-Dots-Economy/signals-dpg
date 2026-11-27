@@ -334,16 +334,12 @@ interface ProfileLimits {
 /**
  * Per-user profile limits for a (network, domain): the domain's
  * `profile_limits`, else no live limit and `MAX_PROFILES_PER_USER` as total.
+ * A config read error propagates: an outage must not pass as a limit.
  */
 async function resolveProfileLimits(network: string, domain: string): Promise<ProfileLimits> {
-  try {
-    const cfg = await getNetworkConfigById(network);
-    const limits = cfg.domains.find((d) => d.id === domain)?.profile_limits;
-    if (limits) return limits;
-  } catch {
-    // Fall back to the global default if the config can't be read here.
-  }
-  return { live: null, total: apiConfig.max_profiles_per_user };
+  const cfg = await getNetworkConfigById(network);
+  const limits = cfg.domains.find((d) => d.id === domain)?.profile_limits;
+  return limits ?? { live: null, total: apiConfig.max_profiles_per_user };
 }
 
 type ProfileScope = Pick<
@@ -417,8 +413,8 @@ export async function resolveLiveSlotFree(
 ): Promise<boolean | undefined> {
   if (!gates.includes('live_limit')) return undefined;
   const { live } = await resolveProfileLimits(scope.item_network, scope.item_domain);
-  // The gate comes from `profile_limits`, so a missing limit here means the
-  // config could not be read: fail closed (stay draft) rather than publish.
+  // The gate comes from `profile_limits`; a missing limit means the config
+  // changed between reads: fail closed (stay draft).
   if (live === null) return false;
   await lockProfileOwner(exec, scope.created_by);
   return (await countProfiles(exec, scope, eq(items.lifecycle_status, 'live'))) < live;
