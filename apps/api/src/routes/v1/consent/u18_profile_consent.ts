@@ -18,7 +18,12 @@ import { resolveConsentVersion } from '@/services/consent_version';
 import {
   issueGuardianOtp, verifyGuardianOtp, assertVerifyAttemptAllowed, guardianOtpErrorReply,
 } from '@/services/guardian_otp';
-import { isItemOwnedBy, upsertGuardianProfileConsentAndPromote } from '@/services/item_service';
+import {
+  isItemOwnedBy,
+  upsertGuardianProfileConsentAndPromote,
+  liveLimitMessage,
+  type PromotionResult,
+} from '@/services/item_service';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
 
@@ -218,10 +223,10 @@ const finalize_handler = async (
     return reply.code(400).send({ error: 'CONSENT_VERSION_UNCONFIGURED', message: 'u18 profile_creation not configured' });
   }
 
-  let promoted = false;
+  let result: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
-      promoted = await upsertGuardianProfileConsentAndPromote(tx, {
+      result = await upsertGuardianProfileConsentAndPromote(tx, {
         userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version,
       });
     });
@@ -230,8 +235,8 @@ const finalize_handler = async (
     await redis.set(tokenKey, '1', 'EX', PRECREATE_TOKEN_TTL_SEC); // allow retry
     return reply.code(500).send({ error: 'CONSENT_WRITE_FAILED', message: 'Failed to record guardian profile consent' });
   }
-  if (promoted) await afterGuardianPromotion(body, request.log);
-  return reply.code(200).send({ promoted });
+  if (result.promoted) await afterGuardianPromotion(body, request.log);
+  return reply.code(200).send({ promoted: result.promoted, ...liveLimitMessage(result) });
 };
 
 const issue_handler = async (request: IssueReq, reply: FastifyReply) => {
@@ -295,10 +300,10 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
   const ok = await verifyGuardianOtp({ scope, otp: body.otp });
   if (!ok) return reply.code(400).send({ error: 'INVALID_OTP', message: 'OTP is invalid or expired' });
 
-  let promoted = false;
+  let result: PromotionResult = { promoted: false, blockedByLiveLimit: false };
   try {
     await db.transaction(async (tx) => {
-      promoted = await upsertGuardianProfileConsentAndPromote(tx, {
+      result = await upsertGuardianProfileConsentAndPromote(tx, {
         userId, itemId: body.item_id, network: body.network, brand: body.brand, documentVersion: version,
       });
     });
@@ -306,6 +311,6 @@ const verify_handler = async (request: VerifyReq, reply: FastifyReply) => {
     request.log.error({ err }, 'Failed to write guardian profile consent');
     return reply.code(500).send({ error: 'CONSENT_WRITE_FAILED', message: 'Failed to record guardian profile consent' });
   }
-  if (promoted) await afterGuardianPromotion(body, request.log);
-  return reply.code(200).send({ verified: true, promoted });
+  if (result.promoted) await afterGuardianPromotion(body, request.log);
+  return reply.code(200).send({ verified: true, promoted: result.promoted, ...liveLimitMessage(result) });
 };

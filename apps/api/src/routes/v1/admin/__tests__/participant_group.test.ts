@@ -25,6 +25,7 @@ const {
   rowQueue,
   queries,
   orderings,
+  limits,
   dbState,
   configState,
   decryptImpl,
@@ -39,6 +40,8 @@ const {
     // routes return are read head-first by length-capped callers, so the sort
     // direction is part of the contract, not an incidental detail.
     orderings: [] as unknown[][],
+    // Every `.limit(n)` argument, in order.
+    limits: [] as unknown[],
     // Resettable failure switch — never monkey-patch the shared row queue, an
     // override there would leak into every later test in the file.
     dbState: { failWith: null as Error | null },
@@ -77,7 +80,10 @@ function thenable() {
   return {
     then: (res: (v: unknown) => unknown, rej?: (e: unknown) => unknown) =>
       nextRows().then(res, rej),
-    limit: () => nextRows(),
+    limit: (n?: unknown) => {
+      limits.push(n);
+      return nextRows();
+    },
     orderBy: (...cols: unknown[]) => {
       orderings.push(cols);
       return thenable();
@@ -356,6 +362,7 @@ beforeEach(() => {
   rowQueue.length = 0;
   queries.length = 0;
   orderings.length = 0;
+  limits.length = 0;
   dbState.failWith = null;
   configState.served_domains = [{ network: 'blue_dot', domain: 'seeker' }];
   // Reset, or a version set by one test silently drives the next.
@@ -819,6 +826,50 @@ describe('participant_read_handler — item + consent projection', () => {
       a: 'items.created_by',
       b: 'u1',
     });
+  });
+
+  it('narrows the items read to the requested lifecycle statuses', async () => {
+    configState.served_domains = [];
+    rowQueue.push(onboarded);
+    rowQueue.push([{ age: 25 }]);
+    rowQueue.push([]);
+    rowQueue.push([]);
+    consentVersionState.current = { terms: 1, privacy: 1, profile_creation: 1 };
+
+    await call(participant_read_handler, {
+      acting_org: AGG,
+      query: { email: 'a@b.com', network: 'blue_dot', lifecycle_status: 'live,draft' },
+    });
+
+    expect(JSON.stringify(queries[2].where)).toContain('items.lifecycle_status');
+    expect(JSON.stringify(queries[2].where)).toContain('"live","draft"');
+  });
+
+  it('keeps only the newest `limit` items, and adds no LIMIT when none is asked for', async () => {
+    const queue = () => {
+      rowQueue.push(onboarded);
+      rowQueue.push([{ age: 25 }]);
+      rowQueue.push([]);
+      rowQueue.push([]);
+    };
+    configState.served_domains = [];
+    consentVersionState.current = { terms: 1, privacy: 1, profile_creation: 1 };
+
+    queue();
+    await call(participant_read_handler, {
+      acting_org: AGG,
+      query: { email: 'a@b.com', network: 'blue_dot', limit: 20 },
+    });
+    expect(limits).toContain(20);
+
+    limits.length = 0;
+    queue();
+    await call(participant_read_handler, {
+      acting_org: AGG,
+      query: { email: 'a@b.com', network: 'blue_dot' },
+    });
+    expect(limits).not.toContain(20);
+    expect(limits.filter((n) => typeof n === 'number' && n > 1)).toEqual([]);
   });
 
   // ---------------------------------------------------------------------------

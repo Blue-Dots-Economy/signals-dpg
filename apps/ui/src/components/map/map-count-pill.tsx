@@ -6,6 +6,8 @@ export interface MapCountPillProps {
   total: number;
   /** Number of markers actually rendered into view (after any client-side domain narrowing). */
   shown: number;
+  /** The viewer's own profiles among the fetched markers: never drawn, so not counted. */
+  own?: number;
   /** Whether `total` exceeds the zoom-band marker cap (`useMapMarkers`'s `truncated`). */
   truncated: boolean;
 }
@@ -17,11 +19,17 @@ export interface MapCountPillProps {
  *
  * - Over-dense ("N+ in this area, zoom in") when the viewport total exceeds
  *   the zoom-band marker cap. Zooming in refetches and clears `truncated`.
- * - Otherwise "Showing X of Y" when some matches are not rendered (the
- *   viewer's own items are excluded), else "Y listings".
+ * - Otherwise "Showing X of Y" when some matches are not rendered, else
+ *   "Y listings". The viewer's own profiles are neither drawn nor counted.
  */
-export function MapCountPill({ total, shown, truncated }: Readonly<MapCountPillProps>) {
+export function MapCountPill({
+  total: allInView,
+  shown,
+  own = 0,
+  truncated,
+}: Readonly<MapCountPillProps>) {
   const { t } = useTranslation();
+  const total = Math.max(0, allInView - own);
 
   if (total <= 0 && !truncated) return null;
 

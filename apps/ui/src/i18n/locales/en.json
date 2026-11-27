@@ -411,6 +411,7 @@
   "profile.no_networks": "No networks available.",
   "profile.toast_created": "Profile created!",
   "profile.toast_created_desc": "You're now visible on the network. Others can discover and connect with you.",
+  "profile.toast_saved_as_draft": "Saved as draft",
   "profile.toast_load_error": "Couldn't load profile",
   "profile.toast_load_error_desc": "There was a problem fetching your profile data. Please check your connection and try again.",
   "profile.toast_not_found_desc": "This profile doesn't exist on the selected network. You may have followed an outdated link.",

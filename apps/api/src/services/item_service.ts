@@ -1,4 +1,5 @@
-import { and, count, eq, ne, sql } from 'drizzle-orm';
+import { isDeepStrictEqual } from 'node:util';
+import { and, count, eq, ne, sql, type SQL } from 'drizzle-orm';
 import {
   getDomainItemSchema,
   getDomainItemTypes,
@@ -194,9 +195,9 @@ export interface CreateItemServiceParams {
    */
   consent_accepted?: boolean;
   /**
-   * Skip the per-user profile cap (MAX_PROFILES_PER_USER / the domain's
-   * `max_profiles_per_user`). For trusted internal callers such as seed
-   * scripts only; every request-driven create path is capped.
+   * Skip the per-user profile limits (the domain's `profile_limits`, else
+   * MAX_PROFILES_PER_USER). For trusted internal callers such as seed scripts
+   * only; every request-driven create path is capped.
    */
   skip_profile_limit?: boolean;
 }
@@ -292,31 +293,92 @@ async function resolveSchema(params: {
   return { itemSchemaUrl, itemState, itemInstanceUrl, itemSchema };
 }
 
+const LIVE_LIMIT_DRAFT_MESSAGE =
+  'Live profile limit reached. This profile has been saved as a draft. Pause or retire any live profile to publish it.';
+export const LIVE_LIMIT_UNPAUSE_MESSAGE =
+  'Live profile limit reached. Pause or retire any live profile to unpause this one.';
 /**
- * Effective per-user profile cap for a (network, domain): the domain's
- * `max_profiles_per_user` when set, otherwise the global
- * `MAX_PROFILES_PER_USER` default. Returns null when no finite cap applies.
+ * True when the live limit is the only gate that kept a profile in draft, i.e.
+ * it would be live with a free slot. The classifier stays gate-agnostic; the
+ * limit's meaning lives here.
  */
-async function resolveProfileLimit(
-  network: string,
-  domain: string,
-): Promise<number | null> {
-  let domainLimit: number | undefined;
-  try {
-    const cfg = await getNetworkConfigById(network);
-    domainLimit = cfg.domains.find((d) => d.id === domain)?.max_profiles_per_user;
-  } catch {
-    // Fall back to the global default if the config can't be read here.
-  }
-  const limit = domainLimit ?? apiConfig.max_profiles_per_user;
-  return typeof limit === 'number' && Number.isFinite(limit) ? limit : null;
+export function isBlockedOnlyByLiveLimit(c: { failed_gates?: readonly GoLiveGate[] }): boolean {
+  return c.failed_gates?.length === 1 && c.failed_gates[0] === 'live_limit';
+}
+
+const LIVE_LIMIT_DRAFTS_MESSAGE =
+  'Live profile limit reached. Some profiles have stayed as drafts. Pause or retire any live profile to publish them.';
+
+/**
+ * Response extra for a write the live limit kept in draft; empty otherwise.
+ * `namesProfile: false` for a call that names no profile (an age write that
+ * promoted the user's drafts), which may cover several.
+ */
+export function liveLimitMessage(
+  r: { blockedByLiveLimit: boolean },
+  namesProfile = true,
+): { message?: string } {
+  if (!r.blockedByLiveLimit) return {};
+  return { message: namesProfile ? LIVE_LIMIT_DRAFT_MESSAGE : LIVE_LIMIT_DRAFTS_MESSAGE };
+}
+const TOTAL_LIMIT_MESSAGE =
+  'This account has reached its profile limit. Retire any profile to add another.';
+
+interface ProfileLimits {
+  /** Max live profiles, or null when the domain sets no live limit. */
+  live: number | null;
+  /** Max non-retired profiles. */
+  total: number;
 }
 
 /**
- * Enforce the per-user profile cap atomically, inside the caller's transaction.
- * A transaction-scoped advisory lock on (user, network, domain, item_type)
- * serializes concurrent creates so two racing inserts can't both pass the
- * count check. Throws 409 PROFILE_LIMIT_REACHED at the cap.
+ * Per-user profile limits for a (network, domain): the domain's
+ * `profile_limits`, else no live limit and `MAX_PROFILES_PER_USER` as total.
+ * A config read error propagates: an outage must not pass as a limit.
+ */
+async function resolveProfileLimits(network: string, domain: string): Promise<ProfileLimits> {
+  const cfg = await getNetworkConfigById(network);
+  const limits = cfg.domains.find((d) => d.id === domain)?.profile_limits;
+  return limits ?? { live: null, total: apiConfig.max_profiles_per_user };
+}
+
+type ProfileScope = Pick<
+  CreateItemServiceParams,
+  'created_by' | 'item_network' | 'item_domain' | 'item_type'
+>;
+
+/**
+ * Transaction-scoped advisory lock on the profile owner, so concurrent writes
+ * can't both pass a limit count. Per user, not per scope: the age sweep promotes
+ * drafts across scopes, and one lock per user leaves no order to deadlock on.
+ * Re-entrant within one transaction; under autocommit it releases at once, so
+ * callers must be in one.
+ */
+async function lockProfileOwner(exec: DbOrTx, ownerId: string): Promise<void> {
+  const key = `profile-limit:${ownerId}`;
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${key}))`);
+}
+
+/** Count the owner's profiles in this scope matching `status`. */
+async function countProfiles(exec: DbOrTx, scope: ProfileScope, status: SQL): Promise<number> {
+  const [row] = await exec
+    .select({ n: count() })
+    .from(items)
+    .where(
+      and(
+        eq(items.created_by, scope.created_by),
+        eq(items.item_network, scope.item_network),
+        eq(items.item_domain, scope.item_domain),
+        eq(items.item_type, scope.item_type),
+        status,
+      ),
+    );
+  return row?.n ?? 0;
+}
+
+/**
+ * Enforce the total profile limit on create, inside the caller's transaction.
+ * Throws 409 PROFILE_LIMIT_REACHED (`limit_type: 'total'`) at the limit.
  *
  * Retired rows do not hold a slot: retiring is the remedy the 409 message
  * offers. This is safe only because `retired` is terminal (no
@@ -327,39 +389,35 @@ async function resolveProfileLimit(
  * retired items: it protects the per-account tenancy key, which retire does not
  * reset.
  */
-async function assertProfileLimit(
-  exec: DbOrTx,
-  params: Pick<
-    CreateItemServiceParams,
-    'created_by' | 'item_network' | 'item_domain' | 'item_type'
-  >,
-): Promise<void> {
-  const limit = await resolveProfileLimit(params.item_network, params.item_domain);
-  if (limit === null) return;
+async function assertProfileLimit(exec: DbOrTx, params: ProfileScope): Promise<void> {
+  const { total } = await resolveProfileLimits(params.item_network, params.item_domain);
+  if (!Number.isFinite(total)) return;
+  await lockProfileOwner(exec, params.created_by);
 
-  const scope = `${params.created_by}:${params.item_network}:${params.item_domain}:${params.item_type}`;
-  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${scope}))`);
-
-  const [row] = await exec
-    .select({ n: count() })
-    .from(items)
-    .where(
-      and(
-        eq(items.created_by, params.created_by),
-        eq(items.item_network, params.item_network),
-        eq(items.item_domain, params.item_domain),
-        eq(items.item_type, params.item_type),
-        ne(items.lifecycle_status, 'retired'),
-      ),
-    );
-
-  if ((row?.n ?? 0) >= limit) {
-    throw new ItemServiceError(
-      409,
-      'PROFILE_LIMIT_REACHED',
-      `This user already has the maximum of ${limit} ${params.item_domain} profile(s) allowed. Retire an existing profile to create a new one.`,
-    );
+  if ((await countProfiles(exec, params, ne(items.lifecycle_status, 'retired'))) >= total) {
+    throw new ItemServiceError(409, 'PROFILE_LIMIT_REACHED', TOTAL_LIMIT_MESSAGE, {
+      limit_type: 'total',
+    });
   }
+}
+
+/**
+ * The `live_limit` gate context: whether the owner has a free live slot in this
+ * scope. Takes the scope lock first so two writes can't both take the last
+ * slot. Returns undefined when the gate is not configured.
+ */
+export async function resolveLiveSlotFree(
+  exec: DbOrTx,
+  gates: readonly GoLiveGate[],
+  scope: ProfileScope,
+): Promise<boolean | undefined> {
+  if (!gates.includes('live_limit')) return undefined;
+  const { live } = await resolveProfileLimits(scope.item_network, scope.item_domain);
+  // The gate comes from `profile_limits`; a missing limit means the config
+  // changed between reads: fail closed (stay draft).
+  if (live === null) return false;
+  await lockProfileOwner(exec, scope.created_by);
+  return (await countProfiles(exec, scope, eq(items.lifecycle_status, 'live'))) < live;
 }
 
 /**
@@ -447,6 +505,9 @@ export async function createItemInternal(
     // gated minor.
     consent_accepted: params.consent_accepted ?? false,
     gates: goLiveGates,
+    live_slot_free: params.skip_profile_limit
+      ? true
+      : await resolveLiveSlotFree(exec, goLiveGates, params),
   });
 
   const itemLocations = locationsForStorage(params.item_locations ?? [], itemSchema);
@@ -489,7 +550,7 @@ export async function createItemInternal(
       'An item with the same type and id already exists'
     );
   }
-  return result[0];
+  return { ...result[0], blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification) };
 }
 
 export interface UpdateItemInternalResult {
@@ -508,6 +569,10 @@ export interface UpdateItemInternalResult {
     created_at: Date;
     updated_at: Date;
   };
+  /** The live limit kept a profile that would have gone live in `draft`. */
+  blockedByLiveLimit: boolean;
+  /** Fields, locations or lifecycle status changed; false for a no-op save. */
+  changed: boolean;
 }
 
 /** Whether a domain's configured gate set includes the `owner_required` gate. */
@@ -546,11 +611,14 @@ export async function resolveGoLiveGates(
 ): Promise<readonly GoLiveGate[]> {
   const networkConfig = await getNetworkConfigById(network);
   const domainConfig = networkConfig.domains.find((d) => d.id === domain);
-  const gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
+  let gates = domainConfig?.go_live_required ?? DEFAULT_GO_LIVE_GATES;
   // The U18 guardian check lives in `consent_required`, so a guardian-gated
   // domain always gets that gate: the age gate must never be droppable by config.
   if (domainConfig?.guardian_consent_required && !gates.includes('consent_required')) {
-    return [...gates, 'consent_required'];
+    gates = [...gates, 'consent_required'];
+  }
+  if (domainConfig?.profile_limits) {
+    gates = [...gates, 'live_limit'];
   }
   return gates;
 }
@@ -600,11 +668,20 @@ export async function guardianGateBlocksGoLive(
   return !guardianRow;
 }
 
+export interface PromotionResult {
+  /** The profile flipped `draft → live`. */
+  promoted: boolean;
+  /** The live limit kept a profile that would have gone live in `draft`. */
+  blockedByLiveLimit: boolean;
+}
+
+const NOT_PROMOTED: PromotionResult = { promoted: false, blockedByLiveLimit: false };
+
 /**
  * Promote a `draft` profile to `live` after its owner accepts
  * `profile_creation` consent, re-running the write-path classifier so the
  * completeness rules stay in one place. `paused` is sticky and `live` needs no
- * change. Returns true if it flipped to live.
+ * change.
  *
  * The caller must already have recorded the consent row and verified ownership;
  * this only re-evaluates lifecycle.
@@ -612,7 +689,7 @@ export async function guardianGateBlocksGoLive(
 export async function promoteItemOnProfileConsent(
   exec: DbOrTx,
   itemId: string
-): Promise<boolean> {
+): Promise<PromotionResult> {
   const [item] = await exec
     .select({
       item_id: items.item_id,
@@ -629,7 +706,7 @@ export async function promoteItemOnProfileConsent(
     .where(eq(items.item_id, itemId))
     .limit(1);
 
-  if (!item || item.lifecycle_status !== 'draft') return false;
+  if (item?.lifecycle_status !== 'draft') return NOT_PROMOTED;
 
   const itemSchema = await getOrFetchSchemaByUrl({
     schemaUrl: item.item_schema_url,
@@ -650,10 +727,12 @@ export async function promoteItemOnProfileConsent(
   );
 
   const goLiveGates = await resolveGoLiveGates(item.item_network, item.item_domain);
+  const slot = await liveSlotForTransition(exec, goLiveGates, item, 'draft');
+  if (slot.stale) return NOT_PROMOTED;
   // The caller recorded the consent row, so `consent_required` reduces to the
   // U18 guardian check (fail-closed for a gated minor or null age).
   const consentSatisfied = !(await guardianGateBlocksGoLive(exec, item));
-  const { lifecycle_status } = classify_item({
+  const classification = classify_item({
     schema: itemSchema as { required?: string[] },
     merged_state: mergedFullState,
     current_status: 'draft',
@@ -666,15 +745,53 @@ export async function promoteItemOnProfileConsent(
       item.item_network,
       item.item_domain,
     ),
+    live_slot_free: slot.liveSlotFree,
   });
 
-  if (lifecycle_status !== 'live') return false;
+  if (classification.lifecycle_status !== 'live') {
+    return { promoted: false, blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification) };
+  }
 
-  await exec
+  // Only from draft: retire takes no owner lock, and must not be undone here.
+  const flipped = await exec
     .update(items)
     .set({ lifecycle_status: 'live', updated_at: sql`now()` })
-    .where(eq(items.item_id, itemId));
-  return true;
+    .where(and(eq(items.item_id, itemId), eq(items.lifecycle_status, 'draft')))
+    .returning({ item_id: items.item_id });
+  return flipped.length > 0 ? { promoted: true, blockedByLiveLimit: false } : NOT_PROMOTED;
+}
+
+/** The item's current lifecycle status, or null when it no longer exists. */
+export async function readLifecycleStatus(exec: DbOrTx, itemId: string): Promise<string | null> {
+  const [row] = await exec
+    .select({ lifecycle_status: items.lifecycle_status })
+    .from(items)
+    .where(eq(items.item_id, itemId))
+    .limit(1);
+  return row?.lifecycle_status ?? null;
+}
+
+export type LiveSlotForTransition =
+  | { stale: true }
+  | { stale: false; liveSlotFree: boolean | undefined };
+
+/**
+ * The `live_limit` context for a transition out of `expected`, re-checked under
+ * the owner lock it takes: `stale` means another write moved the item on while
+ * this one waited (a double submit, a retire, a pause). Shared by every path
+ * that can make an existing profile live: edit, consent promotion, unpause.
+ */
+export async function liveSlotForTransition(
+  exec: DbOrTx,
+  gates: readonly GoLiveGate[],
+  item: ProfileScope & { item_id: string },
+  expected: string,
+): Promise<LiveSlotForTransition> {
+  const liveSlotFree = await resolveLiveSlotFree(exec, gates, item);
+  if (liveSlotFree !== undefined && (await readLifecycleStatus(exec, item.item_id)) !== expected) {
+    return { stale: true };
+  }
+  return { stale: false, liveSlotFree };
 }
 
 /**
@@ -685,7 +802,7 @@ export async function promoteItemOnProfileConsent(
 export async function upsertGuardianProfileConsentAndPromote(
   tx: DbOrTx,
   args: { userId: string; itemId: string; network: string; brand?: string | null; documentVersion: number },
-): Promise<boolean> {
+): Promise<PromotionResult> {
   await tx
     .insert(consent_record)
     .values(guardianProfileConsentRow(args))
@@ -727,16 +844,16 @@ interface ExistingItemForUpdate {
  *          downstream location resolution) and the column writes to apply.
  * @throws {ItemServiceError} 400 INVALID_ITEM_STATE / 409 REQUIRED_FIELD_LOCKED_WHILE_LIVE.
  */
-async function computeItemStateUpdate(
-  exec: DbOrTx,
+function computeItemStateUpdate(
   existingItem: ExistingItemForUpdate,
   itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
   bodyState: Record<string, unknown>,
-): Promise<{
+): {
   mergedFullState: Record<string, unknown>;
   addressChanged: boolean;
-  writes: { item_state: unknown; item_private_state: string; lifecycle_status: string };
-}> {
+  writes: { item_state: unknown; item_private_state: string };
+  stateChanged: boolean;
+} {
   const priorPrivate =
     existingItem.item_private_state === ''
       ? {}
@@ -787,9 +904,44 @@ async function computeItemStateUpdate(
       ? ''
       : encryptPiiBlob(JSON.stringify(split.privateState), getPiiKey());
 
+  return {
+    mergedFullState,
+    addressChanged,
+    writes: { item_state, item_private_state },
+    stateChanged: !isDeepStrictEqual(priorFullState, mergedFullState),
+  };
+}
+
+/** 409 for an edit whose item moved on (retire, pause, go-live) while it was being saved. */
+function itemChangedError(): ItemServiceError {
+  return new ItemServiceError(
+    409,
+    'ITEM_CHANGED',
+    'This profile changed while it was being saved. Reload it and try again.',
+  );
+}
+
+/**
+ * Re-classify go-live for an edit, over the merged post-write state. Runs after
+ * any geocoding, so the owner lock `live_limit` takes is held only for the write.
+ */
+async function classifyStateUpdate(
+  exec: DbOrTx,
+  existingItem: ExistingItemForUpdate,
+  itemSchema: Awaited<ReturnType<typeof getOrFetchSchemaByUrl>>,
+  mergedFullState: Record<string, unknown>,
+): Promise<{ lifecycle_status: string; blockedByLiveLimit: boolean }> {
+  const goLiveGates = await resolveGoLiveGates(existingItem.item_network, existingItem.item_domain);
+  // Only a draft can be held by `live_limit`: it passes for an already-live item
+  // and `paused` is sticky, so the lock and count are skipped for most edits.
+  let liveSlotFree: boolean | undefined;
+  if (existingItem.lifecycle_status === 'draft') {
+    const slot = await liveSlotForTransition(exec, goLiveGates, existingItem, 'draft');
+    if (slot.stale) throw itemChangedError();
+    liveSlotFree = slot.liveSlotFree;
+  }
   // `consent_required` folds in the U18 guardian check so a minor's self-consent
   // row can't flip the item live (the classifier just evaluates configured gates).
-  const goLiveGates = await resolveGoLiveGates(existingItem.item_network, existingItem.item_domain);
   const consentSatisfied =
     (await hasAcceptedProfileConsent(exec, existingItem.item_id)) &&
     !(await guardianGateBlocksGoLive(exec, existingItem));
@@ -811,12 +963,12 @@ async function computeItemStateUpdate(
             existingItem.item_domain,
           )
         : undefined,
+    live_slot_free: liveSlotFree,
   });
 
   return {
-    mergedFullState,
-    addressChanged,
-    writes: { item_state, item_private_state, lifecycle_status: classification.lifecycle_status },
+    lifecycle_status: classification.lifecycle_status,
+    blockedByLiveLimit: isBlockedOnlyByLiveLimit(classification),
   };
 }
 
@@ -874,6 +1026,13 @@ export async function updateItemInternal(
   const updateValues: Record<string, unknown> = {
     updated_at: sql`now()`,
   };
+  let blockedByLiveLimit = false;
+  let changed = false;
+  // Set once the item was read: the write below only lands if it is still in
+  // that status, so a retire, pause or go-live committed meanwhile is never
+  // overwritten (a retire's scrubbed PII must not come back).
+  let expectedStatus: string | undefined;
+  let reclassify: ((tx: DbOrTx) => Promise<void>) | undefined;
 
   // The schema is needed to merge/validate state, classify lifecycle, and
   // jitter a private location field.
@@ -925,14 +1084,14 @@ export async function updateItemInternal(
     let addressChanged = false;
 
     if (body.item_state) {
-      const stateUpdate = await computeItemStateUpdate(
-        exec,
+      const stateUpdate = computeItemStateUpdate(
         existingItem,
         itemSchema,
         body.item_state,
       );
       mergedFullState = stateUpdate.mergedFullState;
       addressChanged = stateUpdate.addressChanged;
+      changed = stateUpdate.stateChanged;
       Object.assign(updateValues, stateUpdate.writes);
     }
 
@@ -946,13 +1105,59 @@ export async function updateItemInternal(
     );
     if (locationUpdate !== undefined) {
       updateValues.item_locations = locationUpdate;
+      changed ||= !sameLocations(
+        (existingItem.item_locations as ItemLocation[] | null) ?? [],
+        locationUpdate,
+      );
+    }
+
+    expectedStatus = existingItem.lifecycle_status;
+    if (body.item_state) {
+      const state = mergedFullState;
+      reclassify = async (tx) => {
+        const lifecycle = await classifyStateUpdate(tx, existingItem, itemSchema, state);
+        updateValues.lifecycle_status = lifecycle.lifecycle_status;
+        blockedByLiveLimit = lifecycle.blockedByLiveLimit;
+        changed ||= lifecycle.lifecycle_status !== existingItem.lifecycle_status;
+      };
     }
   }
 
-  const updateResult = await exec
+  // Lock, classify and write in one short transaction (a savepoint when the
+  // caller already holds one), after the schema fetch and geocoding above, so
+  // no connection or owner lock is held across those external calls.
+  const updateResult = await exec.transaction(async (tx) => {
+    if (reclassify) await reclassify(tx);
+    return writeItemUpdate(tx, updateValues, ownershipFilter, expectedStatus);
+  });
+
+  if (updateResult.length === 0) {
+    throw expectedStatus
+      ? itemChangedError()
+      : new ItemServiceError(
+          404,
+          'ITEM_NOT_FOUND_OR_FORBIDDEN',
+          'Item not found or does not belong to the authenticated user',
+        );
+  }
+  const row = updateResult[0];
+
+  return { row, blockedByLiveLimit, changed };
+}
+
+/** The edit's column write, only from `expectedStatus` when the item was read first. */
+function writeItemUpdate(
+  exec: DbOrTx,
+  updateValues: Record<string, unknown>,
+  ownershipFilter: SQL | undefined,
+  expectedStatus: string | undefined,
+) {
+  return exec
     .update(items)
     .set(updateValues)
-    .where(ownershipFilter)
+    .where(
+      expectedStatus ? and(ownershipFilter, eq(items.lifecycle_status, expectedStatus)) : ownershipFilter,
+    )
     .returning({
       item_network: items.item_network,
       item_domain: items.item_domain,
@@ -968,15 +1173,4 @@ export async function updateItemInternal(
       created_at: items.created_at,
       updated_at: items.updated_at,
     });
-
-  if (updateResult.length === 0) {
-    throw new ItemServiceError(
-      404,
-      'ITEM_NOT_FOUND_OR_FORBIDDEN',
-      'Item not found or does not belong to the authenticated user'
-    );
-  }
-  const row = updateResult[0];
-
-  return { row };
 }

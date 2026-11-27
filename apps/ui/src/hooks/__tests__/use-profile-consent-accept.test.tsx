@@ -22,7 +22,7 @@ vi.mock('@/lib/consent-api', () => ({
   issueProfileConsentOtp: vi.fn(),
   verifyProfileConsentOtp: vi.fn(),
 }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 vi.mock('@/contexts/auth-context', () => ({ useAuth: () => ({ signOut: vi.fn() }) }));
 vi.mock('@/components/actions/guardian-otp-dialog', () => ({
   GuardianOtpDialog: (props: { open: boolean; onSubmitOtp: (otp: string) => Promise<void> }) => {
@@ -108,6 +108,33 @@ describe('useProfileConsentAccept', () => {
     expect(onDone).toHaveBeenCalled();
     // Cache update: the accepted profile id is added to the profile-consent set.
     expect(client.getQueryData(queryKeys.profileConsent(network))).toEqual(new Set(['p1']));
+  });
+
+  it('says "saved as draft", not "now live", when the live profile limit held it', async () => {
+    const { toast } = await import('sonner');
+    vi.mocked(acceptProfileConsent).mockResolvedValue({
+      recorded: 1,
+      message: 'Live profile limit reached. Saved as a draft.',
+    });
+    const onDone = vi.fn();
+    const { result } = renderHook(() => useProfileConsentAccept(), { wrapper });
+
+    await act(async () => {
+      await result.current.accept({
+        network,
+        brand: null,
+        item: { item_id: 'p1', item_domain: 'seeker', item_type: 'profile_1.0' },
+        version: 1,
+        isMinor: false,
+        onDone,
+      });
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith('Saved as draft', {
+      description: 'Live profile limit reached. Saved as a draft.',
+    });
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalled();
   });
 
   it('minor on gated domain issues guardian OTP and does not self-accept', async () => {

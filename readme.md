@@ -165,7 +165,7 @@ SMS_TEMPLATE_ID=""
 # EXPORT_RATE_LIMIT_PER_HOUR=20
 
 # Max profiles a single user may hold (default 5). A network.json domain's
-# max_profiles_per_user overrides this per-domain.
+# profile_limits ({ live, total }) replaces this per-domain.
 MAX_PROFILES_PER_USER=5
 # XADD MAXLEN cap bounding the item-events Redis stream.
 INGEST_STREAM_MAXLEN=100000

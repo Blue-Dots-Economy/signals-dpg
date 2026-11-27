@@ -608,3 +608,36 @@ describe('GetParticipantResponse', () => {
     expect(GetParticipantResponse.safeParse({ user_id: 'usr_1', items: [] }).success).toBe(false);
   });
 });
+
+describe('GetParticipantRequest — lifecycle_status filter', () => {
+  const parse = (lifecycle_status?: string) =>
+    GetParticipantRequest.safeParse({ email: 'a@b.co', lifecycle_status });
+
+  it('is optional', () => {
+    expect(parse().success).toBe(true);
+  });
+
+  it.each(['live', 'draft', 'paused', 'live,draft', 'live,draft,paused'])('accepts %s', (v) => {
+    expect(parse(v).success).toBe(true);
+  });
+
+  it.each(['retired', 'live,retired', 'active', 'live,', ' live', ''])('rejects %j', (v) => {
+    expect(parse(v).success).toBe(false);
+  });
+});
+
+describe('GetParticipantRequest — limit', () => {
+  const parse = (limit?: string) => GetParticipantRequest.safeParse({ email: 'a@b.co', limit });
+
+  it('is optional', () => {
+    expect(parse().success).toBe(true);
+  });
+
+  it.each(['1', '20', '100', '1000'])('accepts %s', (v) => {
+    expect(parse(v).success).toBe(true);
+  });
+
+  it.each(['0', '1001', '-5', '2.5', 'abc'])('rejects %s', (v) => {
+    expect(parse(v).success).toBe(false);
+  });
+});

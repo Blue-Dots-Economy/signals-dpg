@@ -11,7 +11,7 @@ import { DatabaseError } from '@dpg/database';
 import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { publishItemEvent } from '@/utils/publish_item_event';
-import { updateItemInternal, ItemServiceError } from '@/services/item_service';
+import { updateItemInternal, ItemServiceError, liveLimitMessage } from '@/services/item_service';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 
 type UpdateItemRequest = FastifyRequest<{
@@ -33,6 +33,8 @@ export const update_item: FastifyPluginCallbackZod = function (fastify, _opts, d
       response: {
         200: z.object({
           item: ItemResponseSchema,
+          // Present only when the live profile limit kept the profile in draft.
+          message: z.string().optional(),
         }),
       },
     },
@@ -58,10 +60,14 @@ export const update_item_handler = async (
   }
 
   try {
-    const { row: updated } = await updateItemInternal(db, itemId, callerId, isAdmin, {
-      item_state: body.item_state,
-      item_locations: body.item_locations,
-    });
+    // updateItemInternal opens its own short transaction for the lock and write.
+    const { row: updated, blockedByLiveLimit, changed } = await updateItemInternal(
+      db,
+      itemId,
+      callerId,
+      isAdmin,
+      { item_state: body.item_state, item_locations: body.item_locations },
+    );
 
     await publishItemEvent(
       {
@@ -80,20 +86,23 @@ export const update_item_handler = async (
 
     // Owner-facing update email. Fire-and-forget after commit.
     // Lazy-imported to keep the notification chain out of the static graph.
-    void import('@/notifications/notify_item_lifecycle')
-      .then(({ dispatchItemLifecycleNotification }) =>
-        dispatchItemLifecycleNotification(
-          {
-            op: 'update',
-            ownerId: updated.created_by,
-            itemId: updated.item_id,
-            domain: updated.item_domain,
-            network: updated.item_network,
-          },
-          request.log,
-        ),
-      )
-      .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (update) failed'));
+    // A no-op save (e.g. re-saving a draft to retry the live limit) sends nothing.
+    if (changed) {
+      void import('@/notifications/notify_item_lifecycle')
+        .then(({ dispatchItemLifecycleNotification }) =>
+          dispatchItemLifecycleNotification(
+            {
+              op: 'update',
+              ownerId: updated.created_by,
+              itemId: updated.item_id,
+              domain: updated.item_domain,
+              network: updated.item_network,
+            },
+            request.log,
+          ),
+        )
+        .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (update) failed'));
+    }
 
     // Surface real (decrypted) private values to the owner.
     const { mergedState } = decryptItemPrivate({
@@ -104,6 +113,7 @@ export const update_item_handler = async (
 
     return reply.code(200).send({
       item: { ...rest, item_state: mergedState },
+      ...liveLimitMessage({ blockedByLiveLimit }),
     });
   } catch (err) {
     if (err instanceof ItemServiceError) {

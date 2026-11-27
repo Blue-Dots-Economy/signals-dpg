@@ -105,6 +105,26 @@ describe('GET /api/v1/admin/participant (unit)', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  it.each([
+    ['an unknown value', 'live,active'],
+    ['retired, which is not a filter value', 'live,retired'],
+    ['an empty value', ''],
+  ])('rejects lifecycle_status with %s with 400', async (_label, value) => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/participant?email=test@example.com&lifecycle_status=${value}`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it.each(['0', '1001', 'abc'])('rejects limit=%s with 400', async (value) => {
+    const res = await app.inject({
+      method: 'GET',
+      url: `/participant?email=test@example.com&limit=${value}`,
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
   it('rejects missing acting_org with 403', async () => {
     const app2 = Fastify().withTypeProvider<ZodTypeProvider>();
     app2.setValidatorCompiler(validatorCompiler);

@@ -1,5 +1,5 @@
 import { fetchNetworkConfig } from '@/lib/network-api';
-import { fetchItems } from '@/lib/item-api';
+import { fetchAllItems } from '@/lib/item-api';
 import type { ProfileLite } from '@/lib/post-login-route';
 
 /**
@@ -15,7 +15,7 @@ export async function fetchMyProfilesLite(networkId: string): Promise<ProfileLit
       const itemType = domain.item_schemas
         ? Object.keys(domain.item_schemas)[0] ?? 'profile'
         : 'profile';
-      return fetchItems({
+      return fetchAllItems({
         item_network: networkId,
         item_domain: domain.id,
         item_type: itemType,
@@ -23,10 +23,9 @@ export async function fetchMyProfilesLite(networkId: string): Promise<ProfileLit
         // Include retired so a retired-only user counts as set up and is not
         // redirected to create. The sidebar's useMyItems still excludes retired.
         include_retired: true,
-        limit: 100,
       })
-        .then((res) =>
-          res.items.map((i) => ({
+        .then((items) =>
+          items.map((i) => ({
             item_id: i.item_id,
             item_domain: i.item_domain,
             lifecycle_status: i.lifecycle_status ?? '',

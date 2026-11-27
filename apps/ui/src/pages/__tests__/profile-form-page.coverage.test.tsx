@@ -148,7 +148,8 @@ const verifyOtpMock = vi.fn(
     Promise.resolve({ verified: true }),
 );
 const finalizeMock = vi.fn(
-  (_ref: FinalizeRef): Promise<{ promoted: boolean }> => Promise.resolve({ promoted: true }),
+  (_ref: FinalizeRef): Promise<{ promoted: boolean; message?: string }> =>
+    Promise.resolve({ promoted: true }),
 );
 
 // ---- Mocks ----------------------------------------------------------------
@@ -591,25 +592,27 @@ describe('ProfileFormPage submit failures', () => {
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
-  it('a 409 PROFILE_LIMIT_REACHED surfaces the cap message, not "already exists"', async () => {
+  it('a 409 PROFILE_LIMIT_REACHED toasts the cap message, not "already exists"', async () => {
     // Every 409 used to render the duplicate copy, so a participant at the cap
     // was told they "already have a profile for this role" — wrong, and it hid
-    // the one instruction that works (#737).
+    // the one instruction that works (#737). A toast, because the banner sits
+    // at the top of the form, out of sight of the Save button (#927).
     createItemMock.mockRejectedValue(
       httpError(409, {
         error: 'PROFILE_LIMIT_REACHED',
-        message:
-          'This user already has the maximum of 5 seeker profile(s) allowed. Retire an existing profile to create a new one.',
+        limit_type: 'total',
+        message: 'This account has reached its profile limit. Retire any profile to add another.',
       }),
     );
 
     await renderPage();
     await submitCreate();
 
-    const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('Retire an existing profile to create a new one.');
-    expect(alert).not.toHaveTextContent('Profile already exists');
-    expect(alert).not.toHaveTextContent('already have a profile for this role');
+    expect(
+      await screen.findByText('This account has reached its profile limit. Retire any profile to add another.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText('Profile already exists')).toBeNull();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
@@ -644,12 +647,12 @@ describe('ProfileFormPage submit failures', () => {
   });
 
   it('a readable 4xx message from the server is shown as is', async () => {
-    createItemMock.mockRejectedValue(httpError(409, { error: 'PROFILE_LIMIT_REACHED', message: 'You already have the maximum number of profiles.' }));
+    createItemMock.mockRejectedValue(httpError(409, { error: 'ITEM_RETIRED', message: 'This profile is retired and can no longer be edited' }));
 
     await renderPage();
     await submitCreate();
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('You already have the maximum number of profiles.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('This profile is retired and can no longer be edited');
   });
 
   it('server field errors go to the form fields, with no banner', async () => {
@@ -822,6 +825,29 @@ describe('ProfileFormPage pre-create guardian OTP', () => {
     );
     await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/?network=blue_dot'));
     expect(await screen.findByText('Profile created!')).toBeInTheDocument();
+  });
+
+  it('a minor\u2019s profile held back by the live limit at finalize says "Saved as draft", not "visible"', async () => {
+    finalizeMock.mockResolvedValue({
+      promoted: false,
+      message: 'Live profile limit reached. Saved as a draft.',
+    });
+    await renderPage();
+
+    await tickConsent();
+    const notice = await screen.findByRole('dialog');
+    fireEvent.click(within(notice).getByRole('button', { name: /send code to guardian/i }));
+    expect(await screen.findByText(OTP_TITLE)).toBeInTheDocument();
+    typeOtp('123456');
+    await waitFor(() => expect(screen.queryByText(OTP_TITLE)).not.toBeInTheDocument());
+    const publish = screen.getByRole('button', { name: 'Save & publish' });
+    await waitFor(() => expect(publish).toBeEnabled());
+    await ui().click(publish);
+
+    await waitFor(() => expect(finalizeMock).toHaveBeenCalled());
+    expect(await screen.findByText('Saved as draft')).toBeInTheDocument();
+    expect(screen.getByText('Live profile limit reached. Saved as a draft.')).toBeInTheDocument();
+    expect(screen.queryByText('Profile created!')).toBeNull();
   });
 
   it('backing out of the interstitial sends no code and unticks consent', async () => {

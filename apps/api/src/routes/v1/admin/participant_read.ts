@@ -163,7 +163,10 @@ export const participant_read_handler = async (
   }
   const network = networkCheck.network;
 
-  const itemsList = await readItemsForUser(existing.id);
+  const itemsList = await readItemsForUser(existing.id, {
+    statuses: request.query.lifecycle_status?.split(','),
+    limit: request.query.limit,
+  });
   const consentedItemIds = await readProfileConsentedItemIds(
     itemsList.map((i) => i.item_id),
     network,

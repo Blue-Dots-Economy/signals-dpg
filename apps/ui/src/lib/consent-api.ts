@@ -82,8 +82,9 @@ export async function getProfileConsentStatus(
 
 export async function acceptProfileConsent(
   body: ProfileConsentAcceptBody,
-): Promise<{ recorded: number }> {
-  const response = await apiClient.post<{ recorded: number }>(
+): Promise<{ recorded: number; message?: string }> {
+  // `message` is set when the live profile limit kept the profile in draft.
+  const response = await apiClient.post<{ recorded: number; message?: string }>(
     '/api/v1/consent/profile-accept',
     body,
   );
@@ -149,6 +150,8 @@ export interface VerifyProfileConsentOtpBody extends ProfileConsentOtpItemRef {
 export interface VerifyProfileConsentOtpResponse {
   verified: boolean;
   promoted: boolean;
+  /** Set when the live profile limit kept the profile in draft. */
+  message?: string;
 }
 
 export async function submitU18Dob(body: SubmitU18DobBody): Promise<SubmitU18DobResponse> {
@@ -289,8 +292,9 @@ export async function verifyProfilePrecreateOtp(
 
 export async function finalizeProfileConsent(
   body: ProfileConsentOtpItemRef,
-): Promise<{ promoted: boolean }> {
-  const response = await apiClient.post<{ promoted: boolean }>(
+): Promise<{ promoted: boolean; message?: string }> {
+  // `message` is set when the live profile limit kept the profile in draft.
+  const response = await apiClient.post<{ promoted: boolean; message?: string }>(
     '/api/v1/consent/u18/profile-consent/finalize',
     body,
   );

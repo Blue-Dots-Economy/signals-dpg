@@ -325,8 +325,8 @@ export const NetworkRuntimeSecretsSchema = z.object({
     .string()
     .default('true')
     .transform((val) => val === 'true'),
-  // Global default cap on profiles a single user may own per (network, domain,
-  // item_type). A network.json domain's `max_profiles_per_user` overrides this.
+  // Default total cap on profiles a single user may own per (network, domain,
+  // item_type). A network.json domain's `profile_limits` replaces it.
   MAX_PROFILES_PER_USER: z.coerce.number().int().positive().default(5),
   // Per-peer timeout for inter-instance fan-out, so one slow peer cannot stall
   // the aggregate.

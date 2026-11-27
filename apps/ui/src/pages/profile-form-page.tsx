@@ -451,11 +451,13 @@ export function ProfileFormPage() {
   const handleSubmit = async (data: Record<string, unknown>) => {
     if (!selectedDomain || !network) return;
 
-    // A no-change save would still send the owner a "profile updated" email/SMS.
-    // Publishing a draft (needsConsent) goes through: the consent is the change.
+    // Nothing to save on a live/paused profile. A draft always goes through: the
+    // save re-runs the go-live check, which is how a draft parked by the live
+    // profile limit is published once a slot frees (the API sends no "updated"
+    // email/SMS when nothing changed).
     if (
       isEdit &&
-      !needsConsent &&
+      !isDraft &&
       resolvedLocations.length === 0 &&
       !hasProfileChanges(data, initialData)
     ) {
@@ -511,7 +513,7 @@ export function ProfileFormPage() {
           updatePayload.item_locations = item_locations;
         }
 
-        await updateItem(existingItem.item_id, updatePayload);
+        const updated = await updateItem(existingItem.item_id, updatePayload);
         // Bust the by-id caches for this item, or re-opening the editor within
         // the own-data stale window seeds the form from the pre-edit copy and
         // the seed-once guard pins it. removeQueries for editItem (nothing
@@ -531,6 +533,15 @@ export function ProfileFormPage() {
           void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
           void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         };
+
+        // The live limit kept it in draft. The API only reports that once every
+        // other gate passed, consent included, so there is nothing to accept.
+        if (needsConsent && profileDoc && updated.message) {
+          refreshLists();
+          toast.warning(t('profile.toast_saved_as_draft'), { description: updated.message });
+          void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+          return;
+        }
 
         // Editing a draft with a configured statement: record profile_creation
         // consent, which promotes it to live. `onDone` runs immediately for an
@@ -564,9 +575,13 @@ export function ProfileFormPage() {
 
         // Plain edit (live, or no statement configured): refresh the lists now.
         refreshLists();
-        toast.success(t('profile.toast_updated'), {
-          description: t('profile.toast_updated_desc'),
-        });
+        if (updated.message) {
+          toast.warning(t('profile.toast_saved_as_draft'), { description: updated.message });
+        } else {
+          toast.success(t('profile.toast_updated'), {
+            description: t('profile.toast_updated_desc'),
+          });
+        }
       } else {
         const createPayload: CreateItemPayload = {
           item_network: network.id,
@@ -613,14 +628,17 @@ export function ProfileFormPage() {
         // Minor on a gated domain: consume the pre-create token the guardian
         // verified to record guardian profile_creation consent and promote the
         // fresh draft to live.
+        let liveLimitMessage = created.message;
         if (minorGatedCreate) {
-          await finalizeProfileConsent({
+          const finalized = await finalizeProfileConsent({
             network: network.id,
             brand: brand === 'standard' ? null : brand,
             item_domain: selectedDomain,
             item_type: defaultItemType ?? 'profile',
             item_id: created.item_id,
           });
+          // The guardian promotion is where a minor's profile meets the live limit.
+          liveLimitMessage ??= finalized.message;
         }
         // Invalidate after the minor promotion above, so my-items does not
         // refetch the still-draft status.
@@ -628,9 +646,14 @@ export function ProfileFormPage() {
         // Network-level prefix of the browse-items key: invalidates every
         // domain's browse cache for this network.
         void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
-        toast.success(t('profile.toast_created'), {
-          description: t('profile.toast_created_desc'),
-        });
+        // The live profile limit kept it in draft: say so instead of "you're visible".
+        if (liveLimitMessage) {
+          toast.warning(t('profile.toast_saved_as_draft'), { description: liveLimitMessage });
+        } else {
+          toast.success(t('profile.toast_created'), {
+            description: t('profile.toast_created_desc'),
+          });
+        }
       }
 
       void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
@@ -672,6 +695,12 @@ export function ProfileFormPage() {
           description: t('profile.toast_sign_in_desc'),
         });
         void navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
+      } else if (status === 409 && info.code === 'PROFILE_LIMIT_REACHED') {
+        // A toast, not the banner: the banner sits at the top of a long form,
+        // out of sight of the Save button that triggered it.
+        toast.error(isEdit ? t('profile.error_update_failed') : t('profile.error_create_failed'), {
+          description: apiErrorMessage(err, t, t('profile.error_generic_desc')),
+        });
       } else if (status === 409 && info.code === 'ITEM_ALREADY_EXISTS') {
         // Match on the code, not the bare 409: PROFILE_LIMIT_REACHED,
         // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are 409s too, and

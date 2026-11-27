@@ -2379,6 +2379,7 @@ export function HomePage() {
                     the maximize overlay. */}
                 <MapCountPill
                   total={mapMarkers.total}
+                  own={mapMarkers.markers.length - mapItems.length}
                   shown={mapItems.length}
                   truncated={mapMarkers.truncated}
                 />

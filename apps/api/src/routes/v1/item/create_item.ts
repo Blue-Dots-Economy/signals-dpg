@@ -18,6 +18,7 @@ import { publishItemEvent } from '@/utils/publish_item_event';
 import {
   assertSuppliedLocationsInCountry,
   createItemInternal,
+  liveLimitMessage,
   ItemServiceError,
   resolveGoLiveGates,
 } from '@/services/item_service';
@@ -52,6 +53,8 @@ export const create_item: FastifyPluginCallbackZod = function (fastify, _opts, d
         201: z.object({
           item_type: z.string(),
           item_id: z.string(),
+          // Present only when the live profile limit kept the profile in draft.
+          message: z.string().optional(),
         }),
       },
     },
@@ -327,27 +330,33 @@ export const create_item_handler = async (
     // Owner-facing create email. Fire-and-forget after commit, lazy-imported to
     // keep the notification chain off this route's static graph. `userId` is
     // the resolved owner on both paths. `lifecycleStatus` picks "you're live"
-    // vs "complete your profile", since a 201 can commit a draft.
-    void import('@/notifications/notify_item_lifecycle')
-      .then(({ dispatchItemLifecycleNotification }) =>
-        dispatchItemLifecycleNotification(
-          {
-            op: 'create',
-            ownerId: userId,
-            itemId: created.itemId,
-            domain: body.item_domain,
-            network: body.item_network,
-            actingOrgType: request.acting_org?.org_type ?? null,
-            lifecycleStatus: created.lifecycleStatus,
-          },
-          request.log,
-        ),
-      )
-      .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (create) failed'));
+    // vs "complete your profile", since a 201 can commit a draft. A profile the
+    // live limit kept in draft is complete, so neither of those fits: skip it.
+    // An aggregator's create sends the onboarding email instead, which still applies.
+    const actingOrgType = request.acting_org?.org_type ?? null;
+    if (!created.blockedByLiveLimit || actingOrgType === 'aggregator') {
+      void import('@/notifications/notify_item_lifecycle')
+        .then(({ dispatchItemLifecycleNotification }) =>
+          dispatchItemLifecycleNotification(
+            {
+              op: 'create',
+              ownerId: userId,
+              itemId: created.itemId,
+              domain: body.item_domain,
+              network: body.item_network,
+              actingOrgType,
+              lifecycleStatus: created.lifecycleStatus,
+            },
+            request.log,
+          ),
+        )
+        .catch((err) => request.log.warn({ err }, 'item-lifecycle notify (create) failed'));
+    }
 
     return reply.code(201).send({
       item_type: created.itemType,
       item_id: created.itemId,
+      ...liveLimitMessage(created),
     });
   } catch (err) {
     const mapped = mapCreateItemError(err, request.log, body);

@@ -5,11 +5,17 @@ import { auth_middleware_if_enabled } from '@api/plugins/auth/auth_middleware';
 import { acting_org_preHandler_optional } from '@/middleware/acting_org_optional';
 import { db } from '@api/db/postgres/drizzle_config';
 import { items } from '@dpg/database';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { decryptItemPrivate } from '@/utils/item_decrypt';
 import { getOrFetchSchemaByUrl } from '@/network_schema_cache';
 import { getNetworkConfigById } from '@/network_configs';
-import { classify_item } from '@/services/items/classifier';
+import { classify_item, DEFAULT_GO_LIVE_GATES } from '@/services/items/classifier';
+import {
+  LIVE_LIMIT_UNPAUSE_MESSAGE,
+  isBlockedOnlyByLiveLimit,
+  liveSlotForTransition,
+  resolveGoLiveGates,
+} from '@/services/item_service';
 import { hasAcceptedProfileConsent } from '@/services/consent_acceptance';
 import { invalidateItemFetchCache } from '@/utils/item_fetch_cache_invalidate';
 import { buildRetiredItemState } from '@/services/items/retire_pii';
@@ -17,10 +23,92 @@ import { cancelItemConnections } from '@/services/items/retire_connections';
 import type { RetireCancelledCounterparty } from '@/services/items/retire_connections';
 import { dispatchRetireCancelNotifications } from '@/notifications/notify_retire';
 import { publishItemEvent } from '@/utils/publish_item_event';
+import type { DbOrTx } from '@/services/db_types';
 
 type ItemLifecycleRequest = FastifyRequest<{
   Body: z.infer<typeof ItemLifecycleBody>;
 }>;
+
+interface PausedItem {
+  item_id: string;
+  item_network: string;
+  item_domain: string;
+  item_type: string;
+  item_schema_url: string;
+  item_state: unknown;
+  item_private_state: string | null;
+  created_by: string;
+}
+
+/**
+ * Unpause recomputes draft/live from the current (decrypted) data. Only
+ * DEFAULT_GO_LIVE_GATES apply, so `owner_required` is not evaluated: resuming a
+ * profile that was live must not be stricter than leaving it alone. The one
+ * exception is the live limit, which unpause must respect.
+ *
+ * @returns The status to write, or why unpause is refused: the live limit is
+ *   full, or the item stopped being paused while this request waited.
+ */
+async function classifyUnpause(
+  tx: DbOrTx,
+  existing: PausedItem,
+): Promise<
+  | { status: 'draft' | 'live' }
+  | { liveLimitReached: true }
+  | { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' }
+> {
+  const { mergedState } = decryptItemPrivate({
+    item_state: existing.item_state as Record<string, unknown>,
+    item_private_state: existing.item_private_state ?? '',
+  });
+  const itemSchema = await getOrFetchSchemaByUrl({
+    schemaUrl: existing.item_schema_url,
+    network: existing.item_network,
+    domain: existing.item_domain,
+    itemType: existing.item_type,
+  });
+  const consent_accepted = await hasAcceptedProfileConsent(tx, existing.item_id);
+  const domainGates = await resolveGoLiveGates(existing.item_network, existing.item_domain);
+  const gates = domainGates.includes('live_limit')
+    ? [...DEFAULT_GO_LIVE_GATES, 'live_limit' as const]
+    : DEFAULT_GO_LIVE_GATES;
+  // A concurrent unpause or retire of the same item may have committed while
+  // this one waited for the owner lock.
+  const slot = await liveSlotForTransition(tx, gates, existing, 'paused');
+  if (slot.stale) return { invalidAction: 'UNPAUSE_REQUIRES_PAUSED' };
+  const classification = classify_item({
+    schema: itemSchema as { required?: string[] },
+    merged_state: mergedState,
+    current_status: 'draft',
+    consent_accepted,
+    gates,
+    live_slot_free: slot.liveSlotFree,
+  });
+  // Unpause exists only to go live: refuse rather than turn it into a draft.
+  if (isBlockedOnlyByLiveLimit(classification)) return { liveLimitReached: true };
+  return { status: classification.lifecycle_status === 'live' ? 'live' : 'draft' };
+}
+
+/**
+ * Write a pause/unpause transition only if the item is still in `from`, so a
+ * retire committed meanwhile is never overwritten.
+ *
+ * @returns The refusal code when the item moved on, else null.
+ */
+async function writePauseTransition(
+  tx: DbOrTx,
+  item_id: string,
+  from: 'live' | 'paused',
+  to: 'draft' | 'live' | 'paused',
+): Promise<'PAUSE_REQUIRES_LIVE' | 'UNPAUSE_REQUIRES_PAUSED' | null> {
+  const written = await tx
+    .update(items)
+    .set({ lifecycle_status: to, updated_at: sql`now()` })
+    .where(and(eq(items.item_id, item_id), eq(items.lifecycle_status, from)))
+    .returning({ item_id: items.item_id });
+  if (written.length > 0) return null;
+  return from === 'live' ? 'PAUSE_REQUIRES_LIVE' : 'UNPAUSE_REQUIRES_PAUSED';
+}
 
 export const item_lifecycle: FastifyPluginAsyncZod = async function (fastify) {
   // Order matters: auth populates `request.user`, which
@@ -180,39 +268,15 @@ const item_lifecycle_handler = async (
         };
       }
 
-      if (action === 'pause') {
-        next_status = 'paused';
-      } else {
-        // unpause: recompute draft/live from the current (decrypted) data.
-        const { mergedState } = decryptItemPrivate({
-          item_state: existing.item_state as Record<string, unknown>,
-          item_private_state: existing.item_private_state ?? '',
-        });
-        const itemSchema = await getOrFetchSchemaByUrl({
-          schemaUrl: existing.item_schema_url,
-          network: existing.item_network,
-          domain: existing.item_domain,
-          itemType: existing.item_type,
-        });
-        const consent_accepted = await hasAcceptedProfileConsent(tx, item_id);
-        // No `gates` here, so only DEFAULT_GO_LIVE_GATES apply and
-        // `owner_required` is not evaluated: resuming a profile that was live
-        // must not be stricter than leaving it alone.
-        next_status = classify_item({
-          schema: itemSchema as { required?: string[] },
-          merged_state: mergedState,
-          current_status: 'draft',
-          consent_accepted,
-        }).lifecycle_status;
-      }
+      const next =
+        action === 'pause' ? { status: 'paused' as const } : await classifyUnpause(tx, existing);
+      if (!('status' in next)) return next;
+      next_status = next.status;
 
-      await tx
-        .update(items)
-        .set({
-          lifecycle_status: next_status,
-          updated_at: sql`now()`,
-        })
-        .where(eq(items.item_id, item_id));
+      // Checked above: pause needs `live`, unpause needs `paused`.
+      const from = current as 'live' | 'paused';
+      const conflict = await writePauseTransition(tx, item_id, from, next_status);
+      if (conflict) return { invalidAction: conflict } as const;
 
       return {
         item_id,
@@ -237,6 +301,14 @@ const item_lifecycle_handler = async (
       return reply.code(403).send({
         error: 'ITEM_NOT_OWNED_BY_USER',
         message: 'You do not own this item',
+      });
+    }
+
+    if ('liveLimitReached' in result) {
+      return reply.code(409).send({
+        error: 'PROFILE_LIMIT_REACHED',
+        limit_type: 'live',
+        message: LIVE_LIMIT_UNPAUSE_MESSAGE,
       });
     }
 
