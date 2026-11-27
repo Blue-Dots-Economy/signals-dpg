@@ -269,7 +269,7 @@ export function useInfiniteBrowseItems(
     isLoading: query.isLoading,
     isFetchingNextPage: query.isFetchingNextPage,
     fetchNextPage: () => {
-      if (query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
+      if (query.hasNextPage && !query.isFetchingNextPage) void query.fetchNextPage();
     },
     partial,
     source,

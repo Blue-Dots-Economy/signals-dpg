@@ -64,7 +64,7 @@ export function MatchScoreCard({
   const handleCalculate = React.useCallback(() => {
     // Opens the modal on the same click that starts the calculation, like the
     // map's one-click flow; it shows loading, then the score.
-    calculate();
+    void calculate();
     setIsModalOpen(true);
   }, [calculate]);
 
@@ -77,7 +77,7 @@ export function MatchScoreCard({
   }, []);
 
   const handleRecalculate = React.useCallback(() => {
-    recalculate();
+    void recalculate();
   }, [recalculate]);
 
   const handleProceed = React.useCallback(() => {

@@ -209,7 +209,7 @@ export function ProfileFormPage() {
       toast.error(t('home.toast_profile_not_found'), {
         description: t('profile.toast_not_found_desc'),
       });
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } else if (editItem.isError && !existingItem) {
       console.error('Failed to load profile:', editItem.error);
       toast.error(t('profile.toast_load_error'), {
@@ -414,7 +414,7 @@ export function ProfileFormPage() {
     if (selectedDomain && !isEdit && !roleLocked && !singleServedDomain) {
       setSelectedDomain(null);
     } else {
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     }
   }, [selectedDomain, isEdit, roleLocked, singleServedDomain, navigate, resolvedNetwork?.id]);
 
@@ -434,12 +434,12 @@ export function ProfileFormPage() {
   const handleSidebarProfileChange = React.useCallback(
     (profileId: string) => {
       if (network?.id) setStoredActiveProfileId(network.id, profileId);
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     },
     [network?.id, navigate, resolvedNetwork?.id],
   );
   const handleProfilesChanged = React.useCallback(() => {
-    if (network) queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+    if (network) void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
   }, [network, queryClient]);
 
   // Network-level instance URL and schema URL for the selected domain.
@@ -519,7 +519,7 @@ export function ProfileFormPage() {
         queryClient.removeQueries({
           queryKey: queryKeys.editItem(network.id, existingItem.item_id),
         });
-        queryClient.invalidateQueries({
+        void queryClient.invalidateQueries({
           queryKey: queryKeys.itemDetail(network.id, existingItem.item_id),
         });
 
@@ -528,8 +528,8 @@ export function ProfileFormPage() {
         // refetch of the still-draft status would win the race and the sidebar
         // would show "Draft". The accept flow's onDone invalidates instead.
         const refreshLists = () => {
-          queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
-          queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+          void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+          void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         };
 
         // Editing a draft with a configured statement: record profile_creation
@@ -556,7 +556,7 @@ export function ProfileFormPage() {
             },
             onDone: () => {
               refreshLists();
-              navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+              void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
             },
           });
           return;
@@ -624,16 +624,16 @@ export function ProfileFormPage() {
         }
         // Invalidate after the minor promotion above, so my-items does not
         // refetch the still-draft status.
-        queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
+        void queryClient.invalidateQueries({ queryKey: queryKeys.myItems(network.id) });
         // Network-level prefix of the browse-items key: invalidates every
         // domain's browse cache for this network.
-        queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
+        void queryClient.invalidateQueries({ queryKey: ['browse-items', network.id] });
         toast.success(t('profile.toast_created'), {
           description: t('profile.toast_created_desc'),
         });
       }
 
-      navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
+      void navigate(`/?network=${resolvedNetwork?.id ?? ''}`);
     } catch (err: unknown) {
       console.error('Failed to save profile:', err);
 
@@ -671,7 +671,7 @@ export function ProfileFormPage() {
         toast.error(t('profile.toast_sign_in'), {
           description: t('profile.toast_sign_in_desc'),
         });
-        navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
+        void navigate(`/auth/login?redirect=${encodeURIComponent(redirectTo)}`);
       } else if (status === 409 && info.code === 'ITEM_ALREADY_EXISTS') {
         // Match on the code, not the bare 409: PROFILE_LIMIT_REACHED,
         // REQUIRED_FIELD_LOCKED_WHILE_LIVE and ITEM_RETIRED are 409s too, and

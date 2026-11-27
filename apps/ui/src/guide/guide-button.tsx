@@ -41,7 +41,7 @@ export function GuideButton() {
     (tour: GuideTour, opts?: { replace?: boolean }) => {
       markTourSeen(tour.id, userId);
       if (!tour.matches(pathname, searchParams)) {
-        navigate(tourTarget(tour, pathname, searchParams), { replace: opts?.replace });
+        void navigate(tourTarget(tour, pathname, searchParams), { replace: opts?.replace });
       }
       void runTour(tour);
     },
